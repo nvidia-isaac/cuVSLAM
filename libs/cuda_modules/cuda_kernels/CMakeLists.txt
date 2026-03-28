@@ -31,15 +31,13 @@ set(SOURCES
 add_library(cuda_kernels STATIC ${SOURCES})
 
 set_target_properties(cuda_kernels PROPERTIES
-    # CMAKE_CUDA_ARCHITECTURES is set to some unusable value by default, so we can't use it to choose architectures
-    # CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}"
+    CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}"
     CUDA_SEPARABLE_COMPILATION ON
     CUDA_RESOLVE_DEVICE_SYMBOLS ON
 )
 
 target_compile_options(cuda_kernels PRIVATE
     $<$<COMPILE_LANGUAGE:CUDA>:--compiler-options=-fPIC,-fvisibility=hidden>
-    $<$<COMPILE_LANGUAGE:CUDA>:-arch=all> # instead of CMAKE_CUDA_ARCHITECTURES
     # Enable device debug info for compute-sanitizer support
     $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CONFIG:Debug>>:-G>
     $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CONFIG:RelWithDebInfo>>:-lineinfo>

@@ -51,6 +51,10 @@ option(DECREASE_RANSAC_AREA "Do not use 10% tracks for RANSAC near the image bor
 option(CUVSLAM_BUILD_SHARED_LIB "Build shared library version of cuVSLAM" TRUE)
 option(USE_RERUN "Use Rerun for visualization" OFF)
 
+if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+  set(CMAKE_CUDA_ARCHITECTURES "all" CACHE STRING "CUDA architectures to compile for (e.g. 87, 86, all)")
+endif()
+
 include(cmake/cuVSLAMUtils.cmake)
 setup_cuvslam_settings()
 

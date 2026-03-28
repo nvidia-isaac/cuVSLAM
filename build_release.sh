@@ -14,6 +14,7 @@
 #   --build_lib        Build cuvslam library and python bindings
 #   --build_docs       Build documentation
 #   --build_type=TYPE  Set CMake build type (Debug|Release[default]|RelWithDebInfo|MinSizeRel)
+#   --cuda_arch=ARCH   Set CUDA architecture target (e.g. 87 for Orin Nano, default: all)
 #   --jobs=N           Set number of parallel jobs (default: 8)
 #
 # Environment variables (optional):
@@ -35,6 +36,7 @@ APITESTS=false
 LIBBUILD=false
 BUILDDOCS=false
 BUILD_TYPE="Release"
+CUDA_ARCH=""
 USE_RERUN=OFF
 
 SRC=/cuvslam/src
@@ -69,6 +71,9 @@ while [ "$#" -gt 0 ]; do
     --jobs=*)
       MAKE_JOBS="${1#*=}"
       ;;
+    --cuda_arch=*)
+      CUDA_ARCH="${1#*=}"
+      ;;
     --build_type=*)
       BUILD_TYPE="${1#*=}"
       ;;
@@ -95,14 +100,18 @@ set -v # echo each command
 
 mkdir -p $DST
 cd $DST
-cmake -DUSE_RERUN=$USE_RERUN -DCMAKE_BUILD_TYPE=$BUILD_TYPE -S $SRC -B $DST
+CMAKE_ARGS="-DUSE_RERUN=$USE_RERUN -DCMAKE_BUILD_TYPE=$BUILD_TYPE"
+if [ -n "$CUDA_ARCH" ]; then
+  CMAKE_ARGS="$CMAKE_ARGS -DCMAKE_CUDA_ARCHITECTURES=$CUDA_ARCH"
+fi
+cmake $CMAKE_ARGS -S $SRC -B $DST
 # Build all CMake targets regardless of the flags
 make -j${MAKE_JOBS} -C $DST
 
 # Step 1: Run module tests
 if is_true "$MODULETESTS"; then
   echo "Module tests executed."
-  GTEST_FILTER=-*SpeedUp* ctest --output-on-failure || exit 1
+  GTEST_FILTER=-*SpeedUp*:*Speedup* ctest --output-on-failure || exit 1
 else
   echo "Module tests skipped."
 fi
