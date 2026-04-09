@@ -1,0 +1,21 @@
+flowchart TD
+    A[传感器输入<br/>单目/多目图像 + IMU] --> B[launcher/cuvslam 初始化]
+    B --> C[common/utils: 时间戳对齐、数据封装]
+    C --> D[sof 前端: 特征提取/跟踪]
+    D --> E[epipolar: 几何一致性筛选]
+    E --> F[pnp/odometry: 位姿估计与预测]
+    A --> G[imu: 预积分与惯性约束]
+    G --> F
+
+    F --> H[pipelines: track + triangulation + sba service]
+    H --> I[sba/math: 窗口优化]
+    I --> J[map: 关键帧与地标更新]
+    J --> K[slam: 回环检测 + 位姿图优化]
+    K --> L[全局一致轨迹/地图]
+
+    L --> M[对外输出: cuvslam API]
+    L --> N[可选 visualizer/rerun]
+
+    O[cuda_modules 可选加速] -.-> D
+    O -.-> I
+    O -.-> H

@@ -1,0 +1,44 @@
+flowchart LR
+    subgraph Input
+      I1[Camera Frames]
+      I2[IMU Packets]
+      I3[Calibration/Config]
+    end
+
+    subgraph Frontend
+      F1[Image Pyramid / Features]
+      F2[Tracked Keypoints]
+      F3[Inlier Matches]
+      F4[Relative Pose]
+    end
+
+    subgraph Optimization
+      O1[Preintegrated IMU Factors]
+      O2[Local BA State]
+      O3[Optimized Window Pose]
+    end
+
+    subgraph MappingSLAM
+      M1[Keyframes]
+      M2[Landmarks]
+      M3[Pose Graph]
+      M4[Loop Closure Constraints]
+      M5[Global Corrected Trajectory]
+    end
+
+    I1 --> F1 --> F2 --> F3 --> F4
+    I2 --> O1
+    I3 --> F1
+    I3 --> O1
+
+    F4 --> O2
+    O1 --> O2 --> O3
+
+    O3 --> M1
+    O3 --> M2
+    M1 --> M3
+    M2 --> M3
+    M3 --> M4 --> M5
+
+    M5 -->|feedback: corrected priors| O2
+    M5 -->|API output| OUT[Trajectory / Pose / Map]
