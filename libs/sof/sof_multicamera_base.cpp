@@ -74,6 +74,11 @@ bool MultiSOFBase::trackNextFrame(const Sources& curr_sources, Images& curr_imag
     return false;
   }
 
+  // Ensure all mono-stream GPU work (pyramid builds, LK tracking) is complete
+  // before reading results. Required for cross-stream memory visibility on
+  // architectures like Blackwell (sm_121).
+  cudaDeviceSynchronize();
+
   MulticamTracksVector primary_tracks;
   for (auto& sof : mono_sof_) {
     TRACE_EVENT ev1 = profiler_domain_.trace_event("mono finish", profiler_color_);
@@ -90,6 +95,11 @@ bool MultiSOFBase::trackNextFrame(const Sources& curr_sources, Images& curr_imag
 
   if (is_keyframe(primary_tracks, current_time_ns)) {
     TRACE_EVENT ev1 = profiler_domain_.trace_event("prim->sec", profiler_color_);
+    // Ensure all mono-stream GPU work (pyramid builds, feature detection) is fully
+    // visible before launching stereo tracking on separate streams. Without this,
+    // cross-stream memory visibility is not guaranteed on some GPU architectures
+    // (e.g. Blackwell sm_121), leading to CUDA error 700 after ~200 frames.
+    cudaDeviceSynchronize();
     StartKeyframe();
     size_t num_prim_to_sec_tracks = 0;
     const auto& primary_cams = fid_.primary_cameras();

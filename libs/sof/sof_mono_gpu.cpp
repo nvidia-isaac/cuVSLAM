@@ -114,6 +114,10 @@ void MonoSOFGPU::track(const ImageAndSource &curr_image, const ImageContextPtr &
 
   curr_image.image->build_gpu_image_pyramid(curr_image.source, sof_settings_.box3_prefilter, stream.get_stream());
   curr_image.image->build_gpu_gradient_pyramid(false, stream.get_stream());
+  // Sync after pyramid build to ensure GPU memory is visible to other streams.
+  // Required on Blackwell (sm_121) where cross-stream memory visibility is not
+  // guaranteed without explicit synchronization.
+  cudaStreamSynchronize(stream.get_stream());
 
   curr_img_ = curr_image.image;
 
