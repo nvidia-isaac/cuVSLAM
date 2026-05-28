@@ -145,6 +145,42 @@ make -j
       ```
    2. Update SRC & DST paths in `build_release.sh`
 
+### Build natively on Jetson (aarch64)
+
+For building directly on a Jetson Orin device (e.g. Orin Nano, Orin NX, AGX Orin):
+
+1. Install build dependencies (JetPack provides CUDA runtime but not all dev packages):
+   ```bash
+   sudo apt-get update
+   sudo apt-get install g++ cmake git git-lfs python3-dev libcublas-dev-12-6 libcusolver-dev-12-6
+   ```
+   `libcublas-dev` and `libcusolver-dev` provide the headers, unversioned linker symlinks, and cmake config files needed at build time. JetPack only ships the runtime libraries by default.
+
+2. Clone the repository and pull LFS data (test images and datasets are stored with Git LFS):
+   ```bash
+   git clone https://github.com/nvidia-isaac/cuVSLAM.git
+   cd cuVSLAM
+   git lfs install
+   git lfs pull
+   ```
+
+3. Set source and build paths (add to `~/.bashrc` for persistence):
+   ```bash
+   export CUVSLAM_SRC_DIR=~/cuVSLAM
+   export CUVSLAM_DST_DIR=~/cuVSLAM/build
+   ```
+
+4. Build targeting your specific GPU architecture:
+   ```bash
+   ./build_release.sh --cuda_arch=87
+   ```
+   Use `--cuda_arch=87` for Orin Nano/NX/AGX (SM_87, Ampere). Omit for the default (`all` architectures). Building for a single architecture reduces binary size and improves register allocation.
+
+5. Run tests to verify the build:
+   ```bash
+   ./build_release.sh --cuda_arch=87 --modules_test
+   ```
+
 ### Build on remote ARM
 
 Requires SSH access to the remote device.
