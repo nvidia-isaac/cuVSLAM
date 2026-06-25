@@ -1,0 +1,5 @@
+# Root manifest for agent-readiness and example setup discovery.
+# Python binding package metadata lives in python/pyproject.toml.
+# Python binding test dependencies live in python/test/requirements.txt.
+
+-r examples/requirements.txt

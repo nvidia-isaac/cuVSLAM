@@ -1,0 +1,49 @@
+name: Agent Readiness
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      run_gpu_validation:
+        description: Run the self-hosted GPU validation lane.
+        required: false
+        default: "false"
+
+jobs:
+  static-readiness:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run readiness unit tests
+        run: python3 -m unittest discover -s tests -p "test_*.py" -v
+
+      - name: Emit static validation result
+        run: python3 scripts/agent_readiness_smoke.py --mode static --output reports/validation_result.json
+
+      - name: Upload validation result
+        uses: actions/upload-artifact@v4
+        with:
+          name: cuvslam-static-validation-result
+          path: reports/validation_result.json
+
+  gpu-validation:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_gpu_validation == 'true'
+    runs-on: [self-hosted, linux, x64, gpu]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run GPU validation
+        run: python3 scripts/agent_readiness_smoke.py --mode gpu --output reports/validation_result.json
+
+      - name: Upload GPU validation result
+        uses: actions/upload-artifact@v4
+        with:
+          name: cuvslam-gpu-validation-result
+          path: reports/validation_result.json

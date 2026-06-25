@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/nvidia-isaac/cuVSLAM/.agent/validation_result.schema.json",
+  "title": "cuVSLAM Agent Readiness Validation Result",
+  "type": "object",
+  "required": ["schema_version", "product", "mode", "status", "timestamp_utc", "repo", "checks"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "product": {
+      "type": "string",
+      "const": "cuVSLAM"
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["static", "gpu"]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["pass", "fail"]
+    },
+    "timestamp_utc": {
+      "type": "string"
+    },
+    "repo": {
+      "type": "object",
+      "required": ["commit", "root"],
+      "properties": {
+        "commit": {
+          "type": ["string", "null"]
+        },
+        "root": {
+          "type": "string"
+        }
+      }
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "status", "detail"],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pass", "fail"]
+          },
+          "detail": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

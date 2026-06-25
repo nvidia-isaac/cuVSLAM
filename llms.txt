@@ -1,0 +1,29 @@
+# cuVSLAM LLM Entry Point
+
+Product: cuVSLAM
+Repository: https://github.com/nvidia-isaac/cuVSLAM
+
+Purpose:
+cuVSLAM provides CUDA-accelerated visual odometry, visual-inertial odometry,
+mapping, and localization for robotics camera workflows.
+
+Canonical files:
+- README.md
+- AGENTS.md
+- agent-readiness.yaml
+- TROUBLESHOOTING.md
+- examples/README.md
+- python/pyproject.toml
+- python/test/test_tracking.py
+- python/test/test_map.py
+- .agent/validation_result.schema.json
+- .codex/skills/cuvslam-agent-readiness/SKILL.md
+
+Fast no-secret validation:
+python3 scripts/agent_readiness_smoke.py --mode static --output reports/validation_result.json
+
+GPU validation after building or installing PyCuVSLAM:
+python3 scripts/agent_readiness_smoke.py --mode gpu --output reports/validation_result.json
+
+Expected primary artifact:
+reports/validation_result.json
