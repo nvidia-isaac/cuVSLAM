@@ -1,0 +1,66 @@
+agent_readiness:
+  product: cuVSLAM
+  tier_target: agent_native
+  product_promise: CUDA-accelerated visual odometry, visual-inertial odometry, mapping, and localization for robotics camera workflows.
+  release_surface: open_source
+  validation_path: python3 scripts/agent_readiness_smoke.py --mode gpu --output reports/validation_result.json
+  success_criteria:
+    - reports/validation_result.json has status=pass and mode=gpu on a CUDA-capable host.
+    - Static no-secret readiness emits reports/validation_result.json without secrets, datasets, or GPU hardware.
+    - Python API tracking and map tests pass after a built or wheel-installed cuVSLAM package is available.
+  prerequisites:
+    runtime: Ubuntu 22.04 or 24.04, Python 3.9+, CMake 3.19+, CUDA Toolkit 12 or 13, and NVIDIA GPU for real tracking validation.
+    secrets: none
+    hardware: NVIDIA GPU required for full cuVSLAM runtime validation; CPU is sufficient for static syntax smoke.
+  runner:
+    needs:
+      - python>=3.9
+      - cuda>=12 for runtime tests
+      - nvidia-gpu for full validation
+      - no-secret-lane
+  release_thresholds:
+    minimum_tier: agent_native
+    max_blocking_issues: 0
+  jobs:
+    - name: static-agent-readiness
+      priority: P0
+      prompt: Run the no-secret static readiness lane and report the validation_result.json path.
+      expected_artifacts:
+        - reports/validation_result.json
+    - name: pycuvslam-tracking-and-map-regression
+      priority: P0
+      prompt: Run the Python tracking and map regression tests after installing or building cuVSLAM, then report the validation_result.json path.
+      expected_artifacts:
+        - reports/validation_result.json
+  entrypoints:
+    docs:
+      - README.md
+      - AGENTS.md
+      - llms.txt
+      - TROUBLESHOOTING.md
+      - examples/README.md
+      - python/pyproject.toml
+      - .codex/skills/cuvslam-agent-readiness/SKILL.md
+    skills:
+      - .codex/skills/cuvslam-agent-readiness
+    cli:
+      - python3 scripts/agent_readiness_smoke.py --help
+      - python3 python/setup.py --help
+    services:
+      - .agent/validation_result.schema.json
+  smoke_tests:
+    no_secret:
+      - python3 scripts/agent_readiness_smoke.py --mode static --output reports/validation_result.json
+    dry_run:
+      - PYTHONPYCACHEPREFIX=.cache/pycache python3 -m compileall python scripts tests -q
+  required_artifacts:
+    - reports/validation_result.json
+  agent_tasks:
+    - name: static-agent-readiness
+      prompt: Run the no-secret static readiness lane and report the validation_result.json path.
+      expected_artifacts:
+        - reports/validation_result.json
+    - name: pycuvslam-tracking-and-map-regression
+      prompt: Run the Python tracking and map regression tests after installing or building cuVSLAM, then report the validation_result.json path.
+      expected_artifacts:
+        - reports/validation_result.json

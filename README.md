@@ -28,6 +28,28 @@ cuVSLAM is the library by NVIDIA, providing various Visual Tracking Camera modes
 The quickest way to get started is to [install PyCuVSLAM from a pre-built wheel](#install-from-wheels)
 and explore the [examples](examples/).
 
+## Agent Quick Start
+
+Use this path when validating the repository in a no-secret CI or coding-agent
+environment before running CUDA/GPU workflows:
+
+```bash
+python3 scripts/agent_readiness_smoke.py --mode static --output reports/validation_result.json
+python3 -m unittest discover -s tests -p "test_*.py" -v
+```
+
+Expected static success signal: `reports/validation_result.json` exists and has
+`status=pass` and `mode=static`. Full runtime validation still requires CUDA,
+NVIDIA GPU hardware, and a built or wheel-installed PyCuVSLAM package:
+
+```bash
+python3 scripts/agent_readiness_smoke.py --mode gpu --output reports/validation_result.json
+```
+
+Agent-specific routing, outputs, and troubleshooting are documented in
+[`AGENTS.md`](AGENTS.md), [`llms.txt`](llms.txt), and
+[`agent-readiness.yaml`](agent-readiness.yaml).
+
 ## ROS2 Support
 
 To use cuVSLAM in a ROS2 environment:
