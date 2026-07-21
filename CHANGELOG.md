@@ -1,5 +1,38 @@
 # Changelog
 
+## [17.0.0] - 2026-07-21
+
+Adds cuNLS-based multisensor fusion, improves tracking and SLAM robustness, and expands evaluation tooling.
+
+### Added
+- Multisensor odometry mode for mixed RGB/RGB-D camera rigs with optional IMU fusion
+- C++ and Python multisensor settings and TartanGround and RealSense examples
+- Expert parameters for advanced runtime tuning
+- Repeat replay, blackout filtering, TGA caching, KITTI export, loss tracking, and aggregate error plots in `cuvslam_app`
+- Explicit EDEX input and end-of-run statistics in `cuvslam_api_launcher`
+
+### Changed
+- Enabled cuNLS by default
+- Improved cross-camera feature tracking with rig-aware reprojection and reduced per-frame odometry allocations
+- Changed pose covariance order to XYZ/RPY and renamed `PoseWithCovariance::covariance` to `covariance_xyz_rpy`
+- Split `Slam::Track()` into a void tracking call and `Slam::GetPose()`
+- Moved per-frame `Odometry::TrackOptions` to the internal `Internals` API
+- Updated Rerun SDK integration and example visualizations
+
+### Fixed
+- Inertial tracking during image blackouts
+- Races in map save/load and asynchronous SLAM localization updates
+- SLAM map retention-window enforcement
+- CPU-only asynchronous SLAM incorrectly selecting a CUDA device
+- Multisensor calibration, data loading, and tracking issues
+- Internal image-frame lifetime and ownership handling
+- Feature-selection threshold regression
+- ZED example timestamps and RealSense VIO sensor-call serialization
+- Evaluation metrics for lost or filtered frames and report sequence ordering
+
+### Security
+- Added overflow checks to CUDA allocation-size calculations
+
 ## [16.0.0] - 2026-06-02
 
 Bugfixes in IMU integration, SLAM map loading, etc.
