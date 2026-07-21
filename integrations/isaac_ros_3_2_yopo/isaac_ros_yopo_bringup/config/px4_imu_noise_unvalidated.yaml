@@ -1,5 +1,6 @@
-schema_version: 1
-calibration_id: seeker_imu_kalibr_input_assumption_unvalidated
+schema_version: 2
+calibration_id: seeker_imu_kalibr_input_assumption_project_approved_20260721
+project_status: approved
 validated: false
 
 sensor:

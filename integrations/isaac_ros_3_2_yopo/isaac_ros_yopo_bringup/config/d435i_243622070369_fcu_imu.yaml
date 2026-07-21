@@ -1,6 +1,6 @@
 schema_version: 1
 calibration_id: d435i_243622070369_factory_rectified_px4_imu_20260720
-status: runtime_candidate_pending_allan_and_independent_repeatability
+status: approved
 
 provenance:
   camera_serial: "243622070369"
@@ -64,13 +64,6 @@ imu:
     kalibr_equation: t_imu = t_cam + timeshift_cam_imu
     runtime_equation: t_aligned = t_imu_raw + imu_to_camera_offset_ns
     imu_to_camera_offset_ns: 1737987
-  noise:
-    status: required_external_allan_calibration
-    gyroscope_noise_density: null
-    gyroscope_random_walk: null
-    accelerometer_noise_density: null
-    accelerometer_random_walk: null
-
 extrinsics:
   convention: p_camera_infra1_optical = T_camera_infra1_optical_fcu_imu * p_fcu_imu
   parent_frame: camera_infra1_optical_frame

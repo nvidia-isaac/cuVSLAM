@@ -21,6 +21,7 @@ from launch_ros.descriptions import ComposableNode
 
 from isaac_ros_yopo_bringup.calibration import (
     assert_runtime_calibration_allowed,
+    assert_runtime_imu_noise_allowed,
     load_calibration,
     load_imu_noise,
 )
@@ -29,15 +30,6 @@ from isaac_ros_yopo_bringup.calibration import (
 PACKAGE_NAME = "isaac_ros_yopo_bringup"
 EXPECTED_VISUAL_SLAM_PREFIX = "/workspaces/isaac_ros-dev/install/isaac_ros_visual_slam"
 VISUAL_SLAM_PATCH_MARKER = b"ISAAC_ROS_YOPO_IMU_TIMESTAMP_PATCH_V1"
-
-
-def _parse_bool(value: str, name: str) -> bool:
-    normalized = value.strip().lower()
-    if normalized in {"1", "true", "yes", "on"}:
-        return True
-    if normalized in {"0", "false", "no", "off"}:
-        return False
-    raise RuntimeError(f"{name} must be true or false, got {value!r}")
 
 
 def _shutdown_if_process_exits(action, label: str) -> RegisterEventHandler:
@@ -56,15 +48,8 @@ def _shutdown_if_process_exits(action, label: str) -> RegisterEventHandler:
 def _build_runtime_actions(context):
     calibration_path = LaunchConfiguration("calibration_file").perform(context)
     calibration = load_calibration(calibration_path)
-    allow_candidate_calibration = _parse_bool(
-        LaunchConfiguration("allow_candidate_calibration").perform(context),
-        "allow_candidate_calibration",
-    )
     try:
-        assert_runtime_calibration_allowed(
-            calibration,
-            allow_candidate_calibration,
-        )
+        assert_runtime_calibration_allowed(calibration)
     except ValueError as error:
         raise RuntimeError(str(error)) from error
 
@@ -92,26 +77,16 @@ def _build_runtime_actions(context):
             "IMU timestamp patch marker; rebuild isaac_ros_visual_slam"
         )
 
-    enable_visualization = _parse_bool(
-        LaunchConfiguration("enable_visualization").perform(context),
-        "enable_visualization",
-    )
-    allow_unvalidated_noise = _parse_bool(
-        LaunchConfiguration("allow_unvalidated_imu_noise").perform(context),
-        "allow_unvalidated_imu_noise",
-    )
     noise_file = LaunchConfiguration("imu_noise_file").perform(context)
     noise = load_imu_noise(
         noise_file,
         calibration.imu_hardware_id,
         calibration.imu_rate_hz,
     )
-    if not noise.validated and not allow_unvalidated_noise:
-        raise RuntimeError(
-            "the supplied IMU noise file is not validated; provide a traceable PX4 "
-            "Allan result, or explicitly set "
-            "allow_unvalidated_imu_noise:=true for a non-production plumbing test"
-        )
+    try:
+        assert_runtime_imu_noise_allowed(noise)
+    except ValueError as error:
+        raise RuntimeError(str(error)) from error
 
     camera_node = Node(
         package="realsense2_camera",
@@ -198,10 +173,13 @@ def _build_runtime_actions(context):
                 calibration.left_camera_frame,
                 calibration.right_camera_frame,
             ],
-            "enable_localization_n_mapping": True,
-            "enable_slam_visualization": enable_visualization,
-            "enable_landmarks_view": enable_visualization,
-            "enable_observations_view": enable_visualization,
+            "enable_ground_constraint_in_odometry": False,
+            "enable_ground_constraint_in_slam": False,
+            "enable_localization_n_mapping": False,
+            "enable_slam_visualization": False,
+            "enable_landmarks_view": False,
+            "enable_observations_view": False,
+            "publish_map_to_odom_tf": False,
         }],
         remappings=[
             ("visual_slam/image_0", "/camera/infra1/image_rect_raw"),
@@ -301,8 +279,16 @@ def _build_runtime_actions(context):
         ),
         LogInfo(
             msg=(
-                f"IMU noise: {noise.calibration_id}; method={noise.method}; "
-                f"source={noise.source_artifact}; validated={noise.validated}"
+                f"IMU noise: {noise.calibration_id}; "
+                f"project_status={noise.project_status}; method={noise.method}; "
+                f"source={noise.source_artifact}; "
+                f"allan_validated={noise.validated}"
+            )
+        ),
+        LogInfo(
+            msg=(
+                "Operating mode: odometry-only; mapping, loop closure, ground "
+                "constraints, internal visualization, and map->odom TF are disabled"
             )
         ),
     ]
@@ -310,8 +296,8 @@ def _build_runtime_actions(context):
         messages.append(
             LogInfo(
                 msg=(
-                    "[WARNING] Unvalidated IMU noise was explicitly allowed. "
-                    "This run is for plumbing tests only, not navigation acceptance."
+                    "IMU noise provenance: project-approved Kalibr input weights; "
+                    "independent Allan validation is optional and is not claimed"
                 )
             )
         )
@@ -347,6 +333,13 @@ def generate_launch_description() -> LaunchDescription:
             "d435i_243622070369_fcu_imu.yaml",
         )
     )
+    default_imu_noise = str(
+        os.path.join(
+            get_package_share_directory(PACKAGE_NAME),
+            "config",
+            "px4_imu_noise_unvalidated.yaml",
+        )
+    )
     return LaunchDescription([
         DeclareLaunchArgument(
             "calibration_file",
@@ -355,25 +348,11 @@ def generate_launch_description() -> LaunchDescription:
         ),
         DeclareLaunchArgument(
             "imu_noise_file",
-            description="Required schema-validated PX4 IMU Allan YAML file.",
-        ),
-        DeclareLaunchArgument(
-            "allow_candidate_calibration",
-            default_value="false",
+            default_value=default_imu_noise,
             description=(
-                "Allow the current calibration candidate pending Allan and "
-                "independent repeatability checks."
+                "Version-controlled PX4 IMU noise model with independent project "
+                "approval and Allan provenance status."
             ),
-        ),
-        DeclareLaunchArgument(
-            "allow_unvalidated_imu_noise",
-            default_value="false",
-            description="Allow known placeholder noise only for a non-production smoke test.",
-        ),
-        DeclareLaunchArgument(
-            "enable_visualization",
-            default_value="false",
-            description="Enable cuVSLAM observation/landmark visualization publishers.",
         ),
         OpaqueFunction(function=_build_runtime_actions),
     ])

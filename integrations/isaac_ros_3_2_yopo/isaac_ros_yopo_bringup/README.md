@@ -1,6 +1,6 @@
 # D435i + PX4 IMU + Isaac ROS cuVSLAM 启动包
 
-本 ROS 2 Humble 软件包把已完成的 factory-rectified 双目/飞控 IMU 标定结果接入 Isaac ROS Visual SLAM 3.2。当前标定被版本化为运行候选：内参、外参和时间偏移已经固定，但 PX4 Allan 噪声标定与独立重复性验收尚未完成。
+本 ROS 2 Humble 软件包把已完成并获项目运行批准的 factory-rectified 双目/飞控 IMU 标定结果接入 Isaac ROS Visual SLAM 3.2。内参、外参、时间偏移和第一版 IMU 噪声权重均已版本化；PX4 Allan 噪声测量与独立重复标定保留为可选增强，不是启动前置。
 
 完整的宿主机、容器、MAVROS、构建、启动、检查和停止顺序见父目录的 [`STARTUP_RUNBOOK.zh-CN.md`](../STARTUP_RUNBOOK.zh-CN.md) 第 8 节。
 
@@ -30,6 +30,8 @@ Isaac ROS 容器
 
 统一 launch 会启动一份且仅一份 RealSense 驱动、时间对齐节点、标定静态 TF、官方 cuVSLAM component 和运行健康监视节点。D435i 的 gyro/accel 被明确关闭，cuVSLAM 的 IMU 订阅只映射到 `/fcu/imu/data_raw_aligned`。
 
+生产入口固定为 odometry-only：`enable_localization_n_mapping=false`，两类 ground constraint、三类内部可视化以及 cuVSLAM 的 `map -> odom` TF 发布均关闭。该入口不提供命令行开关重新启用这些功能；需要建图或调试可视化时应使用单独的调试 launch。
+
 relay 在 15 秒内收不到首条可发布样本，或运行中 raw/aligned 流持续中断超过 2 秒时会以错误退出；统一 launch 随即停止相机、TF 和 cuVSLAM，避免留下表面存活但不再融合 IMU 的进程。
 
 频率或最大时间间隔单次越界先报告 WARN；连续 3 个诊断周期仍不健康时升级为 ERROR 并退出。最大间隔门限为实测周期的 5 倍，约 `29.4 ms`，为已录制数据的 `16.592 ms` 峰值保留 Jetson 负载余量。`/clock` 或 `use_sim_time` 不会替代该 system-time 新鲜度门禁。
@@ -51,22 +53,27 @@ relay 在 15 秒内收不到首条可发布样本，或运行中 raw/aligned 流
 
 ## 标定状态门禁
 
-当前 YAML 状态为 `runtime_candidate_pending_allan_and_independent_repeatability`。launch 默认只接受 `approved`；现阶段真机验证必须明确传入 `allow_candidate_calibration:=true`。`rejected` 状态永远不能被命令行覆盖。
-
-这个开关只承认“操作者知道当前仍是候选标定”，不会跳过 CameraInfo、TF、时间戳、IMU 数据质量或运行新鲜度检查，也不会把未验证的 IMU 噪声参数变成已验证参数。
+当前 YAML 状态为 `approved`。launch 只接受获项目批准的标定记录，`candidate` 或 `rejected` 不能由命令行覆盖。项目批准来自本机首次联合验收；它不会跳过 CameraInfo、TF、时间戳、IMU 数据质量或运行新鲜度检查。
 
 ## IMU 噪声门禁
 
-launch 不接受四个彼此独立的 CLI 噪声数值，而是要求一个无默认值的 `imu_noise_file`。该 YAML 必须同时记录：
+launch 不接受四个彼此独立的 CLI 噪声数值，而是从一个版本化 `imu_noise_file` 读取完整记录。默认文件为 `config/px4_imu_noise_unvalidated.yaml`；文件名中的 `unvalidated` 仅表示未声称 Allan 来源验证，不表示未获项目运行批准。
 
-- `validated` 状态；
+schema v2 将两个概念明确分开：
+
+- `project_status`：是否允许用于本项目运行；
+- `validated`：是否具有通过文件和 SHA-256 核验的独立 Allan 来源。
+
+当前默认记录是 `project_status: approved`、`validated: false`，方法仍诚实记录为 `kalibr_input_assumption`。因此它可用于第一版 cuVSLAM，但不冒充 Allan 结果。schema v1 仅为旧文件兼容：旧 `validated: true` 视为已批准，旧 `validated: false` 视为候选且不能启动。
+
+该 YAML 还必须记录：
+
 - PX4 IMU 硬件/传输 ID；
-- Allan 数据采样率；
-- 方法名 `allan_deviation`；
-- 源数据文件名与 SHA-256；
+- 数据采样率；
+- 方法名及来源文件；
 - 四项参数及精确单位。
 
-填写入口为 [`config/px4_imu_noise_allan.template.yaml`](config/px4_imu_noise_allan.template.yaml)。模板中的所有 `REPLACE_WITH_...` 都必须替换，不能把模板本身传给 launch。
+可选 Allan 结果的填写入口为 [`config/px4_imu_noise_allan.template.yaml`](config/px4_imu_noise_allan.template.yaml)。模板默认 `project_status: candidate`；完成来源核验和项目审查后才能改为 `approved`。所有 `REPLACE_WITH_...` 都必须替换，不能把模板本身传给 launch。
 
 四项单位为：
 
@@ -75,7 +82,13 @@ launch 不接受四个彼此独立的 CLI 噪声数值，而是要求一个无�
 - `accel_noise_density`：`m/(s^2*sqrt(Hz))`；
 - `accel_random_walk`：`m/(s^3*sqrt(Hz))`。
 
-现有 `seeker_imu.yaml` 中的 `0.09 / 0.05 / 0.06 / 0.001` 是 Kalibr 联合标定的输入假设，不是 Allan 标定输出。D435i 官方默认四元组也不属于 PX4 IMU。仓库中的 `config/px4_imu_noise_unvalidated.yaml` 明确记录了旧值并设置 `validated: false`；launch 默认拒绝它，`allow_unvalidated_imu_noise:=true` 只用于验证接线，不能作为导航验收结果。真实 Allan YAML 引用的源数据文件必须实际存在，且记录的 SHA-256 必须与该文件字节完全一致。
+现有 `seeker_imu.yaml` 中的 `0.09 / 0.05 / 0.06 / 0.001` 是 Kalibr 联合标定使用并经本次运行验收接受的权重，不是 Allan 标定输出。D435i 官方默认四元组也不属于 PX4 IMU。真实 Allan YAML 引用的源数据文件必须实际存在，且记录的 SHA-256 必须与该文件字节完全一致。
+
+正常启动不需要临时放行参数：
+
+```bash
+ros2 launch isaac_ros_yopo_bringup d435i_fcu_imu_cuvslam.launch.py
+```
 
 ## 本地逻辑测试
 

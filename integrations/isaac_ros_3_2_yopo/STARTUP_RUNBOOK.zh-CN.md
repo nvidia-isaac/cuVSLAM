@@ -2,12 +2,14 @@
 
 本文档是 Jetson 机载感知与规划链路的长期启动手册。每完成并验收一个阶段，就把该阶段的启动、验证和停止命令追加到这里，使后续使用者可以按顺序直接启动系统。
 
+项目阶段、复选框、坐标系与 SO3 后续任务统一维护在 [`PROJECT_TASKFLOW.zh-CN.md`](PROJECT_TASKFLOW.zh-CN.md)。
+
 当前文档覆盖：
 
 - Isaac ROS 开发容器的首次创建、冷启动和重复进入；
 - Intel RealSense D435i 正常运行节点的独立启动；
 - NVIDIA Isaac ROS Visual SLAM（cuVSLAM）的独立启动；
-- D435i 双红外与 PX4/MAVROS 飞控 IMU 的候选统一启动；
+- D435i 双红外与 PX4/MAVROS 飞控 IMU 的 odometry-only 统一启动；
 - 相机、IMU、cuVSLAM 输出的运行检查；
 - 正确停止顺序和常见故障；
 - 飞控 IMU、状态适配器和 YOPO PASSIVE 的后续章节边界。
@@ -23,7 +25,7 @@
 | Isaac ROS 3.2 开发容器 | 已验证 | 是 |
 | D435i + 内置 IMU 正常运行源 | 官方组合链路已验证；拆分命令已按同一源码参数整理 | 是 |
 | cuVSLAM + D435i 内置 IMU | 官方组合链路已验证；拆分命令需在 Jetson 再次复核 | 是 |
-| cuVSLAM + PX4/MAVROS 飞控 IMU | 运行源码已完成；PX4 Allan 参数和 Jetson 联合验收待完成 | 候选命令 |
+| cuVSLAM + PX4/MAVROS 飞控 IMU | mapping-on 首次 Jetson 联合验收通过；odometry-only 后续版本待 Jetson A/B，Allan 为可选调优 | 是 |
 | cuVSLAM 到 `/state/odom` 适配 | 尚未完成联合验收 | 否 |
 | YOPO PASSIVE | 尚未完成联合验收 | 否 |
 | YOPO 控制输出 | 禁止启用 | 否 |
@@ -52,7 +54,7 @@
 
 第 3、4 节提供“相机与 cuVSLAM 分终端启动”的候选命令。它们已按 NVIDIA 源码逐项核对，但必须先通过一次 Jetson 冒烟测试，才能提升为日常主路径。
 
-第 8 节提供飞控 IMU 候选链路。该链路尚未取代上述日常主路径：没有 PX4 Allan 噪声结果时只能做明确标记的接线冒烟，不能据此验收导航精度。
+第 8 节提供飞控 IMU 联合链路。mapping-on 首次真机联合验收已经通过；当前源码后续版本固定为 odometry-only，仍需按第 8.7 节完成 Jetson A/B 后才能替换上述恢复基线。当前 Kalibr 四项噪声权重已获项目运行批准；Allan 只作为独立噪声测量和后续调优手段。
 
 ## 执行位置与终端约定
 
@@ -574,10 +576,10 @@ ros2 topic echo /visual_slam/status --once
 
 同时查看 `C2` 中是否存在 TF、时间戳、IMU 注册或 cuVSLAM 初始化错误。
 
-## 8. 飞控 IMU 运行链路（源码已完成，Jetson 待验收）
+## 8. 飞控 IMU odometry-only 运行链路
 
 > [!CAUTION]
-> 本节是候选链路，不是当前生产主路径。现有 `seeker_imu.yaml` 的四项值是 Kalibr 输入假设，不是 PX4 Allan 标定结果。没有真实 Allan 参数时，只能按 8.6 做接线冒烟，禁止据此验收 VIO 精度或接入飞行控制。
+> mapping-on 首次真机联合验收已经通过。当前后续版本将统一入口固定为 odometry-only，待 Jetson A/B 复验；坐标系、状态适配和系统级安全尚未完成，当前仍禁止接入飞行控制。现有 `seeker_imu.yaml` 四项值是项目批准的 Kalibr 权重，不是 PX4 Allan 输出；Allan 不作为第一版部署的强制前置。
 
 本链路固定为：
 
@@ -619,7 +621,7 @@ isaac_ros_yopo_bringup/config/d435i_243622070369_fcu_imu.yaml
 
 这里有意选择“原厂 rectified CameraInfo + 使用同一相机模型求得的联合外参”。另一组自由估计内参的 Kalibr 结果为左目约 `[324.5671, 325.0486, 322.0116, 184.0997]`、右目约 `[324.9723, 325.4113, 321.3716, 184.1345]`，并估计了非零 radtan 畸变和 `49.9168 mm` 基线；它不能直接与当前 RealSense 已校正图像发布的原厂 `K/D/R/P` 混用。若以后选择该模型，必须同时实现并验收新的图像校正与 CameraInfo 发布链路，再重新生成匹配的联合外参。
 
-两组联合结果的 IMU/相机旋转接近，但相机原点在 IMU 坐标系中的位置相差约 `6.83 mm`。因此当前 factory-rectified 结果保持候选状态，不能只因为单次优化收敛就标记为 `approved`。
+两组联合结果的 IMU/相机旋转接近，但相机原点在 IMU 坐标系中的位置相差约 `6.83 mm`。该差异来自不同相机模型，不能解释为 factory-rectified 标定失败；当前 factory-rectified 结果已经通过真机联合运行并获项目批准。独立重复标定仍可用于后续量化可重复性。
 
 Kalibr 时移定义为 `t_imu = t_cam + timeshift_cam_imu`，其中 `timeshift_cam_imu=-0.001737986760008108 s`。保持相机时间戳不变时，正确实现就是给原始 IMU 时间戳增加 `1,737,987 ns`，不能再次使用负号。
 
@@ -752,52 +754,36 @@ ros2 launch isaac_ros_yopo_bringup \
 
 源码补丁本身的首次应用和 `isaac_ros_visual_slam` 重编译仍按 [`README_set_up.md`](README_set_up.md) 执行。仅编译本 bringup 包不会自动重编译 NVIDIA wrapper。
 
-### 8.5 `C1`：使用真实 Allan 参数启动候选链路
+### 8.5 `C1`：正常启动 odometry-only 链路
 
 执行位置：容器主终端 `C1`。运行前必须停止所有旧 RealSense 和 Visual SLAM 节点，并确保 `H4` 中 MAVROS 正常连接。
 
-先把真实 PX4 Allan 结果写成受版本控制的 schema YAML，并设置其容器内绝对路径：
+```bash
+ros2 launch isaac_ros_yopo_bringup \
+  d435i_fcu_imu_cuvslam.launch.py
+```
+
+默认标定记录和 IMU noise schema v2 均已获项目批准。noise 文件仍保留 `validated: false`，准确表示当前四项值来自 Kalibr 输入权重而不是独立 Allan 结果；这与 `project_status: approved` 相互独立，因此不需要临时放行参数。
+
+launch 必须打印 `Operating mode: odometry-only`，并说明 mapping、loop closure、ground constraints、内部可视化和 `map -> odom` TF 均已关闭。该终端会同时保持 RealSense、aligned IMU、标定 TF、cuVSLAM 和运行健康监视节点。不要再单独启动相机节点或官方组合 launch。
+
+### 8.6 `C1`：可选使用独立 Allan 参数
+
+需要进行可选 Allan A/B 时，从 `px4_imu_noise_allan.template.yaml` 生成 schema v2 文件。`validated: true` 只表示来源文件和 SHA-256 通过核验，不会自动授予运行批准；完成项目审查后还必须把 `project_status` 从 `candidate` 改为 `approved`。
 
 ```bash
 export PX4_IMU_NOISE_FILE=/absolute/path/to/px4_imu_allan.yaml
-```
 
-该文件必须使用 `schema_version: 1`，并包含 `validated: true`、匹配的 `hardware_id`、约 `170 Hz` 采样率、`method.name: allan_deviation`、源文件 SHA-256、四项精确单位和四项数值。launch 从同一个文件读取来源与数值，不接受独立 CLI 数值覆盖。
-
-正式启动前执行硬门禁：
-
-```bash
 if [ -z "${PX4_IMU_NOISE_FILE:-}" ] || [ ! -s "$PX4_IMU_NOISE_FILE" ]; then
-  echo "[STOP] valid PX4 Allan parameters are required"
-  exit 1
+  echo "[STOP] approved PX4 Allan YAML does not exist"
+else
+  ros2 launch isaac_ros_yopo_bringup \
+    d435i_fcu_imu_cuvslam.launch.py \
+    imu_noise_file:="$PX4_IMU_NOISE_FILE"
 fi
-
-ros2 launch isaac_ros_yopo_bringup \
-  d435i_fcu_imu_cuvslam.launch.py \
-  imu_noise_file:="$PX4_IMU_NOISE_FILE" \
-  allow_candidate_calibration:=true
 ```
 
-当前版本化联合标定状态仍是候选，因此必须显式设置 `allow_candidate_calibration:=true`。完成真实 Allan 参数和独立重复性验收、把版本化状态改为 `approved` 后，应删除这个开关。该终端会同时保持 RealSense、aligned IMU、标定 TF、cuVSLAM 和运行健康监视节点。不要再单独启动相机节点或官方组合 launch。
-
-### 8.6 `C1`：仅做接线冒烟的临时命令
-
-> [!WARNING]
-> 下列命令明确使用未通过 Allan 标定的旧输入假设，只能检查节点、话题、TF、时间戳和订阅关系。它不能证明 IMU 权重正确，不能用于 VIO 精度结论，更不能用于飞行。
-
-```bash
-UNVALIDATED_NOISE="$(
-  ros2 pkg prefix --share isaac_ros_yopo_bringup
-)/config/px4_imu_noise_unvalidated.yaml"
-
-ros2 launch isaac_ros_yopo_bringup \
-  d435i_fcu_imu_cuvslam.launch.py \
-  imu_noise_file:="$UNVALIDATED_NOISE" \
-  allow_candidate_calibration:=true \
-  allow_unvalidated_imu_noise:=true
-```
-
-launch 会打印 `[WARNING] Unvalidated IMU noise was explicitly allowed`。看不到该警告时，不要把当前运行当作本节的临时冒烟。
+旧 schema v1 仅为兼容：`validated: true` 沿用旧版运行批准语义；`validated: false` 视为候选，不能启动。正常运行始终使用 schema v2。
 
 ### 8.7 `C2`：运行验收
 
@@ -810,7 +796,8 @@ ros2 param get /camera/camera enable_gyro
 ros2 param get /camera/camera enable_accel
 ros2 param get /camera/camera unite_imu_method
 
-if ros2 topic list | grep -qx /camera/imu; then
+TOPICS="$(ros2 topic list)"
+if printf '%s\n' "$TOPICS" | grep -qx /camera/imu; then
   if timeout 6s ros2 topic echo \
     /camera/imu sensor_msgs/msg/Imu \
     --once --qos-reliability best_effort \
@@ -852,6 +839,19 @@ ros2 param get /aligned_fcu_imu_relay output_frame_id
 ros2 param get /visual_slam_node imu_frame
 ros2 param get /visual_slam_node calibration_frequency
 
+for parameter in \
+  enable_localization_n_mapping \
+  enable_ground_constraint_in_odometry \
+  enable_ground_constraint_in_slam \
+  enable_slam_visualization \
+  enable_landmarks_view \
+  enable_observations_view \
+  publish_map_to_odom_tf
+do
+  echo "--- $parameter"
+  ros2 param get /visual_slam_node "$parameter"
+done
+
 timeout 8s ros2 topic echo \
   /fcu/imu/data_raw_aligned sensor_msgs/msg/Imu \
   --once --qos-reliability best_effort
@@ -860,7 +860,7 @@ timeout --signal=INT 5s ros2 run tf2_ros tf2_echo \
   camera_infra1_optical_frame fcu_imu || true
 ```
 
-RealSense 启动日志必须报告序列号 `243622070369` 和固件 `5.15.1.55`。两路 CameraInfo 必须为 `640x360`，并与版本化 YAML 中的 factory `K/D/R/P` 一致；右 CameraInfo 的消息头允许存在已知的左 frame 复用问题。还必须看到 offset `1737987`、两个 IMU frame 均为 `fcu_imu`、频率参数 `170.0`。TF 平移应接近 `[0.02736293, 0.05285189, -0.06214162] m`，四元数 xyzw 应接近 `[0.50184877, -0.50942523, 0.49064963, 0.49789224]`。
+RealSense 启动日志必须报告序列号 `243622070369` 和固件 `5.15.1.55`。两路 CameraInfo 必须为 `640x360`，并与版本化 YAML 中的 factory `K/D/R/P` 一致；右 CameraInfo 的消息头允许存在已知的左 frame 复用问题。还必须看到 offset `1737987`、两个 IMU frame 均为 `fcu_imu`、频率参数 `170.0`。七个 odometry-only 参数必须全部返回 `False`。TF 平移应接近 `[0.02736293, 0.05285189, -0.06214162] m`，四元数 xyzw 应接近 `[0.50184877, -0.50942523, 0.49064963, 0.49789224]`。
 
 检查 cuVSLAM 只有一个正确 IMU 输入：
 
@@ -886,16 +886,26 @@ fi
 ```bash
 timeout --signal=INT 10s ros2 topic hz /camera/infra1/image_rect_raw || true
 timeout --signal=INT 10s ros2 topic hz /camera/infra2/image_rect_raw || true
+timeout --signal=INT 10s ros2 topic hz /camera/infra1/camera_info || true
+timeout --signal=INT 10s ros2 topic hz /camera/infra2/camera_info || true
 timeout --signal=INT 10s ros2 topic hz /fcu/imu/data_raw_aligned || true
 timeout --signal=INT 10s ros2 topic hz /visual_slam/tracking/odometry || true
 
-timeout 8s ros2 topic echo /diagnostics \
-  diagnostic_msgs/msg/DiagnosticArray --once || true
+timeout 8s ros2 topic echo \
+  /diagnostics diagnostic_msgs/msg/DiagnosticArray \
+  --once --filter \
+  "m.status[0].name == '/aligned_fcu_imu_relay: aligned FCU IMU'"
+
+timeout 8s ros2 topic echo \
+  /diagnostics diagnostic_msgs/msg/DiagnosticArray \
+  --once --filter \
+  "m.status[0].name == '/d435i_cuvslam_runtime_health_monitor: calibrated runtime'"
+
 timeout 8s ros2 topic echo /visual_slam/status --once || true
 timeout 8s ros2 topic echo /visual_slam/tracking/odometry --once || true
 ```
 
-参考值为左右图像约 `89.8 Hz`、aligned IMU 约 `170 Hz`、里程计约 `89.8 Hz`。aligned relay diagnostics 必须最终为 `OK`，`last_clock_residual_ms` 的绝对值必须小于 `250`，累计 `zero_stamp`、`invalid_stamp`、`duplicate`、`nonmonotonic`、`frame_mismatch`、`clock_domain_mismatch`、`aligned_out_of_range`、`nonfinite_measurement` 都应为 `0`；单次 IMU 间隔门限约为 `29.4 ms`，持续频率或间隔异常仍会在三个诊断周期后退出。运行健康监视 diagnostics 也必须为 `OK`，odometry 必须使用 `odom -> camera_link`、非零严格递增时间戳和有限数值，`vo_state` 应为 `1`。持续 duplicate、跨时间域、非有限测量、异常频率、CameraInfo 不匹配、D435i IMU 实际出数或里程计中断时，相应守护节点必须非零退出并触发整套 launch 关闭。
+参考值为左右图像和 CameraInfo 约 `89.8 Hz`、aligned IMU 约 `170 Hz`、里程计约 `89.8 Hz`。两个 diagnostics 的 `level` 必须为 `0`；ROS 2 YAML 可能把该字节显示成 `"\0"`。aligned relay 的 `last_clock_residual_ms` 绝对值必须小于 `250`，累计 `zero_stamp`、`invalid_stamp`、`duplicate`、`nonmonotonic`、`frame_mismatch`、`clock_domain_mismatch`、`aligned_out_of_range`、`nonfinite_measurement` 都应为 `0`；单次 IMU 间隔门限约为 `29.4 ms`，持续频率或间隔异常仍会在三个诊断周期后退出。运行健康监视 diagnostics 也必须为 `OK`，odometry 必须使用 `odom -> camera_link`、非零严格递增时间戳和有限数值，`vo_state` 应为 `1`。持续 duplicate、跨时间域、非有限测量、异常频率、CameraInfo 不匹配、D435i IMU 实际出数或里程计中断时，相应守护节点必须非零退出并触发整套 launch 关闭。
 
 ### 8.8 停止顺序和验收边界
 
@@ -905,8 +915,8 @@ timeout 8s ros2 topic echo /visual_slam/tracking/odometry --once || true
 
 源码与单元测试完成不等于真机生产验收。正式替换第 2 节日常主路径前，仍需：
 
-- 用 PX4 原始静止数据完成 Allan 标定并固化四项噪声参数及来源；
-- 在相同 factory-rectified 模型下做一次独立重复联合标定，解释当前约 `6.83 mm` 的新旧相机原点差；
+- 可选：用 PX4 原始静止数据完成 Allan 标定并固化四项噪声参数及来源，用于独立噪声测量与调优；
+- 可选：在相同 factory-rectified 模型下做一次独立重复联合标定，量化可重复性；当前约 `6.83 mm` 是不同相机模型结果的比较，不等同于标定失败；
 - 在 Jetson 验证真实 ROS `Imu` 深拷贝、BEST_EFFORT QoS、拒绝计数和 output-stale diagnostics；
 - 完成时间戳、轨迹质量、失跟恢复、资源占用和长时间稳定性测试。
 
@@ -967,3 +977,5 @@ timeout 8s ros2 topic echo /visual_slam/tracking/odometry --once || true
 | --- | --- |
 | 2026-07-21 | 加入 D435i factory-rectified + PX4/MAVROS 外部 IMU + cuVSLAM 候选统一启动、噪声门禁、验收与停止流程。 |
 | 2026-07-21 | 创建系统启动手册；加入容器生命周期、正常 D435i、cuVSLAM、验证、停止和后续 YOPO 章节边界。 |
+| 2026-07-21 | 首次 Jetson 联合运行验收通过：双 IR/CameraInfo、aligned FCU IMU、标定 TF、唯一 IMU 订阅、两项 diagnostics、`vo_state=1` 与 `odom -> camera_link` 均满足合同，并连续运行约 17 分 48 秒；修正 `/camera/imu` 探测中的 `grep -q` 管道噪声。 |
+| 2026-07-21 | 后续源码改为无临时放行参数的正常启动：项目批准与 Allan 来源状态分离，默认使用已批准 Kalibr 权重；统一 launch 固定 odometry-only，并关闭 cuVSLAM `map -> odom` TF；Jetson A/B 待完成。 |

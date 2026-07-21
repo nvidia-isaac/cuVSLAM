@@ -8,6 +8,7 @@ import yaml
 
 from isaac_ros_yopo_bringup.calibration import (
     assert_runtime_calibration_allowed,
+    assert_runtime_imu_noise_allowed,
     load_calibration,
     load_imu_noise,
 )
@@ -101,19 +102,25 @@ class RuntimeCalibrationTest(unittest.TestCase):
         self.assertEqual(-16.174942016601562, camera.right_p[3])
         self.assertEqual(camera.left_frame, camera.right_recorded_frame_bug)
 
-    def test_candidate_requires_an_explicit_runtime_override(self):
-        with self.assertRaisesRegex(ValueError, "runtime candidate"):
-            assert_runtime_calibration_allowed(self.calibration, False)
-        assert_runtime_calibration_allowed(self.calibration, True)
+    def test_bundled_calibration_is_project_approved(self):
+        self.assertEqual("approved", self.calibration.status)
+        assert_runtime_calibration_allowed(self.calibration)
 
-    def test_approved_status_is_allowed_without_override(self):
+    def test_candidate_is_not_runtime_approved(self):
+        calibration = self._load_modified(
+            status="runtime_candidate_pending_allan_and_independent_repeatability"
+        )
+        with self.assertRaisesRegex(ValueError, "not project-approved"):
+            assert_runtime_calibration_allowed(calibration)
+
+    def test_approved_status_is_allowed(self):
         calibration = self._load_modified(status="approved")
-        assert_runtime_calibration_allowed(calibration, False)
+        assert_runtime_calibration_allowed(calibration)
 
     def test_rejected_status_cannot_be_overridden(self):
         calibration = self._load_modified(status="rejected")
-        with self.assertRaisesRegex(ValueError, "cannot be overridden"):
-            assert_runtime_calibration_allowed(calibration, True)
+        with self.assertRaisesRegex(ValueError, "rejected"):
+            assert_runtime_calibration_allowed(calibration)
 
     def test_rejects_unknown_calibration_status(self):
         with self.assertRaisesRegex(ValueError, "unsupported calibration status"):
@@ -196,18 +203,70 @@ class RuntimeCalibrationTest(unittest.TestCase):
 
 
 class ImuNoiseCalibrationTest(unittest.TestCase):
-    def test_loads_bundled_values_only_as_unvalidated(self):
+    def test_loads_bundled_values_as_project_approved_non_allan(self):
         noise = load_imu_noise(
             UNVALIDATED_NOISE_PATH,
             "px4-highres-imu-105-ttyTHS2",
             170.0,
         )
+        self.assertEqual(2, noise.schema_version)
+        self.assertEqual("approved", noise.project_status)
         self.assertFalse(noise.validated)
         self.assertEqual("kalibr_input_assumption", noise.method)
         self.assertEqual(0.06, noise.gyroscope_noise_density)
         self.assertEqual(0.001, noise.gyroscope_random_walk)
         self.assertEqual(0.09, noise.accelerometer_noise_density)
         self.assertEqual(0.05, noise.accelerometer_random_walk)
+        assert_runtime_imu_noise_allowed(noise)
+
+    def test_schema_one_unvalidated_noise_remains_a_legacy_candidate(self):
+        with open(UNVALIDATED_NOISE_PATH, "r", encoding="utf-8") as stream:
+            data = yaml.safe_load(stream)
+        data["schema_version"] = 1
+        data.pop("project_status")
+        path = self._temporary_yaml(data)
+        try:
+            noise = load_imu_noise(
+                path,
+                "px4-highres-imu-105-ttyTHS2",
+                170.0,
+            )
+            self.assertEqual("candidate", noise.project_status)
+            with self.assertRaisesRegex(ValueError, "not project-approved"):
+                assert_runtime_imu_noise_allowed(noise)
+        finally:
+            os.unlink(path)
+
+    def test_rejected_noise_model_is_not_runtime_allowed(self):
+        with open(UNVALIDATED_NOISE_PATH, "r", encoding="utf-8") as stream:
+            data = yaml.safe_load(stream)
+        data["project_status"] = "rejected"
+        path = self._temporary_yaml(data)
+        try:
+            noise = load_imu_noise(
+                path,
+                "px4-highres-imu-105-ttyTHS2",
+                170.0,
+            )
+            with self.assertRaisesRegex(ValueError, "rejected"):
+                assert_runtime_imu_noise_allowed(noise)
+        finally:
+            os.unlink(path)
+
+    def test_rejects_unknown_noise_project_status(self):
+        with open(UNVALIDATED_NOISE_PATH, "r", encoding="utf-8") as stream:
+            data = yaml.safe_load(stream)
+        data["project_status"] = "looks_good"
+        path = self._temporary_yaml(data)
+        try:
+            with self.assertRaisesRegex(ValueError, "unsupported IMU noise"):
+                load_imu_noise(
+                    path,
+                    "px4-highres-imu-105-ttyTHS2",
+                    170.0,
+                )
+        finally:
+            os.unlink(path)
 
     def test_rejects_noise_for_another_hardware_id(self):
         with self.assertRaises(ValueError):
@@ -245,6 +304,41 @@ class ImuNoiseCalibrationTest(unittest.TestCase):
             )
             self.assertTrue(noise.validated)
             self.assertEqual("allan_deviation", noise.method)
+            assert_runtime_imu_noise_allowed(noise)
+
+    def test_allan_validation_does_not_approve_a_candidate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = self._validated_noise_yaml(directory)
+            with open(path, "r", encoding="utf-8") as stream:
+                data = yaml.safe_load(stream)
+            data["project_status"] = "candidate"
+            with open(path, "w", encoding="utf-8") as stream:
+                yaml.safe_dump(data, stream, sort_keys=False)
+            noise = load_imu_noise(
+                path,
+                "px4-highres-imu-105-ttyTHS2",
+                170.0,
+            )
+            self.assertTrue(noise.validated)
+            with self.assertRaisesRegex(ValueError, "not project-approved"):
+                assert_runtime_imu_noise_allowed(noise)
+
+    def test_schema_one_validated_allan_preserves_legacy_runtime_approval(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = self._validated_noise_yaml(directory)
+            with open(path, "r", encoding="utf-8") as stream:
+                data = yaml.safe_load(stream)
+            data["schema_version"] = 1
+            data.pop("project_status")
+            with open(path, "w", encoding="utf-8") as stream:
+                yaml.safe_dump(data, stream, sort_keys=False)
+            noise = load_imu_noise(
+                path,
+                "px4-highres-imu-105-ttyTHS2",
+                170.0,
+            )
+            self.assertEqual("approved", noise.project_status)
+            assert_runtime_imu_noise_allowed(noise)
 
     def test_rejects_validated_allan_hash_mismatch(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -289,6 +383,17 @@ class ImuNoiseCalibrationTest(unittest.TestCase):
         with open(path, "w", encoding="utf-8") as stream:
             yaml.safe_dump(data, stream, sort_keys=False)
         return path
+
+    @staticmethod
+    def _temporary_yaml(data):
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".yaml",
+            encoding="utf-8",
+            delete=False,
+        ) as stream:
+            yaml.safe_dump(data, stream, sort_keys=False)
+            return stream.name
 
 
 if __name__ == "__main__":

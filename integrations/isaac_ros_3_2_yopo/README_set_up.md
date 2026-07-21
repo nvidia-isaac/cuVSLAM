@@ -2,6 +2,8 @@
 
 中文日常运行与后续扩展手册：[`STARTUP_RUNBOOK.zh-CN.md`](STARTUP_RUNBOOK.zh-CN.md)
 
+项目任务流与当前进度：[`PROJECT_TASKFLOW.zh-CN.md`](PROJECT_TASKFLOW.zh-CN.md)
+
 外部飞控 IMU 运行包：[`isaac_ros_yopo_bringup/README.md`](isaac_ros_yopo_bringup/README.md)
 
 本目录提供 YOPO 集成所使用的 Isaac ROS Visual SLAM 包装层树外补丁。本集成不会修改、
@@ -227,8 +229,9 @@ source /workspaces/isaac_ros-dev/install/setup.bash
 - 所有 IMU 样本均使用预期坐标轴，且标定变换方向已经转换为文档规定的 ROS TF 链；
   对于所选的校正后双目输入，Kalibr 结果应被视为 `T_Crect0_I`，而不是原始光学相机
   变换；
-- 噪声密度与随机游走数值来自选定的飞控 IMU，并通过一个可追溯的 Allan YAML 使用
-  Isaac ROS 参数所要求的单位，而不是使用相互独立的 CLI 数值或 D435i/默认数值；
+- 噪声密度与随机游走数值来自选定的飞控 IMU，并通过一个带独立项目批准状态和来源
+  验证状态的版本化 YAML 使用 Isaac ROS 参数所要求的单位，而不是使用相互独立的 CLI
+  数值或 D435i 默认数值；Allan 来源验证是可选增强，不与项目运行批准混为一项；
 - Visual SLAM 日志中没有 IMU 注册失败记录；
 - 使用本补丁后新录制的数据通过跟踪与时间戳检查。
 

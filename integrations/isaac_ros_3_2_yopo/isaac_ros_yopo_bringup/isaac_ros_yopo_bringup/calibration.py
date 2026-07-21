@@ -22,6 +22,14 @@ SUPPORTED_CALIBRATION_STATUSES = {
     CANDIDATE_CALIBRATION_STATUS,
     REJECTED_CALIBRATION_STATUS,
 }
+APPROVED_PROJECT_STATUS = "approved"
+CANDIDATE_PROJECT_STATUS = "candidate"
+REJECTED_PROJECT_STATUS = "rejected"
+SUPPORTED_PROJECT_STATUSES = {
+    APPROVED_PROJECT_STATUS,
+    CANDIDATE_PROJECT_STATUS,
+    REJECTED_PROJECT_STATUS,
+}
 
 
 class UniqueKeySafeLoader(yaml.SafeLoader):
@@ -99,7 +107,9 @@ class RuntimeCalibration:
 
 @dataclass(frozen=True)
 class ImuNoiseCalibration:
+    schema_version: int
     calibration_id: str
+    project_status: str
     validated: bool
     sensor_hardware_id: str
     sample_rate_hz: float
@@ -446,23 +456,26 @@ def load_calibration(path) -> RuntimeCalibration:
 
 def assert_runtime_calibration_allowed(
     calibration: RuntimeCalibration,
-    allow_candidate: bool,
 ) -> None:
-    """Reject unapproved calibration unless the one known candidate is explicit."""
-    if not isinstance(allow_candidate, bool):
-        raise ValueError("allow_candidate must be a boolean")
+    """Reject a calibration that has not received project runtime approval."""
     if calibration.status == APPROVED_CALIBRATION_STATUS:
         return
     if calibration.status == CANDIDATE_CALIBRATION_STATUS:
-        if allow_candidate:
-            return
-        raise ValueError(
-            "calibration is a runtime candidate pending Allan calibration and "
-            "independent repeatability; explicitly set allow_candidate_calibration:=true"
-        )
+        raise ValueError("calibration is a runtime candidate and is not project-approved")
     if calibration.status == REJECTED_CALIBRATION_STATUS:
-        raise ValueError("calibration status is rejected and cannot be overridden")
+        raise ValueError("calibration status is rejected")
     raise ValueError(f"unsupported calibration status: {calibration.status}")
+
+
+def assert_runtime_imu_noise_allowed(noise: ImuNoiseCalibration) -> None:
+    """Require project approval independently from Allan provenance validation."""
+    if noise.project_status == APPROVED_PROJECT_STATUS:
+        return
+    if noise.project_status == CANDIDATE_PROJECT_STATUS:
+        raise ValueError("IMU noise model is a candidate and is not project-approved")
+    if noise.project_status == REJECTED_PROJECT_STATUS:
+        raise ValueError("IMU noise model is rejected")
+    raise ValueError(f"unsupported IMU noise project_status: {noise.project_status}")
 
 
 def load_imu_noise(
@@ -476,13 +489,27 @@ def load_imu_noise(
             yaml.load(stream, Loader=UniqueKeySafeLoader),
             "IMU noise calibration",
         )
-    if root.get("schema_version") != 1:
+    schema_version = root.get("schema_version")
+    if schema_version not in (1, 2):
         raise ValueError("unsupported IMU noise schema_version")
 
     calibration_id = _nonempty_string(root.get("calibration_id"), "calibration_id")
     validated = root.get("validated")
     if not isinstance(validated, bool):
         raise ValueError("validated must be a boolean")
+    if schema_version == 1:
+        project_status = (
+            APPROVED_PROJECT_STATUS if validated else CANDIDATE_PROJECT_STATUS
+        )
+    else:
+        project_status = _nonempty_string(
+            root.get("project_status"),
+            "project_status",
+        )
+        if project_status not in SUPPORTED_PROJECT_STATUSES:
+            raise ValueError(
+                f"unsupported IMU noise project_status: {project_status}"
+            )
 
     sensor = _mapping(root.get("sensor"), "sensor")
     hardware_id = _nonempty_string(sensor.get("hardware_id"), "sensor.hardware_id")
@@ -562,7 +589,9 @@ def load_imu_noise(
         raise ValueError("validated IMU noise cannot reuse a known default/input tuple")
 
     return ImuNoiseCalibration(
+        schema_version=schema_version,
         calibration_id=calibration_id,
+        project_status=project_status,
         validated=validated,
         sensor_hardware_id=hardware_id,
         sample_rate_hz=sample_rate_hz,

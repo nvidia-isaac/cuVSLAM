@@ -43,7 +43,7 @@ class LaunchSourceContractTest(unittest.TestCase):
             self.source,
         )
 
-    def test_noise_file_is_required_and_cli_values_are_not_accepted(self):
+    def test_noise_file_has_a_versioned_default_and_cli_values_are_not_accepted(self):
         required = {"imu_noise_file"}
         declarations = {}
         for node in ast.walk(self.tree):
@@ -59,7 +59,8 @@ class LaunchSourceContractTest(unittest.TestCase):
             }
         self.assertTrue(required.issubset(declarations))
         for name in required:
-            self.assertNotIn("default_value", declarations[name])
+            self.assertIn("default_value", declarations[name])
+        self.assertIn('"px4_imu_noise_unvalidated.yaml"', self.source)
         for forbidden in (
             'DeclareLaunchArgument(\n            "gyro_noise_density"',
             'DeclareLaunchArgument(\n            "gyro_random_walk"',
@@ -81,10 +82,25 @@ class LaunchSourceContractTest(unittest.TestCase):
         self.assertIn("initialization_timeout = TimerAction", self.source)
         self.assertIn("Patched cuVSLAM tracker was constructed", self.source)
 
-    def test_candidate_calibration_requires_explicit_override(self):
-        self.assertIn('"allow_candidate_calibration"', self.source)
+    def test_runtime_approval_is_versioned_without_cli_overrides(self):
         self.assertIn("assert_runtime_calibration_allowed", self.source)
-        self.assertIn("allow_candidate_calibration", self.source)
+        self.assertIn("assert_runtime_imu_noise_allowed", self.source)
+        self.assertNotIn('"allow_candidate_calibration"', self.source)
+        self.assertNotIn('"allow_unvalidated_imu_noise"', self.source)
+
+    def test_production_launch_is_fixed_to_odometry_only(self):
+        for parameter in (
+            "enable_ground_constraint_in_odometry",
+            "enable_ground_constraint_in_slam",
+            "enable_localization_n_mapping",
+            "enable_slam_visualization",
+            "enable_landmarks_view",
+            "enable_observations_view",
+            "publish_map_to_odom_tf",
+        ):
+            self.assertIn(f'"{parameter}": False', self.source)
+        self.assertNotIn('LaunchConfiguration("enable_visualization")', self.source)
+        self.assertNotIn('DeclareLaunchArgument(\n            "enable_visualization"', self.source)
 
     def test_runtime_monitor_is_required(self):
         self.assertIn('executable="runtime_health_monitor"', self.source)

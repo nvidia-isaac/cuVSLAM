@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>isaac_ros_yopo_bringup</name>
-  <version>0.1.0</version>
+  <version>0.2.0</version>
   <description>D435i rectified stereo and time-aligned PX4 IMU bringup for Isaac ROS Visual SLAM 3.2.</description>
   <maintainer email="u5-4@users.noreply.github.com">u5-4</maintainer>
   <license>Apache-2.0</license>
