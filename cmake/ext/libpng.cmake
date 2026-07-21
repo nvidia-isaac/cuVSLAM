@@ -34,8 +34,8 @@ set(ZLIB_INCLUDE_DIR ${zlib_SOURCE_DIR} ${zlib_BINARY_DIR})
 
 FetchContent_Declare(
     libpng
-    URL https://downloads.sourceforge.net/libpng/libpng-${LIBPNG_VERSION}.tar.xz
-    URL_HASH SHA256=d925722864837ad5ae2a82070d4b2e0603dc72af44bd457c3962298258b8e82d
+    URL https://github.com/pnggroup/libpng/archive/refs/tags/v${LIBPNG_VERSION}.tar.gz
+    URL_HASH SHA256=71a2c5b1218f60c4c6d2f1954c7eb20132156cae90bdb90b566c24db002782a6
 )
 
 FetchContent_MakeAvailable(libpng)
