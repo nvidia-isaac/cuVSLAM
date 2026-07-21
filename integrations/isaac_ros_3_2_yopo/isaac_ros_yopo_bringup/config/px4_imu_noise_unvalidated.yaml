@@ -1,0 +1,24 @@
+schema_version: 1
+calibration_id: seeker_imu_kalibr_input_assumption_unvalidated
+validated: false
+
+sensor:
+  hardware_id: px4-highres-imu-105-ttyTHS2
+  sample_rate_hz: 170.0
+
+method:
+  name: kalibr_input_assumption
+  source_artifact: seeker_imu.yaml
+  source_sha256: null
+
+units:
+  gyroscope_noise_density: rad/(s*sqrt(Hz))
+  gyroscope_random_walk: rad/(s^2*sqrt(Hz))
+  accelerometer_noise_density: m/(s^2*sqrt(Hz))
+  accelerometer_random_walk: m/(s^3*sqrt(Hz))
+
+parameters:
+  gyroscope_noise_density: 0.06
+  gyroscope_random_walk: 0.001
+  accelerometer_noise_density: 0.09
+  accelerometer_random_walk: 0.05

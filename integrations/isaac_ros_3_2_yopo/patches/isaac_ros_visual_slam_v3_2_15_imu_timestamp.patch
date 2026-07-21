@@ -12,7 +12,18 @@ diff --git a/isaac_ros_visual_slam/src/impl/visual_slam_impl.cpp b/isaac_ros_vis
    tf_buffer(std::make_unique<tf2_ros::Buffer>(node.get_clock())),
    tf_listener(std::make_unique<tf2_ros::TransformListener>(*tf_buffer)),
    tf_publisher(std::make_unique<tf2_ros::TransformBroadcaster>(&node)),
-@@ -685,7 +685,7 @@ void VisualSlamNode::VisualSlamImpl::UpdatePose(
+@@ -315,7 +315,8 @@ void VisualSlamNode::VisualSlamImpl::Initialize()
+       node.vis_localizer_loop_closure_pub_, tracker, canonical_pose_cuvslam, node.map_frame_);
+   }
+   cuvslam_handle = tracker;
+-  RCLCPP_INFO(node.get_logger(), "cuVSLAM tracker was successfully initialized.");
++  RCLCPP_INFO(node.get_logger(),
++    "cuVSLAM tracker was successfully initialized. ISAAC_ROS_YOPO_IMU_TIMESTAMP_PATCH_V1");
+-
++
+   if (node.localize_on_startup_) {
+     // We don't care when this thread returns since we anyways can't do anything if the localization
+@@ -685,7 +686,7 @@ void VisualSlamNode::VisualSlamImpl::UpdatePose(
      int64_t imu_ts = static_cast<int64_t>(timestamp.nanoseconds());
      RCLCPP_DEBUG(node.get_logger(), "Using imu msg timestamp [%ld]", imu_ts);
      const CUVSLAM_Status status = CUVSLAM_RegisterImuMeasurement(

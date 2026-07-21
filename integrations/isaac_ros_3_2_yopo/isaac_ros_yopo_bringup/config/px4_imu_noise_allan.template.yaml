@@ -1,0 +1,26 @@
+schema_version: 1
+calibration_id: REPLACE_WITH_UNIQUE_ALLAN_CALIBRATION_ID
+validated: true
+
+sensor:
+  hardware_id: px4-highres-imu-105-ttyTHS2
+  sample_rate_hz: 170.0
+
+method:
+  name: allan_deviation
+  # This file must exist. Relative paths are resolved from this YAML directory.
+  source_artifact: REPLACE_WITH_SOURCE_BAG_OR_CSV
+  # SHA-256 must match the exact bytes of source_artifact.
+  source_sha256: REPLACE_WITH_64_HEX_DIGIT_SHA256
+
+units:
+  gyroscope_noise_density: rad/(s*sqrt(Hz))
+  gyroscope_random_walk: rad/(s^2*sqrt(Hz))
+  accelerometer_noise_density: m/(s^2*sqrt(Hz))
+  accelerometer_random_walk: m/(s^3*sqrt(Hz))
+
+parameters:
+  gyroscope_noise_density: REPLACE_WITH_ALLAN_VALUE
+  gyroscope_random_walk: REPLACE_WITH_ALLAN_VALUE
+  accelerometer_noise_density: REPLACE_WITH_ALLAN_VALUE
+  accelerometer_random_walk: REPLACE_WITH_ALLAN_VALUE

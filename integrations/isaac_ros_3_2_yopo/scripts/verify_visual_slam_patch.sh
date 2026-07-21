@@ -10,6 +10,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 INTEGRATION_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 PATCH_FILE="$INTEGRATION_DIR/patches/isaac_ros_visual_slam_v3_2_15_imu_timestamp.patch"
 SOURCE_FILE="isaac_ros_visual_slam/src/impl/visual_slam_impl.cpp"
+PATCH_MARKER="ISAAC_ROS_YOPO_IMU_TIMESTAMP_PATCH_V1"
 
 usage() {
   echo "Usage: $0 [--source-only] /path/to/isaac_ros_visual_slam" >&2
@@ -133,6 +134,7 @@ grep -Fq \
   'node.image_buffer_size_, 1e6 * node.image_jitter_threshold_ms_),' \
   "$target"
 grep -Fq 'cuvslam_handle, imu_ts, &imu_measurement);' "$target"
+grep -Fq "$PATCH_MARKER" "$target"
 
 if grep -Fq 'cuvslam_handle, latest_ts, &imu_measurement);' "$target"; then
   echo "[STOP] The incorrect image timestamp call is still present." >&2
@@ -150,4 +152,4 @@ if [[ -n "$(git -C "$repo" status --porcelain --untracked-files=no)" ]]; then
 fi
 
 trap - EXIT INT TERM
-echo "[PASS] Patch matches NVIDIA v3.2-15, both corrections are present, and the checkout was restored."
+echo "[PASS] Patch matches NVIDIA v3.2-15, both corrections and the runtime marker are present, and the checkout was restored."
