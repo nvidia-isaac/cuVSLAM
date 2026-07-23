@@ -20,6 +20,11 @@ class LaunchSourceContractTest(unittest.TestCase):
         self.assertIn('"unite_imu_method": 0', self.source)
         self.assertNotIn('"/camera/imu"', self.source)
 
+    def test_enables_native_depth_without_emitter(self):
+        self.assertIn('"enable_depth": True', self.source)
+        self.assertIn('"depth_module.emitter_enabled": 0', self.source)
+        self.assertIn('"depth_module.profile": "640x360x90"', self.source)
+
     def test_uses_official_visual_slam_component(self):
         self.assertIn(
             'plugin="nvidia::isaac_ros::visual_slam::VisualSlamNode"',

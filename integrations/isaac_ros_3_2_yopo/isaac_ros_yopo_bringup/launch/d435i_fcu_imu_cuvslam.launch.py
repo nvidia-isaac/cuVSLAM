@@ -99,7 +99,7 @@ def _build_runtime_actions(context):
             "enable_infra1": True,
             "enable_infra2": True,
             "enable_color": False,
-            "enable_depth": False,
+            "enable_depth": True,
             "depth_module.emitter_enabled": 0,
             "depth_module.profile": "640x360x90",
             "enable_gyro": False,

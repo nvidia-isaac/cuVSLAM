@@ -24,11 +24,14 @@ Isaac ROS 容器
   D435i IR1/IR2 + CameraInfo + factory TF
     -> Isaac ROS cuVSLAM
 
+  D435i native Depth
+    -> ROS 2 DDS planner input
+
   camera_infra1_optical_frame -> fcu_imu
     -> 已标定静态 TF
 ```
 
-统一 launch 会启动一份且仅一份 RealSense 驱动、时间对齐节点、标定静态 TF、官方 cuVSLAM component 和运行健康监视节点。D435i 的 gyro/accel 被明确关闭，cuVSLAM 的 IMU 订阅只映射到 `/fcu/imu/data_raw_aligned`。
+统一 launch 会启动一份且仅一份 RealSense 驱动、时间对齐节点、标定静态 TF、官方 cuVSLAM component 和运行健康监视节点。D435i 的 gyro/accel 被明确关闭，cuVSLAM 的 IMU 订阅只映射到 `/fcu/imu/data_raw_aligned`。原生 Depth 与红外双目共用同一 `640x360@90 Hz` profile，emitter 固定关闭；Depth 只作为规划输入，不改变 cuVSLAM 的 IR1/IR2 图像输入。
 
 生产入口固定为 odometry-only：`enable_localization_n_mapping=false`，两类 ground constraint、三类内部可视化以及 cuVSLAM 的 `map -> odom` TF 发布均关闭。该入口不提供命令行开关重新启用这些功能；需要建图或调试可视化时应使用单独的调试 launch。
 
