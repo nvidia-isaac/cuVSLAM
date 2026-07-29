@@ -124,6 +124,14 @@ and are compatible with Python 3.12 and later. Other Python, CUDA, or Jetson com
 **Prerequisite**: [CUDA Toolkit 12 or 13](https://developer.nvidia.com/cuda/toolkit) must be installed separately
 (not included in the wheels). Its major version must match the wheel's `cu12` or `cu13` tag.
 
+The wheels link against the CUDA math libraries (cuBLAS, cuSOLVER, cuSPARSE) but do not bundle them, so they must come
+from that CUDA Toolkit installation. On systems without one, install the extra matching the wheel's tag instead and pip
+provides them:
+
+```bash
+pip install "cuvslam[cu12]"   # or "cuvslam[cu13]"
+```
+
 Official wheels include cuNLS support for `Multisensor` mode; no separate cuNLS installation is required.
 
 To install (virtual environment is recommended):
@@ -135,6 +143,8 @@ To install (virtual environment is recommended):
 
 ```bash
 pip install cuvslam-*.whl
+# ...or, without a CUDA Toolkit installation, with the CUDA math libraries from pip:
+pip install "$(echo cuvslam-*.whl)[cu12]"
 ```
 
 If a pre-built wheel is not available for your system, see [Install from Source](#install-from-source) below.

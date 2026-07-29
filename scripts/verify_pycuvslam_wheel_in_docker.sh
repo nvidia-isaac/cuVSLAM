@@ -7,6 +7,8 @@ if [ "$#" -ne 1 ] && [ "$#" -ne 3 ]; then
   echo "  fresh environment and imports cuvslam, verifying the wheel filename is valid"
   echo "  (pip-installable) and the auditwheel-repaired extension loads with the"
   echo "  excluded CUDA libraries resolved from the system."
+  echo "  Then reinstalls it with its cu12/cu13 extra in a clean environment and verifies that"
+  echo "  the excluded CUDA libraries also resolve from the nvidia-* pip packages alone."
   echo "  When expected_version and expected_git_sha are provided, also verifies that"
   echo "  get_version() identifies that clean source revision without '-modified'."
   exit 1
@@ -42,6 +44,13 @@ fi
 
 WHEEL_NAME=$(basename "${WHEELS[0]}")
 
+# Wheels are versioned <version>+cu12/<version>+cu13 by build_pycuvslam_in_docker.sh; the same tag names the extra
+# that provides the CUDA math libraries excluded from the wheel. Empty for wheels built without the tag.
+CUDA_EXTRA=$(echo "$WHEEL_NAME" | grep -oE "\+cu[0-9]+" | tr -d "+" || true)
+if [ -z "$CUDA_EXTRA" ]; then
+  echo "Note: $WHEEL_NAME carries no +cuNN version tag; skipping the pip-provided CUDA libraries check."
+fi
+
 TTY_FLAG=""
 [ -t 0 ] && TTY_FLAG="-it"
 
@@ -52,6 +61,7 @@ docker run --runtime=nvidia --gpus all --rm $TTY_FLAG --network host \
   --user "$(id -u):$(id -g)" --group-add video -e HOME=/tmp \
   -v "$OUTPUT_DIR:/output:ro" \
   -e WHEEL_NAME="$WHEEL_NAME" \
+  -e CUDA_EXTRA="$CUDA_EXTRA" \
   -e EXPECTED_VERSION="$EXPECTED_VERSION" \
   -e EXPECTED_GIT_SHA="$EXPECTED_GIT_SHA" \
   cuvslam:local bash -c '
@@ -86,5 +96,45 @@ if expected_version:
         )
 
 print("cuvslam wheel import OK, version:", version_info)
+PY
+
+    if [ -z "$CUDA_EXTRA" ]; then
+      exit 0
+    fi
+
+    # The wheel does not bundle cuBLAS/cuSOLVER/cuSPARSE, and this image provides them system-wide, so the check
+    # above cannot tell a wheel that declares them from one that silently depends on the CUDA Toolkit being
+    # installed. Install the wheel with its CUDA extra into a clean environment instead, and require that the
+    # libraries actually loaded are the pip-provided ones.
+    echo "--- Verifying the [$CUDA_EXTRA] extra provides the CUDA math libraries ---"
+    python3 -m venv /tmp/wheel_venv_cuda_extra
+    . /tmp/wheel_venv_cuda_extra/bin/activate
+    if ! pip install --no-cache-dir "/output/wheel/$WHEEL_NAME[$CUDA_EXTRA]" > /tmp/pip_cuda_extra.log 2>&1; then
+      cat /tmp/pip_cuda_extra.log
+      if grep -q "No matching distribution" /tmp/pip_cuda_extra.log; then
+        echo "SKIPPED: nvidia-* $CUDA_EXTRA wheels are not published for $(uname -m)."
+        exit 0
+      fi
+      exit 1
+    fi
+    cd /tmp
+    python3 - <<PY
+import os
+
+import cuvslam
+
+nvidia_root = os.path.join(os.path.dirname(os.path.dirname(cuvslam.__file__)), "nvidia")
+with open("/proc/self/maps") as maps_file:
+    maps = maps_file.read()
+
+unresolved = [name for name in ("cublas", "cusolver", "cusparse")
+              if os.path.join(nvidia_root, name, "lib") not in maps]
+if unresolved:
+    raise SystemExit(
+        "libcuvslam.so did not load " + ", ".join(unresolved) + " from " + nvidia_root +
+        ": the CUDA extra does not cover every CUDA library excluded from the wheel"
+    )
+
+print("cuvslam wheel import OK with CUDA libraries from", nvidia_root)
 PY
   '

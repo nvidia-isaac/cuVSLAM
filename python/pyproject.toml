@@ -24,6 +24,25 @@ classifiers = [
 ]
 dependencies = ["pyyaml>=5.3.1"]
 
+# libcuvslam.so links against the CUDA math libraries, but wheels exclude them during auditwheel repair
+# (see scripts/build_pycuvslam_in_docker.sh) because of their size. They normally come from a CUDA Toolkit
+# installation; these extras provide them from pip instead. Install the one matching the wheel's cu12/cu13 tag:
+# `pip install "cuvslam[cu12]"`. CUDA 12 packages carry the -cu12 suffix; from CUDA 13 on, NVIDIA publishes the
+# unsuffixed names and bumps them per CUDA release, so those are constrained to the matching major version.
+[project.optional-dependencies]
+cu12 = [
+    "nvidia-cublas-cu12",
+    "nvidia-cusolver-cu12",
+    "nvidia-cusparse-cu12",
+    "nvidia-nvjitlink-cu12",
+]
+cu13 = [
+    "nvidia-cublas>=13,<14",
+    "nvidia-cusolver>=12,<13",
+    "nvidia-cusparse>=12,<13",
+    "nvidia-nvjitlink>=13,<14",
+]
+
 [tool.scikit-build]
 minimum-version = "build-system.requires"
 cmake.version = "CMakeLists.txt"

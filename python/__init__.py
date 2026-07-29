@@ -9,6 +9,20 @@
 
 """cuVSLAM Python bindings."""
 
+from . import _cuda_libs
+
+# Make the CUDA math libraries this package links against, but does not bundle, loadable when they come from the
+# nvidia-* pip packages instead of a CUDA Toolkit installation. No-op otherwise.
+_cuda_libs.preload()
+
+try:
+    # Import all bindings under core namespace
+    from . import pycuvslam as core
+except ImportError as error:
+    if 'cannot open shared object file' not in str(error):
+        raise
+    raise ImportError('{}\n\n{}'.format(error, _cuda_libs.MISSING_LIBRARY_HINT)) from error
+
 # Import select bindings for the main namespace
 from .pycuvslam import (
     get_version,
@@ -25,8 +39,6 @@ from .pycuvslam import (
     PoseEstimate,
     Observation,
     Landmark)
-# Import all bindings under core namespace
-from . import pycuvslam as core
 
 # Import the wrapper class
 from .tracker import Tracker
