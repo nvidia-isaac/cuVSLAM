@@ -12,11 +12,41 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
+import importlib.util
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 
-from cuvslam import _cuda_libs
+
+def load_cuda_libs():
+    """Load ``cuvslam/_cuda_libs.py`` as a standalone module, without importing ``cuvslam``.
+
+    Importing the package runs ``preload()`` and loads the extension module, which is exactly the side effect
+    test_import_resolved_the_cuda_math_libraries has to observe in an interpreter that has not done it yet.
+    """
+    package_root = importlib.util.find_spec('cuvslam').submodule_search_locations[0]
+    spec = importlib.util.spec_from_file_location('_cuda_libs_under_test',
+                                                  os.path.join(package_root, '_cuda_libs.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_cuda_libs = load_cuda_libs()
+
+# Run in a fresh interpreter by test_import_resolved_the_cuda_math_libraries.
+IMPORT_SIDE_EFFECT_PROBE = """
+import cuvslam  # noqa: F401  (imported for its side effect on the process' loaded libraries)
+
+with open('/proc/self/maps') as maps_file:
+    maps = maps_file.read()
+
+missing = [soname for soname in ('libcublas.so.', 'libcusolver.so.', 'libcusparse.so.') if soname not in maps]
+if missing:
+    raise SystemExit('not loaded after "import cuvslam": ' + ', '.join(missing))
+"""
 
 
 def make_pip_cuda_layout(root, components):
@@ -72,12 +102,12 @@ class TestCudaLibs(unittest.TestCase):
 
     def test_import_resolved_the_cuda_math_libraries(self):
         # Whatever provided them, the CUDA math libraries libcuvslam.so links against are loaded once cuvslam
-        # imports: this is the regression guard for wheels that neither bundle nor declare them.
-        import cuvslam  # noqa: F401  (imported for its side effect on the process' loaded libraries)
-        with open('/proc/self/maps') as maps_file:
-            maps = maps_file.read()
-        for soname in ('libcublas.so.', 'libcusolver.so.', 'libcusparse.so.'):
-            self.assertIn(soname, maps)
+        # imports: this is the regression guard for wheels that neither bundle nor declare them. It runs in a
+        # fresh interpreter, because a cuvslam already imported by another test would load them regardless of
+        # whether importing it still does.
+        probe = subprocess.run([sys.executable, '-c', IMPORT_SIDE_EFFECT_PROBE],
+                               capture_output=True, text=True, check=False)
+        self.assertEqual(probe.returncode, 0, probe.stderr)
 
 
 if __name__ == "__main__":

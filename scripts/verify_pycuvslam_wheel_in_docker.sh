@@ -51,6 +51,15 @@ if [ -z "$CUDA_EXTRA" ]; then
   echo "Note: $WHEEL_NAME carries no +cuNN version tag; skipping the pip-provided CUDA libraries check."
 fi
 
+# NVIDIA publishes the nvidia-* CUDA math library wheels the extras declare for x86_64 only; on Jetson the libraries
+# come from JetPack. Decide that here, from the architecture, rather than from how pip fails later: a resolver failure
+# is what a broken extra declaration looks like too, and that must fail the verification.
+HOST_ARCH=$(uname -m)
+if [ -n "$CUDA_EXTRA" ] && [ "$HOST_ARCH" != "x86_64" ]; then
+  echo "SKIPPED: no pip-provided CUDA libraries check on $HOST_ARCH; nvidia-* $CUDA_EXTRA wheels are x86_64-only."
+  CUDA_EXTRA=""
+fi
+
 TTY_FLAG=""
 [ -t 0 ] && TTY_FLAG="-it"
 
@@ -109,14 +118,9 @@ PY
     echo "--- Verifying the [$CUDA_EXTRA] extra provides the CUDA math libraries ---"
     python3 -m venv /tmp/wheel_venv_cuda_extra
     . /tmp/wheel_venv_cuda_extra/bin/activate
-    if ! pip install --no-cache-dir "/output/wheel/$WHEEL_NAME[$CUDA_EXTRA]" > /tmp/pip_cuda_extra.log 2>&1; then
-      cat /tmp/pip_cuda_extra.log
-      if grep -q "No matching distribution" /tmp/pip_cuda_extra.log; then
-        echo "SKIPPED: nvidia-* $CUDA_EXTRA wheels are not published for $(uname -m)."
-        exit 0
-      fi
-      exit 1
-    fi
+    # A resolution failure here means the extra does not describe an installable set of packages, which is the very
+    # thing this stage exists to catch, so it fails the verification.
+    pip install --no-cache-dir "/output/wheel/$WHEEL_NAME[$CUDA_EXTRA]"
     cd /tmp
     python3 - <<PY
 import os
