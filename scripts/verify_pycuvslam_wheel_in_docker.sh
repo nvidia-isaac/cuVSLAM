@@ -126,17 +126,22 @@ PY
     python3 - <<PY
 import os
 
+# Imported for its side effect: the preloading this stage verifies happens while cuvslam is imported.
 import cuvslam
+from cuvslam import _cuda_libs
 
-nvidia_root = os.path.join(os.path.dirname(os.path.dirname(cuvslam.__file__)), "nvidia")
+# Require the set the package itself declares it needs rather than a copy of it, and resolve it the same way the
+# import-time preload does. A component listed in _cuda_libs.CUDA_COMPONENTS with no matching entry in the extras of
+# pyproject.toml is precisely the drift this stage exists to catch, and the two lists stay independent that way.
+nvidia_root = _cuda_libs.nvidia_root()
 with open("/proc/self/maps") as maps_file:
     maps = maps_file.read()
 
-unresolved = [name for name in ("cublas", "cusolver", "cusparse")
+unresolved = [name for name in _cuda_libs.CUDA_COMPONENTS
               if os.path.join(nvidia_root, name, "lib") not in maps]
 if unresolved:
     raise SystemExit(
-        "libcuvslam.so did not load " + ", ".join(unresolved) + " from " + nvidia_root +
+        "cuvslam did not load " + ", ".join(unresolved) + " from " + nvidia_root +
         ": the CUDA extra does not cover every CUDA library excluded from the wheel"
     )
 

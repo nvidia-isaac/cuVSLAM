@@ -141,9 +141,11 @@ To install (virtual environment is recommended):
 
 ```bash
 pip install cuvslam-*.whl
-# ...or, without a CUDA Toolkit installation, with the CUDA math libraries from pip
-# (use the extra matching the wheel's tag: cu12 or cu13):
-pip install "$(echo cuvslam-*.whl)[cu12]"
+# ...or, without a CUDA Toolkit installation, with the CUDA math libraries from pip. Every wheel carries both
+# extras, so pip accepts a mismatched one without an error and installs math libraries of the wrong CUDA major:
+# pick the line matching the tag of the wheel downloaded above.
+pip install "$(echo cuvslam-*.whl)[cu12]"   # cu12 wheels
+pip install "$(echo cuvslam-*.whl)[cu13]"   # cu13 wheels
 ```
 
 If a pre-built wheel is not available for your system, see [Install from Source](#install-from-source) below.
