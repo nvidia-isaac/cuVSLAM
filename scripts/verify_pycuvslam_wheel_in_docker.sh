@@ -51,12 +51,13 @@ if [ -z "$CUDA_EXTRA" ]; then
   echo "Note: $WHEEL_NAME carries no +cuNN version tag; skipping the pip-provided CUDA libraries check."
 fi
 
-# NVIDIA publishes the nvidia-* CUDA math library wheels the extras declare for x86_64 only; on Jetson the libraries
-# come from JetPack. Decide that here, from the architecture, rather than from how pip fails later: a resolver failure
-# is what a broken extra declaration looks like too, and that must fail the verification.
+# The extras target x86_64 systems without a CUDA Toolkit. The aarch64 entries in the wheel matrix are Jetson, where
+# CUDA comes from JetPack and the aarch64 nvidia-* wheels are server-ARM (SBSA) builds, so installing those over a
+# Tegra CUDA is not the configuration this check certifies. Decide that from the architecture, before touching pip: a
+# resolver failure is what a broken extras declaration looks like too, and that must fail the verification.
 HOST_ARCH=$(uname -m)
 if [ -n "$CUDA_EXTRA" ] && [ "$HOST_ARCH" != "x86_64" ]; then
-  echo "SKIPPED: no pip-provided CUDA libraries check on $HOST_ARCH; nvidia-* $CUDA_EXTRA wheels are x86_64-only."
+  echo "SKIPPED: no pip-provided CUDA libraries check on $HOST_ARCH; the $CUDA_EXTRA extra targets x86_64 systems."
   CUDA_EXTRA=""
 fi
 

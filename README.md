@@ -127,7 +127,8 @@ bundle them, so the environment has to provide them in one of two ways:
 - a [CUDA Toolkit 12 or 13](https://developer.nvidia.com/cuda/toolkit) installation whose major version matches the
   wheel's `cu12` or `cu13` tag, or
 - the wheel's matching `cu12`/`cu13` extra, which pulls the math libraries in as `nvidia-*` pip packages
-  (see step 3 below). A CUDA driver is still required; only the toolkit installation is not.
+  (see step 3 below). A CUDA driver is still required; only the toolkit installation is not. This is meant for x86_64
+  systems without a toolkit — on Jetson, CUDA comes with JetPack, so use that rather than the extra.
 
 Official wheels include cuNLS support for `Multisensor` mode; no separate cuNLS installation is required.
 
