@@ -60,7 +60,7 @@ stage_one() {
   fi
 
   echo "Staging $name from $s3_uri -> $dest"
-  aws s3 cp "$s3_uri" "$tmp_tar"
+  aws s3 cp "$s3_uri" "$tmp_tar" --no-progress
   rm -rf "$dest"
   mkdir -p "$dest"
   tar -xf "$tmp_tar" -C "$dest"

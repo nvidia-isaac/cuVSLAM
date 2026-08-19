@@ -116,6 +116,6 @@ if [ "$DRY_RUN" = "true" ]; then
 fi
 
 echo "=== Uploading to $s3_tarball ==="
-aws s3 cp "$tarball" "$s3_tarball"
+aws s3 cp "$tarball" "$s3_tarball" --no-progress
 aws s3 ls "$s3_tarball" --summarize
 echo "Provision complete: $s3_tarball"
