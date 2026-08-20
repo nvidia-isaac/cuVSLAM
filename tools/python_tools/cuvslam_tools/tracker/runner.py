@@ -112,7 +112,7 @@ class Tracker:
             if args.visualize_rerun:
                 self.slam_cfg.enable_reading_internals = True
 
-        if getattr(args, "print_config", False):
+        if args.print_config:
             print(
                 f"cuVSLAM version: {vslam.get_version()}\n"
                 f"Odometry config:\n{conv.to_str(self.odom_cfg)}"
