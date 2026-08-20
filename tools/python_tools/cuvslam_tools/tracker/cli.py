@@ -83,6 +83,11 @@ def add_tracker_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--save_output_tracker_data", action="store_true", help="Save output tracker data.")
     parser.add_argument(
+        "--print_config",
+        action="store_true",
+        help="Print the complete odometry and SLAM configurations.",
+    )
+    parser.add_argument(
         "--visualize_rerun",
         action="store_true",
         help="Enable real-time visualization of tracking results using Rerun viewer.",
