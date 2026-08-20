@@ -191,9 +191,10 @@ class Tracker:
         # Set enable_depth_stereo_tracking (default: False)
         rgbd_settings.enable_depth_stereo_tracking = getattr(args, 'enable_depth_stereo_tracking', False)
 
-        print(f"RGBD settings initialized: depth_camera_id={rgbd_settings.depth_camera_id}, "
-              f"depth_scale_factor={rgbd_settings.depth_scale_factor}, "
-              f"enable_depth_stereo_tracking={rgbd_settings.enable_depth_stereo_tracking}")
+        if args.print_config:
+            print(f"RGBD settings initialized: depth_camera_id={rgbd_settings.depth_camera_id}, "
+                  f"depth_scale_factor={rgbd_settings.depth_scale_factor}, "
+                  f"enable_depth_stereo_tracking={rgbd_settings.enable_depth_stereo_tracking}")
 
         return rgbd_settings
 

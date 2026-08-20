@@ -154,9 +154,7 @@ class DatasetReader:
     def parse_config(config_data: dict) -> vslam.Rig:
         """Parse stereo.edex rig configuration into a cuVSLAM Rig."""
         try:
-            rig = DatasetReader.get_rig(config_data[0])
-            print("Rig initialized successfully.")
-            return rig
+            return DatasetReader.get_rig(config_data[0])
         except Exception as e:
             print(f"Error initializing Rig: {e}")
             raise

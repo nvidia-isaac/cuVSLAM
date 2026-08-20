@@ -559,10 +559,6 @@ class EdexReader(DatasetReader):
             rgbd_settings.depth_scale_factor = depth_scale_factor
             rgbd_settings.enable_depth_stereo_tracking = enable_depth_stereo_tracking
 
-            print(f"RGBD settings parsed: depth_camera_id={depth_camera_id}, "
-                  f"depth_scale_factor={depth_scale_factor}, "
-                  f"enable_depth_stereo_tracking={enable_depth_stereo_tracking}")
-
             return rgbd_settings
 
         except (KeyError, IndexError, TypeError) as e:
