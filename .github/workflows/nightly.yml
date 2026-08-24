@@ -186,8 +186,7 @@ jobs:
               src="$(mktemp -d)"
               cp -a /cuvslam/tools/python_tools/. "$src/"
               pip install --quiet "$src"
-              PYTHONPATH="$src" python3 -m unittest discover -v -s "$src/cuvslam_tools/tests"
-              python3 -m unittest discover -v -s /cuvslam/scripts/tests'
+              PYTHONPATH="$src" python3 -m unittest discover -v -s "$src/cuvslam_tools/tests"'
 
       - name: Verify eval prerequisites
         if: matrix.eval
