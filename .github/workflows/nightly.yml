@@ -186,7 +186,8 @@ jobs:
               src="$(mktemp -d)"
               cp -a /cuvslam/tools/python_tools/. "$src/"
               pip install --quiet "$src"
-              PYTHONPATH="$src" python3 -m unittest discover -v -s "$src/cuvslam_tools/tests"'
+              PYTHONPATH="$src" python3 -m unittest discover -v -s "$src/cuvslam_tools/tests"
+              python3 -m unittest discover -v -s /cuvslam/scripts/tests'
 
       - name: Verify eval prerequisites
         if: matrix.eval
@@ -309,6 +310,7 @@ jobs:
         run: |
           RUN_ID="$(date -u +%Y-%m-%d)" \
           KPI_HISTORY_DIR="${RUNNER_STORAGE_ROOT:?RUNNER_STORAGE_ROOT must be set}/cuvslam-ci/kpi-history/${{ matrix.platform }}-cuda${{ matrix.cuda }}-ubuntu${{ matrix.ubuntu }}" \
+          KPI_RENDER_LEGACY=false \
           ./scripts/eval_cuvslam_in_docker.sh ./output
 
       - name: Upload KPI results
@@ -316,10 +318,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ${{ env.EVAL_KPIS_ARTIFACT }}-${{ needs.check-changes.outputs.package_version }}-${{ matrix.platform }}-cuda${{ matrix.cuda }}-ubuntu${{ matrix.ubuntu }}
-          path: |
-            output/eval/kpi_*.json
-            output/eval/kpi_*.json.table
-            output/eval/kpi_*.json.drift
+          path: output/eval/kpi_*.json
           overwrite: true
           retention-days: 1
           if-no-files-found: warn
@@ -379,6 +378,10 @@ jobs:
       actions: write  # Required by github.rest.actions.deleteArtifact below.
       contents: read
     steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
       - name: Download test result artifacts
         if: >-
           needs.check-changes.outputs.should_build == 'true' &&
@@ -495,32 +498,28 @@ jobs:
           done
           echo "" >> "$REPORT"
 
-          # Merge every config's KPI table into one, prefixed with a Config column
-          # (platform-cuda-ubuntu slug) so rows stay distinct and reports never overwrite.
-          kpi_emit_head=1
           kpi_config_count=0
+          kpi_inputs=()
           KPI_ARTIFACT_PREFIX="${EVAL_KPIS_ARTIFACT}-${PACKAGE_VERSION}-"
           for kpidir in artifacts/kpis/${KPI_ARTIFACT_PREFIX}*; do
             [ -d "$kpidir" ] || continue
             CONFIG=${kpidir#artifacts/kpis/${KPI_ARTIFACT_PREFIX}}
             mkdir -p "consolidated/kpis/$CONFIG"
             cp -a "$kpidir"/. "consolidated/kpis/$CONFIG/"
-            KPI_TABLE=$(find "$kpidir" -name "kpi_*.json.table" -print -quit 2>/dev/null || true)
-            [ -f "$KPI_TABLE" ] || continue
-            awk -v slug="$CONFIG" -v emit_head="$kpi_emit_head" '
-              NR==1 { if (emit_head=="1") print "| Config " $0; next }
-              NR==2 { if (emit_head=="1") print "|--------" $0; next }
-              { print "| " slug " " $0 }
-            ' "$KPI_TABLE" >> consolidated/kpi-combined.table
-            kpi_emit_head=""
+            KPI_REPORT_JSON=$(find "$kpidir" -name "kpi_*.report.json" -print -quit 2>/dev/null || true)
+            [ -f "$KPI_REPORT_JSON" ] || continue
+            kpi_inputs+=(--input "$CONFIG=$KPI_REPORT_JSON")
             kpi_config_count=$((kpi_config_count + 1))
           done
 
-          if [ -f consolidated/kpi-combined.table ]; then
+          if [ "$kpi_config_count" -gt 0 ]; then
+            python3 scripts/cuvslam_kpi_report.py aggregate \
+              "${kpi_inputs[@]}" \
+              --output consolidated/kpi-combined.md
             {
               echo "## cuVSLAM Evaluation KPIs"
               echo ""
-              cat consolidated/kpi-combined.table
+              cat consolidated/kpi-combined.md
               echo ""
             } >> "$REPORT"
           fi
@@ -581,7 +580,7 @@ jobs:
             echo ""
             echo "## Evaluation KPIs"
             echo ""
-            cat consolidated/kpi-combined.table
+            cat consolidated/kpi-combined.md
             echo ""
             echo "## Evaluation record"
             echo ""
@@ -590,7 +589,7 @@ jobs:
           tar -czf "consolidated/cuvslam-evaluation-${PACKAGE_VERSION}.tar.gz" \
             -C consolidated \
             evaluation-summary.md \
-            kpi-combined.table \
+            kpi-combined.md \
             kpis \
             eval-reports
 
