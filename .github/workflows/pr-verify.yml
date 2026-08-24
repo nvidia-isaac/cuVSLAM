@@ -185,7 +185,6 @@ jobs:
         run: |
           RUN_ID="pr-${{ github.event.pull_request.number }}" \
           KPI_HISTORY_DIR="${RUNNER_STORAGE_ROOT:?RUNNER_STORAGE_ROOT must be set}/cuvslam-ci/kpi-history/${EVAL_CONFIG}" \
-          KPI_RENDER_LEGACY=false \
           ./scripts/eval_cuvslam_in_docker.sh ./output
 
       - name: Render KPI table
