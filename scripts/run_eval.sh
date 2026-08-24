@@ -7,7 +7,6 @@ KPI_HISTORY="${KPI_HISTORY:-/kpi-history}"
 WRITE_HISTORY="${EVAL_WRITE_HISTORY:-true}"
 RUN_ID="${RUN_ID:-$(date -u +%Y-%m-%d)}"
 MAX_WORKERS="${MAX_WORKERS:-12}"
-KPI_RENDER_LEGACY="${KPI_RENDER_LEGACY:-true}"
 
 CHOWN_TARGETS=("$OUTPUT_DIR")
 [ "$WRITE_HISTORY" = "true" ] && CHOWN_TARGETS+=("$KPI_HISTORY")
@@ -120,16 +119,14 @@ fi
 
 python3 /cuvslam/scripts/cuvslam_kpi_report.py "${KPI_ARGS[@]}"
 
-# Keep the old outputs during the two-MR migration. The workflow-only MR sets
-# KPI_RENDER_LEGACY=false and renders all published Markdown itself.
-if [ "$KPI_RENDER_LEGACY" = "true" ]; then
-  python3 /cuvslam/scripts/cuvslam_kpi_report.py render \
-    -r "$KPI_REPORT_JSON" \
-    -o "${KPI_JSON}.table"
-  python3 /cuvslam/scripts/cuvslam_kpi_report.py drift \
-    -r "$KPI_REPORT_JSON" \
-    -o "${KPI_JSON}.drift"
-fi
+# Keep the old outputs until CI has switched to the report JSON. A follow-up
+# script-only change can remove them without another workflow migration.
+python3 /cuvslam/scripts/cuvslam_kpi_report.py render \
+  -r "$KPI_REPORT_JSON" \
+  -o "${KPI_JSON}.table"
+python3 /cuvslam/scripts/cuvslam_kpi_report.py drift \
+  -r "$KPI_REPORT_JSON" \
+  -o "${KPI_JSON}.drift"
 
 if [ "$WRITE_HISTORY" = "true" ]; then
   # The S3-backed history mount has no rename(2), so publish the KPI JSON with a

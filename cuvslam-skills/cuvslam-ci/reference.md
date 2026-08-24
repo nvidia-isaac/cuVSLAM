@@ -75,8 +75,8 @@ Repository secrets, split read from write so fork-reachable jobs never hold a ke
 
 - Per run: `kpi_<run_id>.json` contains the flat current values used for rolling history;
   `kpi_<run_id>.report.json` contains the current values, previous per-config values, and soft drift results. KPIs are
-  ATE, ARE, Kabsch, tracking losts, and FPS, in ODOM and SLAM modes. `KPI_RENDER_LEGACY=true` additionally emits the
-  old `.table` and `.drift` files during migration or local compatibility runs; CI disables it.
+  ATE, ARE, Kabsch, tracking losts, and FPS, in ODOM and SLAM modes. During migration, `run_eval.sh` also emits the old
+  `.table` and `.drift` files; a follow-up script-only change removes those after CI switches to report JSON.
 - Nightly: `cuvslam_kpi_report.py aggregate` publishes one row per dataset/type/mode. KPI cells contain the mean and
   population standard deviation across all four x86 configurations; diff cells compare current and previous
   aggregated means. Temporary per-config `eval-kpis-staging-<version>-<slug>` and
