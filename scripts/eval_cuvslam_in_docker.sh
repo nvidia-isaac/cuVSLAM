@@ -10,7 +10,7 @@ if [ "$#" -ne 1 ]; then
   echo "  RUNNER_LOCAL_DATASETS_ROOT  Local extract root (default \$HOME/.cache/cuvslam)"
   echo "  AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY  From AWS_S3_* repository secrets in CI"
   echo "  KPI_HISTORY_DIR  Override KPI path (default \$RUNNER_STORAGE_ROOT/cuvslam-ci/kpi-history)"
-  echo "  RUN_ID, MAX_WORKERS, EVAL_WRITE_HISTORY"
+  echo "  RUN_ID, MAX_WORKERS, EVAL_WRITE_HISTORY, KPI_RENDER_LEGACY"
   exit 1
 fi
 
@@ -76,6 +76,7 @@ docker run --runtime=nvidia --gpus all --rm $TTY_FLAG \
   -e DATASETS_ROOT=/datasets \
   -e KPI_HISTORY=/kpi-history \
   -e EVAL_WRITE_HISTORY="$WRITE_HISTORY" \
+  -e KPI_RENDER_LEGACY="${KPI_RENDER_LEGACY:-true}" \
   -e RUN_ID="$RUN_ID" \
   -e MAX_WORKERS="$MAX_WORKERS" \
   -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \

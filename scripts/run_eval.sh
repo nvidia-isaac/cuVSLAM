@@ -7,6 +7,7 @@ KPI_HISTORY="${KPI_HISTORY:-/kpi-history}"
 WRITE_HISTORY="${EVAL_WRITE_HISTORY:-true}"
 RUN_ID="${RUN_ID:-$(date -u +%Y-%m-%d)}"
 MAX_WORKERS="${MAX_WORKERS:-12}"
+KPI_RENDER_LEGACY="${KPI_RENDER_LEGACY:-true}"
 
 CHOWN_TARGETS=("$OUTPUT_DIR")
 [ "$WRITE_HISTORY" = "true" ] && CHOWN_TARGETS+=("$KPI_HISTORY")
@@ -96,7 +97,14 @@ if [ -d "$KPI_HISTORY" ]; then
 fi
 
 KPI_JSON="$OUTPUT_DIR/eval/kpi_${RUN_ID}.json"
-KPI_ARGS=(-s "$CUVSLAM_OUTPUT" -j "$KPI_JSON" -d "$RUN_ID")
+KPI_REPORT_JSON="$OUTPUT_DIR/eval/kpi_${RUN_ID}.report.json"
+KPI_ARGS=(
+  collect
+  -s "$CUVSLAM_OUTPUT"
+  -j "$KPI_JSON"
+  -r "$KPI_REPORT_JSON"
+  -d "$RUN_ID"
+)
 if [ -n "$PREV_KPI" ]; then
   echo "Using previous KPI history: $PREV_KPI"
   KPI_ARGS+=(-k "$PREV_KPI")
@@ -112,6 +120,17 @@ fi
 
 python3 /cuvslam/scripts/cuvslam_kpi_report.py "${KPI_ARGS[@]}"
 
+# Keep the old outputs during the two-MR migration. The workflow-only MR sets
+# KPI_RENDER_LEGACY=false and renders all published Markdown itself.
+if [ "$KPI_RENDER_LEGACY" = "true" ]; then
+  python3 /cuvslam/scripts/cuvslam_kpi_report.py render \
+    -r "$KPI_REPORT_JSON" \
+    -o "${KPI_JSON}.table"
+  python3 /cuvslam/scripts/cuvslam_kpi_report.py drift \
+    -r "$KPI_REPORT_JSON" \
+    -o "${KPI_JSON}.drift"
+fi
+
 if [ "$WRITE_HISTORY" = "true" ]; then
   # The S3-backed history mount has no rename(2), so publish the KPI JSON with a
   # direct copy (no atomic rename available on this mount).
@@ -125,4 +144,4 @@ else
   echo "Read-only KPI history: baseline not modified (diff-only against existing history)."
 fi
 
-echo "=== Eval complete. KPI table: ${KPI_JSON}.table ==="
+echo "=== Eval complete. KPI report data: ${KPI_REPORT_JSON} ==="

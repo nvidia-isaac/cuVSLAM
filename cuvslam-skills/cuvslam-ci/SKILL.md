@@ -28,8 +28,10 @@ CI scripts (`scripts/`):
 - `stage_eval_datasets.sh` - downloads `<name>.tar` from S3, extracts to the local cache.
 - `check_eval_prerequisites.sh` - verifies credentials/cache and `RUNNER_STORAGE_ROOT`.
 - `eval_cuvslam_in_docker.sh` - host wrapper: mounts datasets and KPI history, starts the eval container.
-- `run_eval.sh` - in container: the active dataset set `DATASETS[]`, runs `cuvslam_app.py`, then the KPI reporter.
-- `cuvslam_kpi_report.py` - KPI math, Markdown `.table`, soft drift check.
+- `run_eval.sh` - in container: the active dataset set `DATASETS[]`, runs `cuvslam_app.py`, then collects
+  machine-readable KPI JSON.
+- `cuvslam_kpi_report.py` - owns KPI collection, rolling diffs, cross-config aggregation, soft drift data, and all
+  KPI Markdown rendering. `collect` writes raw and report JSON; `render` and `aggregate` produce publication Markdown.
 - `kpi_baseline_ranges.json` - committed static drift ranges.
 - `package_cpp_dist.sh` - creates and validates the curated, versioned C++ SDK archive used by Actions and Releases.
 - `Dockerfile` / `build_cuvslam_in_docker.sh` - product build image and wrapper; preserve Git/LFS metadata used by
