@@ -67,8 +67,8 @@ Repository secrets, split read from write so fork-reachable jobs never hold a ke
 ## Dataset registry and layout
 
 - `PROVISIONABLE_DATASETS` (datasets the Provision workflow can build) and `EVAL_DATASET_NAMES` (datasets eval stages) live in `datasets_config.sh`.
-- `run_eval.sh` `DATASETS[]` records are pipe-delimited: `LABEL|link_name|subdir|test_config|app_flags`. KITTI is
-  active; the others are commented until provisioned.
+- `run_eval.sh` `DATASETS[]` records are pipe-delimited: `LABEL|link_name|subdir|test_config|app_flags`. KITTI and
+  EuRoC are active; the others are commented until provisioned.
 - Tarball: uncompressed `<name>.tar` at `<S3_DATASETS_BUCKET>/<name>.tar`. Staged to `<RUNNER_LOCAL_DATASETS_ROOT>/datasets/vslam/<name>/` and mounted read-only into the eval container at `/datasets`. An ETag file skips re-download when the cache is current.
 
 ## KPI outputs

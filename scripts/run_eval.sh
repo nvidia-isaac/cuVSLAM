@@ -39,7 +39,7 @@ DATASETS=(
   "KITTI|kitti|kitti|kitti/kitti-vio_slam_gt.cfg|--odometry_mode=multicamera --rectified_stereo_camera=true --async_sba=false --multicam_mode=moderate --use_segments"
   # "TARTAN|tartanair|tartanV1hard_selected|tartanair/tartan-osmo-vo_slam.cfg|--odometry_mode=multicamera --rectified_stereo_camera=true --async_sba=false --multicam_mode=moderate --use_segments"
   # "M3ED_SPOT|m3ed_spot|m3ed_spot|m3ed_spot/m3ed_spot.cfg|--odometry_mode=multicamera --rectified_stereo_camera=false --async_sba=false --multicam_mode=moderate --use_segments"
-  # "EUROC|euroc|euroc_edex|euroc/euroc-vio_slam.cfg|--odometry_mode=inertial --rectified_stereo_camera=false --async_sba=false --multicam_mode=moderate --use_segments"
+  "EUROC|euroc|euroc|euroc/euroc-vio_slam.cfg|--odometry_mode=inertial --rectified_stereo_camera=false --async_sba=false --multicam_mode=moderate --use_segments"
   # "TUM_RGBD|tum-rgbd|tum_rgbd_edex|tum-rgbd/tum.cfg|--odometry_mode=rgbd --async_sba=false --use_segments"
   # "AR_TABLE|ar_table|ar_table_edex|ar_table/ar_table.cfg|--odometry_mode=rgbd --async_sba=false --use_segments"
   # "ICL_NUIM|icl-nuim|icl_nuim_edex|icl_nuim_edex/icl-nuim.cfg|--odometry_mode=rgbd --async_sba=false --use_segments"

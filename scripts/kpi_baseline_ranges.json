@@ -21,6 +21,16 @@
         "KITTI_ARE_STEREO_SLAM": {"expected": null, "tol_pct": 10},
         "KITTI_Kabsch_STEREO_SLAM": {"expected": null, "tol_pct": 10},
         "KITTI_TrackingLosts_STEREO_SLAM": {"expected": null, "tol_abs": 1},
-        "KITTI_FPS_STEREO_SLAM": {"expected": null, "tol_pct": 15}
+        "KITTI_FPS_STEREO_SLAM": {"expected": null, "tol_pct": 15},
+        "EUROC_ATE_VIO_ODOM": {"expected": null, "tol_pct": 10},
+        "EUROC_ARE_VIO_ODOM": {"expected": null, "tol_pct": 10},
+        "EUROC_Kabsch_VIO_ODOM": {"expected": null, "tol_pct": 10},
+        "EUROC_TrackingLosts_VIO_ODOM": {"expected": null, "tol_abs": 1},
+        "EUROC_FPS_VIO_ODOM": {"expected": null, "tol_pct": 15},
+        "EUROC_ATE_VIO_SLAM": {"expected": null, "tol_pct": 10},
+        "EUROC_ARE_VIO_SLAM": {"expected": null, "tol_pct": 10},
+        "EUROC_Kabsch_VIO_SLAM": {"expected": null, "tol_pct": 10},
+        "EUROC_TrackingLosts_VIO_SLAM": {"expected": null, "tol_abs": 1},
+        "EUROC_FPS_VIO_SLAM": {"expected": null, "tol_pct": 15}
     }
 }
