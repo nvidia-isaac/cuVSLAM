@@ -249,6 +249,7 @@ void MonoSOFCPU::ransacFilter(const camera::ICameraModel &intrinsics, const Trac
     // @TODO: come back and revisit to make sure we do normalization only once
     Vector2T v1, v2;  // in xy coordinates
     if (!intrinsics.normalizePoint(lastIt->position(), v1) || !intrinsics.normalizePoint(track.position(), v2)) {
+      tracks.kill(i);  // drop it, so the inlier loop below stays in step with sampleSequence
       continue;
     }
     sampleSequence.emplace_back(v1, v2);
