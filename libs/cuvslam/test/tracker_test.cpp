@@ -15,6 +15,7 @@
  */
 
 #include <cstdint>
+#include <limits>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -108,6 +109,29 @@ TEST_F(TrackerTest, GtAlignModeRequiresManualDispatch) {
   cfg.slam.gt_align_mode = true;
 
   EXPECT_THROW(Tracker(rig, cfg.odometry, &cfg.slam), std::invalid_argument);
+}
+
+TEST_F(TrackerTest, RejectsNonFiniteCalibration) {
+  constexpr float kNan = std::numeric_limits<float>::quiet_NaN();
+
+  // a non-finite calibration makes every projection NaN, and the range tests on the way in are all
+  // `<` or `<=`, which a NaN passes
+  Rig bad_focal{rig};
+  bad_focal.cameras[0].focal = {kNan, kFocal};
+  EXPECT_THROW(Tracker{bad_focal}, std::invalid_argument);
+
+  Rig bad_principal{rig};
+  bad_principal.cameras[0].principal = {kWidth / 2.f, kNan};
+  EXPECT_THROW(Tracker{bad_principal}, std::invalid_argument);
+
+  Rig bad_distortion{rig};
+  bad_distortion.cameras[0].distortion.model = cuvslam::Distortion::Model::Fisheye;
+  bad_distortion.cameras[0].distortion.parameters = {0.f, kNan, 0.f, 0.f};
+  EXPECT_THROW(Tracker{bad_distortion}, std::invalid_argument);
+
+  Rig bad_pose{rig};
+  bad_pose.cameras[1].rig_from_camera.translation = {kNan, 0.f, 0.f};
+  EXPECT_THROW(Tracker{bad_pose}, std::invalid_argument);
 }
 
 TEST_F(TrackerTest, TrackReturnsSlamPoseWhenEnabled) {
