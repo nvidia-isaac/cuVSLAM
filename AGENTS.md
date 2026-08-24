@@ -114,6 +114,8 @@ Load-bearing rules:
 - `[test]` — test-only changes, new or updated tests
 - `[infra]` — infrastructure not tied to product source code (for example `AGENTS.md`, repo configs, `.gitignore`)
 
+**Length:** Keep the git commit message title (the first line) to 70 characters or fewer.
+
 **Unit tests:** `[fix]` and `[feat]` MRs must include unit tests (C++ in `libs/*/test/` and/or Python under `python/test/` as appropriate).
 
 **Scope:** Do not mix several unrelated changes in one MR. Keep each MR as small as is reasonable; every change in the MR should clearly relate to its stated topic.
