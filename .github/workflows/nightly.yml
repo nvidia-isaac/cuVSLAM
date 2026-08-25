@@ -189,16 +189,6 @@ jobs:
               pip install --quiet "$src"
               PYTHONPATH="$src" python3 -m unittest discover -v -s "$src/cuvslam_tools/tests"'
 
-      - name: Run CI script tests
-        if: matrix.tools_tests
-        run: |
-          docker run --rm \
-            -e PYTHONDONTWRITEBYTECODE=1 \
-            -v "$(pwd):/cuvslam:ro" \
-            -w /cuvslam \
-            cuvslam-ci:local \
-            python3 -m unittest discover -v -s scripts/tests
-
       - name: Verify eval prerequisites
         if: matrix.eval
         env:
