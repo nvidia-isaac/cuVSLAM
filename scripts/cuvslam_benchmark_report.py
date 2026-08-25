@@ -95,10 +95,10 @@ def parse_gtest_xml(xml_path: Path, expected_count: int = 0) -> dict:
                 ),
             )
         )
-        if failures:
-            status = "fail"
-        elif metric_error:
+        if metric_error:
             status = "error"
+        elif failures:
+            status = "fail"
         else:
             status = "pass"
 
