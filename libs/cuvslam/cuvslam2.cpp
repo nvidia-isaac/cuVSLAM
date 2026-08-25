@@ -159,6 +159,13 @@ void CreateCameraModel(const Camera& camera, std::unique_ptr<camera::ICameraMode
   THROW_INVALID_ARG_IF(std::any_of(distortion.begin(), distortion.end(), [](float p) { return !std::isfinite(p); }),
                        "Distortion parameters must be finite");
 
+  // everything built from the extrinsics inherits a NaN: rays, epipolar curves, frustum overlap
+  const auto is_finite = [](float v) { return std::isfinite(v); };
+  const auto& pose = camera.rig_from_camera;
+  THROW_INVALID_ARG_IF(!std::all_of(pose.rotation.begin(), pose.rotation.end(), is_finite) ||
+                           !std::all_of(pose.translation.begin(), pose.translation.end(), is_finite),
+                       "Camera rig_from_camera must be finite");
+
   camera_model = camera::CreateCameraModel(resolution, focal, principal, camera.distortion.model,
                                            camera.distortion.parameters.data(), camera.distortion.parameters.size());
   THROW_INVALID_ARG_IF(!camera_model, "Failed to create camera model with " +
@@ -183,15 +190,9 @@ void SetTrackerRigAndIntrinsics(std::vector<std::unique_ptr<camera::ICameraModel
 void CheckCameras(const cuvslam::Rig& rig) {
   THROW_INVALID_ARG_IF(rig.cameras.empty(), "No cameras in a rig");
   THROW_INVALID_ARG_IF(rig.cameras.size() > camera::Rig::kMaxCameras, "Number of cameras limit exceeded");
-  const auto is_finite = [](float v) { return std::isfinite(v); };
   for (const auto& cam : rig.cameras) {
     THROW_INVALID_ARG_IF(cam.size[0] != rig.cameras[0].size[0] || cam.size[1] != rig.cameras[0].size[1],
                          "All cameras resolutions must be the same");
-    // everything derived from the extrinsics inherits a NaN: rays, epipolar curves, frustum overlap
-    const auto& pose = cam.rig_from_camera;
-    THROW_INVALID_ARG_IF(!std::all_of(pose.rotation.begin(), pose.rotation.end(), is_finite) ||
-                             !std::all_of(pose.translation.begin(), pose.translation.end(), is_finite),
-                         "Camera rig_from_camera must be finite");
   }
   // Check that no two cameras have identical poses
   for (size_t i = 0; i < rig.cameras.size(); i++) {

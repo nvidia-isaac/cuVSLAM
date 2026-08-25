@@ -153,6 +153,15 @@ TEST_F(TrackerTest, RejectsNonFiniteCalibration) {
   EXPECT_THROW(Slam(bad_pose, {0}), std::invalid_argument);
 }
 
+// The per-camera checks run from SetTrackerRigAndIntrinsics, which Slam calls, but the whole-rig
+// ones live in CheckCameras, which only Odometry used to reach.
+TEST_F(TrackerTest, StandaloneSlamChecksTheWholeRig) {
+  Rig mismatched_resolutions{rig};
+  mismatched_resolutions.cameras[1].size = {kWidth / 2, kHeight};
+
+  EXPECT_THROW(Slam(mismatched_resolutions, {0}), std::invalid_argument);
+}
+
 TEST_F(TrackerTest, TrackReturnsSlamPoseWhenEnabled) {
   SyncConfig cfg = MakeSyncConfig();
   Tracker tracker{rig, cfg.odometry, &cfg.slam};
