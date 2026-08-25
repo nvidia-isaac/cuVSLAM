@@ -152,6 +152,13 @@ void CreateCameraModel(const Camera& camera, std::unique_ptr<camera::ICameraMode
   THROW_INVALID_ARG_IF(focal[0] <= 0.0 || focal[1] <= 0.0, "Focal length must be > 0.0");
   THROW_INVALID_ARG_IF(resolution[0] <= 0 || resolution[1] <= 0, "Image width/height must be > 0");
 
+  // everything built from the extrinsics inherits a NaN: rays, epipolar curves, frustum overlap
+  const auto is_finite = [](float v) { return std::isfinite(v); };
+  const auto& pose = camera.rig_from_camera;
+  THROW_INVALID_ARG_IF(!std::all_of(pose.rotation.begin(), pose.rotation.end(), is_finite) ||
+                           !std::all_of(pose.translation.begin(), pose.translation.end(), is_finite),
+                       "Camera rig_from_camera must be finite");
+
   camera_model = camera::CreateCameraModel(resolution, focal, principal, camera.distortion.model,
                                            camera.distortion.parameters.data(), camera.distortion.parameters.size());
   THROW_INVALID_ARG_IF(!camera_model, "Failed to create camera model with " +

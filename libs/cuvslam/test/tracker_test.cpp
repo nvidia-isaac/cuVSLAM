@@ -15,6 +15,7 @@
  */
 
 #include <cstdint>
+#include <limits>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -108,6 +109,13 @@ TEST_F(TrackerTest, GtAlignModeRequiresManualDispatch) {
   cfg.slam.gt_align_mode = true;
 
   EXPECT_THROW(Tracker(rig, cfg.odometry, &cfg.slam), std::invalid_argument);
+}
+
+TEST_F(TrackerTest, RejectsNonFiniteCameraPose) {
+  Rig bad_pose{rig};
+  bad_pose.cameras[1].rig_from_camera.translation = {std::numeric_limits<float>::quiet_NaN(), 0.f, 0.f};
+
+  EXPECT_THROW(Tracker{bad_pose}, std::invalid_argument);
 }
 
 TEST_F(TrackerTest, TrackReturnsSlamPoseWhenEnabled) {
