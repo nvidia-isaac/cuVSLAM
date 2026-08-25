@@ -18,7 +18,11 @@
 import argparse
 import json
 import math
+import os
+import platform
 import re
+import shutil
+import subprocess
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -29,6 +33,32 @@ REQUIRED_PROPERTIES = (
     "gpu_ns_per_iteration",
     "speedup",
 )
+
+
+def _command(arguments: list[str]) -> str:
+    if shutil.which(arguments[0]) is None:
+        return ""
+    result = subprocess.run(arguments, check=False, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def collect_metadata(repo_root: Path) -> dict:
+    tegra_path = Path("/etc/nv_tegra_release")
+    source_status = _command(["git", "-C", str(repo_root), "status", "--porcelain", "--untracked-files=no"])
+    return {
+        "config": os.environ.get("BENCHMARK_CONFIG", "local"),
+        "git_sha": os.environ.get("GITHUB_SHA") or _command(["git", "-C", str(repo_root), "rev-parse", "HEAD"]),
+        "source_modified": bool(source_status),
+        "tegra_release": tegra_path.read_text().strip() if tegra_path.exists() else "",
+        "jetpack": _command(["dpkg-query", "-W", "-f=${Version}", "nvidia-jetpack"]),
+        "cuda_version": os.environ.get("CUDA_VERSION", ""),
+        "ubuntu_version": os.environ.get("UBUNTU_VERSION", ""),
+        "nvpmodel": _command(["nvpmodel", "-q"]),
+        "jetson_clocks": _command(["jetson_clocks", "--show"]),
+        "nvidia_smi": _command(["nvidia-smi", "-L"]),
+        "hostname": platform.node(),
+        "kernel": platform.release(),
+    }
 
 
 def _parse_positive_int(value: str, name: str) -> int:
@@ -216,16 +246,28 @@ def render_markdown(report: dict) -> str:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--xml", type=Path, required=True, help="GoogleTest XML produced by cuda_modules_test")
-    parser.add_argument("--metadata", type=Path, required=True, help="JSON file containing runner metadata")
-    parser.add_argument("--output-json", type=Path, required=True)
-    parser.add_argument("--output-markdown", type=Path, required=True)
-    parser.add_argument("--expected-count", type=int, default=0)
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    metadata_parser = subparsers.add_parser("metadata", help="Collect host benchmark metadata")
+    metadata_parser.add_argument("--repo-root", type=Path, required=True)
+    metadata_parser.add_argument("--output", type=Path, required=True)
+
+    render_parser = subparsers.add_parser("render", help="Render GoogleTest benchmark results")
+    render_parser.add_argument("--xml", type=Path, required=True, help="GoogleTest XML produced by cuda_modules_test")
+    render_parser.add_argument("--metadata", type=Path, required=True, help="JSON file containing runner metadata")
+    render_parser.add_argument("--output-json", type=Path, required=True)
+    render_parser.add_argument("--output-markdown", type=Path, required=True)
+    render_parser.add_argument("--expected-count", type=int, default=0)
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
+    if args.command == "metadata":
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(collect_metadata(args.repo_root), indent=2, sort_keys=True) + "\n")
+        return 0
+
     report = parse_gtest_xml(args.xml, args.expected_count)
     report["metadata"] = json.loads(args.metadata.read_text())
 

@@ -24,42 +24,9 @@ rm -f \
   "$OUTPUT_DIR/cpp-benchmark-results.xml" \
   "$OUTPUT_DIR/benchmark-summary.md"
 
-export REPO_ROOT
-python3 - "$OUTPUT_DIR/cpp-benchmark-metadata.json" <<'PY'
-import json
-import os
-import platform
-import shutil
-import subprocess
-import sys
-from pathlib import Path
-
-
-def command(arguments):
-    if shutil.which(arguments[0]) is None:
-        return ""
-    result = subprocess.run(arguments, check=False, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    return result.stdout.strip() if result.returncode == 0 else ""
-
-
-tegra_path = Path("/etc/nv_tegra_release")
-source_status = command(["git", "-C", os.environ["REPO_ROOT"], "status", "--porcelain", "--untracked-files=no"])
-metadata = {
-    "config": os.environ.get("BENCHMARK_CONFIG", "local"),
-    "git_sha": os.environ.get("GITHUB_SHA") or command(["git", "-C", os.environ["REPO_ROOT"], "rev-parse", "HEAD"]),
-    "source_modified": bool(source_status),
-    "tegra_release": tegra_path.read_text().strip() if tegra_path.exists() else "",
-    "jetpack": command(["dpkg-query", "-W", "-f=${Version}", "nvidia-jetpack"]),
-    "cuda_version": os.environ.get("CUDA_VERSION", ""),
-    "ubuntu_version": os.environ.get("UBUNTU_VERSION", ""),
-    "nvpmodel": command(["nvpmodel", "-q"]),
-    "jetson_clocks": command(["jetson_clocks", "--show"]),
-    "nvidia_smi": command(["nvidia-smi", "-L"]),
-    "hostname": platform.node(),
-    "kernel": platform.release(),
-}
-Path(sys.argv[1]).write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n")
-PY
+python3 "$REPO_ROOT/scripts/cuvslam_benchmark_report.py" metadata \
+  --repo-root "$REPO_ROOT" \
+  --output "$OUTPUT_DIR/cpp-benchmark-metadata.json"
 
 TTY_FLAG=""
 [ -t 0 ] && TTY_FLAG="-it"
@@ -72,24 +39,19 @@ docker run --runtime=nvidia --gpus all --rm $TTY_FLAG \
   cuvslam:local bash -c '
     set -euo pipefail
     trap "chown -R $HOST_UID:$HOST_GID /output" EXIT
-    benchmark=/output/build/bin/cuda_modules_test
-    if [ ! -x "$benchmark" ]; then
-      echo "Error: $benchmark not found or not executable." >&2
-      exit 1
-    fi
-    "$benchmark" \
-      --gtest_filter="*SpeedUp*:*Speedup*" \
-      --gtest_random_seed=42 \
-      --gtest_color=no \
-      --gtest_output=xml:/output/cpp-benchmark-results.xml \
-      2>&1 | tee /output/cpp-benchmark-output.log
+    cd /output/build
+    GTEST_FILTER="*SpeedUp*:*Speedup*" \
+      GTEST_RANDOM_SEED=42 \
+      GTEST_COLOR=no \
+      GTEST_OUTPUT=xml:/output/cpp-benchmark-results.xml \
+      ctest -R "^cuda_modules_test$" -V 2>&1 | tee /output/cpp-benchmark-output.log
   '
 benchmark_status=$?
 set -e
 
 report_status=0
 if [ -f "$OUTPUT_DIR/cpp-benchmark-results.xml" ]; then
-  python3 "$REPO_ROOT/scripts/cuvslam_benchmark_report.py" \
+  python3 "$REPO_ROOT/scripts/cuvslam_benchmark_report.py" render \
     --xml "$OUTPUT_DIR/cpp-benchmark-results.xml" \
     --metadata "$OUTPUT_DIR/cpp-benchmark-metadata.json" \
     --output-json "$OUTPUT_DIR/cpp-benchmark-results.json" \

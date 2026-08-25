@@ -82,10 +82,11 @@ Repository secrets, split read from write so fork-reachable jobs never hold a ke
 - The regular C++ test command excludes names containing `SpeedUp` or `Speedup`. Nightly matrix entries flagged
   `benchmark: true` run the active matching cases from `cuda_modules_test` separately. Tests prefixed with
   `DISABLED_` remain excluded.
-- `benchmark_cuvslam_in_docker.sh` records host Jetson/JetPack, CUDA, Ubuntu, power-mode, clock, commit, and kernel
-  metadata; runs the benchmark binary with a fixed GTest seed; and writes raw output plus GoogleTest XML.
+- `cuvslam_benchmark_report.py metadata` records host Jetson/JetPack, CUDA, Ubuntu, power-mode, clock, commit, and
+  kernel metadata. `benchmark_cuvslam_in_docker.sh` runs the registered `cuda_modules_test` through CTest with a fixed
+  GTest seed and writes raw output plus GoogleTest XML.
 - Each active speed test records `iterations`, `cpu_ns_per_iteration`, `gpu_ns_per_iteration`, and `speedup` as
-  GoogleTest XML properties. `cuvslam_benchmark_report.py` validates those properties and writes
+  GoogleTest XML properties. `cuvslam_benchmark_report.py render` validates those properties and writes
   `cpp-benchmark-results.json` and `benchmark-summary.md`.
 - Per-config staging artifacts use
   `benchmark-results-staging-<version>-<platform>-cuda<version>-ubuntu<version>`. The nightly summary publishes the
