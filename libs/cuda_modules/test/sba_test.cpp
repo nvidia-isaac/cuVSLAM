@@ -16,6 +16,8 @@
  */
 
 #include <chrono>
+#include <cmath>
+#include <cstdlib>
 #include <iostream>
 #include <random>
 
@@ -27,6 +29,7 @@
 #include "profiler/profiler.h"
 #include "sba/bundle_adjustment_problem.h"
 #include "sba/schur_complement_bundler_cpu.h"
+#include "sba/schur_complement_bundler_gpu.h"
 namespace {
 using namespace cuvslam;
 
@@ -1115,6 +1118,93 @@ TEST(Cuda, SBAComputePredictedRelativeReduction) {
     }
     ASSERT_TRUE(std::abs(cpu_prediction - gpu_prediction) < thresh);
   }
+}
+
+// predict_reduction() divides the hessian and scaling terms by current_cost, so the caller has to
+// stop iterating before that cost collapses - SchurComplementBundlerGpu does it at the top of the
+// loop, the way the CPU bundler does. This pins the precondition: hand it a vanished cost and the
+// prediction is not a number the bundler can test, since every comparison a NaN meets is false.
+TEST(Cuda, SBARelativeReductionRequiresPositiveCost) {
+  camera::Rig rig = MakeDefaultRig();
+  const int max_points = 400;
+  const int max_poses = 5;
+  cuda::sba::GPULinearSystem gpu_full_system(max_points, max_poses);
+  cuda::sba::GPUParameterUpdate gpu_update(max_points, max_poses);
+  cuda::sba::GPULevenbergMarquardtStep lm_step(max_points, max_poses);
+  cuda::GPUArrayPinned<float> prediction{1};
+  cuda::Stream s;
+
+  sba::BundleAdjustmentProblem problem;
+  GenerateProblem(problem, rig, Matrix2T::Identity(), max_points, max_poses);
+  const int num_points = static_cast<int>(problem.points.size()) - problem.num_fixed_points;
+  const int num_poses = static_cast<int>(problem.rig_from_world.size()) - problem.num_fixed_key_frames;
+
+  ModelFunction model;
+  sba::schur_complement_bundler_cpu_internal::FullSystem full_system;
+  ReducedSystem reduced_system;
+  ParameterUpdate update;
+  update.point.resize(num_points, Vector3T::Zero());
+  update.pose.resize(num_poses, Isometry3T::Identity());
+
+  UpdateModel(model, problem);
+  BuildFullSystem(full_system, model, problem);
+  BuildReducedSystem(reduced_system, full_system, 0.1f);
+  ComputeUpdate(update, reduced_system, full_system);
+
+  cuda::sba::temporary::FullSystem full_system_gpu = to_temporary(full_system);
+  cuda::sba::temporary::ParameterUpdate update_gpu = to_temporary(update);
+  ASSERT_TRUE(gpu_update.set(update_gpu, s.get_stream()));
+  ASSERT_TRUE(gpu_full_system.set(full_system_gpu, s.get_stream()));
+
+  const auto predict = [&](float current_cost) {
+    float result = 0.f;
+    EXPECT_TRUE(lm_step.predict_reduction(current_cost, 0.01f, gpu_update.meta(), gpu_full_system.meta(), num_points,
+                                          num_poses, prediction.ptr(), s.get_stream()));
+    CUDA_CHECK(cudaMemcpyAsync(&result, prediction.ptr(), sizeof(float), cudaMemcpyDeviceToHost, s.get_stream()));
+    cudaStreamSynchronize(s.get_stream());
+    return result;
+  };
+
+  EXPECT_TRUE(std::isfinite(predict(10.f)));
+  EXPECT_FALSE(std::isfinite(predict(0.f)));
+}
+
+// Exact observations put the optimum at zero cost, which is what drives current_cost below
+// initial_cost * epsilon during the solve - the state the guard above exists for. The solver has to
+// come back from it converged, not having spent its whole budget rejecting steps.
+TEST(Cuda, SBASolverConvergesOnExactObservations) {
+  // This one drives a whole solve to convergence rather than checking a single kernel, so pin the
+  // problem instead of taking whatever GenerateProblem draws from the run's seed.
+  std::srand(1);
+
+  camera::Rig rig = MakeDefaultRig();
+
+  sba::BundleAdjustmentProblem problem;
+  GenerateProblem(problem, rig, Matrix2T::Identity(), 200, 5);
+
+  // replace the generated noise with exact projections of the generated state
+  for (size_t i = 0; i < problem.observation_xys.size(); ++i) {
+    const Vector3T p = rig.camera_from_rig[problem.camera_ids[i]] * problem.rig_from_world[problem.pose_ids[i]] *
+                       problem.points[problem.point_ids[i]];
+    problem.observation_xys[i] = p.topRows(2) / p.z();
+  }
+
+  // then nudge the free key frames off the optimum. The fixed ones sit at the end of the vector and
+  // anchor the gauge, so the solver can get back to exactly where the observations were taken.
+  const size_t free_poses = problem.rig_from_world.size() - static_cast<size_t>(problem.num_fixed_key_frames);
+  for (size_t i = 0; i < free_poses; ++i) {
+    problem.rig_from_world[i].translation() += Vector3T(0.01f, -0.01f, 0.01f);
+  }
+
+  problem.max_iterations = 50;
+
+  sba::SchurComplementBundlerGpu bundler;
+  ASSERT_TRUE(bundler.solve(problem));
+
+  EXPECT_TRUE(std::isfinite(problem.initial_cost));
+  EXPECT_TRUE(std::isfinite(problem.last_cost));
+  EXPECT_LT(problem.last_cost, problem.initial_cost);
+  EXPECT_LT(problem.iterations, problem.max_iterations);
 }
 
 TEST(Cuda, DISABLED_SBABuildReducedSystem) {
