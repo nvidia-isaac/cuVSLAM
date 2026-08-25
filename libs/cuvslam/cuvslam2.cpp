@@ -973,6 +973,9 @@ public:
     std::string message;
     TracePrintIf(!CheckCudaCompatibility(message), "[WARNING] %s\n", message.c_str());
 
+    // Slam can be constructed on its own, so it cannot rely on Odometry having vetted the rig
+    CheckCameras(rig);
+
     SetTrackerRigAndIntrinsics(cameras_models_, rig_, rig.cameras);
 
     slam::AsyncSlamOptions options;
