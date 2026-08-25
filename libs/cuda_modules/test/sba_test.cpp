@@ -60,7 +60,7 @@ void GenerateProblem(sba::BundleAdjustmentProblem& problem, const camera::Rig& r
   }
 
   for (int i = 0; i < num_points; ++i) {
-    problem.points.push_back(Vector3T(xy(rng), xy(rng), depth(rng)));
+    problem.points.emplace_back(xy(rng), xy(rng), depth(rng));
   }
 
   ASSERT_EQ(num_poses, static_cast<int>(problem.rig_from_world.size()));
@@ -146,28 +146,6 @@ cuda::sba::temporary::ParameterUpdate to_temporary(
   return out;
 }
 
-sba::schur_complement_bundler_cpu_internal::ReducedSystem from_temporary(
-    const cuda::sba::temporary::ReducedSystem& system) {
-  sba::schur_complement_bundler_cpu_internal::ReducedSystem out;
-  out.pose_block = system.pose_block;
-  out.pose_rhs = system.pose_rhs;
-  out.camera_backsub_block = system.camera_backsub_block;
-  out.point_rhs = system.point_rhs;
-  out.inverse_point_block = system.inverse_point_block;
-  return out;
-}
-
-sba::schur_complement_bundler_cpu_internal::FullSystem from_temporary(const cuda::sba::temporary::FullSystem& system) {
-  sba::schur_complement_bundler_cpu_internal::FullSystem out;
-
-  out.pose_block = system.pose_block;
-  out.pose_rhs = system.pose_rhs;
-  out.point_block = system.point_block;
-  out.point_rhs = system.point_rhs;
-  out.point_pose_block = system.point_pose_block;
-  return out;
-}
-
 sba::schur_complement_bundler_cpu_internal::ParameterUpdate from_temporary(
     const cuda::sba::temporary::ParameterUpdate& update) {
   sba::schur_complement_bundler_cpu_internal::ParameterUpdate out;
@@ -235,7 +213,7 @@ TEST(Cuda, SpeedupSBAUpdateModel) {
   ASSERT_TRUE(duration_basic >= duration_cuda);
 }
 
-TEST(Cuda, DISABLED_SBAUpdateModel) {
+TEST(Cuda, SBAUpdateModel) {
   const float thresh = 1;
   const float robustifier_scale = 1.f;
   const int num_points = 400;
@@ -291,13 +269,9 @@ TEST(Cuda, DISABLED_SBAUpdateModel) {
       ASSERT_TRUE((mf_cpu.residuals[j] - mf_gpu.residuals[jj]).norm() < thresh);
     }
 
-    for (size_t j = 0; j < problem_input1.points.size(); j++) {
-      if (!problem_input1.info_matrix[j].isApprox(problem_input2.info_matrix[j], thresh)) {
-        std::cout << "gpu info_matrix = " << std::endl << problem_input2.info_matrix[j] << std::endl;
-        std::cout << "cpu info_matrix = " << std::endl << problem_input1.info_matrix[j] << std::endl;
-      }
-      ASSERT_TRUE(problem_input1.info_matrix[j].isApprox(problem_input2.info_matrix[j], thresh));
-    }
+    // BundleAdjustmentProblem::info_matrix used to be compared here. Nothing fills it - not
+    // GenerateProblem, not GPUBundleAdjustmentProblem::set/get - so both vectors are empty and the
+    // comparison read past the end of them.
 
     for (size_t jj = 0; jj < problem_input1.observation_xys.size(); jj++) {
       const int j = gpu_problem.original_observation_index(jj);
@@ -493,18 +467,17 @@ TEST(Cuda, SBABuildFullSystem) {
   }
 }
 
-TEST(Cuda, DISABLED_SBASolverSpeedUp) {
+TEST(Cuda, SBASolverSpeedUp) {
   camera::Rig rig = MakeDefaultRig();
 
   ReducedSystem reduced_system;
-  Eigen::VectorXf cpu_sollution, gpu_sollution;
+  Eigen::VectorXf cpu_sollution, gpu_solution;
 
   int max_system_order = 200;
-
   int max_points = 400;
   int max_poses = 5;
 
-  cuda::sba::GPUSolver solver{max_system_order};
+  cuda::sba::GPUCholeskySolver solver{max_system_order};
   cuda::sba::GPULinearSystem gpu_reduced_system{max_points, max_poses};
   float* x;
 
@@ -524,7 +497,7 @@ TEST(Cuda, DISABLED_SBASolverSpeedUp) {
     // prepare all the data
     CUDA_CHECK(cudaMalloc((void**)&x, max_system_order * sizeof(float)));
     current_system_order = reduced_system.pose_block.cols();
-    gpu_sollution.resize(current_system_order);
+    gpu_solution.resize(current_system_order);
     ASSERT_TRUE(reduced_system.pose_block.cols() == reduced_system.pose_block.rows());
     // gpu part
 
@@ -566,12 +539,12 @@ TEST(Cuda, DISABLED_SBASolverSpeedUp) {
 }
 
 TEST(Cuda, SBASolver) {
-  const float thresh = 0.01;
+  constexpr float thresh = 0.01;
   camera::Rig rig = MakeDefaultRig();
   int max_points = 400;
   int max_poses = 5;
   int max_system_order = 400;
-  cuda::sba::GPUSolver solver{1};
+  cuda::sba::GPUCholeskySolver solver{1};
   cuda::sba::GPULinearSystem gpu_reduced_system{max_points, max_poses};
   float* x;
   CUDA_CHECK(cudaMalloc((void**)&x, max_system_order * sizeof(float)));
@@ -602,10 +575,11 @@ TEST(Cuda, SBASolver) {
       cpu_sollution = usv.solve(reduced_system.pose_rhs);
     }
 
-    Eigen::VectorXf gpu_sollution;
+    Eigen::VectorXf gpu_solution;
+
     {
       int current_system_order = reduced_system.pose_block.cols();
-      gpu_sollution.resize(current_system_order);
+      gpu_solution.resize(current_system_order);
       ASSERT_TRUE(reduced_system.pose_block.cols() == reduced_system.pose_block.rows());
       // gpu part
 
@@ -614,16 +588,16 @@ TEST(Cuda, SBASolver) {
 
       const auto& meta = gpu_reduced_system.meta();
       solver.solve(meta.pose_block, meta.pose_block_pitch, meta.pose_rhs, x, current_system_order, s.get_stream());
-      CUDA_CHECK(cudaMemcpyAsync((void*)gpu_sollution.data(), (void*)x, current_system_order * sizeof(float),
-                                 cudaMemcpyDeviceToHost, s.get_stream()));
+      CUDA_CHECK(cudaMemcpyAsync(gpu_solution.data(), x, current_system_order * sizeof(float), cudaMemcpyDeviceToHost,
+                                 s.get_stream()));
       cudaStreamSynchronize(s.get_stream());
     }
 
-    if (!gpu_sollution.isApprox(cpu_sollution, thresh)) {
+    if (!gpu_solution.isApprox(cpu_sollution, thresh)) {
       std::cout << "cpu = " << cpu_sollution.block<5, 1>(0, 0) << std::endl;
-      std::cout << "gpu = " << gpu_sollution.block<5, 1>(0, 0) << std::endl;
+      std::cout << "gpu = " << gpu_solution.block<5, 1>(0, 0) << std::endl;
     }
-    ASSERT_TRUE(gpu_sollution.isApprox(cpu_sollution, thresh));
+    ASSERT_TRUE(gpu_solution.isApprox(cpu_sollution, thresh));
   }
 
   CUDA_CHECK(cudaFree(x));
@@ -633,7 +607,7 @@ TEST(Cuda, SBAEvaluateCostSpeedUp) {
   camera::Rig rig = MakeDefaultRig();
   int max_points = 400;
   int max_poses = 5;
-  const int num_cameras = 2;
+  constexpr int num_cameras = 2;
 
   sba::BundleAdjustmentProblem problem_input_cpu, problem_input_gpu;
   ModelFunction model;
@@ -698,11 +672,11 @@ TEST(Cuda, SBAEvaluateCostSpeedUp) {
 }
 
 TEST(Cuda, SBAEvaluateCost) {
-  const float thresh = 10;
+  constexpr float thresh = 10;
   camera::Rig rig = MakeDefaultRig();
   int max_points = 400;
   int max_poses = 5;
-  const int num_cameras = 2;
+  constexpr int num_cameras = 2;
   cuda::sba::GPUBundleAdjustmentProblem gpu_problem(max_points, max_poses, max_points * max_poses * num_cameras);
   cuda::sba::GPUModelFunction gpu_function(max_points * max_poses * num_cameras);
   cuda::sba::GPUParameterUpdate gpu_update(max_points, max_poses);
@@ -771,7 +745,7 @@ TEST(Cuda, SBAParameterUpdaterComputeUpdateSpeedUp) {
   int max_poses = 20;
   cuda::sba::GPULinearSystem gpu_reduced_system(max_points, max_poses);
   cuda::sba::GPUParameterUpdate gpu_update(max_points, max_poses);
-  cuda::sba::GPUParameterUpdater gpu_parameter_updater(max_points, max_poses);
+  cuda::sba::GPULevenbergMarquardtStep lm_step(max_points, max_poses);
   cuda::GPUArrayPinned<float> points_poses_update_max{2};
   cuda::Stream s;
 
@@ -808,8 +782,8 @@ TEST(Cuda, SBAParameterUpdaterComputeUpdateSpeedUp) {
   auto time_cuda_start = std::chrono::high_resolution_clock::now();
   for (int i = 0; i < 100; i++) {
     TRACE_EVENT ev = helper.trace_event("GPU_ComputeUpdate");
-    ASSERT_TRUE(gpu_parameter_updater.compute_update(gpu_update.meta(), gpu_reduced_system.meta(), num_points,
-                                                     num_poses, points_poses_update_max, s.get_stream()));
+    ASSERT_TRUE(lm_step.compute_update(gpu_update.meta(), gpu_reduced_system.meta(), num_points, num_poses,
+                                       points_poses_update_max, s.get_stream()));
   }
   cudaStreamSynchronize(s.get_stream());
   auto duration_cuda =
@@ -829,7 +803,7 @@ TEST(Cuda, SBAParameterUpdaterComputeUpdate) {
   int max_poses = 5;
   cuda::sba::GPULinearSystem gpu_reduced_system(max_points, max_poses);
   cuda::sba::GPUParameterUpdate gpu_update(max_points, max_poses);
-  cuda::sba::GPUParameterUpdater gpu_parameter_updater(max_points, max_poses);
+  cuda::sba::GPULevenbergMarquardtStep lm_step(max_points, max_poses);
   cuda::GPUArrayPinned<float> points_poses_update_max{2};
   cuda::Stream s;
 
@@ -865,8 +839,8 @@ TEST(Cuda, SBAParameterUpdaterComputeUpdate) {
       reduced_temp.inverse_point_block = reduced_system.inverse_point_block;
 
       ASSERT_TRUE(gpu_reduced_system.set(reduced_temp, s.get_stream()));
-      ASSERT_TRUE(gpu_parameter_updater.compute_update(gpu_update.meta(), gpu_reduced_system.meta(), num_points,
-                                                       num_poses, points_poses_update_max, s.get_stream()));
+      ASSERT_TRUE(lm_step.compute_update(gpu_update.meta(), gpu_reduced_system.meta(), num_points, num_poses,
+                                         points_poses_update_max, s.get_stream()));
 
       points_poses_update_max.copy(cuda::GPUCopyDirection::ToCPU, s.get_stream());
       ASSERT_TRUE(gpu_update.get(num_points, num_poses, update_temp, s.get_stream()));
@@ -902,7 +876,7 @@ TEST(Cuda, SBAParameterUpdaterUpdateStateSpeedUp) {
   cuda::sba::GPUBundleAdjustmentProblem gpu_problem{max_points, max_poses, max_observations};
   gpu_problem.set_rig(rig);
   cuda::sba::GPUParameterUpdate gpu_update(max_points, max_poses);
-  cuda::sba::GPUParameterUpdater gpu_parameter_updater(max_points, max_poses);
+  cuda::sba::GPULevenbergMarquardtStep lm_step(max_points, max_poses);
   cuda::GPUGraph graph;
   cuda::Stream s;
 
@@ -916,7 +890,7 @@ TEST(Cuda, SBAParameterUpdaterUpdateStateSpeedUp) {
   update.point.resize(num_points, Vector3T::Zero());
   update.pose.resize(num_poses, Isometry3T::Identity());
   auto lambda = [&](cudaStream_t s_) {
-    ASSERT_TRUE(gpu_parameter_updater.update_state(gpu_problem.meta(), gpu_update.meta(), num_points, num_poses, s_));
+    ASSERT_TRUE(lm_step.apply_update(gpu_problem.meta(), gpu_update.meta(), num_points, num_poses, s_));
   };
   graph.launch(lambda, s.get_stream());
   cudaStreamSynchronize(s.get_stream());
@@ -946,17 +920,17 @@ TEST(Cuda, SBAParameterUpdaterUpdateStateSpeedUp) {
 }
 
 TEST(Cuda, SBAParameterUpdaterUpdateState) {
-  const float thresh = 0.01f;
+  constexpr float thresh = 0.01f;
   camera::Rig rig = MakeDefaultRig();
   int max_points = 400;
   int max_poses = 5;
-  cuda::sba::GPUBundleAdjustmentProblem gpu_problem{max_points, max_poses};
+  int max_observations = 20000;
+  cuda::sba::GPUBundleAdjustmentProblem gpu_problem{max_points, max_poses, max_observations};
   gpu_problem.set_rig(rig);
   cuda::sba::GPULinearSystem gpu_reduced_system(max_points, max_poses);
   cuda::sba::GPUParameterUpdate gpu_update(max_points, max_poses);
-  cuda::sba::GPUParameterUpdater gpu_parameter_updater(max_points, max_poses);
+  cuda::sba::GPULevenbergMarquardtStep lm_step(max_points, max_poses);
   cuda::GPUArrayPinned<float> points_poses_update_max{2};
-  cuda::GPUGraph graph;
   cuda::Stream s;
 
   for (int i = 0; i < 100; i++) {
@@ -987,10 +961,9 @@ TEST(Cuda, SBAParameterUpdaterUpdateState) {
     {
       ASSERT_TRUE(gpu_problem.set(problem_input_gpu, s.get_stream()));
       ASSERT_TRUE(gpu_reduced_system.set(reduced_temp, s.get_stream()));
-      ASSERT_TRUE(gpu_parameter_updater.compute_update(gpu_update.meta(), gpu_reduced_system.meta(), num_points,
-                                                       num_poses, points_poses_update_max, s.get_stream()));
-      ASSERT_TRUE(gpu_parameter_updater.update_state(gpu_problem.meta(), gpu_update.meta(), num_points, num_poses,
-                                                     s.get_stream()));
+      ASSERT_TRUE(lm_step.compute_update(gpu_update.meta(), gpu_reduced_system.meta(), num_points, num_poses,
+                                         points_poses_update_max, s.get_stream()));
+      ASSERT_TRUE(lm_step.apply_update(gpu_problem.meta(), gpu_update.meta(), num_points, num_poses, s.get_stream()));
       ASSERT_TRUE(gpu_problem.get(problem_input_gpu, s.get_stream()));
 
       cudaStreamSynchronize(s.get_stream());
@@ -1016,7 +989,7 @@ TEST(Cuda, SBAComputePredictedRelativeReductionSpeedUp) {
   int max_poses = 200;
   cuda::sba::GPULinearSystem gpu_full_system(max_points, max_poses);
   cuda::sba::GPUParameterUpdate gpu_update(max_points, max_poses);
-  cuda::sba::GPUParameterUpdater gpu_parameter_updater(max_points, max_poses);
+  cuda::sba::GPULevenbergMarquardtStep lm_step(max_points, max_poses);
   cuda::GPUGraph graph;
   cuda::GPUArrayPinned<float> prediction{1};
   cuda::Stream s;
@@ -1052,8 +1025,8 @@ TEST(Cuda, SBAComputePredictedRelativeReductionSpeedUp) {
   ASSERT_TRUE(gpu_update.set(update_temp, s.get_stream()));
   ASSERT_TRUE(gpu_full_system.set(full_system_2, s.get_stream()));
   auto lambda = [&](cudaStream_t s_) {
-    ASSERT_TRUE(gpu_parameter_updater.relative_reduction(10, 0.01, gpu_update.meta(), gpu_full_system.meta(),
-                                                         num_points, num_poses, prediction.ptr(), s_));
+    ASSERT_TRUE(lm_step.predict_reduction(10, 0.01, gpu_update.meta(), gpu_full_system.meta(), num_points, num_poses,
+                                          prediction.ptr(), s_));
   };
   graph.launch(lambda, s.get_stream());
   cudaStreamSynchronize(s.get_stream());
@@ -1090,7 +1063,7 @@ TEST(Cuda, SBAComputePredictedRelativeReduction) {
   int max_poses = 5;
   cuda::sba::GPULinearSystem gpu_full_system(max_points, max_poses);
   cuda::sba::GPUParameterUpdate gpu_update(max_points, max_poses);
-  cuda::sba::GPUParameterUpdater gpu_parameter_updater(max_points, max_poses);
+  cuda::sba::GPULevenbergMarquardtStep lm_step(max_points, max_poses);
   cuda::GPUArrayPinned<float> prediction{1};
   cuda::GPUGraph graph;
   cuda::Stream s;
@@ -1127,8 +1100,8 @@ TEST(Cuda, SBAComputePredictedRelativeReduction) {
       ASSERT_TRUE(gpu_full_system.set(full_system_2, s.get_stream()));
       graph.launch(
           [&](cudaStream_t s_) {
-            ASSERT_TRUE(gpu_parameter_updater.relative_reduction(10, 0.01, gpu_update.meta(), gpu_full_system.meta(),
-                                                                 num_points, num_poses, prediction.ptr(), s_));
+            ASSERT_TRUE(lm_step.predict_reduction(10, 0.01, gpu_update.meta(), gpu_full_system.meta(), num_points,
+                                                  num_poses, prediction.ptr(), s_));
           },
           s.get_stream());
       CUDA_CHECK(
@@ -1209,10 +1182,10 @@ TEST(Cuda, DISABLED_SBABuildReducedSystem) {
     }
 
     // std::vector<Matrix3T> inverse_point_block;
-    for (int i = 0; i < num_points; i++) {
-      if (!rs_gpu.inverse_point_block[i].isApprox(rs_cpu.inverse_point_block[i], thresh)) {
-        std::cout << "rs_cpu.inverse_point_block[" << i << "] =\n" << rs_cpu.inverse_point_block[i] << '\n';
-        std::cout << "rs_gpu.inverse_point_block[" << i << "] =\n" << rs_gpu.inverse_point_block[i] << '\n';
+    for (int k = 0; k < num_points; k++) {
+      if (!rs_gpu.inverse_point_block[k].isApprox(rs_cpu.inverse_point_block[k], thresh)) {
+        std::cout << "rs_cpu.inverse_point_block[" << k << "] =\n" << rs_cpu.inverse_point_block[k] << '\n';
+        std::cout << "rs_gpu.inverse_point_block[" << k << "] =\n" << rs_gpu.inverse_point_block[k] << '\n';
         ASSERT_TRUE(false);
       }
     }

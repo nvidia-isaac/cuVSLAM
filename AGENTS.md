@@ -31,7 +31,7 @@ Key files:
 
 ```bash
 cd <build-dir>
-GTEST_FILTER=-*SpeedUp* ctest --output-on-failure
+ctest --output-on-failure
 ```
 
 Test sources live in `libs/*/test/` directories. Each library has its own test CMakeLists.
