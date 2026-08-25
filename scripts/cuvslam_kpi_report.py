@@ -13,27 +13,30 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
-"""Compute cuVSLAM evaluation KPIs from cuvslam_app stats and render a Markdown table.
+"""Collect, compare, aggregate, and render cuVSLAM evaluation KPIs.
 
 Runner-local port of the OSMO osmo_reporter (full_kpis_report.py). The KPI math
 (ATE / ARE / Kabsch / Losts / FPS, per dataset, ODOM + SLAM) is unchanged; the
 OSMO-specific output paths and the Slack webhook notification are removed so the
 script runs on the GitHub Actions gpu runner with only the standard library.
 
-Input: a stats folder containing one subfolder per dataset run, each holding a
-timestamped folder with stats/all_stats.json (the layout cuvslam_app writes).
-Output: a KPI JSON file plus a pipe-delimited <json>.table that renders as native
-Markdown for the nightly GitHub Release body.
+The ``collect`` command converts cuvslam_app stats into machine-readable raw and
+report JSON. The ``render`` and ``aggregate`` commands are the only owners of
+Markdown KPI tables for PR and nightly CI publication.
 """
 
 from argparse import ArgumentParser
+import glob
 import json
 import os
-import glob
+from statistics import fmean, pstdev
 
 NO_DIFF_METRICS = {"FPS"}
+REQUIRED_METRICS = ["ATE", "ARE", "Kabsch", "TrackingLosts", "FPS"]
+REPORT_SCHEMA_VERSION = 1
 
 DATASET_DISPLAY_ALIASES = {"TARTAN_FLAKY": "TARTAN_F"}
+METRIC_UNITS = {"ATE": "%", "ARE": "º/m", "Kabsch": "", "TrackingLosts": "", "FPS": "Hz"}
 
 
 def display_dataset_key(key):
@@ -44,11 +47,11 @@ def display_dataset_key(key):
     return key
 
 
-def get_unit(metric, metric_units={"ATE": "%", "ARE": "º/m", "Kabsch": "", "TrackingLosts": "", "FPS": "Hz"}):
-    for unit_key, unit_value in metric_units.items():
+def get_unit(metric):
+    for unit_key, unit_value in METRIC_UNITS.items():
         if unit_key in metric:
             return unit_value
-    return ''
+    return ""
 
 
 def get_display_name(metric):
@@ -254,193 +257,383 @@ def process_dataset_folder(dataset_folder_path):
     return out_dict
 
 
-def organize_data(data, required_metrics, prev_data={}):
-    """Organize data by dataset and metric.
+def parse_kpi_key(key):
+    """Return (dataset row key, metric), or None for an unknown key."""
+    parts = key.split("_")
+    if len(parts) < 4:
+        return None
+    mode = parts[-1]
+    dataset_type = parts[-2]
+    metric = parts[-3]
+    dataset_name = "_".join(parts[:-3])
+    if metric not in REQUIRED_METRICS:
+        return None
+    return f"{dataset_name}-{dataset_type}_{mode}", metric
 
-    Args:
-        data: Dictionary with keys like "KITTI_ATE_STEREO_ODOM"
-        required_metrics: List of metrics to include (e.g., ["ATE", "ARE", "Kabsch"])
-        prev_data: Previous data for comparison
 
-    Returns:
-        Dictionary organized by dataset with metrics
-    """
-    if not isinstance(prev_data, dict):
-        print(f"Warning: prev_data is not a dictionary (type: {type(prev_data)}), using empty dict")
-        prev_data = {}
+def format_metric(metric, value, *, aggregate=False):
+    """Format one scalar KPI or one aggregate diff."""
+    if value == "NA":
+        return value
+    base_metric = metric.removeprefix("diff ")
+    if base_metric == "TrackingLosts":
+        return f"{float(value):.2f}" if aggregate else str(int(value))
+    if base_metric == "FPS":
+        return f"{float(value):.1f}"
+    return f"{float(value):.4f}"
+
+
+def organize_data(data, required_metrics=REQUIRED_METRICS, prev_data=None):
+    """Organize flat KPI dictionaries into dataset rows for a single config."""
+    if prev_data is not None and not isinstance(prev_data, dict):
+        raise ValueError(f"previous KPI data must be a dictionary, got {type(prev_data).__name__}")
 
     organized_data = {}
-
-    for key, value in data.items():
-        parts = key.split('_')
-
-        if len(parts) < 4:
+    for key in sorted(data):
+        parsed = parse_kpi_key(key)
+        if parsed is None:
             continue
+        dataset_key, metric = parsed
+        metrics = organized_data.setdefault(dataset_key, {})
+        value = data[key]
 
-        odom_type = parts[-1]
-        dataset_type = parts[-2]
-        metric = parts[-3]
-        dataset_name = '_'.join(parts[:-3])
+        if metric == "TrackingLosts":
+            metrics[metric] = int(value)
+        elif metric == "FPS":
+            metrics[metric] = round(value, 1)
+        else:
+            metrics[metric] = round(value, 4)
 
-        dataset_key = f"{dataset_name}-{dataset_type}_{odom_type}"
+        if metric in NO_DIFF_METRICS:
+            continue
+        if "MONO" in dataset_key and metric == "ATE":
+            metrics["diff " + metric] = "NA"
+        elif prev_data is not None and key in prev_data:
+            difference = value - prev_data[key]
+            metrics["diff " + metric] = int(difference) if metric == "TrackingLosts" else round(difference, 4)
+        else:
+            metrics["diff " + metric] = "NA"
 
-        if metric in required_metrics:
-            if dataset_key not in organized_data:
-                organized_data[dataset_key] = {}
-
-            if metric == "TrackingLosts":
-                organized_data[dataset_key][metric] = int(value)
-            elif metric == "FPS":
-                organized_data[dataset_key][metric] = round(value, 1)
-            else:
-                organized_data[dataset_key][metric] = round(value, 4)
-
-            if metric in NO_DIFF_METRICS:
-                pass
-            elif metric == "TrackingLosts":
-                if key in prev_data:
-                    organized_data[dataset_key]["diff " + metric] = int(value - prev_data[key])
-                else:
-                    organized_data[dataset_key]["diff " + metric] = "NA"
-            elif ("MONO" in dataset_key) and ("ATE" in metric):
-                organized_data[dataset_key]["diff " + metric] = "NA"
-            elif key in prev_data:
-                organized_data[dataset_key]["diff " + metric] = round(value - prev_data[key], 4)
-            else:
-                organized_data[dataset_key]["diff " + metric] = "NA"
-
-    for dataset_key, metrics_dict in organized_data.items():
+    for dataset_key, metrics in organized_data.items():
         for metric in required_metrics:
-            if metric not in metrics_dict:
-                organized_data[dataset_key][metric] = "NA"
-            if ("MONO" in dataset_key) and ("ATE" in metric):
-                organized_data[dataset_key][metric] = "NA"
+            metrics.setdefault(metric, "NA")
+            if "MONO" in dataset_key and metric == "ATE":
+                metrics[metric] = "NA"
 
     return organized_data
 
 
-def create_table(organized_data, required_metrics):
-    diffable = [m for m in required_metrics if m not in NO_DIFF_METRICS]
-    nondiff = [m for m in required_metrics if m in NO_DIFF_METRICS]
-    columns = diffable + ["diff " + i for i in diffable] + nondiff
-
-    display_keys = {d: display_dataset_key(d) for d in organized_data.keys()}
-    ds_w = max([len("Dataset")] + [len(v) for v in display_keys.values()])
-
-    header = f"| {'Dataset':<{ds_w}} |" + "|".join(f"{get_display_name(metric) + ',' + get_unit(metric):<12}" for metric in columns) + "|\n"
-    separator = "|" + "-" * (ds_w + 2) + "|" + "------------|" * len(columns) + "\n"
-
-    rows = []
-    for dataset, metrics in organized_data.items():
-        if all(metric in metrics for metric in columns):
-            row = f"| {display_keys[dataset]:<{ds_w}} | " + " | ".join(f"{metrics[metric]:<10}" for metric in columns) + " |"
-            rows.append(row)
-
-    table = header + separator + "\n".join(rows)
-    return table
+def table_columns(required_metrics=REQUIRED_METRICS):
+    diffable = [metric for metric in required_metrics if metric not in NO_DIFF_METRICS]
+    nondiff = [metric for metric in required_metrics if metric in NO_DIFF_METRICS]
+    return diffable + ["diff " + metric for metric in diffable] + nondiff
 
 
-def main():
-    print("=============================\nKPI report generator is up!")
-    parser = ArgumentParser()
-    parser.add_argument('-s', '--stat_folder', type=str, help='full path to folder with stat_results folders (e.g., .../stat_results)')
-    parser.add_argument('-j', '--out_kpi_json', type=str, help='full path to output KPI json')
-    parser.add_argument('-d', '--run_id', type=str, help='run id label for logs/report', default="")
-    parser.add_argument('-k', '--prev_kpi', type=str, help='path to previous KPI json file for diff calculation', default="")
-    parser.add_argument('-b', '--baseline_ranges', type=str, help='path to committed KPI baseline-ranges json for a soft drift check', default="")
-    args = parser.parse_args()
+def column_title(metric, *, aggregate=False):
+    title = get_display_name(metric)
+    unit = get_unit(metric)
+    if unit:
+        title += f", {unit}"
+    if aggregate:
+        title += " (mean)" if metric.startswith("diff ") else " (mean ± σ)"
+    return title
 
-    kpis_dict = {}
 
-    required_metrics = ["ATE", "ARE", "Kabsch", "TrackingLosts", "FPS"]
-
-    if not os.path.exists(args.stat_folder):
-        raise ValueError(f'Stat folder does not exist: {args.stat_folder}')
-
-    dataset_folders = [
-        os.path.join(args.stat_folder, d)
-        for d in os.listdir(args.stat_folder)
-        if os.path.isdir(os.path.join(args.stat_folder, d))
+def create_table(organized_data, required_metrics=REQUIRED_METRICS, *, config=None, aggregate=False):
+    """Render an already-organized KPI dictionary as Markdown."""
+    columns = table_columns(required_metrics)
+    headers = (["Config"] if config else []) + ["Dataset"] + [
+        column_title(metric, aggregate=aggregate) for metric in columns
+    ]
+    lines = [
+        "| " + " | ".join(headers) + " |",
+        "|" + "|".join("---" for _ in headers) + "|",
     ]
 
+    for dataset in sorted(organized_data):
+        metrics = organized_data[dataset]
+        if not all(metric in metrics for metric in columns):
+            missing = [metric for metric in columns if metric not in metrics]
+            raise ValueError(f"{dataset} is missing table columns: {', '.join(missing)}")
+        cells = ([config] if config else []) + [display_dataset_key(dataset)]
+        cells.extend(
+            str(metrics[metric]) if aggregate else format_metric(metric, metrics[metric]) for metric in columns
+        )
+        lines.append("| " + " | ".join(cells) + " |")
+    return "\n".join(lines) + "\n"
+
+
+def dataset_sort_key(folder):
+    name = os.path.basename(folder).lower()
+    if "mono" in name:
+        return (0, name)
+    if "stereo" in name and "vio" not in name:
+        return (1, name)
+    if "vio" in name:
+        return (2, name)
+    if "rgbd" in name:
+        return (3, name)
+    return (4, name)
+
+
+def collect_kpis(stat_folder):
+    """Compute a flat KPI dictionary from a cuvslam_app stats directory."""
+    if not os.path.isdir(stat_folder):
+        raise ValueError(f"Stat folder does not exist: {stat_folder}")
+    dataset_folders = sorted(
+        (
+            os.path.join(stat_folder, name)
+            for name in os.listdir(stat_folder)
+            if os.path.isdir(os.path.join(stat_folder, name))
+        ),
+        key=dataset_sort_key,
+    )
     if not dataset_folders:
-        raise ValueError(f'No dataset folders found in: {args.stat_folder}')
+        raise ValueError(f"No dataset folders found in: {stat_folder}")
 
-    def sort_key(folder):
-        name = os.path.basename(folder).lower()
-        if 'mono' in name:
-            return (0, name)
-        elif 'stereo' in name and 'vio' not in name:
-            return (1, name)
-        elif 'vio' in name:
-            return (2, name)
-        elif 'rgbd' in name:
-            return (3, name)
-        else:
-            return (4, name)
-
-    dataset_folders = sorted(dataset_folders, key=sort_key)
-
+    kpis = {}
     print(f"Processing {len(dataset_folders)} dataset folders...")
     for dataset_folder in dataset_folders:
         print(f"  Processing: {os.path.basename(dataset_folder)}")
         result = process_dataset_folder(dataset_folder)
         if result:
-            kpis_dict.update(result)
+            kpis.update(result)
+    if not kpis:
+        raise ValueError("output KPI JSON is empty; check the input stats format")
+    return kpis
 
-    if not kpis_dict:
-        raise ValueError('output KPI json is empty, please check the input stat files format')
 
-    os.makedirs(os.path.dirname(args.out_kpi_json), exist_ok=True)
+def load_json_object(path, description):
+    with open(path, "r", encoding="utf-8") as file:
+        data = json.load(file)
+    if not isinstance(data, dict):
+        raise ValueError(f"{description} must be a JSON object: {path}")
+    return data
 
-    with open(args.out_kpi_json, 'w') as outfile:
-        json.dump(kpis_dict, outfile, indent=4)
-        print("JSON report was successfully saved at", args.out_kpi_json)
 
-    prev_kpi_dict = {}
-    if os.path.isfile(args.prev_kpi):
-        print("Load previous KPI data from", args.prev_kpi)
-        try:
-            with open(args.prev_kpi, 'r') as f:
-                prev_kpi_dict = json.load(f)
+def write_json(path, data):
+    parent = os.path.dirname(os.path.abspath(path))
+    os.makedirs(parent, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as file:
+        json.dump(data, file, indent=2, sort_keys=True)
+        file.write("\n")
 
-            if isinstance(prev_kpi_dict, dict) and prev_kpi_dict:
-                print(f"Loaded {len(prev_kpi_dict)} metrics from previous run")
-            else:
-                print("Warning: Previous KPI file is empty or invalid, ignoring previous data")
-                prev_kpi_dict = {}
-        except Exception as e:
-            print(f"Warning: Failed to load previous KPI data: {e}")
-            print("Continuing without previous data comparison")
-            prev_kpi_dict = {}
 
-    organized_data = organize_data(kpis_dict, required_metrics, prev_kpi_dict)
-    table = create_table(organized_data, required_metrics)
-    with open(args.out_kpi_json + '.table', "w") as file:
-        file.write(table)
+def write_text(path, text):
+    if path == "-":
+        print(text, end="")
+        return
+    parent = os.path.dirname(os.path.abspath(path))
+    os.makedirs(parent, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as file:
+        file.write(text)
 
-    print("=============================\nRun " + args.run_id + " finished with following results:\n")
-    print(table)
 
-    if args.baseline_ranges:
-        ranges = load_baseline_ranges(args.baseline_ranges)
-        if ranges:
-            rows = evaluate_drift(kpis_dict, ranges)
-            drift_lines = ["KPI drift check (soft, informational only) vs " + args.baseline_ranges]
-            for key, status, detail in rows:
-                drift_lines.append(f"  [{status:7}] {key}: {detail}")
-            n_drift = sum(1 for _, status, _ in rows if status == "DRIFT")
-            n_calibrated = sum(1 for _, status, _ in rows if status in ("WITHIN", "DRIFT"))
-            if n_calibrated == 0:
-                drift_lines.append("  (no calibrated KPIs yet; seed 'expected' values in the ranges file)")
-            elif n_drift:
-                drift_lines.append(f"  {n_drift} KPI(s) outside expected range (not failing the job).")
-            drift_report = "\n".join(drift_lines)
-            print("\n" + drift_report)
-            with open(args.out_kpi_json + '.drift', 'w') as f:
-                f.write(drift_report + "\n")
+def build_report(run_id, current, previous=None, baseline_ranges=None):
+    drift = []
+    if baseline_ranges:
+        drift = [
+            {"key": key, "status": status, "detail": detail}
+            for key, status, detail in evaluate_drift(current, baseline_ranges)
+        ]
+    return {
+        "schema_version": REPORT_SCHEMA_VERSION,
+        "run_id": run_id,
+        "current": current,
+        "previous": previous,
+        "drift": drift,
+    }
+
+
+def load_report(path):
+    report = load_json_object(path, "KPI report")
+    if report.get("schema_version") != REPORT_SCHEMA_VERSION:
+        raise ValueError(
+            f"unsupported KPI report schema in {path}: "
+            f"{report.get('schema_version')!r} (expected {REPORT_SCHEMA_VERSION})"
+        )
+    if not isinstance(report.get("current"), dict):
+        raise ValueError(f"KPI report current field must be an object: {path}")
+    if report.get("previous") is not None and not isinstance(report["previous"], dict):
+        raise ValueError(f"KPI report previous field must be an object or null: {path}")
+    if not isinstance(report.get("drift"), list):
+        raise ValueError(f"KPI report drift field must be an array: {path}")
+    return report
+
+
+def render_report(report, config):
+    organized = organize_data(report["current"], prev_data=report["previous"])
+    return create_table(organized, config=config)
+
+
+def render_drift(report):
+    lines = ["KPI drift check (soft, informational only)"]
+    for row in report["drift"]:
+        lines.append(f"  [{row['status']:7}] {row['key']}: {row['detail']}")
+    n_drift = sum(row["status"] == "DRIFT" for row in report["drift"])
+    n_calibrated = sum(row["status"] in ("WITHIN", "DRIFT") for row in report["drift"])
+    if report["drift"] and n_calibrated == 0:
+        lines.append("  (no calibrated KPIs yet; seed expected values in the ranges file)")
+    elif n_drift:
+        lines.append(f"  {n_drift} KPI(s) outside expected range (not failing the job).")
+    return "\n".join(lines) + "\n"
+
+
+def require_numeric(value, key, config):
+    number = safe_float(value)
+    if number is None:
+        raise ValueError(f"non-numeric KPI {key!r} for configuration {config!r}: {value!r}")
+    return number
+
+
+def format_distribution(metric, values):
+    mean = fmean(values)
+    deviation = pstdev(values)
+    if metric == "TrackingLosts":
+        return f"{mean:.2f} ± {deviation:.2f}"
+    if metric == "FPS":
+        return f"{mean:.1f} ± {deviation:.1f}"
+    return f"{mean:.4f} ± {deviation:.4f}"
+
+
+def aggregate_reports(config_reports):
+    """Aggregate matching KPI reports across build configurations."""
+    if not config_reports:
+        raise ValueError("at least one configuration report is required")
+
+    reference_config, reference_report = config_reports[0]
+    reference_keys = set(reference_report["current"])
+    for config, report in config_reports[1:]:
+        keys = set(report["current"])
+        if keys != reference_keys:
+            missing = sorted(reference_keys - keys)
+            extra = sorted(keys - reference_keys)
+            raise ValueError(
+                f"KPI keys differ for {config!r} vs {reference_config!r}; "
+                f"missing={missing}, extra={extra}"
+            )
+
+    organized = {}
+    for key in sorted(reference_keys):
+        parsed = parse_kpi_key(key)
+        if parsed is None:
+            continue
+        dataset_key, metric = parsed
+        metrics = organized.setdefault(dataset_key, {})
+        if "MONO" in dataset_key and metric == "ATE":
+            metrics[metric] = "NA"
+            metrics["diff " + metric] = "NA"
+            continue
+
+        current_values = [
+            require_numeric(report["current"][key], key, config) for config, report in config_reports
+        ]
+        metrics[metric] = format_distribution(metric, current_values)
+
+        if metric in NO_DIFF_METRICS:
+            continue
+        previous_complete = all(
+            report["previous"] is not None and key in report["previous"] for _, report in config_reports
+        )
+        if previous_complete:
+            previous_values = [
+                require_numeric(report["previous"][key], key, config) for config, report in config_reports
+            ]
+            metrics["diff " + metric] = format_metric(
+                metric, fmean(current_values) - fmean(previous_values), aggregate=True
+            )
         else:
-            print(f"Warning: no usable baseline ranges in {args.baseline_ranges}; skipping drift check.")
+            metrics["diff " + metric] = "NA"
+
+    for metrics in organized.values():
+        for metric in REQUIRED_METRICS:
+            metrics.setdefault(metric, "NA")
+            if metric not in NO_DIFF_METRICS:
+                metrics.setdefault("diff " + metric, "NA")
+    return organized
+
+
+def render_aggregate_report(config_reports):
+    organized = aggregate_reports(config_reports)
+    count = len(config_reports)
+    note = (
+        f"_Aggregated across {count} configuration{'s' if count != 1 else ''}. "
+        "KPI values are mean ± population σ; diffs compare the current and previous aggregated means._\n\n"
+    )
+    return note + create_table(organized, aggregate=True)
+
+
+def parse_config_report(value):
+    if "=" not in value:
+        raise ValueError(f"configuration input must have CONFIG=PATH form: {value!r}")
+    config, path = value.split("=", 1)
+    if not config or not path:
+        raise ValueError(f"configuration input must have CONFIG=PATH form: {value!r}")
+    return config, load_report(path)
+
+
+def collect_command(args):
+    print("=============================\nKPI collector is up!")
+    current = collect_kpis(args.stat_folder)
+    previous = load_json_object(args.prev_kpi, "previous KPI data") if args.prev_kpi else None
+    ranges = load_baseline_ranges(args.baseline_ranges) if args.baseline_ranges else {}
+    report = build_report(args.run_id, current, previous, ranges)
+    write_json(args.out_kpi_json, current)
+    write_json(args.out_report_json, report)
+    print(f"Raw KPI JSON saved at {args.out_kpi_json}")
+    print(f"KPI report JSON saved at {args.out_report_json}")
+
+
+def render_command(args):
+    write_text(args.output, render_report(load_report(args.report_json), args.config))
+
+
+def aggregate_command(args):
+    config_reports = [parse_config_report(value) for value in args.input]
+    configs = [config for config, _ in config_reports]
+    if len(set(configs)) != len(configs):
+        raise ValueError(f"configuration names must be unique: {configs}")
+    write_text(args.output, render_aggregate_report(config_reports))
+
+
+def drift_command(args):
+    write_text(args.output, render_drift(load_report(args.report_json)))
+
+
+def build_argument_parser():
+    parser = ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="command", required=True)
+
+    collect = commands.add_parser("collect", help="collect stats into raw and report JSON")
+    collect.add_argument("-s", "--stat_folder", required=True)
+    collect.add_argument("-j", "--out_kpi_json", required=True)
+    collect.add_argument("-r", "--out_report_json", required=True)
+    collect.add_argument("-d", "--run_id", default="")
+    collect.add_argument("-k", "--prev_kpi", default="")
+    collect.add_argument("-b", "--baseline_ranges", default="")
+    collect.set_defaults(func=collect_command)
+
+    render = commands.add_parser("render", help="render one configuration report as Markdown")
+    render.add_argument("-r", "--report_json", required=True)
+    render.add_argument("-c", "--config", default="")
+    render.add_argument("-o", "--output", default="-")
+    render.set_defaults(func=render_command)
+
+    aggregate = commands.add_parser("aggregate", help="aggregate configuration reports as Markdown")
+    aggregate.add_argument("-i", "--input", action="append", required=True, metavar="CONFIG=PATH")
+    aggregate.add_argument("-o", "--output", default="-")
+    aggregate.set_defaults(func=aggregate_command)
+
+    drift = commands.add_parser("drift", help="render the soft drift report as text")
+    drift.add_argument("-r", "--report_json", required=True)
+    drift.add_argument("-o", "--output", default="-")
+    drift.set_defaults(func=drift_command)
+    return parser
+
+
+def main():
+    args = build_argument_parser().parse_args()
+    args.func(args)
 
 
 if __name__ == "__main__":

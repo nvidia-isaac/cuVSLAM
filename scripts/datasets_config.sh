@@ -5,6 +5,7 @@ PROVISIONABLE_DATASETS=(kitti euroc tum tartan)
 
 EVAL_DATASET_NAMES=(
   kitti
+  euroc
 )
 
 is_provisionable_dataset() {
