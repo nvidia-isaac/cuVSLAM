@@ -18,6 +18,7 @@ concurrency:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   TEST_RESULTS_ARTIFACT: test-results-staging
+  BENCHMARK_RESULTS_ARTIFACT: benchmark-results-staging
   EVAL_KPIS_ARTIFACT: eval-kpis-staging
   EVAL_REPORT_ARTIFACT: eval-reports-staging
   AWS_DEFAULT_REGION: ${{ vars.AWS_DEFAULT_REGION }}
@@ -134,8 +135,8 @@ jobs:
 
           # Jetson configs (CUDA version must match host JetPack driver)
           # Orin uses base_image override; cuda value is not used for the Docker base but kept for artifact naming
-          - { name: "aarch64 / Orin (JP 6.1)",  runner: '["jetson-orin"]', cuda: "12.6.3", ubuntu: "22.04", archs: "87",  platform: "orin",  wheel: true, base_image: "nvcr.io/nvidia/12.6.11-devel:12.6.11-devel-aarch64-ubuntu22.04", ports_mirror: "http://mirrors.ocf.berkeley.edu/ubuntu-ports" }
-          - { name: "aarch64 / Thor (JP 7.1)",  runner: '["jetson-thor"]', cuda: "13.0.1", ubuntu: "24.04", archs: "110", platform: "thor",  wheel: true, retries: 3, build_timeout: 60, job_timeout: 180, ports_mirror: "http://mirrors.ocf.berkeley.edu/ubuntu-ports" }
+          - { name: "aarch64 / Orin (JP 6.1)",  runner: '["jetson-orin"]', cuda: "12.6.3", ubuntu: "22.04", archs: "87",  platform: "orin",  wheel: true, benchmark: true, base_image: "nvcr.io/nvidia/12.6.11-devel:12.6.11-devel-aarch64-ubuntu22.04", ports_mirror: "http://mirrors.ocf.berkeley.edu/ubuntu-ports" }
+          - { name: "aarch64 / Thor (JP 7.1)",  runner: '["jetson-thor"]', cuda: "13.0.1", ubuntu: "24.04", archs: "110", platform: "thor",  wheel: true, benchmark: true, retries: 3, build_timeout: 60, job_timeout: 180, ports_mirror: "http://mirrors.ocf.berkeley.edu/ubuntu-ports" }
     steps:
       - name: Verify GPU
         run: nvidia-smi
@@ -188,6 +189,16 @@ jobs:
               pip install --quiet "$src"
               PYTHONPATH="$src" python3 -m unittest discover -v -s "$src/cuvslam_tools/tests"'
 
+      - name: Run CI script tests
+        if: matrix.tools_tests
+        run: |
+          docker run --rm \
+            -e PYTHONDONTWRITEBYTECODE=1 \
+            -v "$(pwd):/cuvslam:ro" \
+            -w /cuvslam \
+            cuvslam-ci:local \
+            python3 -m unittest discover -v -s scripts/tests
+
       - name: Verify eval prerequisites
         if: matrix.eval
         env:
@@ -238,6 +249,37 @@ jobs:
           timeout_minutes: 30
           retry_wait_seconds: 30
           command: ./scripts/test_cuvslam_in_docker.sh ./output
+
+      # Collect benchmark data without gating nightly while Jetson variance is characterized.
+      - name: Run Jetson CUDA benchmarks
+        id: cuda-benchmarks
+        if: matrix.benchmark
+        continue-on-error: true
+        uses: nick-fields/retry@v3
+        with:
+          max_attempts: ${{ matrix.retries || 1 }}
+          timeout_minutes: 30
+          retry_wait_seconds: 30
+          command: |
+            BENCHMARK_CONFIG="${{ matrix.platform }}-cuda${{ matrix.cuda }}-ubuntu${{ matrix.ubuntu }}" \
+            CUDA_VERSION="${{ matrix.cuda }}" \
+            UBUNTU_VERSION="${{ matrix.ubuntu }}" \
+            ./scripts/benchmark_cuvslam_in_docker.sh ./output
+
+      - name: Publish Jetson benchmark job summary
+        if: always() && matrix.benchmark
+        run: |
+          if [ -f output/benchmark-summary.md ]; then
+            {
+              echo "## Jetson CUDA Benchmarks"
+              echo ""
+              cat output/benchmark-summary.md
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "## Jetson CUDA Benchmarks" >> "$GITHUB_STEP_SUMMARY"
+            echo "No structured benchmark report was produced; inspect the raw benchmark artifact." \
+              >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Build Python wheel
         if: matrix.wheel
@@ -344,6 +386,21 @@ jobs:
           retention-days: 1
           if-no-files-found: warn
 
+      - name: Upload Jetson benchmark results
+        if: always() && matrix.benchmark
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.BENCHMARK_RESULTS_ARTIFACT }}-${{ needs.check-changes.outputs.package_version }}-${{ matrix.platform }}-cuda${{ matrix.cuda }}-ubuntu${{ matrix.ubuntu }}
+          path: |
+            output/cpp-benchmark-metadata.json
+            output/cpp-benchmark-output.log
+            output/cpp-benchmark-results.json
+            output/cpp-benchmark-results.xml
+            output/benchmark-summary.md
+          overwrite: true
+          retention-days: 1
+          if-no-files-found: warn
+
       - name: Upload C++ distribution
         if: ${{ !matrix.skip_artifacts }}
         uses: actions/upload-artifact@v7
@@ -390,6 +447,16 @@ jobs:
           pattern: ${{ env.TEST_RESULTS_ARTIFACT }}-${{ needs.check-changes.outputs.package_version }}-*
           path: artifacts/test-results
 
+      - name: Download Jetson benchmark staging artifacts
+        if: >-
+          needs.check-changes.outputs.should_build == 'true' &&
+          needs.build-and-test.result == 'success'
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          pattern: ${{ env.BENCHMARK_RESULTS_ARTIFACT }}-${{ needs.check-changes.outputs.package_version }}-*
+          path: artifacts/benchmark-results
+
       - name: Download KPI staging artifacts
         if: >-
           needs.check-changes.outputs.should_build == 'true' &&
@@ -417,7 +484,7 @@ jobs:
           PACKAGE_VERSION: ${{ needs.check-changes.outputs.package_version }}
         run: |
           set -euo pipefail
-          mkdir -p consolidated/test-results consolidated/kpis consolidated/eval-reports
+          mkdir -p consolidated/test-results consolidated/benchmark-results consolidated/kpis consolidated/eval-reports
           REPORT=consolidated/summary.md
 
           {
@@ -436,6 +503,7 @@ jobs:
               echo ""
             } >> "$REPORT"
             echo "has_test_results=false" >> "$GITHUB_OUTPUT"
+            echo "has_benchmark_results=false" >> "$GITHUB_OUTPUT"
             echo "has_reports=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -446,6 +514,7 @@ jobs:
               echo ""
             } >> "$REPORT"
             echo "has_test_results=false" >> "$GITHUB_OUTPUT"
+            echo "has_benchmark_results=false" >> "$GITHUB_OUTPUT"
             echo "has_reports=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -457,6 +526,7 @@ jobs:
               echo ""
             } >> "$REPORT"
             echo "has_test_results=false" >> "$GITHUB_OUTPUT"
+            echo "has_benchmark_results=false" >> "$GITHUB_OUTPUT"
             echo "has_reports=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -495,6 +565,42 @@ jobs:
             done < "$summary"
           done
           echo "" >> "$REPORT"
+
+          benchmark_config_count=0
+          benchmark_incomplete_count=0
+          BENCHMARK_ARTIFACT_PREFIX="${BENCHMARK_RESULTS_ARTIFACT}-${PACKAGE_VERSION}-"
+          for benchmarkdir in artifacts/benchmark-results/${BENCHMARK_ARTIFACT_PREFIX}*; do
+            [ -d "$benchmarkdir" ] || continue
+            CONFIG=${benchmarkdir#artifacts/benchmark-results/${BENCHMARK_ARTIFACT_PREFIX}}
+            mkdir -p "consolidated/benchmark-results/$CONFIG"
+            cp -a "$benchmarkdir"/. "consolidated/benchmark-results/$CONFIG/"
+            BENCHMARK_JSON=$(find "$benchmarkdir" -name "cpp-benchmark-results.json" -print -quit 2>/dev/null || true)
+            BENCHMARK_SUMMARY=$(find "$benchmarkdir" -name "benchmark-summary.md" -print -quit 2>/dev/null || true)
+            if [ ! -f "$BENCHMARK_JSON" ] || [ ! -f "$BENCHMARK_SUMMARY" ]; then
+              benchmark_incomplete_count=$((benchmark_incomplete_count + 1))
+              continue
+            fi
+            if ! python3 -c \
+              'import json,sys; sys.exit(0 if json.load(open(sys.argv[1]))["summary"]["complete"] else 1)' \
+              "$BENCHMARK_JSON"; then
+              benchmark_incomplete_count=$((benchmark_incomplete_count + 1))
+            fi
+            benchmark_config_count=$((benchmark_config_count + 1))
+          done
+
+          if [ "$benchmark_config_count" -gt 0 ]; then
+            echo "has_benchmark_results=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "## Jetson CUDA Benchmarks"
+              echo ""
+              for benchmark_summary in consolidated/benchmark-results/*/benchmark-summary.md; do
+                [ -f "$benchmark_summary" ] || continue
+                cat "$benchmark_summary"
+              done
+            } >> "$REPORT"
+          else
+            echo "has_benchmark_results=false" >> "$GITHUB_OUTPUT"
+          fi
 
           kpi_config_count=0
           kpi_inputs=()
@@ -545,6 +651,14 @@ jobs:
               echo "::error::Successful matrix produced no test result artifacts."
               exit 1
             fi
+            if [ "$benchmark_config_count" -ne 2 ]; then
+              echo "::error::Expected benchmark reports from Orin and Thor; got $benchmark_config_count."
+              exit 1
+            fi
+            if [ "$benchmark_incomplete_count" -ne 0 ]; then
+              echo "::error::$benchmark_incomplete_count Jetson benchmark artifact(s) were incomplete."
+              exit 1
+            fi
             if [ "$kpi_config_count" -eq 0 ]; then
               echo "::error::Successful matrix produced no KPI artifacts."
               exit 1
@@ -562,6 +676,17 @@ jobs:
         with:
           name: test-results-${{ needs.check-changes.outputs.package_version }}
           path: consolidated/test-results/
+          overwrite: true
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload consolidated Jetson benchmark results
+        id: upload-benchmarks
+        if: steps.aggregate.outputs.has_benchmark_results == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: benchmark-results-${{ needs.check-changes.outputs.package_version }}
+          path: consolidated/benchmark-results/
           overwrite: true
           retention-days: 30
           if-no-files-found: error
@@ -609,6 +734,7 @@ jobs:
         env:
           PACKAGE_VERSION: ${{ needs.check-changes.outputs.package_version }}
           TESTS_RETAINED: ${{ steps.upload-tests.outcome == 'success' }}
+          BENCHMARKS_RETAINED: ${{ steps.upload-benchmarks.outcome == 'success' }}
           EVALUATION_RETAINED: ${{ steps.upload-evaluation.outcome == 'success' }}
         with:
           script: |
@@ -631,6 +757,9 @@ jobs:
             const prefixes = [];
             if (process.env.TESTS_RETAINED === 'true') {
               prefixes.push(`${process.env.TEST_RESULTS_ARTIFACT}-${process.env.PACKAGE_VERSION}-`);
+            }
+            if (process.env.BENCHMARKS_RETAINED === 'true') {
+              prefixes.push(`${process.env.BENCHMARK_RESULTS_ARTIFACT}-${process.env.PACKAGE_VERSION}-`);
             }
             if (process.env.EVALUATION_RETAINED === 'true') {
               prefixes.push(
