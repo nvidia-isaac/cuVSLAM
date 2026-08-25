@@ -78,7 +78,7 @@ docker run --runtime=nvidia --gpus all --rm $TTY_FLAG \
       exit 1
     fi
     "$benchmark" \
-      --gtest_filter="*SpeedUp*:*Speedup*-*DISABLED_*" \
+      --gtest_filter="*SpeedUp*:*Speedup*" \
       --gtest_random_seed=42 \
       --gtest_color=no \
       --gtest_output=xml:/output/cpp-benchmark-results.xml \
