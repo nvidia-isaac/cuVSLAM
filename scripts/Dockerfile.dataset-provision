@@ -1,0 +1,12 @@
+# syntax=docker/dockerfile:1
+
+ARG BASE_IMAGE=cuvslam-ci:local
+FROM ${BASE_IMAGE}
+
+# TartanGround provisioning uses the official TartanAir toolbox. Keep this
+# dependency out of the shared CI image because it brings a large, x86-only
+# scientific/CUDA dependency stack that other datasets do not need.
+RUN pip install --no-cache-dir \
+    tartanair==1.4.0 \
+    numpy==2.2.3 \
+    scipy==1.15.3
