@@ -15,8 +15,8 @@ changing anything.
 
 Workflows (`.github/workflows/`):
 
-- `pr-verify.yml` - lint, then build + unit test on x86, Orin, and Thor; eval on the x86 job (fork-gated); posts a KPI table to the PR comment.
-- `nightly.yml` - scheduled/manual build + test matrix; eval on the four x86 configs; writes per-config KPI history and versioned Actions artifacts. Scheduled runs never create a Release. A manual dispatch from a matching `release/vX.Y.Z` branch promotes the same distributable bytes to a protected draft GitHub Release.
+- `pr-verify.yml` - lint, then build + unit test on x86, Orin, and Thor; eval on the x86 job (fork-gated); posts a KPI table to the PR comment. Jetson benchmarks do not run on PRs.
+- `nightly.yml` - scheduled/manual build + test matrix; eval on the four x86 configs and CUDA micro-benchmarks on Orin and Thor; writes per-config reports and versioned Actions artifacts. Scheduled runs never create a Release. A manual dispatch from a matching `release/vX.Y.Z` branch promotes the same distributable bytes to a protected draft GitHub Release.
 - `provision-datasets.yml` - manual `workflow_dispatch` on the default branch; downloads, converts, and uploads a dataset tarball to S3. The only writer of dataset storage.
 - `sync-rulesets.yml` - applies `.github/rulesets/default-branch-ruleset.json` through the API.
 
@@ -27,6 +27,8 @@ CI scripts (`scripts/`):
 - `provision_dataset.sh` - runs the dataset preparation module (`python3 -m cuvslam_tools.dataset_preparation.<name>.prepare` with `PYTHONPATH=tools/python_tools`), tars the converted output (uncompressed `.tar`), uploads to S3.
 - `stage_eval_datasets.sh` - downloads `<name>.tar` from S3, extracts to the local cache.
 - `check_eval_prerequisites.sh` - verifies credentials/cache and `RUNNER_STORAGE_ROOT`.
+- `benchmark_cuvslam_in_docker.sh` - runs the active `cuda_modules_test` speed benchmarks in the product container and captures runner metadata, raw output, and GoogleTest XML.
+- `cuvslam_benchmark_report.py` - validates benchmark XML properties and renders per-Jetson JSON and Markdown reports.
 - `eval_cuvslam_in_docker.sh` - host wrapper: mounts datasets and KPI history, starts the eval container.
 - `run_eval.sh` - in container: the active dataset set `DATASETS[]`, runs `cuvslam_app.py`, then collects
   machine-readable KPI JSON.
@@ -62,6 +64,7 @@ Do not reintroduce gzip: provisioning uses uncompressed `.tar` to cap memory on 
 ## Task: control the PR vs nightly matrix
 
 - Nightly configs: `nightly.yml` `strategy.matrix.include`. Eval runs on entries flagged `eval: true` (currently the four x86 configs). Every eval-enabled config needs the `RUNNER_STORAGE_ROOT` mount and configured repo secrets/variables; the `cuvslam-ci:local` image supplies the AWS CLI.
+- Jetson CUDA micro-benchmarks run only on nightly entries flagged `benchmark: true` (currently Orin and Thor). The normal C++ test invocation continues to exclude `*SpeedUp*` and `*Speedup*`; the dedicated benchmark wrapper runs the positive filter and excludes `DISABLED_` tests.
 - PR config: `pr-verify.yml` runs eval only on `build-test-x86` (fork-gated). `EVAL_CONFIG` is the static slug label for the PR table.
 - Active dataset set: `DATASETS[]` in `run_eval.sh` is global; PR and nightly run the same set. There is no per-pipeline dataset selection today. To run a different set in PR vs nightly, add an env-selected subset in `run_eval.sh` and have each workflow pass the selector.
 
@@ -99,5 +102,6 @@ Detail in [reference.md](reference.md). The load-bearing ones:
 - Dataset and eval steps stay fork-gated (`if: ... head.repo == github.repository`); never run fork code on dataset runners.
 - Eval uses the read-only `AWS_S3_RO_*` secrets; only `provision-datasets.yml` uses the read-write `AWS_S3_*` pair.
 - KPI history directories and eval artifact names carry the `platform-cuda-ubuntu` slug so matrix configs never overwrite each other.
+- Jetson benchmark artifacts carry the same `platform-cuda-ubuntu` slug; Orin and Thor results are reported independently and are never averaged together.
 - Nightly distributables must report `VERSION+<short-checked-out-sha>` without `-modified`.
 - Ruleset, CODEOWNERS, and `.github/workflows/**` changes go in their own `[infra]` MR (enforced by the `isolated-ruleset-change` pre-commit hook).

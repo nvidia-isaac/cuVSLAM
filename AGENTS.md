@@ -98,6 +98,7 @@ Load-bearing rules:
 - Don't put implementation details in `cuvslam2.h`; it is the public C++ API boundary
 - Don't use non-ABI-stable types (`std::string`, `std::map`, etc.) in `cuvslam2.h`; `std::vector` is the explicit exception. Otherwise, use `std::string_view`, raw pointers with a count, or plain structs of primitive types only
 - Don't mix different `CMAKE_BUILD_TYPE` values in the same `CUVSLAM_DST_DIR`
+- Don't add standalone unit tests under `scripts/tests/` for CI or helper scripts; validate script changes with focused invocations and the relevant pre-commit hooks
 - Don't commit directly to `main` — the pre-commit hook blocks it
 - Don't skip pre-commit with `--no-verify` except to unblock a known false positive
 - Never run `git push`

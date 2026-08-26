@@ -19,6 +19,7 @@
 #include <iostream>
 #include <random>
 
+#include "benchmark_utils.h"
 #include "common/environment.h"
 #include "common/include_gtest.h"
 #include "cuda_modules/cuda_kernels/cuda_sba_v1.h"
@@ -228,10 +229,7 @@ TEST(Cuda, SpeedupSBAUpdateModel) {
   auto duration_cuda =
       std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - time_cuda_start);
 
-  std::cout << "Basic time, nano_sec = " << duration_basic.count() / 100 << std::endl;
-  std::cout << "Cuda time, nano_sec = " << duration_cuda.count() / 100 << std::endl;
-  float speedup = static_cast<float>(duration_basic.count()) / static_cast<float>(duration_cuda.count());
-  std::cout << "Speedup, times = " << speedup << std::endl;
+  ReportSpeedBenchmark(duration_basic, duration_cuda, 100);
   ASSERT_TRUE(duration_basic >= duration_cuda);
 }
 
@@ -365,10 +363,7 @@ TEST(Cuda, SBABuildFullSystemSpeedUp) {
   auto duration_cuda =
       std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - time_cuda_start);
 
-  std::cout << "Basic time, nano_sec = " << duration_basic.count() / 100 << std::endl;
-  std::cout << "Cuda time, nano_sec = " << duration_cuda.count() / 100 << std::endl;
-  float speedup = static_cast<float>(duration_basic.count()) / static_cast<float>(duration_cuda.count());
-  std::cout << "Speedup, times = " << speedup << std::endl;
+  ReportSpeedBenchmark(duration_basic, duration_cuda, 100);
   ASSERT_TRUE(duration_basic >= duration_cuda);
 }
 
@@ -690,10 +685,7 @@ TEST(Cuda, SBAEvaluateCostSpeedUp) {
   auto duration_cuda =
       std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - time_cuda_start);
 
-  std::cout << "Basic time, nano_sec = " << duration_basic.count() / 100 << std::endl;
-  std::cout << "Cuda time, nano_sec = " << duration_cuda.count() / 100 << std::endl;
-  float speedup = static_cast<float>(duration_basic.count()) / static_cast<float>(duration_cuda.count());
-  std::cout << "Speedup, times = " << speedup << std::endl;
+  ReportSpeedBenchmark(duration_basic, duration_cuda, 100);
   ASSERT_TRUE(duration_basic >= duration_cuda);
 }
 
@@ -815,10 +807,7 @@ TEST(Cuda, SBAParameterUpdaterComputeUpdateSpeedUp) {
   auto duration_cuda =
       std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - time_cuda_start);
 
-  std::cout << "Basic time, nano_sec = " << duration_basic.count() / 100 << std::endl;
-  std::cout << "Cuda time, nano_sec = " << duration_cuda.count() / 100 << std::endl;
-  float speedup = static_cast<float>(duration_basic.count()) / static_cast<float>(duration_cuda.count());
-  std::cout << "Speedup, times = " << speedup << std::endl;
+  ReportSpeedBenchmark(duration_basic, duration_cuda, 100);
   ASSERT_TRUE(duration_basic >= duration_cuda);
 }
 
@@ -938,10 +927,7 @@ TEST(Cuda, SBAParameterUpdaterUpdateStateSpeedUp) {
   auto duration_cuda =
       std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - time_cuda_start);
 
-  std::cout << "Basic time, nano_sec = " << duration_basic.count() / 100 << std::endl;
-  std::cout << "Cuda time, nano_sec = " << duration_cuda.count() / 100 << std::endl;
-  float speedup = static_cast<float>(duration_basic.count()) / static_cast<float>(duration_cuda.count());
-  std::cout << "Speedup, times = " << speedup << std::endl;
+  ReportSpeedBenchmark(duration_basic, duration_cuda, 100);
   ASSERT_TRUE(duration_basic >= duration_cuda);
 }
 
@@ -1076,10 +1062,7 @@ TEST(Cuda, SBAComputePredictedRelativeReductionSpeedUp) {
   auto duration_cuda =
       std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - time_cuda_start);
 
-  std::cout << "Basic time, nano_sec = " << duration_basic.count() / 100 << std::endl;
-  std::cout << "Cuda time, nano_sec = " << duration_cuda.count() / 100 << std::endl;
-  float speedup = static_cast<float>(duration_basic.count()) / static_cast<float>(duration_cuda.count());
-  std::cout << "Speedup, times = " << speedup << std::endl;
+  ReportSpeedBenchmark(duration_basic, duration_cuda, 100);
   ASSERT_TRUE(duration_basic >= duration_cuda);
 }
 
