@@ -26,17 +26,19 @@ if command -v aws >/dev/null 2>&1; then
   fi
 fi
 
-# One greppable line per staged dataset. Download and extract are reported
-# separately because they scale with different things and need different fixes:
-# bandwidth for the transfer, file count for the extraction.
+# One greppable line per staged dataset, with the same fields regardless of how
+# the dataset was fetched so logs from different staging strategies can be
+# compared field by field. Streaming reports "-" for the per-phase figures
+# because transfer and extraction overlap and are no longer separable.
 report_staging_profile() {
-  local name="$1" bytes="$2" download_seconds="$3" extract_seconds="$4" file_count="$5"
-  local total_seconds=$((download_seconds + extract_seconds))
-  local mib="unknown" download_rate="unknown" total_rate="unknown"
+  local name="$1" bytes="$2" total_seconds="$3" download_seconds="$4" extract_seconds="$5" file_count="$6"
+  local mib="unknown" download_rate="-" total_rate="unknown"
   if [[ "$bytes" =~ ^[0-9]+$ ]]; then
     mib=$((bytes / 1048576))
-    [ "$download_seconds" -gt 0 ] && download_rate=$((mib / download_seconds))
     [ "$total_seconds" -gt 0 ] && total_rate=$((mib / total_seconds))
+    if [[ "$download_seconds" =~ ^[0-9]+$ ]] && [ "$download_seconds" -gt 0 ]; then
+      download_rate=$((mib / download_seconds))
+    fi
   fi
   echo "staging profile: dataset=$name mib=$mib download_s=$download_seconds" \
     "extract_s=$extract_seconds total_s=$total_seconds files=$file_count" \
@@ -49,8 +51,6 @@ stage_one() {
   local s3_uri="s3://${S3_BUCKET}/${s3_key}"
   local dest="$LOCAL_DATASETS_DIR/$name"
   local etag_file="$dest/.s3_etag"
-  local tmp_tar
-  tmp_tar="$(mktemp "${TMPDIR:-/tmp}/cuvslam-${name}.XXXXXX.tar")"
 
   remote_etag=""
   remote_bytes=""
@@ -92,23 +92,32 @@ stage_one() {
   fi
 
   echo "Staging $name from $s3_uri -> $dest"
-  local download_start=$SECONDS
-  aws s3 cp "$s3_uri" "$tmp_tar" --no-progress
-  local download_seconds=$((SECONDS - download_start))
+  # Extract as the object arrives: peak disk is one expanded dataset instead of
+  # the archive plus its expansion, which matters most for the largest corpora.
+  # Extraction lands in a sibling directory and is swapped in only on success,
+  # so a failed transfer leaves any existing cache intact.
+  local staging_dir="${dest}.partial"
+  rm -rf "$staging_dir"
+  mkdir -p "$staging_dir"
+  local stream_start=$SECONDS
+  # pipefail is set at the top of this script, so a failed download or a
+  # truncated archive fails the pipeline rather than yielding a partial dataset.
+  if ! aws s3 cp "$s3_uri" - --no-progress | tar -xf - -C "$staging_dir"; then
+    rm -rf "$staging_dir"
+    echo "Error: staging $name failed; existing cache at $dest is unchanged." >&2
+    exit 1
+  fi
+  local stream_seconds=$((SECONDS - stream_start))
 
   rm -rf "$dest"
-  mkdir -p "$dest"
-  local extract_start=$SECONDS
-  tar -xf "$tmp_tar" -C "$dest"
-  local extract_seconds=$((SECONDS - extract_start))
-  rm -f "$tmp_tar"
+  mv "$staging_dir" "$dest"
   if [ -n "$remote_etag" ]; then
     echo "$remote_etag" > "$etag_file"
   fi
   local file_count
   file_count="$(find "$dest" -type f ! -name '.s3_etag' | wc -l)"
   echo "  staged $file_count files under $dest"
-  report_staging_profile "$name" "$remote_bytes" "$download_seconds" "$extract_seconds" "$file_count"
+  report_staging_profile "$name" "$remote_bytes" "$stream_seconds" - - "$file_count"
 }
 
 for name in "${EVAL_DATASET_NAMES[@]}"; do
