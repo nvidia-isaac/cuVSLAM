@@ -57,6 +57,16 @@ jobs:
           DOCKER_BUILDKIT=1 docker build -f scripts/Dockerfile.ci . --network host --tag cuvslam-ci:local \
             --secret id=aws_cli_public_key,src="$keyfile"
 
+      - name: Verify TartanGround provisioning architecture
+        if: github.event.inputs.dataset == 'tartan'
+        env:
+          RUNNER_ARCH: ${{ runner.arch }}
+        run: |
+          if [ "$RUNNER_ARCH" != X64 ]; then
+            echo "TartanGround provisioning requires an x86_64 runner; got $RUNNER_ARCH." >&2
+            exit 1
+          fi
+
       - name: Build TartanGround provisioning image
         if: github.event.inputs.dataset == 'tartan'
         run: |

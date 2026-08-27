@@ -17,3 +17,5 @@ RUN pip install --no-cache-dir \
     tartanair==1.4.0 \
     numpy==2.2.3 \
     scipy==1.15.3
+
+RUN python3 -c "import cv2; import tartanair"
