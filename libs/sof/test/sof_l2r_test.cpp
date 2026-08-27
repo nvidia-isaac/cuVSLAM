@@ -59,8 +59,10 @@ void LogMatches(const std::string& name, const Sources& sources, const Metas& me
       }
       Vector2T uv_l;
       Vector2T uv_r;
-      rig.intrinsics[primary_id]->denormalizePoint(obs_l.xy, uv_l);
-      rig.intrinsics[secondary_id]->denormalizePoint(obs_r.xy, uv_r);
+      if (!rig.intrinsics[primary_id]->denormalizePoint(obs_l.xy, uv_l) ||
+          !rig.intrinsics[secondary_id]->denormalizePoint(obs_r.xy, uv_r)) {
+        break;
+      }
       strips.push_back(rerun::LineStrip2D({{uv_l.x(), uv_l.y()}, {uv_r.x() + static_cast<float>(w), uv_r.y()}}));
       break;
     }
