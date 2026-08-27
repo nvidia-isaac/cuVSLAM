@@ -173,7 +173,9 @@ static void DoMonoTrack(const std::string& edexFile, std::string outputFolder, s
       const Color& c = trackColors.at(track.id);
 
       Vector2T uvL;
-      intrinsicsL.denormalizePoint(track.xy, uvL);
+      if (!intrinsicsL.denormalizePoint(track.xy, uvL)) {
+        continue;
+      }
       cv::circle(imgDrawL, cv::Point(uvL.x(), uvL.y()), 2, cv::Scalar(c.b, c.g, c.r), cv::FILLED);
     }
 

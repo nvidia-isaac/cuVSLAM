@@ -114,8 +114,12 @@ public:
         continue;
       }
 
-      frameTracks.push_back(
-          {t.cam_id(), t.id(), xy, camera::ObservationInfoUVToXY(intrinsics, t.position(), xy, t.info())});
+      Matrix2T info_xy;
+      if (!camera::ObservationInfoUVToXY(intrinsics, t.position(), xy, t.info(), info_xy)) {
+        continue;
+      }
+
+      frameTracks.push_back({t.cam_id(), t.id(), xy, info_xy});
     }
   }
 

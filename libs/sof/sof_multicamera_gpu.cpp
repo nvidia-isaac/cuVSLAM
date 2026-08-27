@@ -106,7 +106,13 @@ void MultiSOFGPU::LaunchTrackingPrimaryToSecondary(CameraId primary_id, CameraId
 
   size_t max_candidates = 0;
   for (size_t i = 0; i < n; ++i) {
-    intrinsicsP.denormalizePoint(primary_obs[i].xy, uvL[i]);
+    // A point that can't be projected gets no candidates: Candidates() would otherwise leave last
+    // frame's list in place, and uvL[i] still reaches the kernel as `data.track`.
+    if (!intrinsicsP.denormalizePoint(primary_obs[i].xy, uvL[i])) {
+      uvL[i].setZero();
+      cands[i].clear();
+      continue;
+    }
     epipolar_curves.Candidates(uvL[i], cands[i]);
     max_candidates = std::max(max_candidates, cands[i].size());
   }
@@ -219,10 +225,13 @@ void MultiSOFGPU::GetTrackingResults(MulticamObservations& observations) {
         if (data.track_status) {
           uvR << data.track.x, data.track.y;
           info << data.info[0], data.info[1], data.info[2], data.info[3];
-          intrinsicsS.normalizePoint(uvR, xyR);
+          Matrix2T info_xy;
+          if (!intrinsicsS.normalizePoint(uvR, xyR) ||
+              !camera::ObservationInfoUVToXY(intrinsicsS, uvR, xyR, info, info_xy)) {
+            continue;
+          }
 
-          secondary_observations[secondary_id].push_back(
-              {secondary_id, trackId, xyR, camera::ObservationInfoUVToXY(intrinsicsS, uvR, xyR, info)});
+          secondary_observations[secondary_id].push_back({secondary_id, trackId, xyR, info_xy});
         }
       }
     }

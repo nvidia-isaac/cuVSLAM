@@ -180,7 +180,9 @@ void AsyncSlam::TrackResult(const FrameId frameId, const int64_t timestamp_ns,
           continue;
         }
         Vector2T uv_norm;
-        intrinsics->normalizePoint(uv, uv_norm);
+        if (!intrinsics->normalizePoint(uv, uv_norm)) {
+          continue;
+        }
         vo_keyframe->frame_data.tracks2d_norm.emplace_back(VOFrameData::Track2DXY{cam_id, track_id, uv_norm});
         added_tracks.insert(track_id);
       }
