@@ -26,23 +26,19 @@ if command -v aws >/dev/null 2>&1; then
   fi
 fi
 
-# One greppable line per staged dataset, with the same fields regardless of how
-# the dataset was fetched so logs from different staging strategies can be
-# compared field by field. Streaming reports "-" for the per-phase figures
-# because transfer and extraction overlap and are no longer separable.
+# One greppable line per staged dataset. The step duration is already visible in
+# the Actions UI, but that covers every dataset at once, so report the per-dataset
+# figures the UI cannot show: payload size, file count, and the throughput that
+# makes two runs comparable at a glance.
 report_staging_profile() {
-  local name="$1" bytes="$2" total_seconds="$3" download_seconds="$4" extract_seconds="$5" file_count="$6"
-  local mib="unknown" download_rate="-" total_rate="unknown"
+  local name="$1" bytes="$2" total_seconds="$3" file_count="$4"
+  local mib="unknown" total_rate="unknown"
   if [[ "$bytes" =~ ^[0-9]+$ ]]; then
     mib=$((bytes / 1048576))
     [ "$total_seconds" -gt 0 ] && total_rate=$((mib / total_seconds))
-    if [[ "$download_seconds" =~ ^[0-9]+$ ]] && [ "$download_seconds" -gt 0 ]; then
-      download_rate=$((mib / download_seconds))
-    fi
   fi
-  echo "staging profile: dataset=$name mib=$mib download_s=$download_seconds" \
-    "extract_s=$extract_seconds total_s=$total_seconds files=$file_count" \
-    "download_mib_s=$download_rate total_mib_s=$total_rate"
+  echo "staging profile: dataset=$name mib=$mib total_s=$total_seconds" \
+    "files=$file_count total_mib_s=$total_rate"
 }
 
 stage_one() {
@@ -117,7 +113,7 @@ stage_one() {
   local file_count
   file_count="$(find "$dest" -type f ! -name '.s3_etag' | wc -l)"
   echo "  staged $file_count files under $dest"
-  report_staging_profile "$name" "$remote_bytes" "$stream_seconds" - - "$file_count"
+  report_staging_profile "$name" "$remote_bytes" "$stream_seconds" "$file_count"
 }
 
 for name in "${EVAL_DATASET_NAMES[@]}"; do
