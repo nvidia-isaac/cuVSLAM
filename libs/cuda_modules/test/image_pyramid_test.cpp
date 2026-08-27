@@ -18,6 +18,7 @@
 #include <chrono>
 #include <iostream>
 
+#include "benchmark_utils.h"
 #include "common/include_gtest.h"
 #include "cuda_modules/image_pyramid.h"
 #include "sof/image_pyramid_float.h"
@@ -135,10 +136,7 @@ TEST(Cuda, ImagePyramidSpeedup) {
   auto duration_cuda =
       std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - time_cuda_start);
 
-  std::cout << "Basic time, nano_sec = " << duration_basic.count() / 100 << std::endl;
-  std::cout << "Cuda time, nano_sec = " << duration_cuda.count() / 100 << std::endl;
-  float speedup = static_cast<float>(duration_basic.count()) / static_cast<float>(duration_cuda.count());
-  std::cout << "Speedup, times = " << speedup << std::endl;
+  ReportSpeedBenchmark(duration_basic, duration_cuda, 100);
   ASSERT_TRUE(duration_basic >= duration_cuda);
 }
 
@@ -262,10 +260,7 @@ TEST(Cuda, ImagePyramidU8Speedup) {
   auto duration_cuda =
       std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - time_cuda_start);
 
-  std::cout << "Basic time, nano_sec = " << duration_basic.count() / 100 << std::endl;
-  std::cout << "Cuda time, nano_sec = " << duration_cuda.count() / 100 << std::endl;
-  float speedup = static_cast<float>(duration_basic.count()) / static_cast<float>(duration_cuda.count());
-  std::cout << "Speedup, times = " << speedup << std::endl;
+  ReportSpeedBenchmark(duration_basic, duration_cuda, 100);
   ASSERT_TRUE(duration_basic >= duration_cuda);
 }
 
@@ -303,10 +298,7 @@ TEST(Cuda, ImagePyramidU8PrefilterSpeedup) {
   auto duration_cuda =
       std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - time_cuda_start);
 
-  std::cout << "Basic time, nano_sec = " << duration_basic.count() / 100 << std::endl;
-  std::cout << "Cuda time, nano_sec = " << duration_cuda.count() / 100 << std::endl;
-  float speedup = static_cast<float>(duration_basic.count()) / static_cast<float>(duration_cuda.count());
-  std::cout << "Speedup, times = " << speedup << std::endl;
+  ReportSpeedBenchmark(duration_basic, duration_cuda, 100);
   ASSERT_TRUE(duration_basic >= duration_cuda);
 }
 

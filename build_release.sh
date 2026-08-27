@@ -132,7 +132,7 @@ cmake --build "$DST" --parallel "$MAKE_JOBS" --config "$BUILD_TYPE"
 # Step 1: Run module tests
 if is_true "$MODULETESTS"; then
   echo "Module tests executed."
-  GTEST_FILTER=-*SpeedUp*:*Speedup* GTEST_RANDOM_SEED=42 ctest --build-config "$BUILD_TYPE" --output-on-failure || exit 1
+  GTEST_RANDOM_SEED=42 ctest --build-config "$BUILD_TYPE" --output-on-failure || exit 1
 else
   echo "Module tests skipped."
 fi
