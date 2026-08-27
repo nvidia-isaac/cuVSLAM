@@ -23,13 +23,13 @@ if [ "${GITHUB_ACTIONS:-}" = "true" ] && ! $have_aws; then
 fi
 
 cache_ok=true
-for name in "${EVAL_DATASET_NAMES[@]}"; do
+while read -r name; do
   dest="$LOCAL_DATASETS_DIR/$name"
   if [ ! -d "$dest" ] || [ -z "$(find "$dest" -type f ! -name '.s3_etag' -print -quit 2>/dev/null)" ]; then
     cache_ok=false
     break
   fi
-done
+done < <(dataset_registry list --eval)
 
 if $have_aws; then
   echo "Eval prerequisites OK (S3 tarball staging; KPI history under $RUNNER_STORAGE_ROOT)"

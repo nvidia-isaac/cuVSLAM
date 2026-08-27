@@ -71,8 +71,8 @@ def prepare(
 ) -> Path:
     """Download and lay out the TUM RGB-D sequence, and return the prepared root.
 
-    Returns the raw directory when ``download_only`` is set, otherwise the sequence
-    directory holding the extracted data and the rig calibration.
+    Returns the raw directory when ``download_only`` is set, otherwise the dataset
+    root holding the extracted sequence and its rig calibration.
     """
     raw_dir = resolve_raw_dir(raw_dir, DATASET_NAME)
     output_dir = resolve_output_dir(output_dir)
@@ -105,8 +105,11 @@ def prepare(
     shutil.copyfile(dataset_file(__file__, RIG_FILE), sequence_dir / RIG_FILE)
 
     print()
-    print(f"done — dataset ready at {sequence_dir}")
-    return sequence_dir
+    print(f"done — sequence ready at {sequence_dir}")
+    # The dataset root is returned, not the sequence: provisioning archives this
+    # directory, and the reporter expects sequence folders directly beneath the
+    # dataset mount.
+    return dataset_dir
 
 
 def main(argv: Optional[List[str]] = None) -> int:

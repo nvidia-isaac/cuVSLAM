@@ -116,8 +116,14 @@ stage_one() {
   report_staging_profile "$name" "$remote_bytes" "$stream_seconds" "$file_count"
 }
 
-for name in "${EVAL_DATASET_NAMES[@]}"; do
+# Fails in seconds on a registry fault, rather than after a download.
+dataset_registry validate
+
+while read -r name; do
   stage_one "$name"
-done
+  # The reporter resolves sequences through the "dataset_folder" recorded in the
+  # shipped config, which must agree with the mount this script just created.
+  dataset_registry verify-staged "$name" --root "$LOCAL_DATASETS_DIR/$name"
+done < <(dataset_registry list --eval)
 
 echo "Dataset staging complete: $LOCAL_DATASETS_DIR"

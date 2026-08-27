@@ -23,10 +23,10 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
+from cuvslam_tools import dataset_registry
 from cuvslam_tools.dataset_preparation import common
 
-# Kept in sync with PROVISIONABLE_DATASETS in scripts/datasets_config.sh.
-DATASETS = ("kitti", "euroc", "tum", "tartan")
+DATASETS = tuple(spec.dataset_id for spec in dataset_registry.provisionable_datasets())
 
 PREPARATION_ROOT = Path(common.__file__).resolve().parent
 
