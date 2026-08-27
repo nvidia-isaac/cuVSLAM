@@ -502,8 +502,8 @@ bool GPUBundleAdjustmentProblem::set(const cuvslam::sba::BundleAdjustmentProblem
     Pose& pose = cpu_poses_[i];
 
     for (int j = 0; j < 4; j++) {
-      for (int k = 0; k < 4; k++) {
-        pose[j][k] = transform(j, k);
+      for (int m = 0; m < 4; m++) {
+        pose[j][m] = transform(j, m);
       }
     }
   }
@@ -585,59 +585,60 @@ const GPUBundleAdjustmentProblemMeta& GPUBundleAdjustmentProblem::meta() const {
   return meta_;
 }
 
-GPUSolver::GPUSolver(int max_system_order)
-    : max_system_order_(max_system_order), buffer(bufferSize), Acopy(max_system_order_ * max_system_order_) {
-  CUSOLVER_CHECK(cusolverDnCreate(&handle));
-  CUBLAS_CHECK(cublasCreate(&cublasHandle));
+GPUCholeskySolver::GPUCholeskySolver(int max_system_order)
+    : max_system_order_(max_system_order), workspace_(workspace_size_), factor_(max_system_order_ * max_system_order_) {
+  CUSOLVER_CHECK(cusolverDnCreate(&cusolver_handle_));
+  CUBLAS_CHECK(cublasCreate(&cublas_handle_));
 }
 
-GPUSolver::~GPUSolver() {
-  if (handle) {
-    CUSOLVER_CHECK_NOTHROW(cusolverDnDestroy(handle));
+GPUCholeskySolver::~GPUCholeskySolver() {
+  if (cusolver_handle_) {
+    CUSOLVER_CHECK_NOTHROW(cusolverDnDestroy(cusolver_handle_));
   }
-  if (cublasHandle) {
-    CUBLAS_CHECK_NOTHROW(cublasDestroy(cublasHandle));
+  if (cublas_handle_) {
+    CUBLAS_CHECK_NOTHROW(cublasDestroy(cublas_handle_));
   }
 }
 
-void GPUSolver::solve(float* A, size_t A_pitch, float* b, float* x, int system_order, cudaStream_t s) {
-  CUSOLVER_CHECK(cusolverDnSetStream(handle, s));
-  CUBLAS_CHECK(cublasSetStream(cublasHandle, s));
+void GPUCholeskySolver::solve(const float* A, size_t A_pitch, const float* b, float* x, int system_order,
+                              cudaStream_t s) {
+  CUSOLVER_CHECK(cusolverDnSetStream(cusolver_handle_, s));
+  CUBLAS_CHECK(cublasSetStream(cublas_handle_, s));
   if (system_order > max_system_order_) {
     max_system_order_ = 2 * system_order;
-    Acopy.resize(max_system_order_ * max_system_order_);
+    factor_.resize(max_system_order_ * max_system_order_);
   }
 
-  CUDA_CHECK(cudaMemcpy2DAsync(Acopy.ptr(), system_order * sizeof(float), A, A_pitch, system_order * sizeof(float),
+  CUDA_CHECK(cudaMemcpy2DAsync(factor_.ptr(), system_order * sizeof(float), A, A_pitch, system_order * sizeof(float),
                                system_order, cudaMemcpyDeviceToDevice, s));
 
-  int newBufferSize;
-  CUSOLVER_CHECK(cusolverDnSpotrf_bufferSize(handle, CUBLAS_FILL_MODE_LOWER, system_order, Acopy.ptr(), system_order,
-                                             &newBufferSize));
+  int new_workspace_size;
+  CUSOLVER_CHECK(cusolverDnSpotrf_bufferSize(cusolver_handle_, CUBLAS_FILL_MODE_LOWER, system_order, factor_.ptr(),
+                                             system_order, &new_workspace_size));
 
-  if (bufferSize < newBufferSize) {
-    bufferSize = 2 * newBufferSize;
-    buffer.resize(bufferSize);
+  if (workspace_size_ < new_workspace_size) {
+    workspace_size_ = 2 * new_workspace_size;
+    workspace_.resize(workspace_size_);
   }
 
-  CUDA_CHECK(cudaMemsetAsync((void*)info.ptr(), 0, sizeof(int), s));
+  CUDA_CHECK(cudaMemsetAsync((void*)factorization_status_.ptr(), 0, sizeof(int), s));
 
-  // cholesky factorifation of lower triangular part
-  CUSOLVER_CHECK(cusolverDnSpotrf(handle, CUBLAS_FILL_MODE_LOWER, system_order, Acopy.ptr(), system_order, buffer.ptr(),
-                                  bufferSize, info.ptr()));
+  // cholesky factorization of lower triangular part
+  CUSOLVER_CHECK(cusolverDnSpotrf(cusolver_handle_, CUBLAS_FILL_MODE_LOWER, system_order, factor_.ptr(), system_order,
+                                  workspace_.ptr(), workspace_size_, factorization_status_.ptr()));
 
   CUDA_CHECK(cudaMemcpyAsync(x, b, sizeof(float) * system_order, cudaMemcpyDeviceToDevice, s));
-  CUSOLVER_CHECK(cusolverDnSpotrs(handle, CUBLAS_FILL_MODE_LOWER, system_order, 1, Acopy.ptr(), system_order, x,
-                                  system_order, info.ptr()));
+  CUSOLVER_CHECK(cusolverDnSpotrs(cusolver_handle_, CUBLAS_FILL_MODE_LOWER, system_order, 1, factor_.ptr(),
+                                  system_order, x, system_order, factorization_status_.ptr()));
 }
 
-GPUParameterUpdater::GPUParameterUpdater(int max_points, int max_poses)
+GPULevenbergMarquardtStep::GPULevenbergMarquardtStep(int max_points, int max_poses)
     : max_points_(max_points), max_poses_(max_poses), solver_(6 * max_poses) {}
 
-bool GPUParameterUpdater::compute_update(const GPUParameterUpdateMeta& update,
-                                         const GPULinearSystemMeta& reduced_system, int num_points, int num_poses,
-                                         GPUArrayPinned<float>& points_poses_update_max,  // must contain 2 floats
-                                         cudaStream_t s) {
+bool GPULevenbergMarquardtStep::compute_update(const GPUParameterUpdateMeta& update,
+                                               const GPULinearSystemMeta& reduced_system, int num_points, int num_poses,
+                                               GPUArrayPinned<float>& points_poses_update_max,  // must contain 2 floats
+                                               cudaStream_t s) {
   int system_order = 6 * num_poses;
   if (max_poses_ < num_poses || max_points_ < num_points) {
     return false;
@@ -659,18 +660,19 @@ bool GPUParameterUpdater::compute_update(const GPUParameterUpdateMeta& update,
   return true;
 }
 
-bool GPUParameterUpdater::update_state(const GPUBundleAdjustmentProblemMeta& problem,
-                                       const GPUParameterUpdateMeta& update, int num_points, int num_poses,
-                                       cudaStream_t s) {
+bool GPULevenbergMarquardtStep::apply_update(const GPUBundleAdjustmentProblemMeta& problem,
+                                             const GPUParameterUpdateMeta& update, int num_points, int num_poses,
+                                             cudaStream_t s) {
   CUDA_CHECK(
       update_parameters(problem.points, update.point, problem.rig_from_world, update.pose, num_points, num_poses, s));
   return true;
 }
 
-bool GPUParameterUpdater::relative_reduction(float current_cost, float lambda, const GPUParameterUpdateMeta& update,
-                                             const GPULinearSystemMeta& full_system, int num_points, int num_poses,
-                                             float* prediction, cudaStream_t s) {
-  float* point_hessian_term_ = buffer_.ptr();
+bool GPULevenbergMarquardtStep::predict_reduction(float current_cost, float lambda,
+                                                  const GPUParameterUpdateMeta& update,
+                                                  const GPULinearSystemMeta& full_system, int num_points, int num_poses,
+                                                  float* prediction, cudaStream_t s) {
+  float* point_hessian_term_ = hessian_and_scaling_terms_.ptr();
   float* point_scaling_term_ = point_hessian_term_ + 1;
   float* pose_scaling_term_ = point_hessian_term_ + 2;
 
