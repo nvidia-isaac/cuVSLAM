@@ -15,6 +15,8 @@ S3_KEY_PREFIX="${_s3_path#*/}"
 
 mkdir -p "$LOCAL_DATASETS_DIR"
 
+echo "Dataset cache root: $LOCAL_DATASETS_DIR (RUNNER_LOCAL_DATASETS_ROOT=$RUNNER_LOCAL_DATASETS_ROOT)"
+
 have_aws=false
 if command -v aws >/dev/null 2>&1; then
   if [ -n "${AWS_ACCESS_KEY_ID:-}" ] && [ -n "${AWS_SECRET_ACCESS_KEY:-}" ]; then
@@ -23,6 +25,23 @@ if command -v aws >/dev/null 2>&1; then
     have_aws=true
   fi
 fi
+
+# One greppable line per staged dataset. Download and extract are reported
+# separately because they scale with different things and need different fixes:
+# bandwidth for the transfer, file count for the extraction.
+report_staging_profile() {
+  local name="$1" bytes="$2" download_seconds="$3" extract_seconds="$4" file_count="$5"
+  local total_seconds=$((download_seconds + extract_seconds))
+  local mib="unknown" download_rate="unknown" total_rate="unknown"
+  if [[ "$bytes" =~ ^[0-9]+$ ]]; then
+    mib=$((bytes / 1048576))
+    [ "$download_seconds" -gt 0 ] && download_rate=$((mib / download_seconds))
+    [ "$total_seconds" -gt 0 ] && total_rate=$((mib / total_seconds))
+  fi
+  echo "staging profile: dataset=$name mib=$mib download_s=$download_seconds" \
+    "extract_s=$extract_seconds total_s=$total_seconds files=$file_count" \
+    "download_mib_s=$download_rate total_mib_s=$total_rate"
+}
 
 stage_one() {
   local name="$1"
@@ -34,14 +53,27 @@ stage_one() {
   tmp_tar="$(mktemp "${TMPDIR:-/tmp}/cuvslam-${name}.XXXXXX.tar")"
 
   remote_etag=""
+  remote_bytes=""
   if $have_aws; then
-    remote_etag="$(aws s3api head-object --bucket "$S3_BUCKET" --key "$s3_key" --query ETag --output text 2>/dev/null || true)"
+    # ETag and size come from one request so the staging profile can report
+    # throughput without stat(2) on a local copy.
+    head_output="$(aws s3api head-object --bucket "$S3_BUCKET" --key "$s3_key" \
+      --query '[ETag,ContentLength]' --output text 2>/dev/null || true)"
+    if [ -n "$head_output" ]; then
+      remote_etag="$(printf '%s' "$head_output" | cut -f1)"
+      remote_bytes="$(printf '%s' "$head_output" | cut -f2)"
+    fi
   fi
 
   cache_has_files=false
   if [ -d "$dest" ] && [ -n "$(find "$dest" -type f ! -name '.s3_etag' -print -quit 2>/dev/null)" ]; then
     cache_has_files=true
   fi
+
+  cached_etag="none"
+  [ -f "$etag_file" ] && cached_etag="$(cat "$etag_file")"
+  echo "Cache check $name: have_aws=$have_aws cache_has_files=$cache_has_files" \
+    "force_restage=$FORCE_RESTAGE remote_etag=${remote_etag:-none} cached_etag=$cached_etag"
 
   if [ "$FORCE_RESTAGE" != "true" ] && $cache_has_files; then
     if ! $have_aws; then
@@ -60,15 +92,23 @@ stage_one() {
   fi
 
   echo "Staging $name from $s3_uri -> $dest"
+  local download_start=$SECONDS
   aws s3 cp "$s3_uri" "$tmp_tar" --no-progress
+  local download_seconds=$((SECONDS - download_start))
+
   rm -rf "$dest"
   mkdir -p "$dest"
+  local extract_start=$SECONDS
   tar -xf "$tmp_tar" -C "$dest"
+  local extract_seconds=$((SECONDS - extract_start))
   rm -f "$tmp_tar"
   if [ -n "$remote_etag" ]; then
     echo "$remote_etag" > "$etag_file"
   fi
-  echo "  staged $(find "$dest" -type f ! -name '.s3_etag' | wc -l) files under $dest"
+  local file_count
+  file_count="$(find "$dest" -type f ! -name '.s3_etag' | wc -l)"
+  echo "  staged $file_count files under $dest"
+  report_staging_profile "$name" "$remote_bytes" "$download_seconds" "$extract_seconds" "$file_count"
 }
 
 for name in "${EVAL_DATASET_NAMES[@]}"; do
