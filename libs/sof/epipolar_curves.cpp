@@ -64,8 +64,10 @@ void EpipolarCurves::Candidates(const Vector2T& uv_l_base, std::vector<Vector2T>
   out.clear();
   const float v_f = uv_l_base.y() * inv_scale_;
   const float u_f = uv_l_base.x() * inv_scale_;
-  // Guard against negative, NaN, or oversized inputs. The `!(x >= 0.f)` form catches NaN too.
-  if (!(v_f >= 0.f) || !(u_f >= 0.f)) {
+
+  const size_t top_image_w = curves_[0].size();
+  const size_t top_image_h = curves_.size();
+  if (v_f < 0.f || v_f >= static_cast<float>(top_image_h) || u_f < 0.f || u_f >= static_cast<float>(top_image_w)) {
     return;
   }
   const auto v0 = static_cast<size_t>(v_f);
@@ -73,7 +75,7 @@ void EpipolarCurves::Candidates(const Vector2T& uv_l_base, std::vector<Vector2T>
   const size_t v1 = v0 + 1;
   const size_t u1 = u0 + 1;
   // Need four corners around (u_f, v_f); bail if either right/bottom corner is out of range.
-  if (v1 >= curves_.size() || u1 >= curves_[v0].size()) {
+  if (v1 >= top_image_h || u1 >= top_image_w) {
     return;
   }
   const float dv = v_f - static_cast<float>(v0);

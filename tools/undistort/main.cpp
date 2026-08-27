@@ -50,8 +50,12 @@ void Undistort(const camera::ICameraModel& input_model, const camera::ICameraMod
     for (int x = 0; x < output.cols; ++x) {
       Vector2T dst(x, y);
       Vector2T interim, src;
-      output_model.normalizePoint(dst, interim);
-      input_model.denormalizePoint(interim, src);
+      if (!output_model.normalizePoint(dst, interim) || !input_model.denormalizePoint(interim, src)) {
+        // Unmapped pixel — point the map outside the source so remap fills it from the border.
+        map_x.at<float>(y, x) = -1.f;
+        map_y.at<float>(y, x) = -1.f;
+        continue;
+      }
       map_x.at<float>(y, x) = src.x();
       map_y.at<float>(y, x) = src.y();
     }
