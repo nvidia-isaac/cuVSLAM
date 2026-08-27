@@ -184,7 +184,16 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_RO_SECRET_ACCESS_KEY }}
         run: |
           RUN_ID="pr-${{ github.event.pull_request.number }}" \
+          KPI_HISTORY_DIR="${RUNNER_STORAGE_ROOT:?RUNNER_STORAGE_ROOT must be set}/cuvslam-ci/kpi-history/${EVAL_CONFIG}" \
           ./scripts/eval_cuvslam_in_docker.sh ./output
+
+      - name: Render KPI table
+        run: |
+          KPI_REPORT_JSON=$(find output/eval -name 'kpi_*.report.json' -print -quit)
+          python3 scripts/cuvslam_kpi_report.py render \
+            --report_json "$KPI_REPORT_JSON" \
+            --config "$EVAL_CONFIG" \
+            --output output/eval/kpi-report.md
 
       - name: Build documentation
         run: ./scripts/build_docs_in_docker.sh ./output
@@ -222,8 +231,7 @@ jobs:
           name: ${{ env.EVAL_KPIS_ARTIFACT }}
           path: |
             output/eval/kpi_*.json
-            output/eval/kpi_*.json.table
-            output/eval/kpi_*.json.drift
+            output/eval/kpi-report.md
           retention-days: 30
           if-no-files-found: warn
 
@@ -492,19 +500,18 @@ jobs:
               echo "</details>"
             fi
 
-            KPI_TABLE=$(find results -name 'kpi_*.json.table' 2>/dev/null | head -1)
-            if [ -f "$KPI_TABLE" ]; then
+          } > report.md
+
+          KPI_TABLE=$(find results -name 'kpi-report.md' -print -quit 2>/dev/null || true)
+          if [ -f "$KPI_TABLE" ]; then
+            {
               echo ""
               echo "## cuVSLAM Evaluation KPIs"
               echo ""
-              awk -v slug="$EVAL_CONFIG" '
-                NR==1 { print "| Config " $0; next }
-                NR==2 { print "|--------" $0; next }
-                { print "| " slug " " $0 }
-              ' "$KPI_TABLE"
+              cat "$KPI_TABLE"
               echo ""
-            fi
-          } > report.md
+            } >> report.md
+          fi
           cat report.md
 
       - name: Post PR comment
