@@ -15,6 +15,7 @@
  * of the software or derivative works thereof, you agree to be bound by this License.
  */
 
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -601,6 +602,65 @@ TEST(Cuda, SBASolver) {
   CUDA_CHECK(cudaFree(x));
 }
 
+// A factorization that gives up says so in a status on the device, and the triangular solve queued
+// right after writes its own over the same buffer. So the status a caller reads is only the
+// factorization's because solve() copies it back in between. Pin that: a system that is not
+// positive definite has to still report failure once the stream has run.
+TEST(Cuda, SBACholeskySolverReportsFactorizationStatus) {
+  constexpr int system_order = 3;
+  constexpr int matrix_size = system_order * system_order;
+  constexpr float thresh = 1e-4f;
+
+  cuda::sba::GPUCholeskySolver solver{system_order};
+
+  // A is square and dense with nothing padding its rows, so its pitch is just one row of it.
+  constexpr size_t pitch = system_order * sizeof(float);
+  cuda::GPUArrayPinned<float> A{matrix_size};
+  cuda::GPUArrayPinned<float> b{system_order};
+  cuda::GPUArrayPinned<float> x{system_order};
+  cuda::Stream s;
+
+  // nothing has been queued yet, so there is no factor to trust
+  EXPECT_FALSE(solver.solve_succeeded());
+
+  const auto solve = [&](const std::array<float, matrix_size>& matrix, const std::array<float, system_order>& rhs) {
+    for (int i = 0; i < matrix_size; ++i) {
+      A[i] = matrix[i];
+    }
+    for (int i = 0; i < system_order; ++i) {
+      b[i] = rhs[i];
+    }
+    A.copy(cuda::GPUCopyDirection::ToGPU, s.get_stream());
+    b.copy(cuda::GPUCopyDirection::ToGPU, s.get_stream());
+
+    solver.solve(A.ptr(), pitch, b.ptr(), x.ptr(), system_order, s.get_stream());
+
+    x.copy(cuda::GPUCopyDirection::ToCPU, s.get_stream());
+    cudaStreamSynchronize(s.get_stream());
+  };
+
+  // symmetric positive definite, with the right hand side picked so the solution is exactly (1, 2, 3)
+  const std::array<float, matrix_size> positive_definite = {4.f, 1.f, 0.f, 1.f, 3.f, 1.f, 0.f, 1.f, 2.f};
+  const std::array<float, system_order> rhs = {6.f, 10.f, 8.f};
+
+  solve(positive_definite, rhs);
+  EXPECT_TRUE(solver.solve_succeeded());
+  EXPECT_NEAR(x[0], 1.f, thresh);
+  EXPECT_NEAR(x[1], 2.f, thresh);
+  EXPECT_NEAR(x[2], 3.f, thresh);
+
+  // symmetric with a positive diagonal, but its leading 2x2 minor is negative, so the second pivot
+  // is the square root of a negative number and the factorization stops there
+  const std::array<float, matrix_size> indefinite = {1.f, 2.f, 0.f, 2.f, 1.f, 0.f, 0.f, 0.f, 1.f};
+
+  solve(indefinite, rhs);
+  EXPECT_FALSE(solver.solve_succeeded());
+
+  // and the status is the last solve's rather than a latch, so the same instance recovers
+  solve(positive_definite, rhs);
+  EXPECT_TRUE(solver.solve_succeeded());
+}
+
 TEST(Cuda, SBAEvaluateCostSpeedUp) {
   camera::Rig rig = MakeDefaultRig();
   int max_points = 400;
@@ -858,6 +918,52 @@ TEST(Cuda, SBAParameterUpdaterComputeUpdate) {
       ASSERT_TRUE(std::abs(update.pose_step.lpNorm<Eigen::Infinity>() - points_poses_update_max[1]) < thresh);
     }
   }
+}
+
+// compute_update() returns true for anything it managed to queue, so the linear solve inside it can
+// still have failed. GPULevenbergMarquardtStep owns the solver and forwards its status, which is
+// what tells SchurComplementBundlerGpu the step it just queued is meaningless and needs more damping.
+TEST(Cuda, SBALevenbergMarquardtStepForwardsSolveStatus) {
+  camera::Rig rig = MakeDefaultRig();
+  const int max_points = 400;
+  const int max_poses = 5;
+  cuda::sba::GPULinearSystem gpu_reduced_system(max_points, max_poses);
+  cuda::sba::GPUParameterUpdate gpu_update(max_points, max_poses);
+  cuda::sba::GPULevenbergMarquardtStep lm_step(max_points, max_poses);
+  cuda::GPUArrayPinned<float> points_poses_update_max{2};
+  cuda::Stream s;
+
+  sba::BundleAdjustmentProblem problem;
+  GenerateProblem(problem, rig, Matrix2T::Identity(), max_points, max_poses);
+  const int num_points = static_cast<int>(problem.points.size()) - problem.num_fixed_points;
+  const int num_poses = static_cast<int>(problem.rig_from_world.size()) - problem.num_fixed_key_frames;
+
+  ModelFunction model;
+  sba::schur_complement_bundler_cpu_internal::FullSystem full_system;
+  ReducedSystem reduced_system;
+
+  UpdateModel(model, problem);
+  BuildFullSystem(full_system, model, problem);
+  BuildReducedSystem(reduced_system, full_system, 0.1f);
+
+  const auto queue_update = [&](const ReducedSystem& system) {
+    const bool queued = gpu_reduced_system.set(to_temporary(system), s.get_stream()) &&
+                        lm_step.compute_update(gpu_update.meta(), gpu_reduced_system.meta(), num_points, num_poses,
+                                               points_poses_update_max, s.get_stream());
+    cudaStreamSynchronize(s.get_stream());
+    return queued;
+  };
+
+  // damping leaves the reduced pose block positive definite, so this one factorizes
+  ASSERT_TRUE(queue_update(reduced_system));
+  EXPECT_TRUE(lm_step.solve_succeeded());
+
+  // flipping its sign keeps it symmetric and turns every pivot negative
+  ReducedSystem negated_system = reduced_system;
+  negated_system.pose_block = -reduced_system.pose_block;
+
+  ASSERT_TRUE(queue_update(negated_system));
+  EXPECT_FALSE(lm_step.solve_succeeded());
 }
 
 TEST(Cuda, SBAParameterUpdaterUpdateStateSpeedUp) {
