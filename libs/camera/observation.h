@@ -47,7 +47,9 @@ bool FindObservation(const std::vector<Observation>& observations, TrackId track
 Matrix2T GetDefaultObservationInfoUV();
 
 Matrix2T ObservationInfoUVToNormUV(const ICameraModel& intrinsics, const Matrix2T& info_uv);
-Matrix2T ObservationInfoUVToXY(const ICameraModel& intrinsics, const Vector2T& uv, const Vector2T& xy,
-                               const Matrix2T& info_uv);
+// Fails when a sample of the numeric jacobian falls outside the camera model's validity — the
+// resulting matrix would be silently wrong. `info_xy` is left untouched in that case.
+[[nodiscard]] bool ObservationInfoUVToXY(const ICameraModel& intrinsics, const Vector2T& uv, const Vector2T& xy,
+                                         const Matrix2T& info_uv, Matrix2T& info_xy);
 
 }  // namespace cuvslam::camera

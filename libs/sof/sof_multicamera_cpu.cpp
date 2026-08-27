@@ -81,7 +81,12 @@ void MultiSOFCPU::LaunchTrackingPrimaryToSecondary(CameraId primary_id, CameraId
 
   size_t max_candidates = 0;
   for (size_t i = 0; i < n; ++i) {
-    intrinsicsP.denormalizePoint(primary_obs[i].xy, uvL[i]);
+    // A point that can't be projected gets no candidates: Candidates() would otherwise leave last
+    // frame's list in place, and uvL[i] keeps whatever it held.
+    if (!intrinsicsP.denormalizePoint(primary_obs[i].xy, uvL[i])) {
+      cands[i].clear();
+      continue;
+    }
     epipolar_curves.Candidates(uvL[i], cands[i]);
     max_candidates = std::max(max_candidates, cands[i].size());
   }
@@ -120,9 +125,12 @@ void MultiSOFCPU::LaunchTrackingPrimaryToSecondary(CameraId primary_id, CameraId
         continue;
       }
       Vector2T xyR;
-      intrinsicsS.normalizePoint(winners[i].uvR, xyR);
-      secondary_obs->push_back({secondary_id, primary_obs[i].id, xyR,
-                                camera::ObservationInfoUVToXY(intrinsicsS, winners[i].uvR, xyR, winners[i].info)});
+      Matrix2T info_xy;
+      if (!intrinsicsS.normalizePoint(winners[i].uvR, xyR) ||
+          !camera::ObservationInfoUVToXY(intrinsicsS, winners[i].uvR, xyR, winners[i].info, info_xy)) {
+        continue;
+      }
+      secondary_obs->push_back({secondary_id, primary_obs[i].id, xyR, info_xy});
     }
   }
 }
