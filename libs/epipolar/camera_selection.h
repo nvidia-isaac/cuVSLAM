@@ -33,6 +33,10 @@ namespace FrustumProperties {
 const float MINIMUM_HITHER = 0.1f;
 }  // namespace FrustumProperties
 
+/// True when a camera-local depth clears the near plane. Prefer this over a hand-written
+/// comparison so every guard treats the boundary the same way.
+inline bool IsDepthInFront(float z) { return z > FrustumProperties::MINIMUM_HITHER; }
+
 enum class TriangulationState { None, Triangulated, AlmostParallel };
 
 /* TODO: review OptimalTriangulation limits
@@ -113,7 +117,7 @@ public:
 using Ray3T = Ray3<float>;
 
 inline bool IsPointInFrontInLocalSpace(const Vector3T& point, const Isometry3T& toLocalSpace) {
-  return (toLocalSpace * point).z() > FrustumProperties::MINIMUM_HITHER;
+  return IsDepthInFront((toLocalSpace * point).z());
 }
 
 inline bool IntersectRaysInReferenceSpace(const Isometry3T& transform, const Vector3T& direction1,
@@ -235,8 +239,7 @@ inline bool OptimalTriangulation(const Isometry3T& transform, const Vector2T& x1
   //(void)atInfinity;
   // assert((loc3d / scaleFactor).norm() < atInfinity / scaleFactor);
 
-  ts = (loc3d.z() > FrustumProperties::MINIMUM_HITHER &&
-        (transform.inverse() * loc3d).z() > FrustumProperties::MINIMUM_HITHER && loc3d.norm() > epsilon())
+  ts = (IsDepthInFront(loc3d.z()) && IsPointInFrontInLocalSpace(loc3d, transform.inverse()) && loc3d.norm() > epsilon())
            ? ((IsVectorsParallel(x1m, rotation * x2m, parallelMeasure)) ? TriangulationState::AlmostParallel
                                                                         : TriangulationState::Triangulated)
            : TriangulationState::None;

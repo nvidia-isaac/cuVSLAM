@@ -184,4 +184,25 @@ TEST_F(CameraSelectionTest, CountPointsInFrontOfCameras_MixedPointsInFrontAndBeh
   EXPECT_EQ(expectedCount, actualCount);
 }
 
+TEST(NearPlaneGuard, IsDepthInFront_TreatsTheBoundaryAsTooClose) {
+  const float hither = cuvslam::epipolar::FrustumProperties::MINIMUM_HITHER;
+
+  EXPECT_TRUE(cuvslam::epipolar::IsDepthInFront(hither * 2.0f));
+  EXPECT_TRUE(cuvslam::epipolar::IsDepthInFront(hither * 1.01f));
+
+  // A point sitting exactly on the near plane counts as too close, not as visible.
+  EXPECT_FALSE(cuvslam::epipolar::IsDepthInFront(hither));
+  EXPECT_FALSE(cuvslam::epipolar::IsDepthInFront(hither * 0.99f));
+  EXPECT_FALSE(cuvslam::epipolar::IsDepthInFront(0.0f));
+  EXPECT_FALSE(cuvslam::epipolar::IsDepthInFront(-hither));
+}
+
+TEST(NearPlaneGuard, IsPointInFrontInLocalSpace_SharesTheSameBoundary) {
+  const float hither = cuvslam::epipolar::FrustumProperties::MINIMUM_HITHER;
+  const Isometry3T identity = Isometry3T::Identity();
+
+  EXPECT_TRUE(cuvslam::epipolar::IsPointInFrontInLocalSpace(Vector3T(0.0f, 0.0f, hither * 2.0f), identity));
+  EXPECT_FALSE(cuvslam::epipolar::IsPointInFrontInLocalSpace(Vector3T(0.0f, 0.0f, hither), identity));
+}
+
 }  // namespace test::epipolar

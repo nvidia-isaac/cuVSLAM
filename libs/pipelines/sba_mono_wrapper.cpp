@@ -17,7 +17,7 @@
 
 #include "pipelines/internal/mono/sba_mono_wrapper.h"
 
-#include "epipolar/camera_selection.h"  // for HEATER
+#include "epipolar/camera_selection.h"  // for IsDepthInFront
 #include "sba/mono_sba_solver.h"
 
 namespace cuvslam::pipelines {
@@ -33,7 +33,7 @@ static bool calcTrackResidualInFrame(const Isometry3T& inverse_camera, const sto
   const Vector3T v3 = inverse_camera * outTrack.getLocation3D();
   const float z = v3.z();
 
-  if (z < epipolar::FrustumProperties::MINIMUM_HITHER) {
+  if (!epipolar::IsDepthInFront(z)) {
     return false;
   }
   const Vector2T proj = v3.head(2) / z;
