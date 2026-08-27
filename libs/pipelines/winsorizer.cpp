@@ -22,6 +22,7 @@
 #include "common/isometry.h"
 #include "common/track_id.h"
 #include "common/vector_3t.h"
+#include "epipolar/camera_selection.h"
 
 namespace cuvslam::pipelines {
 void winsorize(const camera::Rig& rig, const std::vector<KeyframeLandmarkObs>& observations_from_last_keyframe) {
@@ -44,7 +45,7 @@ void winsorize(const camera::Rig& rig, const std::vector<KeyframeLandmarkObs>& o
     Isometry3T rig_from_w = obs.keyframe->get_pose();
     Vector3T point = *obs.landmark->get_pose();
     const Vector3T pos = cam_from_rig * rig_from_w * point;
-    if (pos.z() <= epsilon()) {
+    if (!epipolar::IsDepthInFront(pos.z())) {
       continue;
     }
 
