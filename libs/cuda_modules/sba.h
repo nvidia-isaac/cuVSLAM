@@ -118,7 +118,7 @@ private:
 
 class GPUBundleAdjustmentProblem {
 public:
-  GPUBundleAdjustmentProblem(int max_points = 400, int max_poses = 20, int max_observations = 20000);
+  GPUBundleAdjustmentProblem(int max_points, int max_poses, int max_observations);
   ~GPUBundleAdjustmentProblem();
   void set_rig(const camera::Rig& rig);
   const GPUBundleAdjustmentProblemMeta& meta() const;
@@ -164,51 +164,92 @@ private:
   mutable GPUBundleAdjustmentProblemMeta meta_;
 };
 
-class GPUSolver {
+// Dense Cholesky solve of a small symmetric positive definite system - the reduced pose block, in
+// this library. Nothing here runs when you call it: the work is queued on the stream you pass and
+// the call returns before the GPU has started. There is no completion signal of its own. You own
+// the stream, so wait on it yourself and only then read the result:
+//
+//   solver.solve(A, A_pitch, b, x, system_order, s);
+//   cudaStreamSynchronize(s);  // any wait on s does, an event recorded on it for instance
+//   // x is readable here
+//
+// One instance carries one workspace, and so one solve at a time.
+class GPUCholeskySolver {
 public:
-  explicit GPUSolver(int max_system_order);
-  ~GPUSolver();
+  explicit GPUCholeskySolver(int max_system_order);
+  ~GPUCholeskySolver();
 
-  void solve(float* A, size_t A_pitch, float* b, float* x, int system_order, cudaStream_t s);
+  // It destroys the cuSOLVER and cuBLAS handles it owns, so a copy would destroy them twice.
+  GPUCholeskySolver(const GPUCholeskySolver&) = delete;
+  GPUCholeskySolver& operator=(const GPUCholeskySolver&) = delete;
+
+  // Queues the Cholesky solve of A x = b on the lower triangle of A - it does not solve anything by
+  // the time it returns. A and b are only read; x holds the system_order floats of the result once
+  // the stream has run it. Nothing fails loudly: a matrix that is not positive definite still
+  // produces an x, and nothing here tells you that x is garbage.
+  void solve(const float* A, size_t A_pitch, const float* b, float* x, int system_order, cudaStream_t s);
 
 private:
   int max_system_order_;
 
-  cusolverDnHandle_t handle = nullptr;
-  cublasHandle_t cublasHandle = nullptr;
+  cusolverDnHandle_t cusolver_handle_ = nullptr;
+  cublasHandle_t cublas_handle_ = nullptr;
 
-  int bufferSize = 100;
-  GPUArrayPinned<int> info{1};
-  GPUArrayPinned<float> buffer;
-  GPUArrayPinned<float> Acopy;
+  int workspace_size_ = 100;
+  GPUArrayPinned<int> factorization_status_{1};
+  GPUArrayPinned<float> workspace_;
+  GPUArrayPinned<float> factor_;
 };
 
-class GPUParameterUpdater {
+// One Levenberg-Marquardt step, on the GPU: work out the step from the reduced system, measure it,
+// predict what it should buy, and apply it once the caller has decided to keep it. The three belong
+// together because they share the solver and the scratch buffers below, sized once at construction.
+//
+// Every method takes the *free* counts - the points and key frames left after the fixed ones are
+// subtracted - and they must be the same throughout a step. `update` is the step itself:
+// compute_update() fills it, the other two read it.
+//
+// Like GPUCholeskySolver, nothing here runs when you call it. Each method queues work on the
+// stream and returns, so a true return says the work was queued, not that it worked or finished,
+// and everything these methods write is only readable once the caller has synchronized the stream.
+class GPULevenbergMarquardtStep {
 public:
-  explicit GPUParameterUpdater(int max_points, int max_poses);
+  explicit GPULevenbergMarquardtStep(int max_points, int max_poses);
 
   // TODO: maybe unite the following methods in one?
+
+  // Solves the reduced system for the pose step and back-substitutes the point steps, leaving both
+  // in `update`, then reduces the largest absolute component of each into points_poses_update_max:
+  // [0] over the point steps and [1] over the pose steps, which is what a caller tests to decide
+  // that the step has become too small to bother with. Returns false, before queueing anything, if
+  // the counts exceed the sizes this instance was built with.
   bool compute_update(const GPUParameterUpdateMeta& update, const GPULinearSystemMeta& reduced_system, int num_points,
                       int num_poses,
                       GPUArrayPinned<float>& points_poses_update_max,  // must contain 2 floats
                       cudaStream_t s);
 
-  static bool update_state(const GPUBundleAdjustmentProblemMeta& problem, const GPUParameterUpdateMeta& update,
+  // Applies the step in `update` to the problem's points and key frame poses. Queue this only for a
+  // step you have accepted - there is no way back to the previous state.
+  static bool apply_update(const GPUBundleAdjustmentProblemMeta& problem, const GPUParameterUpdateMeta& update,
                            int num_points, int num_poses, cudaStream_t s);
 
-  bool relative_reduction(float current_cost, float lambda, const GPUParameterUpdateMeta& update,
-                          const GPULinearSystemMeta& full_system, int num_points, int num_poses, float* prediction,
-                          cudaStream_t s);
+  // Predicts the relative cost reduction the step should bring, the denominator of the LM gain
+  // ratio, and writes that one float to `prediction` on the device. current_cost is the cost the
+  // step starts from and lambda the damping it was computed with, so both must match the
+  // compute_update() call that produced `update`.
+  bool predict_reduction(float current_cost, float lambda, const GPUParameterUpdateMeta& update,
+                         const GPULinearSystemMeta& full_system, int num_points, int num_poses, float* prediction,
+                         cudaStream_t s);
 
 private:
   int max_points_;
   int max_poses_;
 
-  GPUSolver solver_;
+  GPUCholeskySolver solver_;
 
   GPUArrayPinned<float> pose_hessian_term_{1};
   // point_hessian_term_, point_scaling_term_, pose_scaling_term_
-  GPUArrayPinned<float> buffer_{3};
+  GPUArrayPinned<float> hessian_and_scaling_terms_{3};
 };
 
 }  // namespace cuvslam::cuda::sba

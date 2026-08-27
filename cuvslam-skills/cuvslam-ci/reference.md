@@ -12,7 +12,7 @@ playbooks are in [SKILL.md](SKILL.md).
 ## Pipelines
 
 - `pr-verify.yml`: lint in the CI image, then build + unit test on x86 (fork-gated), Orin, and Thor. The x86 job stages datasets, runs eval, and posts a KPI table to the PR comment. A status job aggregates the required checks.
-- `nightly.yml`: build + test matrix across four x86 CUDA/Ubuntu configs plus Orin and Thor. The four x86 configs run eval (`eval: true`) and generate KPI data and PDF reports. Scheduled and ordinary manual runs retain versioned Actions artifacts but never create a Release. A successful manual dispatch from a matching `release/vX.Y.Z` branch promotes the same consumer artifacts to an unpublished draft Release.
+- `nightly.yml`: build + test matrix across four x86 CUDA/Ubuntu configs plus Orin and Thor. The four x86 configs run eval (`eval: true`) and generate KPI data and PDF reports; Orin and Thor run CUDA micro-benchmarks (`benchmark: true`) and generate structured speed reports. Scheduled and ordinary manual runs retain versioned Actions artifacts but never create a Release. A successful manual dispatch from a matching `release/vX.Y.Z` branch promotes the same consumer artifacts to an unpublished draft Release.
 - `provision-datasets.yml`: manual `workflow_dispatch`, gated to the default branch. Builds the CI image, runs `provision_dataset.sh` for the chosen dataset, uploads `<name>.tar`. The only writer of dataset storage.
 - `sync-rulesets.yml`: applies `.github/rulesets/default-branch-ruleset.json` through the GitHub API using `RULESET_ADMIN_TOKEN`, on push to the ruleset path, weekly, and on demand.
 
@@ -87,6 +87,25 @@ Repository secrets, split read from write so fork-reachable jobs never hold a ke
 - PR: `cuvslam_kpi_report.py render` produces a single table labeled with `EVAL_CONFIG`; `RUN_ID=pr-<number>`; the
   matching config's KPI history is mounted read-only, so PR runs never write the baseline.
 
+## Jetson benchmark outputs
+
+- The regular C++ test command excludes names containing `SpeedUp` or `Speedup`. Nightly matrix entries flagged
+  `benchmark: true` run the active matching cases from `cuda_modules_test` separately. Tests prefixed with
+  `DISABLED_` remain excluded.
+- `cuvslam_benchmark_report.py metadata` records host Jetson/JetPack, CUDA, Ubuntu, power-mode, clock, commit, and
+  kernel metadata. `benchmark_cuvslam_in_docker.sh` runs the registered `cuda_modules_test` through CTest with a fixed
+  GTest seed and writes raw output plus GoogleTest XML.
+- Each active speed test records `iterations`, `cpu_ns_per_iteration`, `gpu_ns_per_iteration`, and `speedup` as
+  GoogleTest XML properties. `cuvslam_benchmark_report.py render` validates those properties and writes
+  `cpp-benchmark-results.json` and `benchmark-summary.md`.
+- Per-config staging artifacts use
+  `benchmark-results-staging-<version>-<platform>-cuda<version>-ubuntu<version>`. The nightly summary publishes the
+  Orin and Thor tables independently, then retains `benchmark-results-<version>` for 30 days.
+- Benchmark test failures are informational during the initial soak period. Missing tests, malformed metrics, or a
+  missing Orin/Thor report fail summary consolidation because they indicate broken benchmark coverage.
+- Jetson benchmarks do not run on PRs and are CI diagnostics, not release assets. They are not added to
+  `cuvslam-evaluation-<version>.tar.gz`.
+
 ## Nightly artifacts and releases
 
 - `VERSION` is the single package-version source for scheduled, manual, and release runs. Release dispatch additionally requires the `release/vX.Y.Z` branch name to match `VERSION`.
@@ -103,6 +122,8 @@ Repository secrets, split read from write so fork-reachable jobs never hold a ke
 - Fork isolation: eval and dataset steps run only where `head.repo == github.repository`. Fork code never reaches dataset runners.
 - Credential split: eval steps pass the read-only `AWS_S3_RO_*` pair; only provisioning uses the read-write `AWS_S3_*` pair.
 - Per-config namespacing: KPI history directories and eval artifact names carry the `platform-cuda-ubuntu` slug. Artifact names are immutable in `upload-artifact@v7`, so a multi-config run requires per-config names to avoid an upload collision, and per-config history directories keep each config's diff-vs-previous lineage correct.
+- Benchmark namespacing: Orin and Thor benchmark artifacts carry the same full config slug. Their absolute timings and
+  speedups are not aggregated because the devices use different SoCs, CUDA versions, and JetPack releases.
 - Direct distributable uploads: `upload-artifact@v7` uses `archive: false` only for single-file C++ archives, wheels, documentation, and the evaluation record. Multi-file diagnostics retain the default ZIP container.
 - Release safety: only manual dispatches from validated `release/*` branches can publish, and they create drafts. Scheduled runs have no `contents: write` permission. Rebuilding requires explicit deletion of the previous draft; published Releases and existing tags are never moved or replaced.
 - Uncompressed `.tar`: gzip was dropped to cap memory on the provisioning runner. Packing (`provision_dataset.sh`) and extraction (`stage_eval_datasets.sh`) stay gzip-free and consistent.
