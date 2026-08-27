@@ -57,8 +57,26 @@ jobs:
           DOCKER_BUILDKIT=1 docker build -f scripts/Dockerfile.ci . --network host --tag cuvslam-ci:local \
             --secret id=aws_cli_public_key,src="$keyfile"
 
+      - name: Verify TartanGround provisioning architecture
+        if: github.event.inputs.dataset == 'tartan'
+        env:
+          RUNNER_ARCH: ${{ runner.arch }}
+        run: |
+          if [ "$RUNNER_ARCH" != X64 ]; then
+            echo "TartanGround provisioning requires an x86_64 runner; got $RUNNER_ARCH." >&2
+            exit 1
+          fi
+
+      - name: Build TartanGround provisioning image
+        if: github.event.inputs.dataset == 'tartan'
+        run: |
+          DOCKER_BUILDKIT=1 docker build -f scripts/Dockerfile.dataset-provision . --network host \
+            --build-arg BASE_IMAGE=cuvslam-ci:local \
+            --tag cuvslam-dataset-provision:local
+
       - name: Seed S3 dataset tarball
         env:
+          DATASET: ${{ github.event.inputs.dataset }}
           FORCE_DOWNLOAD: ${{ github.event.inputs.force_download }}
           DRY_RUN: ${{ github.event.inputs.dry_run }}
           AWS_ACCESS_KEY_ID: ${{ github.event.inputs.dry_run != 'true' && secrets.AWS_S3_ACCESS_KEY_ID || '' }}
@@ -66,6 +84,10 @@ jobs:
         run: |
           host_work="$RUNNER_TEMP/provision-work-${GITHUB_RUN_ID}"
           container_work=/tmp/cuvslam-provision
+          provision_image=cuvslam-ci:local
+          if [ "$DATASET" = tartan ]; then
+            provision_image=cuvslam-dataset-provision:local
+          fi
           mkdir -p "$host_work"
           docker run --rm --network host \
             -e FORCE_DOWNLOAD -e DRY_RUN -e AWS_DEFAULT_REGION -e S3_DATASETS_BUCKET \
@@ -74,4 +96,4 @@ jobs:
             -v "$(pwd):/cuvslam:ro" \
             -v "$host_work:$container_work" \
             -w /cuvslam \
-            cuvslam-ci:local ./scripts/provision_dataset.sh "${{ github.event.inputs.dataset }}"
+            "$provision_image" ./scripts/provision_dataset.sh "$DATASET"
