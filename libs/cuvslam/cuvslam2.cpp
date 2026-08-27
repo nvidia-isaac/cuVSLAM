@@ -148,9 +148,23 @@ void CreateCameraModel(const Camera& camera, std::unique_ptr<camera::ICameraMode
   Vector2T focal{camera.focal[0], camera.focal[1]};
   Vector2T principal{camera.principal[0], camera.principal[1]};
 
-  THROW_INVALID_ARG_IF(principal[0] < 0.0 || principal[1] < 0.0, "Principal point coords must be >= 0.0");
-  THROW_INVALID_ARG_IF(focal[0] <= 0.0 || focal[1] <= 0.0, "Focal length must be > 0.0");
+  // the finiteness tests are separate: a NaN passes `<` and `<=` just as happily as a valid number
+  THROW_INVALID_ARG_IF(!principal.allFinite() || principal[0] < 0.0 || principal[1] < 0.0,
+                       "Principal point coords must be finite and >= 0.0");
+  THROW_INVALID_ARG_IF(!focal.allFinite() || focal[0] <= 0.0 || focal[1] <= 0.0,
+                       "Focal length must be finite and > 0.0");
   THROW_INVALID_ARG_IF(resolution[0] <= 0 || resolution[1] <= 0, "Image width/height must be > 0");
+
+  const auto& distortion = camera.distortion.parameters;
+  THROW_INVALID_ARG_IF(std::any_of(distortion.begin(), distortion.end(), [](float p) { return !std::isfinite(p); }),
+                       "Distortion parameters must be finite");
+
+  // everything built from the extrinsics inherits a NaN: rays, epipolar curves, frustum overlap
+  const auto is_finite = [](float v) { return std::isfinite(v); };
+  const auto& pose = camera.rig_from_camera;
+  THROW_INVALID_ARG_IF(!std::all_of(pose.rotation.begin(), pose.rotation.end(), is_finite) ||
+                           !std::all_of(pose.translation.begin(), pose.translation.end(), is_finite),
+                       "Camera rig_from_camera must be finite");
 
   camera_model = camera::CreateCameraModel(resolution, focal, principal, camera.distortion.model,
                                            camera.distortion.parameters.data(), camera.distortion.parameters.size());
@@ -341,7 +355,7 @@ void CheckMultisensorDepths(const Odometry::ImageSet& depths, const std::vector<
     const auto& resolution = cameras_models[depths[i].camera_index]->getResolution();
     THROW_INVALID_ARG_IF(depths[i].width != resolution[0] || depths[i].height != resolution[1],
                          "Multisensor depth image dimensions do not match camera resolution");
-    const int32_t cam_id = static_cast<int32_t>(depths[i].camera_index);
+    const auto cam_id = static_cast<int32_t>(depths[i].camera_index);
     THROW_INVALID_ARG_IF(
         std::find(expected_depth_cam_ids.begin(), expected_depth_cam_ids.end(), cam_id) == expected_depth_cam_ids.end(),
         "Multisensor depth image for camera " + std::to_string(cam_id) +
@@ -360,7 +374,7 @@ void CheckMultisensorDepths(const Odometry::ImageSet& depths, const std::vector<
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 void SetVerbosity(int verbosity) {
-  constexpr const Trace::Verbosity max_allowed =
+  constexpr Trace::Verbosity max_allowed =
 #if defined(NDEBUG)
       Trace::Verbosity::Message;
 #else
@@ -666,7 +680,7 @@ PoseEstimate Odometry::Track(const ImageSet& images, const ImageSet& masks, cons
   Metas& image_metas = impl->image_metas;
   sof::Images& cuvslam_images_ptrs = impl->curr_image_ptrs;
 
-  const size_t num_cameras = static_cast<size_t>(impl->rig.num_cameras);
+  const auto num_cameras = static_cast<size_t>(impl->rig.num_cameras);
   image_sources.assign(num_cameras, {});
   masks_sources.assign(num_cameras, {});
   depth_sources.assign(num_cameras, {});
@@ -959,6 +973,9 @@ public:
       : primary_cameras_(primary_cameras) {
     std::string message;
     TracePrintIf(!CheckCudaCompatibility(message), "[WARNING] %s\n", message.c_str());
+
+    // Slam can be constructed on its own, so it cannot rely on Odometry having vetted the rig
+    CheckCameras(rig);
 
     SetTrackerRigAndIntrinsics(cameras_models_, rig_, rig.cameras);
 

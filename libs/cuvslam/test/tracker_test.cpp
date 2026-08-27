@@ -15,6 +15,9 @@
  */
 
 #include <cstdint>
+#include <limits>
+#include <stdexcept>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -49,6 +52,19 @@ Rig MakeStereoRig() {
   rig.cameras.push_back(camera);
   rig.cameras[1].rig_from_camera.translation = {kBaseline, 0.f, 0.f};
   return rig;
+}
+
+/// Checks that the rig is rejected as invalid, with a message naming the field that is at fault.
+testing::AssertionResult RejectedWith(const Rig& rig, std::string_view field) {
+  try {
+    Tracker{rig};
+  } catch (const std::invalid_argument& e) {
+    if (std::string_view{e.what()}.find(field) != std::string_view::npos) {
+      return testing::AssertionSuccess();
+    }
+    return testing::AssertionFailure() << "rejected with \"" << e.what() << "\", which does not name " << field;
+  }
+  return testing::AssertionFailure() << "rig was accepted";
 }
 
 /// Run the bundler and SLAM in the calling thread so the tests do not depend on background workers.
@@ -108,6 +124,42 @@ TEST_F(TrackerTest, GtAlignModeRequiresManualDispatch) {
   cfg.slam.gt_align_mode = true;
 
   EXPECT_THROW(Tracker(rig, cfg.odometry, &cfg.slam), std::invalid_argument);
+}
+
+TEST_F(TrackerTest, RejectsNonFiniteCalibration) {
+  constexpr float kNan = std::numeric_limits<float>::quiet_NaN();
+
+  // a non-finite calibration makes every projection NaN, and the range tests on the way in are all
+  // `<` or `<=`, which a NaN passes. Each rig must be turned away by the check for its own field,
+  // not by some unrelated one further down.
+  Rig bad_focal{rig};
+  bad_focal.cameras[0].focal = {kNan, kFocal};
+  EXPECT_TRUE(RejectedWith(bad_focal, "Focal length"));
+
+  Rig bad_principal{rig};
+  bad_principal.cameras[0].principal = {kWidth / 2.f, kNan};
+  EXPECT_TRUE(RejectedWith(bad_principal, "Principal point"));
+
+  Rig bad_distortion{rig};
+  bad_distortion.cameras[0].distortion.model = cuvslam::Distortion::Model::Fisheye;
+  bad_distortion.cameras[0].distortion.parameters = {0.f, kNan, 0.f, 0.f};
+  EXPECT_TRUE(RejectedWith(bad_distortion, "Distortion parameters"));
+
+  Rig bad_pose{rig};
+  bad_pose.cameras[1].rig_from_camera.translation = {kNan, 0.f, 0.f};
+  EXPECT_TRUE(RejectedWith(bad_pose, "rig_from_camera"));
+
+  // Slam is constructible on its own, so it has to reject the rig without Odometry's help
+  EXPECT_THROW(Slam(bad_pose, {0}), std::invalid_argument);
+}
+
+// The per-camera checks run from SetTrackerRigAndIntrinsics, which Slam calls, but the whole-rig
+// ones live in CheckCameras, which only Odometry used to reach.
+TEST_F(TrackerTest, StandaloneSlamChecksTheWholeRig) {
+  Rig mismatched_resolutions{rig};
+  mismatched_resolutions.cameras[1].size = {kWidth / 2, kHeight};
+
+  EXPECT_THROW(Slam(mismatched_resolutions, {0}), std::invalid_argument);
 }
 
 TEST_F(TrackerTest, TrackReturnsSlamPoseWhenEnabled) {
