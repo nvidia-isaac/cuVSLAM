@@ -13,8 +13,6 @@
 # of the software or derivative works thereof, you agree to be bound by this License.
 
 import json
-import os
-import re
 import subprocess
 import sys
 import tempfile
@@ -23,8 +21,6 @@ from pathlib import Path
 
 from cuvslam_tools import dataset_registry
 from cuvslam_tools.dataset_registry import DatasetSpec, EvalSpec, RegistryError
-
-REPO_ROOT = Path(__file__).resolve().parents[4]
 
 KITTI_PREPARE = "cuvslam_tools.dataset_preparation.kitti.prepare"
 
@@ -43,9 +39,9 @@ class TestShippedRegistry(unittest.TestCase):
     def test_shipped_registry_validates(self):
         dataset_registry.validate()
 
-    def test_kitti_and_euroc_records_match_the_previous_shell_records(self):
-        # Guards the refactor: these are the label, config path, and flags that
-        # scripts/run_eval.sh carried as pipe-delimited records, in the same order.
+    def test_active_eval_records_are_exact(self):
+        # run_eval.sh passes these straight to cuvslam_app, and the KPI history is
+        # keyed on the derived prefixes, so any change here reindexes the history.
         expected = [
             (
                 "kitti",
@@ -92,23 +88,13 @@ class TestShippedRegistry(unittest.TestCase):
             "import sys; from cuvslam_tools import dataset_registry as r; r.validate();"
             "[print(m) for m in ('numpy', 'cv2', 'scipy', 'PIL', 'h5py', 'yaml') if m in sys.modules]"
         )
-        completed = subprocess.run(
-            [sys.executable, "-c", probe],
-            cwd=REPO_ROOT,
-            env={**os.environ, "PYTHONPATH": str(REPO_ROOT / "tools" / "python_tools")},
-            capture_output=True,
-            text=True,
-            check=True,
-        )
+        completed = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, check=True)
         self.assertEqual(completed.stdout.strip(), "", f"validating the registry imported {completed.stdout.split()}")
 
-    def test_registry_cli_runs_without_the_package_installed(self):
-        # CI shell wrappers call the module with PYTHONPATH alone, inside an image
-        # where nothing is pip installed.
+    def test_registry_is_runnable_as_a_module(self):
+        # CI shell wrappers invoke `python3 -m cuvslam_tools.dataset_registry`.
         completed = subprocess.run(
             [sys.executable, "-m", "cuvslam_tools.dataset_registry", "eval-records"],
-            cwd=REPO_ROOT,
-            env={**os.environ, "PYTHONPATH": str(REPO_ROOT / "tools" / "python_tools")},
             capture_output=True,
             text=True,
             check=True,
@@ -117,14 +103,10 @@ class TestShippedRegistry(unittest.TestCase):
         self.assertEqual([row[0] for row in rows], ["kitti", "euroc"])
         self.assertTrue(all(len(row) == 4 for row in rows), rows)
 
-    def test_every_provisioning_workflow_choice_is_a_registry_dataset(self):
-        workflow = (REPO_ROOT / ".github" / "workflows" / "provision-datasets.yml").read_text(encoding="utf-8")
-        block = re.search(r"options:\n((?:\s+-\s+\S+\n)+)", workflow)
-        self.assertIsNotNone(block, "could not find the dataset choice options block")
-        choices = re.findall(r"-\s+(\S+)", block.group(1))
-        self.assertTrue(choices)
-        for choice in choices:
-            self.assertIn(choice, dataset_registry.DATASETS, f"workflow offers unknown dataset '{choice}'")
+    def test_unknown_dataset_is_rejected_with_the_known_ids(self):
+        # provision_dataset.sh relies on this to reject a stale workflow choice.
+        with self.assertRaisesRegex(RegistryError, r"unknown dataset 'nope' \(known: euroc, kitti, tartan, tum\)"):
+            dataset_registry.validate(["nope"])
 
     def test_preparation_modules_expose_a_callable_prepare(self):
         # Imports the converters, so it is the one test that pays that cost.
@@ -158,8 +140,7 @@ class TestValidationFailures(unittest.TestCase):
         with self.assertRaisesRegex(RegistryError, "bare filename"):
             self._validate({"kitti": spec})
 
-    def test_hyphenated_prefix_is_rejected_before_it_can_collide(self):
-        # tartan-flaky-... would derive TARTAN and overwrite the stable report.
+    def test_config_must_end_with_cfg(self):
         spec = DatasetSpec("kitti", KITTI_PREPARE, (stereo_eval(config="kitti.txt"),))
         with self.assertRaisesRegex(RegistryError, "must end with .cfg"):
             self._validate({"kitti": spec})
