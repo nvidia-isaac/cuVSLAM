@@ -1,7 +1,7 @@
 {
   "name": "Main branch protection",
   "target": "branch",
-  "enforcement": "evaluate",
+  "enforcement": "active",
   "conditions": {
     "ref_name": {
       "include": ["~DEFAULT_BRANCH"],
@@ -16,31 +16,30 @@
       "type": "non_fast_forward"
     },
     {
+      "type": "required_linear_history"
+    },
+    {
       "type": "pull_request",
       "parameters": {
-        "dismiss_stale_reviews_on_push": true,
+        "dismiss_stale_reviews_on_push": false,
         "require_code_owner_review": true,
         "require_last_push_approval": true,
-        "required_approving_review_count": 3,
-        "required_review_thread_resolution": true
+        "require_extra_approval_for_unattributed_changes": true,
+        "required_approving_review_count": 1,
+        "required_review_thread_resolution": true,
+        "allowed_merge_methods": ["squash"]
       }
     },
     {
       "type": "required_status_checks",
       "parameters": {
-        "strict_required_status_checks_policy": true,
+        "strict_required_status_checks_policy": false,
         "do_not_enforce_on_create": true,
         "required_status_checks": [
-          { "context": "PR status" }
+          { "context": "PR status", "integration_id": 15368 }
         ]
       }
     }
   ],
-  "bypass_actors": [
-    {
-      "actor_id": 1,
-      "actor_type": "OrganizationAdmin",
-      "bypass_mode": "always"
-    }
-  ]
+  "bypass_actors": []
 }
