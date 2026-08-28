@@ -77,11 +77,18 @@ class PinholeCamera:
 
 def _parse_timestamp_ns(text: str, source: str, line_number: int) -> int:
     try:
-        return int(Decimal(text) * NANOSECONDS_PER_SECOND)
+        seconds = Decimal(text)
     except (InvalidOperation, ValueError) as exc:
         raise RgbdConversionError(
             f"{source} line {line_number}: invalid timestamp {text!r}"
         ) from exc
+    # Decimal accepts "inf" and "nan"; converting either to an integer raises
+    # something outside this module's error contract.
+    if not seconds.is_finite():
+        raise RgbdConversionError(
+            f"{source} line {line_number}: non-finite timestamp {text!r}"
+        )
+    return int(seconds * NANOSECONDS_PER_SECOND)
 
 
 def _data_lines(text: str) -> List[Tuple[int, List[str]]]:
@@ -143,6 +150,12 @@ def read_tum_trajectory(text: str, source: str) -> List[TrajectoryRow]:
             raise RgbdConversionError(
                 f"{source} line {line_number}: invalid numeric value"
             ) from exc
+        # float() accepts "inf" and "nan". Left alone they propagate into every
+        # interpolated pose as silently wrong ground truth rather than an error.
+        if not all(math.isfinite(value) for value in values):
+            raise RgbdConversionError(
+                f"{source} line {line_number}: non-finite pose value"
+            )
         if previous is not None and timestamp <= previous:
             raise RgbdConversionError(
                 f"{source} line {line_number}: timestamps must be strictly increasing"
@@ -167,6 +180,10 @@ def associate(
     candidate pair within the tolerance is considered, the smallest time
     difference wins, and both frames are then consumed. Ties break on timestamp,
     so the result does not depend on iteration order.
+
+    Both indices must be sorted by timestamp, which
+    :func:`read_timestamp_index` guarantees. Unsorted input does not raise; the
+    sliding window below simply stops early and silently drops pairs.
     """
     if max_difference_ns <= 0:
         raise RgbdConversionError("association tolerance must be positive")

@@ -63,6 +63,14 @@ class TestTimestampIndex(unittest.TestCase):
         with self.assertRaisesRegex(rgbd.RgbdConversionError, "strictly increasing"):
             rgbd.read_timestamp_index("2.0 rgb/a.png\n1.0 rgb/b.png\n", "rgb.txt")
 
+    def test_non_finite_timestamps_are_rejected(self):
+        # Decimal accepts these, and converting them to an integer raises
+        # outside the module's error contract unless they are caught first.
+        for text in ("inf", "-inf", "Infinity", "nan"):
+            with self.subTest(timestamp=text):
+                with self.assertRaises(rgbd.RgbdConversionError):
+                    rgbd.read_timestamp_index(f"{text} rgb/a.png\n", "rgb.txt")
+
     def test_empty_index_is_rejected(self):
         with self.assertRaisesRegex(rgbd.RgbdConversionError, "no entries"):
             rgbd.read_timestamp_index("# only a comment\n", "rgb.txt")
@@ -81,6 +89,14 @@ class TestTrajectory(unittest.TestCase):
     def test_zero_length_quaternion_is_rejected(self):
         with self.assertRaisesRegex(rgbd.RgbdConversionError, "zero-length quaternion"):
             rgbd.read_tum_trajectory("1.0 0 0 0 0 0 0 0\n", "gt")
+
+    def test_non_finite_pose_values_are_rejected(self):
+        # float() accepts these, and they would otherwise reach every
+        # interpolated pose as silently wrong ground truth.
+        with self.assertRaisesRegex(rgbd.RgbdConversionError, "non-finite pose value"):
+            rgbd.read_tum_trajectory("1.0 inf 0 0 0 0 0 1\n", "gt")
+        with self.assertRaisesRegex(rgbd.RgbdConversionError, "non-finite pose value"):
+            rgbd.read_tum_trajectory("1.0 0 0 0 nan 0 0 1\n", "gt")
 
 
 class TestAssociation(unittest.TestCase):
@@ -107,10 +123,27 @@ class TestAssociation(unittest.TestCase):
         self.assertEqual(len(rgbd.associate(color, depth, MILLISECOND_NS + 1)), 1)
 
     def test_result_is_sorted_by_colour_timestamp(self):
-        color = [(0, "rgb/a.png"), (100, "rgb/b.png"), (200, "rgb/c.png")]
-        depth = [(205, "depth/c.png"), (5, "depth/a.png"), (95, "depth/b.png")]
+        # Offsets shrink along the sequence, so closest-first consumes the last
+        # colour frame first and the output order comes from the final sort
+        # rather than the scan order. Both indices are sorted, as
+        # read_timestamp_index guarantees for real input.
+        color = [(0, "rgb/a.png"), (100_000, "rgb/b.png"), (200_000, "rgb/c.png")]
+        depth = [(50_000, "depth/a.png"), (130_000, "depth/b.png"), (200_000, "depth/c.png")]
         matched = rgbd.associate(color, depth, MILLISECOND_NS)
-        self.assertEqual([pair[0] for pair in matched], [0, 100, 200])
+        self.assertEqual([pair[0] for pair in matched], [0, 100_000, 200_000])
+        self.assertEqual(
+            [pair[3] for pair in matched],
+            ["depth/a.png", "depth/b.png", "depth/c.png"],
+        )
+
+    def test_window_pairs_every_frame_when_the_tolerance_is_tight(self):
+        # A tolerance on the scale of the data, rather than one that spans the
+        # whole index, is what exercises the sliding window.
+        color = [(0, "rgb/a.png"), (100_000, "rgb/b.png"), (200_000, "rgb/c.png")]
+        depth = [(1_000, "depth/a.png"), (101_000, "depth/b.png"), (201_000, "depth/c.png")]
+        matched = rgbd.associate(color, depth, 2_000)
+        self.assertEqual(len(matched), 3)
+        self.assertEqual([pair[1] for pair in matched], ["rgb/a.png", "rgb/b.png", "rgb/c.png"])
 
     def test_non_positive_tolerance_is_rejected(self):
         with self.assertRaisesRegex(rgbd.RgbdConversionError, "tolerance must be positive"):
