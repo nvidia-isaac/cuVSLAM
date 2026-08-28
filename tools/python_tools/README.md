@@ -74,7 +74,7 @@ Reinstall the binding after rebuilding `libcuvslam.so`.
 | `prepare_kitti` | Download KITTI odometry archives, convert them to cuVSLAM format, and generate KITTI reporter configs. |
 | `prepare_euroc` | Download and convert all 11 official EuRoC MAV sequences, or an explicit subset, to portable EDEX and reporter configs. |
 | `prepare_tartan` | Download TartanGround data and convert TartanGround stereo pairs or compatible TartanAir-layout sequences to EDEX. |
-| `prepare_tum` | Download and lay out the TUM RGB-D `freiburg3_long_office_household` dataset. |
+| `prepare_tum` | Download and convert the 15 evaluated TUM RGB-D freiburg3 sequences, or an explicit subset, to portable EDEX and a reporter config. |
 | `cuvslam_tracker` | Run one EDEX sequence or supported video input through cuVSLAM. |
 | `cuvslam_reporter` | Run one dataset config and generate report outputs. |
 | `cuvslam_validator` | Run multiple reporter configs, combine results, and apply validation checks. |
@@ -185,12 +185,44 @@ data.
 
 Use `--variant multicamera` for EDEX conversion from the 12-camera TartanGround image variant. Both TartanGround variants also download metadata, including `pose_lcam_*` and `pose_rcam_*` files. The multicamera variant converts each complete stereo orientation, for example `P2000_front`, `P2000_left`, and `P2000_right`. The `multisensor` variant is intended for the RGB-D/IMU example data and can be downloaded with `--download-only`.
 
-`prepare_tum` runs `cuvslam_tools.dataset_preparation.tum.prepare`. It downloads and lays out the TUM RGB-D `freiburg3_long_office_household` dataset and copies the bundled rig calibration into the sequence folder.
+`prepare_tum` runs `cuvslam_tools.dataset_preparation.tum.prepare`. It downloads the 15 evaluated TUM RGB-D
+freiburg3 sequence archives and converts them to portable EDEX with a reporter config.
 
 ```bash
 prepare_tum \
     --raw-dir /path/to/datasets/tum/raw \
     --output-dir /path/to/datasets/converted
+
+# One sequence, for a quick check (roughly 1.5 GB of source data)
+prepare_tum \
+    --raw-dir /path/to/datasets/tum/raw \
+    --output-dir /path/to/datasets/converted \
+    --sequences rgbd_dataset_freiburg3_long_office_household
+```
+
+The prepared root is `/path/to/datasets/converted/tum`. It contains `tum-rgbd_slam.cfg` and
+`dataset_metadata.json`. Every sequence contains `stereo.edex`, `frame_metadata.jsonl`, camera-aligned `gt.txt`,
+colour PNGs under `00/`, and depth PNGs under `01/`.
+
+Colour and depth frames are associated within 1 ms, which pairs the two views of a single Kinect capture and
+rejects pairs stitched across neighbouring captures. Ground truth is interpolated onto the associated frame times
+(linear translation, slerp rotation) and written relative to the first frame. Frames outside the ground-truth time
+span are dropped so every frame has a pose.
+
+Depth is copied from the source unchanged: 16-bit PNG in TUM units, declared in the EDEX as
+`depth_scale_factor: 5000`. All 15 sequences come from the freiburg3 camera series, whose published pinhole
+intrinsics carry no distortion, so one calibration covers the selection.
+
+Run the combined RGB-D ODOM+SLAM report with:
+
+```bash
+cuvslam_reporter \
+    --test_config /path/to/datasets/converted/tum/tum-rgbd_slam.cfg \
+    --datasets_root /path/to/datasets/converted \
+    --output_root /tmp/cuvslam-tum-reports \
+    --odometry_mode rgbd \
+    --async_sba false \
+    --use_segments
 ```
 
 All dataset preparation commands support `--force-download` and `--download-only`, default to `./datasets/<dataset>/raw`
