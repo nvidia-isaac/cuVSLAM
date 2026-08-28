@@ -123,8 +123,12 @@ def read_timestamp_index(text: str, source: str) -> List[IndexEntry]:
 
 
 def _normalize_quaternion(quaternion: List[float], source: str, line_number: int) -> List[float]:
-    norm = sum(component * component for component in quaternion) ** 0.5
-    if norm <= 0.0:
+    # hypot rather than sum-of-squares: squaring overflows to infinity for large
+    # components, which normalizes to an all-zero quaternion and then to an
+    # identity rotation, and underflows to zero for tiny ones, which reads as a
+    # zero-length quaternion. Both are silent corruption of the ground truth.
+    norm = math.hypot(*quaternion)
+    if norm <= 0.0 or not math.isfinite(norm):
         raise RgbdConversionError(f"{source} line {line_number}: zero-length quaternion")
     return [component / norm for component in quaternion]
 
@@ -255,7 +259,7 @@ def _slerp(first: Sequence[float], second: Sequence[float], weight: float) -> Li
         first_weight = math.sin((1.0 - weight) * angle) / sine
         second_weight = math.sin(weight * angle) / sine
         blended = [a * first_weight + b * second_weight for a, b in zip(first, target)]
-    norm = sum(component * component for component in blended) ** 0.5
+    norm = math.hypot(*blended)
     return [component / norm for component in blended]
 
 

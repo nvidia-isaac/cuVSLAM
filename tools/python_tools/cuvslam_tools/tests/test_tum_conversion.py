@@ -90,6 +90,19 @@ class TestTrajectory(unittest.TestCase):
         with self.assertRaisesRegex(rgbd.RgbdConversionError, "zero-length quaternion"):
             rgbd.read_tum_trajectory("1.0 0 0 0 0 0 0 0\n", "gt")
 
+    def test_extreme_quaternion_magnitudes_still_normalize(self):
+        # Squaring these overflows to infinity and underflows to zero
+        # respectively. Either one silently yields an all-zero quaternion, which
+        # quaternion_to_matrix then reads as an identity rotation.
+        for magnitude in ("1e308", "1e-200"):
+            with self.subTest(magnitude=magnitude):
+                rows = rgbd.read_tum_trajectory(f"1.0 0 0 0 {magnitude} 0 0 0\n", "gt")
+                self.assertEqual(rows[0][2], [1.0, 0.0, 0.0, 0.0])
+                self.assertEqual(
+                    rgbd.quaternion_to_matrix(rows[0][2]),
+                    [[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]],
+                )
+
     def test_non_finite_pose_values_are_rejected(self):
         # float() accepts these, and they would otherwise reach every
         # interpolated pose as silently wrong ground truth.
