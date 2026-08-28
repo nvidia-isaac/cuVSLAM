@@ -63,6 +63,9 @@ public:
   const int max_poses = 20;
 
 private:
+  // Result of the last evaluate_cost(), readable once its stream has been synchronized.
+  float evaluated_cost(int num_observations) const;
+
   cuda::GPUArrayPinned<float> gpu_cost_{1};
   cuda::GPUArrayPinned<int> gpu_num_skipped_{1};
   cuda::GPUArrayPinned<float> predicted_reduction_{1};
@@ -97,6 +100,17 @@ bool SchurComplementBundlerGpu::solve(BundleAdjustmentProblem& problem) {
 }
 
 SchurComplementBundlerGpu::Impl::Impl(int max_points, int max_poses) : max_points(max_points), max_poses(max_poses) {}
+
+float SchurComplementBundlerGpu::Impl::evaluated_cost(int num_observations) const {
+  // An observation that lands behind its camera is skipped and adds nothing, so a state that hides
+  // every one of them would otherwise score a perfect zero. That is infeasible, not optimal - the
+  // IMU bundler reports it the same way.
+  if (gpu_num_skipped_[0] == num_observations) {
+    return std::numeric_limits<float>::infinity();
+  }
+
+  return gpu_cost_[0];
+}
 
 bool SchurComplementBundlerGpu::Impl::solve(BundleAdjustmentProblem& problem) {
   TRACE_EVENT ev = profiler_domain_.trace_event("SchurComplementBundlerGpu::Impl::solve()", profiler_color_);
@@ -136,9 +150,10 @@ bool SchurComplementBundlerGpu::Impl::solve(BundleAdjustmentProblem& problem) {
                                  problem.robustifier_scale, stream_.get_stream()));
 
   gpu_cost_.copy(cuda::GPUCopyDirection::ToCPU, stream_.get_stream());
+  gpu_num_skipped_.copy(cuda::GPUCopyDirection::ToCPU, stream_.get_stream());
   RETURN_IF_FAILED(cudaStreamSynchronize(stream_.get_stream()));
 
-  const float initial_cost = gpu_cost_[0];
+  const float initial_cost = evaluated_cost(num_observations);
   float current_cost = initial_cost;
   problem.initial_cost = initial_cost;
   problem.last_cost = initial_cost;
@@ -182,9 +197,18 @@ bool SchurComplementBundlerGpu::Impl::solve(BundleAdjustmentProblem& problem) {
     points_poses_update_max_.copy(cuda::GPUCopyDirection::ToCPU, stream_.get_stream());
     predicted_reduction_.copy(cuda::GPUCopyDirection::ToCPU, stream_.get_stream());
     gpu_cost_.copy(cuda::GPUCopyDirection::ToCPU, stream_.get_stream());
+    gpu_num_skipped_.copy(cuda::GPUCopyDirection::ToCPU, stream_.get_stream());
 
     RETURN_IF_FAILED(cudaStreamSynchronize(stream_.get_stream()));
-    auto cost = gpu_cost_[0];
+
+    if (!lm_step_.solve_succeeded()) {
+      // A pose block that is not positive definite leaves a partial factor, and the step
+      // back-substituted from it is meaningless. Damping is the cure, so reject the step.
+      lambda *= 5.f;
+      continue;
+    }
+
+    const float cost = evaluated_cost(num_observations);
     float predicted_relative_reduction = predicted_reduction_[0];
 
     if (current_cost < initial_cost * std::numeric_limits<float>::epsilon()) {
@@ -202,8 +226,7 @@ bool SchurComplementBundlerGpu::Impl::solve(BundleAdjustmentProblem& problem) {
     // cost = inf and current_cost = inf.
     // The only possible case is cost = inf (step leads outside of feasible region).
     assert(std::isfinite(current_cost));
-#warning Fix assert(std::isfinite(predicted_relative_reduction))
-    // FIXME assert(std::isfinite(predicted_relative_reduction));
+    assert(std::isfinite(predicted_relative_reduction));
     TraceDebugIf(!std::isfinite(predicted_relative_reduction), "predicted_relative_reduction is not finite");
     auto rho = (1.f - cost / current_cost) / predicted_relative_reduction;
 

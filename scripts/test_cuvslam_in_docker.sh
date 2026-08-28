@@ -26,6 +26,6 @@ docker run --runtime=nvidia --gpus all --rm $TTY_FLAG \
     set -euo pipefail
     trap "chown -R $HOST_UID:$HOST_GID /output" EXIT
     cd /output/build
-    GTEST_FILTER=-*SpeedUp*:*Speedup* GTEST_RANDOM_SEED=42 \
+    GTEST_RANDOM_SEED=42 \
       ctest --output-on-failure --output-junit /output/cpp-test-results.xml
   '

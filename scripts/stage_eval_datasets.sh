@@ -15,6 +15,8 @@ S3_KEY_PREFIX="${_s3_path#*/}"
 
 mkdir -p "$LOCAL_DATASETS_DIR"
 
+echo "Dataset cache root: $LOCAL_DATASETS_DIR (RUNNER_LOCAL_DATASETS_ROOT=$RUNNER_LOCAL_DATASETS_ROOT)"
+
 have_aws=false
 if command -v aws >/dev/null 2>&1; then
   if [ -n "${AWS_ACCESS_KEY_ID:-}" ] && [ -n "${AWS_SECRET_ACCESS_KEY:-}" ]; then
@@ -24,24 +26,50 @@ if command -v aws >/dev/null 2>&1; then
   fi
 fi
 
+# One greppable line per staged dataset. The step duration is already visible in
+# the Actions UI, but that covers every dataset at once, so report the per-dataset
+# figures the UI cannot show: payload size, file count, and the throughput that
+# makes two runs comparable at a glance.
+report_staging_profile() {
+  local name="$1" bytes="$2" total_seconds="$3" file_count="$4"
+  local mib="unknown" total_rate="unknown"
+  if [[ "$bytes" =~ ^[0-9]+$ ]]; then
+    mib=$((bytes / 1048576))
+    [ "$total_seconds" -gt 0 ] && total_rate=$((mib / total_seconds))
+  fi
+  echo "staging profile: dataset=$name mib=$mib total_s=$total_seconds" \
+    "files=$file_count total_mib_s=$total_rate"
+}
+
 stage_one() {
   local name="$1"
   local s3_key="${S3_KEY_PREFIX}/${name}.tar"
   local s3_uri="s3://${S3_BUCKET}/${s3_key}"
   local dest="$LOCAL_DATASETS_DIR/$name"
   local etag_file="$dest/.s3_etag"
-  local tmp_tar
-  tmp_tar="$(mktemp "${TMPDIR:-/tmp}/cuvslam-${name}.XXXXXX.tar")"
 
   remote_etag=""
+  remote_bytes=""
   if $have_aws; then
-    remote_etag="$(aws s3api head-object --bucket "$S3_BUCKET" --key "$s3_key" --query ETag --output text 2>/dev/null || true)"
+    # ETag and size come from one request so the staging profile can report
+    # throughput without stat(2) on a local copy.
+    head_output="$(aws s3api head-object --bucket "$S3_BUCKET" --key "$s3_key" \
+      --query '[ETag,ContentLength]' --output text 2>/dev/null || true)"
+    if [ -n "$head_output" ]; then
+      remote_etag="$(printf '%s' "$head_output" | cut -f1)"
+      remote_bytes="$(printf '%s' "$head_output" | cut -f2)"
+    fi
   fi
 
   cache_has_files=false
   if [ -d "$dest" ] && [ -n "$(find "$dest" -type f ! -name '.s3_etag' -print -quit 2>/dev/null)" ]; then
     cache_has_files=true
   fi
+
+  cached_etag="none"
+  [ -f "$etag_file" ] && cached_etag="$(cat "$etag_file")"
+  echo "Cache check $name: have_aws=$have_aws cache_has_files=$cache_has_files" \
+    "force_restage=$FORCE_RESTAGE remote_etag=${remote_etag:-none} cached_etag=$cached_etag"
 
   if [ "$FORCE_RESTAGE" != "true" ] && $cache_has_files; then
     if ! $have_aws; then
@@ -60,15 +88,32 @@ stage_one() {
   fi
 
   echo "Staging $name from $s3_uri -> $dest"
-  aws s3 cp "$s3_uri" "$tmp_tar" --no-progress
+  # Extract as the object arrives: peak disk is one expanded dataset instead of
+  # the archive plus its expansion, which matters most for the largest corpora.
+  # Extraction lands in a sibling directory and is swapped in only on success,
+  # so a failed transfer leaves any existing cache intact.
+  local staging_dir="${dest}.partial"
+  rm -rf "$staging_dir"
+  mkdir -p "$staging_dir"
+  local stream_start=$SECONDS
+  # pipefail is set at the top of this script, so a failed download or a
+  # truncated archive fails the pipeline rather than yielding a partial dataset.
+  if ! aws s3 cp "$s3_uri" - --no-progress | tar -xf - -C "$staging_dir"; then
+    rm -rf "$staging_dir"
+    echo "Error: staging $name failed; existing cache at $dest is unchanged." >&2
+    exit 1
+  fi
+  local stream_seconds=$((SECONDS - stream_start))
+
   rm -rf "$dest"
-  mkdir -p "$dest"
-  tar -xf "$tmp_tar" -C "$dest"
-  rm -f "$tmp_tar"
+  mv "$staging_dir" "$dest"
   if [ -n "$remote_etag" ]; then
     echo "$remote_etag" > "$etag_file"
   fi
-  echo "  staged $(find "$dest" -type f ! -name '.s3_etag' | wc -l) files under $dest"
+  local file_count
+  file_count="$(find "$dest" -type f ! -name '.s3_etag' | wc -l)"
+  echo "  staged $file_count files under $dest"
+  report_staging_profile "$name" "$remote_bytes" "$stream_seconds" "$file_count"
 }
 
 for name in "${EVAL_DATASET_NAMES[@]}"; do
