@@ -28,6 +28,7 @@
 #include "common/isometry.h"
 #include "common/log.h"
 #include "common/vector_3t.h"
+#include "epipolar/camera_selection.h"
 
 #include "common/rerun.h"
 #include "visualizer/visualizer.hpp"
@@ -61,7 +62,7 @@ void logLandmarks(const std::vector<std::reference_wrapper<const Vector3T>>& lan
     // Transform landmark from world frame to camera frame
     Vector3T landmark_camera = camera_from_world * landmark_world;
 
-    if (landmark_camera.z() <= 0.0f) {
+    if (!epipolar::IsDepthInFront(landmark_camera.z())) {
       continue;
     }
 

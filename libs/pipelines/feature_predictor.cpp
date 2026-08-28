@@ -17,6 +17,8 @@
 
 #include "pipelines/feature_predictor.h"
 
+#include "epipolar/camera_selection.h"
+
 namespace cuvslam::pipelines {
 
 FeaturePredictor::FeaturePredictor(const map::UnifiedMap& map, const camera::Rig& rig) : map_(map), rig_(rig){};
@@ -45,8 +47,7 @@ void FeaturePredictor::predictObservations(const Isometry3T& world_from_rig, int
 
     const Vector3T camPoint = cameraFromWorld * point_3d;
 
-    // TODO: (msmirnov) make this a parameter
-    if (camPoint.z() > 0.f) {
+    if (epipolar::IsDepthInFront(camPoint.z())) {
       // Project into the camera (OpenCV +Z forward). "denormalize" = project to pixels, "normalize" = unproject.
       Vector2T xy(camPoint.x() / camPoint.z(), camPoint.y() / camPoint.z());
       Vector2T uv;
