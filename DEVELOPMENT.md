@@ -80,9 +80,9 @@ tool mode: set `Odometry::Config::async_sba = false` and
 Neither of those is the default, and no tool flag sets them.
 
 **IO warm-up trick.** The first run of a sequence pays the disk-read cost
-(TGA files page in). The second run reads from the OS page cache, so the
-per-frame time you measure is pure tracking time. Always run twice when
-benchmarking — discard the first.
+(TGA files page in). The second run reads from the OS page cache, so what you
+measure is tracking with cached input — read and decode are still in there,
+just not the disk. Always run twice when benchmarking — discard the first.
 
 ### CI cadence
 

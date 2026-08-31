@@ -6,8 +6,8 @@ library. If you only call SOF from above, you do not need to read this.
 
 ## Implementation invariants
 
-The LK tracker here is not a textbook Lucas-Kanade. Every setting and behavior
-below is load-bearing — they were tuned together across automotive, drone,
+The LK tracker here is not a textbook Lucas-Kanade. The settings and behaviors
+below are all load-bearing — they were tuned together across automotive, drone,
 warehouse, indoor, and street datasets. Changing any one of them in isolation
 will improve one ODD and break another.
 
@@ -59,8 +59,10 @@ set below the measured count to absorb GPU/driver jitter.
 
 ## Touching the LK tuning
 
-If you genuinely need to change a constant (patch size, level count,
-convergence threshold, NCC threshold, gradient threshold, …):
+If you genuinely need to change any entry in that table — a constant (patch
+size, level count, convergence threshold, NCC threshold, gradient threshold, …)
+or a behavior (level fallback, patch padding, mean subtraction, the convergence
+check):
 
 1. Run the `tools/cuvslam_app` reporter both with and without the change, on
    every dataset enabled in `scripts/run_eval.sh` (KITTI and EuRoC today —

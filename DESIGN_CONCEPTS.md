@@ -256,9 +256,16 @@ sites then take what they need with `acquire()` / `acquire_with_depth()` and
 hold an `ImageContextPtr`. The allocation itself is done by `ImageContext` and
 the `cuda::` image and pyramid types it owns, not by the manager. Because call
 sites neither allocate image memory nor branch on where it came from, the pool
-plus the context is the extension point: adding another backend (pinned host
-memory, unified memory, a non-CUDA accelerator buffer) means changing how a
-context is built and pooled, not a global refactor.
+plus the context is the extension point: another CUDA allocator kind (pinned
+host memory, unified memory) means changing how a context is built and pooled,
+not a global refactor.
+
+A genuinely non-CUDA accelerator is a bigger job and should not be read into
+the rule above. `ImageContext` exposes a CUDA-typed interface — `gpu_image()`,
+`build_gpu_image_pyramid(..., cudaStream_t)`, `cuda::GaussianGPUImagePyramid`
+— and the SOF, descriptor and RGB-D paths consume those types directly. Such a
+backend needs a backend-neutral interface and changes in every consumer of it,
+on top of adapting context construction and pooling.
 
 **What to avoid:**
 
