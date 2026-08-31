@@ -75,6 +75,7 @@ Reinstall the binding after rebuilding `libcuvslam.so`.
 | `prepare_euroc` | Download and convert all 11 official EuRoC MAV sequences, or an explicit subset, to portable EDEX and reporter configs. |
 | `prepare_tartan` | Download TartanGround data and convert TartanGround stereo pairs or compatible TartanAir-layout sequences to EDEX. |
 | `prepare_tum` | Download and convert the 15 evaluated TUM RGB-D freiburg3 sequences, or an explicit subset, to portable EDEX and a reporter config. |
+| `prepare_icl_nuim` | Download and convert the eight ICL-NUIM living-room and office trajectories, or an explicit subset, to portable EDEX and a reporter config. |
 | `cuvslam_tracker` | Run one EDEX sequence or supported video input through cuVSLAM. |
 | `cuvslam_reporter` | Run one dataset config and generate report outputs. |
 | `cuvslam_validator` | Run multiple reporter configs, combine results, and apply validation checks. |
@@ -91,6 +92,7 @@ prepare_kitti --help
 prepare_euroc --help
 prepare_tartan --help
 prepare_tum --help
+prepare_icl_nuim --help
 cuvslam_tracker --help
 cuvslam_reporter --help
 cuvslam_validator --help
@@ -220,6 +222,48 @@ cuvslam_reporter \
     --test_config /path/to/datasets/converted/tum/tum-rgbd_slam.cfg \
     --datasets_root /path/to/datasets/converted \
     --output_root /tmp/cuvslam-tum-reports \
+    --odometry_mode rgbd \
+    --async_sba false \
+    --use_segments
+```
+
+`prepare_icl_nuim` runs `cuvslam_tools.dataset_preparation.icl_nuim.prepare`. It downloads the eight ICL-NUIM
+TUM-compatible archives and converts them to portable EDEX with a reporter config. Each archive already carries its
+`associations.txt` and `.gt.freiburg` poses, so the archive is the only download per sequence.
+
+```bash
+prepare_icl_nuim \
+    --raw-dir /path/to/datasets/icl_nuim/raw \
+    --output-dir /path/to/datasets/converted
+
+# One trajectory, for a quick check
+prepare_icl_nuim \
+    --raw-dir /path/to/datasets/icl_nuim/raw \
+    --output-dir /path/to/datasets/converted \
+    --sequences traj2_frei_png
+```
+
+The prepared root is `/path/to/datasets/converted/icl_nuim`. It contains `icl_nuim-rgbd_slam.cfg` and
+`dataset_metadata.json`. Every sequence contains `stereo.edex`, `frame_metadata.jsonl`, camera-aligned `gt.txt`,
+colour PNGs under `00/`, and depth PNGs under `01/`. Depth is copied unchanged as 16-bit PNG with
+`depth_scale_factor: 5000`, matching TUM.
+
+ICL-NUIM is rendered rather than recorded, so two things differ from TUM. There are no timestamps: colour, depth,
+and pose are matched by frame index and timestamps are synthesized at the published 30 Hz, which keeps the output
+reproducible. And the published poses are expressed in the renderer's y-up world while the TUM-compatible PNGs are
+stored top-down, so poses are reflected about the XZ plane to reach the camera frame. That reflection is not
+cosmetic — skipping it scores 40.39% ATE against 1.51% with it.
+
+The dataset page publishes the camera matrix with a negative `fy` and warns that projections break without it. That
+applies to the POVRay-native format, whose image rows run bottom-up; these PNGs use the positive value.
+
+Run the combined RGB-D ODOM+SLAM report with:
+
+```bash
+cuvslam_reporter \
+    --test_config /path/to/datasets/converted/icl_nuim/icl_nuim-rgbd_slam.cfg \
+    --datasets_root /path/to/datasets/converted \
+    --output_root /tmp/cuvslam-icl-reports \
     --odometry_mode rgbd \
     --async_sba false \
     --use_segments

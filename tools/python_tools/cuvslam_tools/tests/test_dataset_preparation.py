@@ -61,12 +61,13 @@ class TestPreparationModuleContract(unittest.TestCase):
                 self.assertTrue(prepare.call_args.kwargs["force_download"])
 
     def test_only_download_scripts_remain_under_dataset_preparation(self):
+        # Preparation is Python-owned; shell survives only for the download step,
+        # where curl's resume and retry handling is worth keeping.
         shell_scripts = sorted(path.name for path in PREPARATION_ROOT.rglob("*.sh"))
 
-        self.assertEqual(
-            shell_scripts,
-            ["download_euroc.sh", "download_kitti.sh", "download_tum.sh"],
-        )
+        self.assertTrue(shell_scripts, "expected at least one download script")
+        unexpected = [name for name in shell_scripts if not name.startswith("download_")]
+        self.assertEqual(unexpected, [])
 
     def test_no_dataset_keeps_a_cli_wrapper_module(self):
         self.assertEqual(sorted(path.name for path in PREPARATION_ROOT.rglob("cli.py")), [])

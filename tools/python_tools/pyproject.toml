@@ -38,6 +38,7 @@ where = ["."]
 "cuvslam_tools.dataset_preparation.euroc" = ["download_*.sh"]
 "cuvslam_tools.dataset_preparation.tartan.dataset_converter" = ["cfg/*.json"]
 "cuvslam_tools.dataset_preparation.tum" = ["download_*.sh"]
+"cuvslam_tools.dataset_preparation.icl_nuim" = ["download_*.sh"]
 "cuvslam_tools.reporter" = ["report_templates/*.html"]
 "cuvslam_tools.datasets_validator" = ["configs/*.cfg"]
 
@@ -51,6 +52,7 @@ prepare_kitti = "cuvslam_tools.dataset_preparation.kitti.prepare:main"
 prepare_euroc = "cuvslam_tools.dataset_preparation.euroc.prepare:main"
 prepare_tartan = "cuvslam_tools.dataset_preparation.tartan.prepare:main"
 prepare_tum = "cuvslam_tools.dataset_preparation.tum.prepare:main"
+prepare_icl_nuim = "cuvslam_tools.dataset_preparation.icl_nuim.prepare:main"
 cuvslam_tracker = "cuvslam_tools.tracker.cli:main"
 cuvslam_reporter = "cuvslam_tools.reporter.cli:main"
 cuvslam_validator = "cuvslam_tools.datasets_validator.cli:main"
