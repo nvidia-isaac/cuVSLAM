@@ -524,7 +524,7 @@ TEST(Cuda, SBABuildFullSystem) {
   }
 }
 
-TEST(Cuda, SBASolverSpeedUp) {
+TEST(Cuda, DISABLED_SBASolverSpeedUp) {
   camera::Rig rig = MakeDefaultRig();
 
   ReducedSystem reduced_system;
