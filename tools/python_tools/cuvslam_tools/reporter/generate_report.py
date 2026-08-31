@@ -220,21 +220,29 @@ def _git_output(args: List[str], repo_dir: str) -> Tuple[str, str]:
     return completed.stdout.strip(), ""
 
 
-def _git_source_metadata(repo_dir: str) -> Tuple[str, str, str]:
-    """Return (commit_sha, branch_name, commit_timestamp) describing repo_dir."""
+def _git_source_metadata(repo_dir: str) -> Tuple[str, str, str, str]:
+    """Return (commit_sha, branch_name, commit_timestamp, warning) describing repo_dir.
+
+    The warning is empty once provenance resolves. Otherwise it explains why the three
+    fields are unknown, so the report carries the reason too; reports are published as
+    an artifact of their own and are read without the run log next to them.
+    """
     commit_sha, error = _git_output(['rev-parse', 'HEAD'], repo_dir)
     if not commit_sha:
-        print(f"Warning: report provenance unavailable for {repo_dir}: {error}")
-        return "unknown", "unknown", "unknown"
+        warning = f"Provenance unavailable for {repo_dir}: {error}"
+        print(f"Warning: {warning}")
+        return "unknown", "unknown", "unknown", warning
 
     branch_name, _ = _git_output(['rev-parse', '--abbrev-ref', 'HEAD'], repo_dir)
     commit_ts, _ = _git_output(['show', '-s', '--format=%ci', commit_sha], repo_dir)
-    return commit_sha, branch_name or "unknown", commit_ts.replace(' ', '/') or "unknown"
+    return commit_sha, branch_name or "unknown", commit_ts.replace(' ', '/') or "unknown", ""
 
 
 def generate_report(test_folder, comments, stats, generate_pdf=False, config_name=None):
     """Generate an HTML report and optionally render a PDF copy."""
-    commit_sha, branch_name, commit_ts = _git_source_metadata(os.path.dirname(os.path.abspath(__file__)))
+    commit_sha, branch_name, commit_ts, provenance_warning = _git_source_metadata(
+        os.path.dirname(os.path.abspath(__file__))
+    )
 
     date_time = datetime.now().replace(microsecond=0).astimezone().isoformat('/')
 
@@ -287,6 +295,7 @@ def generate_report(test_folder, comments, stats, generate_pdf=False, config_nam
         branch_name=branch_name,
         commit_sha=commit_sha,
         commit_ts=commit_ts,
+        provenance_warning=provenance_warning,
         comments=comments,
         stats=stats_for_html,
         total=total,
@@ -327,6 +336,7 @@ def generate_report(test_folder, comments, stats, generate_pdf=False, config_nam
                 branch_name=branch_name,
                 commit_sha=commit_sha,
                 commit_ts=commit_ts,
+                provenance_warning=provenance_warning,
                 comments=comments,
                 stats=stats_for_pdf,
                 total=total,

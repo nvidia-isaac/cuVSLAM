@@ -44,27 +44,29 @@ class TestGitSourceMetadata(unittest.TestCase):
             run.side_effect = [mock.Mock(stdout=f"{value}\n") for value in outputs]
             metadata = generate_report._git_source_metadata("/cuvslam")
 
-        self.assertEqual(metadata, ("1234567890abcdef", "feature/branch", "2026-08-31/17:08:04/+0000"))
+        self.assertEqual(metadata, ("1234567890abcdef", "feature/branch", "2026-08-31/17:08:04/+0000", ""))
 
-    def test_unreadable_repository_degrades_to_unknown(self):
+    def test_unreadable_repository_degrades_to_unknown_with_a_reason(self):
         error = subprocess.CalledProcessError(128, ["git", "rev-parse", "HEAD"])
-        error.stderr = "fatal: detected dubious ownership in repository at '/cuvslam'\n"
+        error.stderr = "fatal: detected dubious ownership in repository at /cuvslam\n"
         with mock.patch.object(generate_report.subprocess, "run", side_effect=error):
-            metadata = generate_report._git_source_metadata("/cuvslam")
+            commit_sha, branch_name, commit_ts, warning = generate_report._git_source_metadata("/cuvslam")
 
-        self.assertEqual(metadata, ("unknown", "unknown", "unknown"))
+        self.assertEqual((commit_sha, branch_name, commit_ts), ("unknown", "unknown", "unknown"))
+        self.assertIn("detected dubious ownership", warning)
 
-    def test_missing_git_degrades_to_unknown(self):
+    def test_missing_git_degrades_to_unknown_with_a_reason(self):
         with mock.patch.object(generate_report.subprocess, "run", side_effect=FileNotFoundError("git")):
-            metadata = generate_report._git_source_metadata("/cuvslam")
+            commit_sha, branch_name, commit_ts, warning = generate_report._git_source_metadata("/cuvslam")
 
-        self.assertEqual(metadata, ("unknown", "unknown", "unknown"))
+        self.assertEqual((commit_sha, branch_name, commit_ts), ("unknown", "unknown", "unknown"))
+        self.assertIn("git is not installed", warning)
 
     def test_git_failure_is_not_written_to_the_process_log(self):
         """A directory outside any repository must not leak git's fatal error to stderr."""
         script = (
             "from cuvslam_tools.reporter.generate_report import _git_source_metadata\n"
-            "print(_git_source_metadata(__import__('sys').argv[1]))\n"
+            "print(_git_source_metadata(__import__('sys').argv[1])[:3])\n"
         )
         env = dict(os.environ)
         package_root = Path(generate_report.__file__).resolve().parents[2]
@@ -82,6 +84,55 @@ class TestGitSourceMetadata(unittest.TestCase):
 
         self.assertNotIn("fatal:", completed.stderr)
         self.assertIn("('unknown', 'unknown', 'unknown')", completed.stdout)
+
+
+class TestReportProvenanceHeader(unittest.TestCase):
+    """The report header must explain unknown provenance without the run log."""
+
+    UNRESOLVED = ("unknown", "unknown", "unknown", "Provenance unavailable for /cuvslam: git is not installed")
+    RESOLVED = ("1234567890abcdef", "feature/branch", "2026-08-31/17:08:04/+0000", "")
+
+    def _render_html(self, metadata):
+        with tempfile.TemporaryDirectory() as output_dir:
+            with mock.patch.object(generate_report, "_git_source_metadata", return_value=metadata):
+                generate_report.generate_report(output_dir, [], [])
+            return (Path(output_dir) / "report.html").read_text(encoding="utf-8")
+
+    def _render_pdf_html(self, metadata):
+        captured = {}
+
+        class CapturingHtml:
+            def __init__(self, **kwargs):
+                captured["html"] = kwargs["string"]
+
+            def write_pdf(self, path):
+                Path(path).write_bytes(b"")
+
+        weasyprint = types.ModuleType("weasyprint")
+        weasyprint.HTML = CapturingHtml
+        with tempfile.TemporaryDirectory() as output_dir:
+            with mock.patch.dict(sys.modules, {"weasyprint": weasyprint}):
+                with mock.patch.object(generate_report, "_git_source_metadata", return_value=metadata):
+                    generate_report.generate_report(output_dir, [], [], generate_pdf=True)
+        return captured["html"]
+
+    def test_warning_is_rendered_in_the_html_report(self):
+        html = self._render_html(self.UNRESOLVED)
+
+        self.assertIn("git is not installed", html)
+
+    def test_warning_is_rendered_in_the_pdf_report(self):
+        pdf_html = self._render_pdf_html(self.UNRESOLVED)
+
+        self.assertIn("git is not installed", pdf_html)
+
+    def test_resolved_provenance_is_reported_without_a_warning_row(self):
+        for name, rendered in (("html", self._render_html(self.RESOLVED)),
+                               ("pdf", self._render_pdf_html(self.RESOLVED))):
+            with self.subTest(report=name):
+                self.assertIn("1234567890abcdef", rendered)
+                self.assertIn("feature/branch", rendered)
+                self.assertNotIn("Provenance", rendered)
 
 
 class TestPdfGeneration(unittest.TestCase):
