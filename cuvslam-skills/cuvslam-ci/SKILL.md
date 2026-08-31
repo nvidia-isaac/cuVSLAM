@@ -68,7 +68,7 @@ Do not reintroduce gzip: provisioning uses uncompressed `.tar` to cap memory on 
 - Nightly configs: `nightly.yml` `strategy.matrix.include`. Eval runs on entries flagged `eval: true` (currently the four x86 configs). Every eval-enabled config needs the `RUNNER_STORAGE_ROOT` mount and configured repo secrets/variables; the `cuvslam-ci:local` image supplies the AWS CLI.
 - Jetson CUDA micro-benchmarks run only on nightly entries flagged `benchmark: true` (currently Orin and Thor). The normal C++ test invocation continues to exclude `*SpeedUp*` and `*Speedup*`; the dedicated benchmark wrapper runs the positive filter and excludes `DISABLED_` tests.
 - PR config: `pr-verify.yml` runs eval only on `build-test-x86` (fork-gated). `EVAL_CONFIG` is the static slug label for the PR table.
-- Active dataset set: `DATASETS[]` in `run_eval.sh` is global; PR and nightly run the same set. There is no per-pipeline dataset selection today. To run a different set in PR vs nightly, add an env-selected subset in `run_eval.sh` and have each workflow pass the selector.
+- Active dataset set: `run_eval.sh` reads every record from `dataset_registry eval-records`, so PR and nightly run the same set. There is no per-pipeline selection today. To differ, filter the records by suite in the registry and have each workflow pass the selector; `EvalSpec.suites` already carries the membership.
 
 ## Task: preserve nightly version provenance
 

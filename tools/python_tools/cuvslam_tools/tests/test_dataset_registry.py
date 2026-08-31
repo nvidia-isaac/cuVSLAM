@@ -150,6 +150,35 @@ class TestValidationFailures(unittest.TestCase):
         with self.assertRaisesRegex(RegistryError, "odometry_mode must be one of"):
             self._validate({"kitti": spec})
 
+    def test_repeated_odometry_mode_fails(self):
+        # cuvslam_app takes the last value, so a repeat could run an unchecked mode.
+        record = stereo_eval(args=("--odometry_mode=multicamera", "--odometry_mode=rgbd"))
+        with self.assertRaisesRegex(RegistryError, "exactly one --odometry_mode flag, found 2"):
+            self._validate({"kitti": DatasetSpec("kitti", KITTI_PREPARE, (record,))})
+
+    def test_missing_odometry_mode_fails(self):
+        record = stereo_eval(args=("--use_segments",))
+        with self.assertRaisesRegex(RegistryError, "exactly one --odometry_mode flag, found 0"):
+            self._validate({"kitti": DatasetSpec("kitti", KITTI_PREPARE, (record,))})
+
+    def test_collision_across_datasets_is_caught_when_scoped_to_one(self):
+        # A collision belongs to the pair, so narrowing to one dataset must not hide it.
+        datasets = {
+            "kitti": DatasetSpec("kitti", KITTI_PREPARE, (stereo_eval(config="tartan-a.cfg"),)),
+            "tartan": DatasetSpec(
+                "tartan",
+                "cuvslam_tools.dataset_preparation.tartan.prepare",
+                (stereo_eval(config="tartan-b.cfg"),),
+            ),
+        }
+        original = dataset_registry.DATASETS
+        dataset_registry.DATASETS = datasets
+        try:
+            with self.assertRaisesRegex(RegistryError, "same KPI identity"):
+                dataset_registry.validate(["kitti"])
+        finally:
+            dataset_registry.DATASETS = original
+
     def test_malformed_argument_tuple_fails(self):
         spec = DatasetSpec("kitti", KITTI_PREPARE, (stereo_eval(args=("odometry_mode=multicamera",)),))
         with self.assertRaisesRegex(RegistryError, "non-empty tuple of --flag"):
@@ -228,6 +257,13 @@ class TestVerifyStaged(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             (Path(root) / "kitti-vio_slam_gt.cfg").write_text("{not json", encoding="utf-8")
             with self.assertRaisesRegex(RegistryError, "not valid JSON"):
+                dataset_registry.verify_staged(spec, Path(root))
+
+    def test_json_that_is_not_an_object_fails(self):
+        spec = dataset_registry.dataset("kitti")
+        with tempfile.TemporaryDirectory() as root:
+            (Path(root) / "kitti-vio_slam_gt.cfg").write_text("[]", encoding="utf-8")
+            with self.assertRaisesRegex(RegistryError, "must hold a JSON object, got list"):
                 dataset_registry.verify_staged(spec, Path(root))
 
 

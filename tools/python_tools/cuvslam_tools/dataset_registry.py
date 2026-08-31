@@ -75,12 +75,19 @@ class EvalSpec:
         return Path(self.config).stem.split("-")[0].upper()
 
     @property
+    def odometry_modes(self) -> tuple[str, ...]:
+        """Every --odometry_mode value in the argument tuple."""
+        return tuple(a.split("=", 1)[1] for a in self.args if a.startswith("--odometry_mode="))
+
+    @property
     def odometry_mode(self) -> str:
-        """Value of the --odometry_mode flag, which decides the KPI type."""
-        for argument in self.args:
-            if argument.startswith("--odometry_mode="):
-                return argument.split("=", 1)[1]
-        return ""
+        """The --odometry_mode value, which decides the KPI type.
+
+        Validation requires exactly one, so a repeated flag cannot make this
+        disagree with the last-wins value cuvslam_app would actually use.
+        """
+        modes = self.odometry_modes
+        return modes[0] if len(modes) == 1 else ""
 
 
 @dataclass(frozen=True)
@@ -213,7 +220,13 @@ def _validate_eval(spec: DatasetSpec, record: EvalSpec) -> None:
         )
     if not record.args or not all(isinstance(a, str) and a.startswith("--") for a in record.args):
         raise RegistryError(f"{where}: args must be a non-empty tuple of --flag strings")
-    if record.odometry_mode not in ODOMETRY_MODES:
+    modes = record.odometry_modes
+    if len(modes) != 1:
+        raise RegistryError(
+            f"{where}: expected exactly one --odometry_mode flag, found {len(modes)}. "
+            "cuvslam_app takes the last value, so a repeat would run a mode the registry did not check"
+        )
+    if modes[0] not in ODOMETRY_MODES:
         raise RegistryError(
             f"{where}: --odometry_mode must be one of {', '.join(ODOMETRY_MODES)}; "
             "an unrecognized mode silently becomes a STEREO KPI type"
@@ -227,15 +240,36 @@ def _validate_eval(spec: DatasetSpec, record: EvalSpec) -> None:
         raise RegistryError(f"{where}: gating must be one of {', '.join(GATING_POLICIES)}")
 
 
-def validate(dataset_ids: Iterable[str] | None = None) -> None:
-    """Check the whole registry, or the named subset, and raise on the first fault."""
-    specs = [dataset(name) for name in dataset_ids] if dataset_ids else provisionable_datasets()
+def _validate_kpi_identities() -> None:
+    """Reject two records that would produce the same KPI keys.
 
+    Always spans the whole registry: a collision is a property of a pair, so
+    checking one dataset in isolation cannot see it.
+    """
+    seen: dict[tuple[str, str], str] = {}
+    for spec in DATASETS.values():
+        for record in spec.evals:
+            key = (record.kpi_prefix, record.odometry_mode)
+            origin = f"{spec.dataset_id}/{record.config}"
+            if key in seen:
+                raise RegistryError(
+                    f"{origin} derives the same KPI identity as '{seen[key]}': prefix {key[0]} "
+                    f"with mode {key[1]}. One would silently overwrite the other in the KPI report."
+                )
+            seen[key] = origin
+
+
+def validate(dataset_ids: Iterable[str] | None = None) -> None:
+    """Check the registry and raise on the first fault.
+
+    ``dataset_ids`` narrows the per-dataset checks; KPI identities are compared
+    across every dataset regardless.
+    """
     for key, spec in DATASETS.items():
         if key != spec.dataset_id:
             raise RegistryError(f"registry key '{key}' does not match dataset_id '{spec.dataset_id}'")
 
-    seen_keys: dict[tuple[str, str], str] = {}
+    specs = [dataset(name) for name in dataset_ids] if dataset_ids else provisionable_datasets()
     for spec in specs:
         if not _DATASET_ID.match(spec.dataset_id):
             raise RegistryError(f"dataset id '{spec.dataset_id}' must be lower-case alphanumeric or underscore")
@@ -249,14 +283,8 @@ def validate(dataset_ids: Iterable[str] | None = None) -> None:
             raise RegistryError(f"{spec.dataset_id}: preparation module not found: {spec.prepare_module}")
         for record in spec.evals:
             _validate_eval(spec, record)
-            key = (record.kpi_prefix, record.odometry_mode)
-            if key in seen_keys:
-                raise RegistryError(
-                    f"{spec.dataset_id} eval '{record.config}' derives the same KPI identity as "
-                    f"'{seen_keys[key]}': prefix {key[0]} with mode {key[1]}. One would silently "
-                    "overwrite the other in the KPI report."
-                )
-            seen_keys[key] = f"{spec.dataset_id}/{record.config}"
+
+    _validate_kpi_identities()
 
 
 def verify_staged(spec: DatasetSpec, root: Path) -> None:
@@ -272,9 +300,14 @@ def verify_staged(spec: DatasetSpec, root: Path) -> None:
         if not config_path.is_file():
             raise RegistryError(f"{spec.dataset_id}: staged config not found: {config_path}")
         try:
-            declared = json.loads(config_path.read_text(encoding="utf-8")).get("dataset_folder")
+            config = json.loads(config_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
             raise RegistryError(f"{spec.dataset_id}: {config_path} is not valid JSON: {exc}") from exc
+        if not isinstance(config, dict):
+            raise RegistryError(
+                f"{spec.dataset_id}: {config_path} must hold a JSON object, got {type(config).__name__}"
+            )
+        declared = config.get("dataset_folder")
         if declared != expected:
             raise RegistryError(
                 f"{spec.dataset_id}: {record.config} declares dataset_folder {declared!r}, "

@@ -28,7 +28,7 @@ flowchart TD
     prereq --> build --> stage --> wrapper
   end
   subgraph container [cuvslam:local container]
-    inner["run_eval.sh (DATASETS[])"]
+    inner["run_eval.sh (registry eval-records)"]
     app["cuvslam_app.py per dataset"]
     kpi["cuvslam_kpi_report.py collect\nraw + report JSON"]
     inner --> app --> kpi
