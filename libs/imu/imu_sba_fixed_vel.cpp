@@ -17,6 +17,7 @@
 
 #include "common/log_types.h"
 #include "common/statistic.h"
+#include "epipolar/near_plane.h"
 #include "math/robust_cost_function.h"
 #include "math/twist.h"
 
@@ -250,7 +251,7 @@ float IMUBundlerCpuFixedVel::EvaluateCost(const ImuBAProblem& problem, const int
 
     p_c = cam_from_imu[camera_idx] * imu_from_w[pose_idx] * p_w;
 
-    if (p_c.z() > 0) {
+    if (epipolar::IsDepthInFront(p_c.z())) {
       r = p_c.topRows(2) / p_c.z() - problem.observation_xys[obs];
       cost += ROBUST_COST(r.dot(problem.observation_infos[obs] * r), problem.robustifier_scale);
     } else {
@@ -500,7 +501,7 @@ void IMUBundlerCpuFixedVel::UpdateModel(internal::ModelFunction& model, ImuBAPro
     Matrix3T Rimu_from_w = imu_from_w.linear();
     Matrix3T Rcam_from_imu = cam_from_imu[camera_idx].linear();
 
-    if (p_c.z() > 0) {
+    if (epipolar::IsDepthInFront(p_c.z())) {
       Vector2T prediction = p_c.topRows(2) / p_c.z();
       Vector2T r = prediction - problem.observation_xys[obs];
 

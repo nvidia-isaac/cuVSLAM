@@ -43,6 +43,7 @@ set(LIBS
     camera
     common
     cuvslam_math
+    epipolar
     profiler
 )
 

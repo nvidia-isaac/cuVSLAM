@@ -20,6 +20,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <random>
 
 #include "benchmark_utils.h"
@@ -27,6 +28,7 @@
 #include "common/include_gtest.h"
 #include "cuda_modules/cuda_kernels/cuda_sba_v1.h"
 #include "cuda_modules/sba.h"
+#include "epipolar/near_plane.h"
 #include "math/twist.h"
 #include "profiler/profiler.h"
 #include "sba/bundle_adjustment_problem.h"
@@ -37,6 +39,9 @@ using namespace cuvslam;
 
 using ProfilerDomain = cuvslam::profiler::DefaultProfiler::DomainHelper;
 ProfilerDomain helper("SBA_TEST");
+
+// Keeps the randomly generated parity problems away from the near plane, where 1/z blows up.
+constexpr float kWellConditionedDepth = 1.f;
 
 void GenerateProblem(sba::BundleAdjustmentProblem& problem, const camera::Rig& rig,
                      const Matrix2T& obs_info = Matrix2T::Identity(), const int num_points = 400,
@@ -82,7 +87,11 @@ void GenerateProblem(sba::BundleAdjustmentProblem& problem, const camera::Rig& r
         // cam space
         Vec3 p = rig.camera_from_rig[cam_idx] * rig_from_world[pose_idx] * points[point_idx];
 
-        if (p.z() <= 1.f) {
+        // Not the near plane: this is scene construction. The parity tests compare CPU and GPU
+        // solutions with isApprox, and an observation just past MINIMUM_HITHER has 1/z Jacobian
+        // entries that wreck the conditioning of the random problem. Where the guard actually sits
+        // is pinned by the near-field tests below.
+        if (p.z() <= kWellConditionedDepth) {
           continue;
         }
 
@@ -116,6 +125,55 @@ static camera::Rig MakeDefaultRig() {
   rig.camera_from_rig[1].translate(Eigen::Vector3f(0.125f, 0., 0.f));
 
   return rig;
+}
+
+// GenerateProblem draws depths in [2, 16] m, so nothing in the suite ever lands in the band between
+// the near plane and the 1 m the bundlers used to carry. This one places every point at a chosen
+// camera-frame depth instead, and projects without a near filter, so a test can put observations
+// deliberately on either side of MINIMUM_HITHER.
+void GenerateFixedDepthProblem(sba::BundleAdjustmentProblem& problem, const camera::Rig& rig, float min_depth,
+                               float max_depth, int num_points = 60, int num_poses = 3) {
+  using namespace cuvslam;
+  problem = {};
+
+  std::mt19937 rng(7);
+  std::uniform_real_distribution<float> depth(min_depth, max_depth);
+  std::uniform_real_distribution<float> xy(-0.05f, 0.05f);
+  // Keep the pose perturbation far smaller than the depth band so every observation stays on the
+  // side of the near plane the caller asked for.
+  std::uniform_real_distribution<float> dt(-0.01f, 0.01f);
+  std::uniform_real_distribution<float> domega(-0.01f, 0.01f);
+
+  for (int i = 0; i < num_poses; ++i) {
+    Vector6T log_pose;
+    log_pose << domega(rng), domega(rng), domega(rng), dt(rng), dt(rng), dt(rng);
+    Isometry3T pose;
+    math::Exp(pose, log_pose);
+    problem.rig_from_world.push_back(pose);
+  }
+
+  for (int i = 0; i < num_points; ++i) {
+    problem.points.emplace_back(xy(rng), xy(rng), depth(rng));
+  }
+
+  for (int pose_idx = 0; pose_idx < num_poses; ++pose_idx) {
+    for (int point_idx = 0; point_idx < num_points; ++point_idx) {
+      for (int8_t cam_idx = 0; cam_idx < rig.num_cameras; ++cam_idx) {
+        const Vector3T p = rig.camera_from_rig[cam_idx] * problem.rig_from_world[pose_idx] * problem.points[point_idx];
+        problem.observation_xys.push_back(p.topRows(2) / p.z());
+        problem.observation_infos.push_back(Matrix2T::Identity());
+        problem.camera_ids.push_back(cam_idx);
+        problem.point_ids.push_back(point_idx);
+        problem.pose_ids.push_back(pose_idx);
+      }
+    }
+  }
+
+  problem.num_fixed_points = 0;
+  problem.num_fixed_key_frames = 1;
+  problem.rig.num_cameras = rig.num_cameras;
+  problem.rig.camera_from_rig[0] = rig.camera_from_rig[0];
+  problem.rig.camera_from_rig[1] = rig.camera_from_rig[1];
 }
 
 cuda::sba::temporary::ReducedSystem to_temporary(
@@ -1294,6 +1352,113 @@ TEST(Cuda, SBASolverConvergesOnExactObservations) {
   EXPECT_TRUE(std::isfinite(problem.last_cost));
   EXPECT_LT(problem.last_cost, problem.initial_cost);
   EXPECT_LT(problem.iterations, problem.max_iterations);
+}
+
+// The visual bundlers used to skip anything closer than a hard-coded 1 m while the rest of the
+// system guarded at MINIMUM_HITHER (0.1). Landmarks in that band reached the bundler, then carried
+// zero weight in the cost and in both Jacobians. These pin the guard where the shared predicate
+// puts it, in the two places the CPU bundler applies it.
+TEST(Cuda, SBANearFieldObservationsCarryWeightCpu) {
+  camera::Rig rig = MakeDefaultRig();
+
+  sba::BundleAdjustmentProblem problem;
+  GenerateFixedDepthProblem(problem, rig, 0.3f, 0.8f);
+  ASSERT_FALSE(problem.observation_xys.empty());
+
+  ModelFunction model;
+  UpdateModel(model, problem);
+
+  for (size_t i = 0; i < problem.observation_xys.size(); ++i) {
+    EXPECT_GT(model.point_jacobians[i].norm(), 0.f) << "near-field observation " << i << " was skipped";
+    EXPECT_GT(model.robustifier_weights[i], 0.f) << "near-field observation " << i << " got zero weight";
+  }
+
+  ParameterUpdate update;
+  update.point.resize(problem.points.size(), Vector3T::Zero());
+  update.pose.resize(problem.rig_from_world.size(), Isometry3T::Identity());
+  // Observations are exact projections, so a fed-back state costs nothing - the point is that the
+  // cost is a real number rather than the infinity a fully skipped problem reports.
+  EXPECT_TRUE(std::isfinite(EvaluateCost(problem, update)));
+}
+
+// Same problem through the GPU bundler: the two implementations have always agreed on where this
+// plane sits, and they still have to.
+TEST(Cuda, SBANearFieldObservationsCarryWeightGpu) {
+  camera::Rig rig = MakeDefaultRig();
+
+  sba::BundleAdjustmentProblem problem;
+  GenerateFixedDepthProblem(problem, rig, 0.3f, 0.8f);
+  problem.max_iterations = 10;
+
+  sba::SchurComplementBundlerGpu bundler;
+  EXPECT_TRUE(bundler.solve(problem));
+  EXPECT_TRUE(std::isfinite(problem.initial_cost)) << "every near-field observation was skipped on the GPU";
+}
+
+// The other side of the boundary: moving the guard onto MINIMUM_HITHER only means something if
+// points inside the near plane are still refused. A problem made entirely of them is infeasible,
+// which is what the num_skipped path reports. Checked on both implementations, because each kernel
+// carries its own copy of the comparison.
+TEST(Cuda, SBAObservationsInsideTheNearPlaneAreSkipped) {
+  camera::Rig rig = MakeDefaultRig();
+
+  sba::BundleAdjustmentProblem problem;
+  GenerateFixedDepthProblem(problem, rig, 0.02f, 0.08f);
+  ASSERT_FALSE(problem.observation_xys.empty());
+
+  ModelFunction model;
+  UpdateModel(model, problem);
+  for (size_t i = 0; i < problem.observation_xys.size(); ++i) {
+    EXPECT_EQ(model.point_jacobians[i].norm(), 0.f) << "observation " << i << " inside the near plane was kept";
+    EXPECT_EQ(model.robustifier_weights[i], 0.f);
+  }
+
+  ParameterUpdate update;
+  update.point.resize(problem.points.size(), Vector3T::Zero());
+  update.pose.resize(problem.rig_from_world.size(), Isometry3T::Identity());
+  EXPECT_FALSE(std::isfinite(EvaluateCost(problem, update)));
+
+  const int num_points = static_cast<int>(problem.points.size());
+  const int num_poses = static_cast<int>(problem.rig_from_world.size());
+  const int num_observations = static_cast<int>(problem.observation_xys.size());
+
+  cuda::sba::GPUBundleAdjustmentProblem gpu_problem(num_points, num_poses, num_observations);
+  cuda::sba::GPUModelFunction gpu_function(num_observations);
+  cuda::sba::GPUParameterUpdate gpu_update(num_points, num_poses);
+  gpu_problem.set_rig(rig);
+
+  cuda::GPUArrayPinned<float> gpu_cost{1};
+  cuda::GPUArrayPinned<int> gpu_num_skipped{1};
+  cuda::Stream s;
+
+  sba::BundleAdjustmentProblem gpu_side = problem;
+  ASSERT_TRUE(gpu_problem.set(gpu_side, s.get_stream()));
+  CUDA_CHECK(update_model(gpu_function.meta(), gpu_problem.meta(), gpu_side.robustifier_scale, s.get_stream()));
+
+  cuda::sba::temporary::ParameterUpdate update_temp = to_temporary(update);
+  ASSERT_TRUE(gpu_update.set(update_temp, s.get_stream()));
+  CUDA_CHECK(evaluate_cost(gpu_cost.ptr(), gpu_num_skipped.ptr(), gpu_problem.meta(), gpu_update.meta(),
+                           gpu_side.robustifier_scale, s.get_stream()));
+
+  gpu_cost.copy(cuda::GPUCopyDirection::ToCPU, s.get_stream());
+  gpu_num_skipped.copy(cuda::GPUCopyDirection::ToCPU, s.get_stream());
+  CUDA_CHECK(cudaStreamSynchronize(s.get_stream()));
+
+  ASSERT_TRUE(gpu_problem.get(gpu_side, s.get_stream()));
+  ModelFunction gpu_model;
+  ASSERT_TRUE(gpu_function.get(gpu_side.observation_xys.size(), gpu_model, s.get_stream()));
+  for (int i = 0; i < num_observations; ++i) {
+    EXPECT_EQ(gpu_model.point_jacobians[i].norm(), 0.f) << "GPU observation " << i << " inside the near plane was kept";
+    EXPECT_EQ(gpu_model.robustifier_weights[i], 0.f);
+  }
+
+  // evaluate_cost_kernel leaves a fully skipped problem at a cost of zero; the infinity is applied
+  // by SchurComplementBundlerGpu::Impl::evaluated_cost from num_skipped, so assert on that and map
+  // it the way the bundler does to line the check up with the CPU one above.
+  EXPECT_EQ(gpu_num_skipped[0], num_observations);
+  const float gpu_evaluated_cost =
+      gpu_num_skipped[0] == num_observations ? std::numeric_limits<float>::infinity() : gpu_cost[0];
+  EXPECT_FALSE(std::isfinite(gpu_evaluated_cost));
 }
 
 TEST(Cuda, DISABLED_SBABuildReducedSystem) {
