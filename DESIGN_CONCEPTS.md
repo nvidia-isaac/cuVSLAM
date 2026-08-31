@@ -205,6 +205,17 @@ not introduce error.
 **Rule:** Treat odometry as the externally consumed surface and SLAM as an
 internal benchmark feature. Reviewer expectations differ accordingly.
 
+**This is about emphasis, not support status.** The SLAM APIs are supported
+public API: `Slam::Config`, map persistence, `LocalizeInMap()`,
+`LocalizationSettings`, `GetLoopClosurePoses()` and the pose-graph, landmark
+and metrics accessors are declared in `libs/cuvslam/cuvslam2.h`, bound in
+`python/cuvslam2.cpp`, covered by `libs/slam/test/` and `python/test/test_map.py`,
+and demonstrated by `examples/kitti/track_kitti_slam.py`. They carry the same
+compatibility expectations as the rest of the public API, and the README, API
+reference and examples are right to present SLAM as available. Nothing in this
+section makes them experimental or deprecated — it sets where product emphasis
+and review effort go.
+
 **Why:** Production users almost never consume cuVSLAM's SLAM output
 directly. Practical robotics applications need access to the map, semantic
 labelling, custom serialization, and integration with planners — so users

@@ -68,6 +68,11 @@ check):
    every dataset enabled in `scripts/run_eval.sh` (KITTI and EuRoC today —
    the other entries are commented out). See
    [DEVELOPMENT.md — Accuracy regression workflow](../../DEVELOPMENT.md#accuracy-regression-workflow-reporter).
+   The same eval runs in CI, but the dataset and eval jobs are fork-gated: they
+   run only when the pull request branch lives in this repository, so a PR from
+   a fork gets no dataset run at all and the local run is the only signal. The
+   gate is defined in
+   [cuvslam-ci — Hard rules](../../cuvslam-skills/cuvslam-ci/SKILL.md#hard-rules).
 2. Compare the resulting PDFs page by page. A constant that improves one
    dataset by 0.5% but breaks another by 5% is a regression, not a win.
 3. Apply the drift-interpretation rule: < 2 % drift = the number is
