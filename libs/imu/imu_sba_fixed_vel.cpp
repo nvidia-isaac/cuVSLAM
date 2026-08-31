@@ -17,7 +17,7 @@
 
 #include "common/log_types.h"
 #include "common/statistic.h"
-#include "epipolar/camera_selection.h"
+#include "epipolar/near_plane.h"
 #include "math/robust_cost_function.h"
 #include "math/twist.h"
 

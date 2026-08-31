@@ -12,32 +12,40 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
-"""Download the TUM RGB-D freiburg3 archive and lay out the sequence for the examples.
-
-This is provisioning only: it extracts the archive and copies the rig calibration
-into place. It does not convert the dataset to the cuVSLAM reporter format.
-"""
+"""Download the TUM RGB-D freiburg3 sequences and convert them to cuVSLAM data."""
 
 import argparse
-import shutil
 import tarfile
 from pathlib import Path, PurePosixPath
-from typing import List, Optional
+from typing import List, Optional, Sequence
 
 from cuvslam_tools.dataset_preparation.common import (
     PreparationError,
     add_common_arguments,
     dataset_file,
+    require_nonempty_files,
     resolve_output_dir,
     resolve_raw_dir,
     run_download_script,
     run_preparation,
 )
 
-DATASET_NAME = "tum"
+from . import convert_tum
+
+DATASET_NAME = convert_tum.DATASET_ID
 DOWNLOAD_SCRIPT = "download_tum.sh"
-RIG_FILE = "freiburg3_rig.yaml"
-SEQUENCE_NAME = "rgbd_dataset_freiburg3_long_office_household"
+
+DATASET_ARTIFACTS = (
+    "dataset_metadata.json",
+    "tum-rgbd_slam.cfg",
+)
+SEQUENCE_ARTIFACTS = (
+    "stereo.edex",
+    "frame_metadata.jsonl",
+    "gt.txt",
+    "00/000000.png",
+    "01/000000.png",
+)
 
 
 def _check_member_path(member_path: str, description: str) -> None:
@@ -63,63 +71,98 @@ def extract_archive(archive: Path, destination: Path) -> None:
         raise PreparationError(f"failed to extract {archive}: {exc}") from exc
 
 
+def extract_sequence(archive: Path, destination: Path) -> Path:
+    """Extract one sequence archive and return the directory holding its files."""
+    extract_archive(archive, destination)
+    # Each TUM archive holds exactly one top-level directory named after the
+    # sequence, but locate it rather than assume, so a renamed archive fails here
+    # instead of midway through conversion.
+    candidates = [entry for entry in destination.iterdir() if entry.is_dir()]
+    if len(candidates) != 1:
+        names = ", ".join(sorted(entry.name for entry in candidates)) or "none"
+        raise PreparationError(
+            f"{archive.name}: expected one top-level directory in the archive, found: {names}"
+        )
+    return candidates[0]
+
+
 def prepare(
     raw_dir: Optional[Path] = None,
     output_dir: Optional[Path] = None,
+    sequences: Optional[Sequence[str]] = None,
     force_download: bool = False,
     download_only: bool = False,
 ) -> Path:
-    """Download and lay out the TUM RGB-D sequence, and return the prepared root.
+    """Download the required TUM archives, convert them, and return the prepared root.
 
-    Returns the raw directory when ``download_only`` is set, otherwise the sequence
-    directory holding the extracted data and the rig calibration.
+    Only the archives holding the selected sequences are downloaded.
+    ``sequences`` defaults to all 15 evaluated freiburg3 sequences. Returns the
+    raw directory when ``download_only`` is set, otherwise the converted root.
     """
     raw_dir = resolve_raw_dir(raw_dir, DATASET_NAME)
     output_dir = resolve_output_dir(output_dir)
+    # Only an omitted selection means "all 15"; an explicitly empty one is an
+    # error the converter reports, not a request to convert everything.
+    selected = list(sequences) if sequences is not None else None
 
     print(f"Raw dir    : {raw_dir}")
     print(f"Output dir : {output_dir}")
     print()
 
+    try:
+        archives = convert_tum.required_archives(selected)
+    except convert_tum.ConversionError as exc:
+        raise PreparationError(str(exc)) from exc
+
     download_arguments = [str(raw_dir)]
     if force_download:
         download_arguments.append("--force")
+    if selected is not None:
+        for archive in archives:
+            download_arguments.extend(["--archive", archive])
     run_download_script(dataset_file(__file__, DOWNLOAD_SCRIPT), download_arguments)
 
     if download_only:
         return raw_dir
 
     dataset_dir = output_dir / DATASET_NAME
-    sequence_dir = dataset_dir / SEQUENCE_NAME
-    archive = raw_dir / f"{SEQUENCE_NAME}.tgz"
+    print()
+    print(f"Converting TUM RGB-D data to {dataset_dir} …")
+    try:
+        convert_tum.convert(
+            raw_dir, dataset_dir, selected, extract_sequence=extract_sequence
+        )
+    except convert_tum.ConversionError as exc:
+        raise PreparationError(str(exc)) from exc
+
+    require_nonempty_files(dataset_dir, DATASET_ARTIFACTS, "converter")
+    for sequence in selected or convert_tum.ALL_SEQS:
+        require_nonempty_files(dataset_dir / sequence, SEQUENCE_ARTIFACTS, "converter")
 
     print()
-    print(f"Extracting {archive.name} …")
-    dataset_dir.mkdir(parents=True, exist_ok=True)
-    extract_archive(archive, dataset_dir)
-
-    if not sequence_dir.is_dir():
-        raise PreparationError(f"expected {sequence_dir} after extraction")
-
-    print("Copying rig calibration …")
-    shutil.copyfile(dataset_file(__file__, RIG_FILE), sequence_dir / RIG_FILE)
-
-    print()
-    print(f"done — dataset ready at {sequence_dir}")
-    return sequence_dir
+    print(f"done — portable TUM RGB-D dataset ready at {dataset_dir}")
+    return dataset_dir
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     """Parse command-line arguments and prepare the TUM RGB-D dataset."""
     parser = argparse.ArgumentParser(
         prog="prepare_tum",
-        description="Download and lay out the TUM RGB-D freiburg3 long_office_household dataset.",
+        description=(
+            "Download and convert the 15 evaluated TUM RGB-D freiburg3 sequences "
+            "to portable cuVSLAM EDEX data."
+        ),
     )
-    add_common_arguments(
-        parser,
-        DATASET_NAME,
-        label="TUM",
-        download_only_help="Download archives but skip dataset layout.",
+    add_common_arguments(parser, DATASET_NAME, label="TUM")
+    parser.add_argument(
+        "--sequences",
+        nargs="+",
+        choices=convert_tum.ALL_SEQS,
+        metavar="SEQUENCE",
+        help=(
+            "Convert an explicit sequence subset, such as "
+            "rgbd_dataset_freiburg3_long_office_household. The default is all 15 sequences."
+        ),
     )
     args = parser.parse_args(argv)
 
@@ -127,6 +170,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         lambda: prepare(
             raw_dir=args.raw_dir,
             output_dir=args.output_dir,
+            sequences=args.sequences,
             force_download=args.force_download,
             download_only=args.download_only,
         )
