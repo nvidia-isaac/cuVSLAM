@@ -66,7 +66,7 @@ Below is an example demonstrating loop closure detection. When the vehicle revis
 
 ![Loop Closure Demonstration](../assets/tutorial_kitti_lc.gif)
 
-To enable SLAM in PyCuVSLAM, you must provide a SLAM configuration when initializing the tracker:
+To enable SLAM in PyCuVSLAM, pick a SLAM tracker mode — the mode is what turns SLAM on, not the configuration. `slam_config` is optional and only overrides the SLAM defaults, which already suit `Mode.OdometryWithSlamRealtime`; the example below passes one to show the fields discussed further down:
 
 ```python
 odom_cfg = cuvslam.Odometry.Config(async_sba=True)
