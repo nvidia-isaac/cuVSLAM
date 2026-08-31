@@ -18,6 +18,14 @@ if [ ! -d "$OUTPUT_DIR/build" ]; then
   exit 1
 fi
 
+# The source tree is bind-mounted from the host while this container runs as root, so
+# Git rejects it as dubiously owned. Allow-list it so the reporter can read the commit
+# SHA, branch, and commit date for the report header. Provenance is not worth failing
+# the evaluation over, so a missing or unusable Git only downgrades those fields.
+if ! git config --global --add safe.directory /cuvslam; then
+  echo "Warning: could not mark /cuvslam as a safe Git directory; report provenance will be unknown"
+fi
+
 EVAL_STATS="$OUTPUT_DIR/eval/stats"
 mkdir -p "$EVAL_STATS"
 [ "$WRITE_HISTORY" = "true" ] && mkdir -p "$KPI_HISTORY"

@@ -200,39 +200,41 @@ def _save_avg_error_plots(stats, plots_dir: str) -> Tuple[Optional[str], Optiona
     return avg_tl_path, avg_rl_path
 
 
+def _git_output(args: List[str], repo_dir: str) -> Tuple[str, str]:
+    """Run one git command in repo_dir and return (stdout, error_message).
+
+    Git output is captured rather than inherited so that a failed provenance query
+    cannot write to the log of whatever pipeline is running the reporter.
+    """
+    try:
+        completed = subprocess.run(
+            ['git', '-C', repo_dir] + args,
+            capture_output=True,
+            universal_newlines=True,
+            check=True,
+        )
+    except FileNotFoundError:
+        return "", "git is not installed"
+    except subprocess.CalledProcessError as exc:
+        return "", " ".join((exc.stderr or "").split()) or f"git exited with {exc.returncode}"
+    return completed.stdout.strip(), ""
+
+
+def _git_source_metadata(repo_dir: str) -> Tuple[str, str, str]:
+    """Return (commit_sha, branch_name, commit_timestamp) describing repo_dir."""
+    commit_sha, error = _git_output(['rev-parse', 'HEAD'], repo_dir)
+    if not commit_sha:
+        print(f"Warning: report provenance unavailable for {repo_dir}: {error}")
+        return "unknown", "unknown", "unknown"
+
+    branch_name, _ = _git_output(['rev-parse', '--abbrev-ref', 'HEAD'], repo_dir)
+    commit_ts, _ = _git_output(['show', '-s', '--format=%ci', commit_sha], repo_dir)
+    return commit_sha, branch_name or "unknown", commit_ts.replace(' ', '/') or "unknown"
+
+
 def generate_report(test_folder, comments, stats, generate_pdf=False, config_name=None):
     """Generate an HTML report and optionally render a PDF copy."""
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-
-    # Get commit SHA
-    try:
-        commit_sha = subprocess.check_output(
-            ['git', 'rev-parse', 'HEAD'],
-            universal_newlines=True,
-            cwd=script_dir
-        ).strip()
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        commit_sha = "unknown"
-
-    # Get branch name
-    try:
-        branch_name = subprocess.check_output(
-            ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
-            universal_newlines=True,
-            cwd=script_dir
-        ).strip()
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        branch_name = "unknown"
-
-    # Get commit timestamp
-    try:
-        commit_ts = subprocess.check_output(
-            ['git', 'show', '-s', '--format=%ci', commit_sha],
-            universal_newlines=True,
-            cwd=script_dir
-        ).strip().replace(' ', '/')
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        commit_ts = "unknown"
+    commit_sha, branch_name, commit_ts = _git_source_metadata(os.path.dirname(os.path.abspath(__file__)))
 
     date_time = datetime.now().replace(microsecond=0).astimezone().isoformat('/')
 
