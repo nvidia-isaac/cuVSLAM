@@ -19,6 +19,7 @@
 
 #include "common/imu_calibration.h"
 #include "common/log.h"
+#include "epipolar/near_plane.h"
 #include "math/robust_cost_function.h"
 #include "math/twist.h"
 
@@ -93,7 +94,7 @@ void CalcOutliers(const imu::ImuCalibration& imu_calibration, const StereoPnPInp
 
     p_c = cam_from_w[camera_idx] * p_w;
 
-    if (p_c.z() > 1.f) {
+    if (epipolar::IsDepthInFront(p_c.z())) {
       r = p_c.topRows(2) / p_c.z() - input.observation_xys[obs];
       float err = r.dot(input.observation_infos[obs] * r);
       is_obs_outlier[obs] = err > thresh;
@@ -150,7 +151,7 @@ float EvaluateCost(const imu::ImuCalibration& imu_calibration, const StereoPnPIn
 
     p_c = input.rig.camera_from_rig[camera_idx] * rig_from_imu * pu2.w_from_imu.inverse() * p_w;
 
-    if (p_c.z() > 1.f) {
+    if (epipolar::IsDepthInFront(p_c.z())) {
       r = p_c.topRows(2) / p_c.z() - input.observation_xys[obs];
       cost += ROBUST_COST(r.dot(input.observation_infos[obs] * r), input.robustifier_scale);
     }
@@ -262,7 +263,7 @@ void build_hessian(const imu::ImuCalibration& imu_calibration, const StereoPnPIn
     const Isometry3T& w_from_imu = pose_right.w_from_imu;
     Vector3T p_c = problem.rig.camera_from_rig[camera_idx] * rig_from_imu * w_from_imu.inverse() * p_w;
 
-    if (p_c.z() > 1.f) {
+    if (epipolar::IsDepthInFront(p_c.z())) {
       Vector2T prediction = p_c.topRows(2) / p_c.z();
       Vector2T r = prediction - problem.observation_xys[obs];
 

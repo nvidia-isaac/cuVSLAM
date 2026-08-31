@@ -21,6 +21,7 @@
 #include "common/log_types.h"
 #include "common/rotation_utils.h"
 #include "common/statistic.h"
+#include "epipolar/near_plane.h"
 #include "math/robust_cost_function.h"
 #include "math/twist.h"
 
@@ -93,7 +94,7 @@ void schur_complement_bundler_cpu_internal::UpdateModel(ModelFunction& model, Bu
     // from observations_start indirectly
     Vec3 p_c = camera_from_world * p_w;
 
-    if (p_c.z() > 1.f) {
+    if (epipolar::IsDepthInFront(p_c.z())) {
       Vec2 prediction = p_c.topRows(2) / p_c.z();
       Vec2 r = problem.observation_xys[observation] - prediction;
 
@@ -316,7 +317,7 @@ float schur_complement_bundler_cpu_internal::EvaluateCost(const BundleAdjustment
     // from observations_start indirectly
     Vec3 p_c = problem.rig.camera_from_rig[camera_idx] * p_r;
 
-    if (p_c.z() > 1.f) {
+    if (epipolar::IsDepthInFront(p_c.z())) {
       Vec2 r = problem.observation_xys[observation] - p_c.topRows(2) / p_c.z();
 
       const Matrix2T& info = problem.observation_infos[observation];

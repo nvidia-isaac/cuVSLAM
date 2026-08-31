@@ -37,7 +37,7 @@ where = ["."]
 "cuvslam_tools.dataset_preparation.kitti" = ["download_*.sh"]
 "cuvslam_tools.dataset_preparation.euroc" = ["download_*.sh"]
 "cuvslam_tools.dataset_preparation.tartan.dataset_converter" = ["cfg/*.json"]
-"cuvslam_tools.dataset_preparation.tum" = ["download_*.sh", "*.yaml"]
+"cuvslam_tools.dataset_preparation.tum" = ["download_*.sh"]
 "cuvslam_tools.reporter" = ["report_templates/*.html"]
 "cuvslam_tools.datasets_validator" = ["configs/*.cfg"]
 
