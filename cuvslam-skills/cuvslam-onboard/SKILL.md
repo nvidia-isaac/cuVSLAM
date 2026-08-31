@@ -256,8 +256,8 @@ With Rerun: `cmake -S . -B build -DUSE_RERUN=ON && cmake --build build --target 
 3. **Localize:** Load saved map, provide initial pose hint, call `tracker.slam.localize_in_map()`
 
 ```python
-odom_cfg = cuvslam.Odometry.Config(async_sba=False, ...)  # blocking SBA for reproducibility
-slam_cfg = cuvslam.Slam.Config(sync_mode=True)            # sync SLAM, same reason
+odom_cfg = cuvslam.Odometry.Config(async_sba=False)  # blocking SBA for reproducibility
+slam_cfg = cuvslam.Slam.Config(sync_mode=True)       # sync SLAM, same reason
 # The mode must agree with both fields; the tracker rejects a mismatch instead of overriding it.
 tracker = cuvslam.Tracker(cuvslam.Rig(...), cuvslam.Tracker.Mode.OdometryWithSlamOffline,
                           odom_cfg, slam_cfg)

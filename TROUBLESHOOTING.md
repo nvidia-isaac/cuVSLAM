@@ -188,6 +188,9 @@ cuvslam::Tracker tracker{rig, cuvslam::Tracker::Mode::OdometryWithSlamOffline, o
 2. [cuvslam.Odometry.Config.async_sba](https://nvidia-isaac.github.io/cuVSLAM/python/api.html#cuvslam.Odometry.Config.async_sba)
 3. [cuvslam.Slam.Config.sync_mode](https://nvidia-isaac.github.io/cuVSLAM/python/api.html#cuvslam.Slam.Config.sync_mode)
 
+`sync_mode` is a `Slam.Config` field, so it only applies to `OdometryWithSlamOffline`. The
+odometry-only modes take no `slam_config` at all — pass one and the tracker rejects it.
+
 **Isaac ROS**
 
 ROS cannot run cuVSLAM in blocking mode because `ros2 bag play` does not support blocking playback. Troubleshooting
@@ -631,6 +634,9 @@ configuration fields to match. Adjust these parameters to balance latency and th
 2. `Odometry::Config::async_sba` (must be `true` in a realtime mode)
 3. `Slam::Config::sync_mode` (must be `false` in a realtime mode)
 4. `Slam::Config::throttling_time_ms`
+
+Items 3 and 4 are `Slam::Config` fields, so they only apply to `OdometryWithSlamRealtime`. In
+`OdometryOnlyRealtime`, omit `slam_config` entirely.
 
 ### Verify SLAM keeps up with odometry
 

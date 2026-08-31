@@ -1064,7 +1064,7 @@ public:
     OdometryOnlyRealtime,
     /// Odometry only, bundle adjustment in the calling thread.
     OdometryOnlyOffline,
-    /// Odometry and SLAM, both on background threads.
+    /// Odometry in the calling thread, bundle adjustment and SLAM on background threads.
     OdometryWithSlamRealtime,
     /// Odometry and SLAM, both in the calling thread.
     OdometryWithSlamOffline,

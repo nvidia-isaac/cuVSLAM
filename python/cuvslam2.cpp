@@ -1117,7 +1117,7 @@ NB_MODULE(pycuvslam, m) {
       .value("OdometryOnlyOffline", Tracker::Mode::OdometryOnlyOffline,
              "Odometry only, bundle adjustment in the calling thread, so every `track()` result is final.")
       .value("OdometryWithSlamRealtime", Tracker::Mode::OdometryWithSlamRealtime,
-             "Odometry and SLAM, both on background threads.")
+             "Odometry in the calling thread, bundle adjustment and SLAM on background threads.")
       .value("OdometryWithSlamOffline", Tracker::Mode::OdometryWithSlamOffline,
              "Odometry and SLAM, both in the calling thread, which makes a run reproducible.");
 
