@@ -27,21 +27,16 @@
 #include "sof/image_pyramid_float.h"
 #include "sof/kernel_operator.h"
 
+namespace cuvslam::sof {
+
 namespace {
 
 const float ST_CONVERGENCE_THRESHOLD = 0.05f;
 
-using Vector2N = cuvslam::Vector2N;
-using Vector2T = cuvslam::Vector2T;
-using Vector6T = cuvslam::Vector6T;
-using Matrix2T = cuvslam::Matrix2T;
-using Matrix6T = cuvslam::Matrix6T;
 constexpr auto epsilon = cuvslam::epsilon();
-using GradientPyramidT = cuvslam::sof::GradientPyramidT;
 using FeaturePatch = cuvslam::ImageMatrixPatch<float, 9, 9>;
 constexpr auto patch_cols = FeaturePatch::ColsAtCompileTime;
 constexpr auto patch_rows = FeaturePatch::RowsAtCompileTime;
-using ImagePyramidT = cuvslam::sof::ImagePyramidT;
 
 FeaturePatch make_x_patch() {
   FeaturePatch patch;
@@ -184,10 +179,12 @@ float compute_ncc(const FeaturePatch& patch1, const FeaturePatch& patch2) {
   return vavb < epsilon ? 0 : cov / std::sqrt(vavb);
 }
 
-class Tracker {
+// Tracks a single feature patch across an image pyramid. Deliberately not named Tracker: the public
+// cuvslam::Tracker is visible here through cuvslam2.h, and a local Tracker would silently shadow it.
+class PatchTracker {
 public:
-  Tracker(const GradientPyramidT& current_image_gradient, const ImagePyramidT& current_image,
-          unsigned n_shift_only_iterations, unsigned n_full_mapping_iterations, Matrix2T& info, float& ncc)
+  PatchTracker(const GradientPyramidT& current_image_gradient, const ImagePyramidT& current_image,
+               unsigned n_shift_only_iterations, unsigned n_full_mapping_iterations, Matrix2T& info, float& ncc)
       : current_image_gradient(current_image_gradient),
         current_image(current_image),
         n_shift_only_iterations(n_shift_only_iterations),
@@ -504,11 +501,9 @@ private:
 
   Matrix2T map;
   Vector2T xy;
-};  // class Tracker
+};  // class PatchTracker
 
 }  // namespace
-
-namespace cuvslam::sof {
 
 STTracker::STTracker(unsigned n_shift_only_iterations, unsigned n_full_mapping_iterations)
     : n_shift_only_iterations(n_shift_only_iterations), n_full_mapping_iterations(n_full_mapping_iterations) {}
@@ -522,8 +517,8 @@ bool STTracker::trackPoint(const GradientPyramidT&, const GradientPyramidT& curr
 
   float ncc;
 
-  Tracker tracker(current_image_gradients, current_image, n_shift_only_iterations, n_full_mapping_iterations,
-                  current_info, ncc);
+  PatchTracker tracker(current_image_gradients, current_image, n_shift_only_iterations, n_full_mapping_iterations,
+                       current_info, ncc);
 
   return tracker.trackPoint(previous_image, current_uv, offset, search_radius_px, ncc_threshold);
 }
@@ -571,8 +566,8 @@ bool STTracker::TrackPointWithCache(const GradientPyramidT& current_image_gradie
 
   Matrix2T info;
 
-  Tracker tracker(current_image_gradients, current_image, n_shift_only_iterations, n_full_mapping_iterations, info,
-                  ncc);
+  PatchTracker tracker(current_image_gradients, current_image, n_shift_only_iterations, n_full_mapping_iterations, info,
+                       ncc);
 
   bool status = tracker.trackPoint(levels_mask, image_patches_size, image_patches, current, offset, search_radius_px,
                                    ncc_threshold, initial_guess_map);

@@ -61,23 +61,23 @@ def str2bool(value: Union[str, bool]) -> bool:
     )
 
 
-def str2multicam_mode(value: str) -> vslam.Tracker.MulticameraMode:
+def str2multicam_mode(value: str) -> vslam.Odometry.MulticameraMode:
     """Convert string to multicamera mode enum."""
     str2multicam_mode_map = {
-        'performance': vslam.Tracker.MulticameraMode.Performance,
-        'precision': vslam.Tracker.MulticameraMode.Precision,
-        'moderate': vslam.Tracker.MulticameraMode.Moderate
+        'performance': vslam.Odometry.MulticameraMode.Performance,
+        'precision': vslam.Odometry.MulticameraMode.Precision,
+        'moderate': vslam.Odometry.MulticameraMode.Moderate
     }
     return str2multicam_mode_map[value]
 
 
-def str2odometry_mode(value: str) -> vslam.Tracker.OdometryMode:
+def str2odometry_mode(value: str) -> vslam.Odometry.OdometryMode:
     """Convert string to odometry mode enum."""
     str2odometry_mode_map = {
-        'mono': vslam.Tracker.OdometryMode.Mono,
-        'multicamera': vslam.Tracker.OdometryMode.Multicamera,
-        'inertial': vslam.Tracker.OdometryMode.Inertial,
-        'rgbd': vslam.Tracker.OdometryMode.RGBD
+        'mono': vslam.Odometry.OdometryMode.Mono,
+        'multicamera': vslam.Odometry.OdometryMode.Multicamera,
+        'inertial': vslam.Odometry.OdometryMode.Inertial,
+        'rgbd': vslam.Odometry.OdometryMode.RGBD
     }
     return str2odometry_mode_map[value]
 

@@ -105,15 +105,15 @@ class TestMap(unittest.TestCase):
 
     def get_localization_configs(self):
         """Get configurations for localization mode."""
-        odom_cfg = vslam.Tracker.OdometryConfig()
-        odom_cfg.odometry_mode = vslam.Tracker.OdometryMode.Multicamera
+        odom_cfg = vslam.Odometry.Config()
+        odom_cfg.odometry_mode = vslam.Odometry.OdometryMode.Multicamera
         odom_cfg.rectified_stereo_camera = True
         odom_cfg.async_sba = False
 
-        slam_cfg = vslam.Tracker.SlamConfig()
+        slam_cfg = vslam.Slam.Config()
         slam_cfg.sync_mode = True
 
-        loc_settings = vslam.Tracker.SlamLocalizationSettings(
+        loc_settings = vslam.Slam.LocalizationSettings(
             horizontal_search_radius=0.25,
             vertical_search_radius=0.25,
             horizontal_step=0.0625,
@@ -173,7 +173,7 @@ class TestMap(unittest.TestCase):
         def save_callback(success):
             nonlocal map_saved
             map_saved = success
-        tracker.save_map(self.map_path(map_name), save_callback)
+        tracker.slam.save_map(self.map_path(map_name), save_callback)
         self.assertTrue(map_saved)
 
     def try_localize(
@@ -210,8 +210,8 @@ class TestMap(unittest.TestCase):
             result_pose = pose
             localization_complete.set()
 
-        tracker.localize_in_map(self.map_path(map_name), timestamp, guess_pose, images, loc_settings,
-                                localization_start_cb, localization_finish_cb)
+        tracker.slam.localize_in_map(self.map_path(map_name), timestamp, guess_pose, images, loc_settings,
+                                     localization_start_cb, localization_finish_cb)
         while not localization_complete.wait(timeout=0.1):
             # Simulate time passing; this is necessary for the async callback to be processed
             timestamp += 1_000

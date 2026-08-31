@@ -170,6 +170,8 @@ void DumpConfiguration(const std::string& input_dump_root_dir, const Rig& rig, c
     dst_cfg["max_frame_delta_s"] = cfg.max_frame_delta_s;
     dst_cfg["multicam_mode"] = ToUnderlying(cfg.multicam_mode);
     dst_cfg["odometry_mode"] = ToUnderlying(cfg.odometry_mode);
+    dst_cfg["min_depth"] = cfg.min_depth;
+    dst_cfg["max_depth"] = cfg.max_depth;
     dst_cfg["rgbd_settings"]["depth_scale_factor"] = cfg.rgbd_settings.depth_scale_factor;
     dst_cfg["rgbd_settings"]["depth_camera_id"] = cfg.rgbd_settings.depth_camera_id;
     dst_cfg["rgbd_settings"]["enable_depth_stereo_tracking"] = cfg.rgbd_settings.enable_depth_stereo_tracking;

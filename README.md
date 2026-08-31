@@ -29,7 +29,7 @@ cuVSLAM is the library by NVIDIA, providing various Visual Tracking Camera modes
 # Tracking modes
 
 cuVSLAM's tracker supports several odometry modes selected via `Odometry::Config::odometry_mode`
-(C++) / `cuvslam.Tracker.OdometryMode` (Python). Modes differ in which sensors they require, which
+(C++) / `cuvslam.Odometry.OdometryMode` (Python). Modes differ in which sensors they require, which
 ones they can additionally fuse, and how they handle scale. Pick the mode that matches the most
 informative sensor set on your rig:
 

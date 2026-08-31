@@ -67,18 +67,28 @@ Matrix2T ObservationInfoUVToNormUV(const ICameraModel& intrinsics, const Matrix2
 }
 
 // xy must be equal to output of intrinsics.normalizePoint(uv)
-Matrix2T ObservationInfoUVToXY(const ICameraModel& intrinsics, const Vector2T& uv, const Vector2T& xy,
-                               const Matrix2T& info_uv) {
-  Matrix2T cov = info_uv.inverse();
-  Matrix2T cov_xy = math::approximate<2, 2>(
+bool ObservationInfoUVToXY(const ICameraModel& intrinsics, const Vector2T& uv, const Vector2T& xy,
+                           const Matrix2T& info_uv, Matrix2T& info_xy) {
+  // The jacobian is sampled around uv, so a sample can land outside the model even when uv itself
+  // is fine. Such a sample contributes a zero instead of a real value, which would quietly skew
+  // the result — report it rather than returning a plausible-looking matrix.
+  bool all_samples_valid = true;
+  const Matrix2T cov = info_uv.inverse();
+  const Matrix2T cov_xy = math::approximate<2, 2>(
       uv, xy, cov,
-      [&intrinsics](const Vector2T& in) {
-        Vector2T out;
-        intrinsics.normalizePoint(in, out);
+      [&intrinsics, &all_samples_valid](const Vector2T& in) {
+        Vector2T out = Vector2T::Zero();
+        if (!intrinsics.normalizePoint(in, out)) {
+          all_samples_valid = false;
+        }
         return out;
       },
       true /* is_lambda_affine */);
-  return cov_xy.inverse();
+  if (!all_samples_valid) {
+    return false;
+  }
+  info_xy = cov_xy.inverse();
+  return true;
 }
 
 }  // namespace cuvslam::camera

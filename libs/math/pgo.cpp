@@ -468,7 +468,7 @@ bool PGO::pgo_planar(PGOInput& inputs, int max_iterations) const {
 
   int32_t num_iterations = 0;
 
-  Eigen::SimplicialLDLT<Eigen::SparseMatrix<float>, Eigen::Upper, Eigen::NaturalOrdering<int>> solver;
+  Eigen::SimplicialLDLT<Eigen::SparseMatrix<float>, Eigen::Upper> solver;
 
   do {
     ++num_iterations;
@@ -590,7 +590,7 @@ bool PGO::pgo_regular(PGOInput& inputs, int max_iterations) const {
 
   int32_t num_iterations = 0;
 
-  Eigen::SimplicialLDLT<Eigen::SparseMatrix<float>, Eigen::Upper, Eigen::NaturalOrdering<int>> solver;
+  Eigen::SimplicialLDLT<Eigen::SparseMatrix<float>, Eigen::Upper> solver;
 
   do {
     ++num_iterations;

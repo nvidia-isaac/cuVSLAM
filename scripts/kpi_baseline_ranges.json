@@ -3,9 +3,9 @@
         "Expected KPI ranges for cuVSLAM nightly eval drift detection.",
         "These are static, human-maintained guardrails, distinct from the rolling",
         "nightly baseline in KPI_HISTORY (which changes every night).",
-        "cuvslam_kpi_report.py reads this via -b/--baseline_ranges and prints a SOFT",
-        "drift check (PASS/WITHIN/DRIFT) plus a <kpi>.json.drift report. It never fails",
-        "the job. Keys match the KPI JSON: <DATASET>_<METRIC>_<TYPE>_<ODOM|SLAM>.",
+        "cuvslam_kpi_report.py collect reads this via -b/--baseline_ranges and stores",
+        "a SOFT drift check (WITHIN/DRIFT/SKIPPED/MISSING) in the report JSON. It never",
+        "fails the job. Keys match the KPI JSON: <DATASET>_<METRIC>_<TYPE>_<ODOM|SLAM>.",
         "Each entry has an 'expected' value and exactly one tolerance: 'tol_pct'",
         "(percent of expected) or 'tol_abs' (absolute). expected=null means the KPI is",
         "uncalibrated and is SKIPPED. To calibrate, copy the steady-state values from a",
@@ -21,6 +21,16 @@
         "KITTI_ARE_STEREO_SLAM": {"expected": null, "tol_pct": 10},
         "KITTI_Kabsch_STEREO_SLAM": {"expected": null, "tol_pct": 10},
         "KITTI_TrackingLosts_STEREO_SLAM": {"expected": null, "tol_abs": 1},
-        "KITTI_FPS_STEREO_SLAM": {"expected": null, "tol_pct": 15}
+        "KITTI_FPS_STEREO_SLAM": {"expected": null, "tol_pct": 15},
+        "EUROC_ATE_VIO_ODOM": {"expected": null, "tol_pct": 10},
+        "EUROC_ARE_VIO_ODOM": {"expected": null, "tol_pct": 10},
+        "EUROC_Kabsch_VIO_ODOM": {"expected": null, "tol_pct": 10},
+        "EUROC_TrackingLosts_VIO_ODOM": {"expected": null, "tol_abs": 1},
+        "EUROC_FPS_VIO_ODOM": {"expected": null, "tol_pct": 15},
+        "EUROC_ATE_VIO_SLAM": {"expected": null, "tol_pct": 10},
+        "EUROC_ARE_VIO_SLAM": {"expected": null, "tol_pct": 10},
+        "EUROC_Kabsch_VIO_SLAM": {"expected": null, "tol_pct": 10},
+        "EUROC_TrackingLosts_VIO_SLAM": {"expected": null, "tol_abs": 1},
+        "EUROC_FPS_VIO_SLAM": {"expected": null, "tol_pct": 15}
     }
 }

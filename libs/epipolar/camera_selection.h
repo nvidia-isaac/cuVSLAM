@@ -25,13 +25,9 @@
 #include "common/types.h"
 #include "common/vector_2t.h"
 #include "common/vector_3t.h"
+#include "epipolar/near_plane.h"
 
 namespace cuvslam::epipolar {
-
-namespace FrustumProperties {
-/// Minimum positive depth (camera +Z forward, OpenCV) for a point to be considered in front of the camera.
-const float MINIMUM_HITHER = 0.1f;
-}  // namespace FrustumProperties
 
 enum class TriangulationState { None, Triangulated, AlmostParallel };
 
@@ -113,7 +109,7 @@ public:
 using Ray3T = Ray3<float>;
 
 inline bool IsPointInFrontInLocalSpace(const Vector3T& point, const Isometry3T& toLocalSpace) {
-  return (toLocalSpace * point).z() > FrustumProperties::MINIMUM_HITHER;
+  return IsDepthInFront((toLocalSpace * point).z());
 }
 
 inline bool IntersectRaysInReferenceSpace(const Isometry3T& transform, const Vector3T& direction1,
@@ -235,8 +231,7 @@ inline bool OptimalTriangulation(const Isometry3T& transform, const Vector2T& x1
   //(void)atInfinity;
   // assert((loc3d / scaleFactor).norm() < atInfinity / scaleFactor);
 
-  ts = (loc3d.z() > FrustumProperties::MINIMUM_HITHER &&
-        (transform.inverse() * loc3d).z() > FrustumProperties::MINIMUM_HITHER && loc3d.norm() > epsilon())
+  ts = (IsDepthInFront(loc3d.z()) && IsPointInFrontInLocalSpace(loc3d, transform.inverse()) && loc3d.norm() > epsilon())
            ? ((IsVectorsParallel(x1m, rotation * x2m, parallelMeasure)) ? TriangulationState::AlmostParallel
                                                                         : TriangulationState::Triangulated)
            : TriangulationState::None;

@@ -61,7 +61,7 @@ def main() -> None:
     )
 
     # Configure tracker
-    cfg = vslam.Tracker.OdometryConfig(
+    odom_cfg = vslam.Odometry.Config(
         async_sba=False,
         enable_final_landmarks_export=True,
         enable_observations_export=True,
@@ -72,7 +72,7 @@ def main() -> None:
     rig = get_rs_stereo_rig(camera_params)
 
     # Initialize tracker and visualizer
-    tracker = vslam.Tracker(rig, cfg)
+    tracker = vslam.Tracker(rig, odom_cfg)
 
     # Get device product line for setting a supporting resolution
     pipeline_wrapper = rs.pipeline_wrapper(pipeline)
@@ -143,7 +143,7 @@ def main() -> None:
                     frame_id=frame_id,
                     images=[images[0]],
                     pose=odom_pose,
-                    observations_main_cam=[tracker.get_last_observations(0)],
+                    observations_main_cam=[tracker.odometry.get_last_observations(0)],
                     trajectory=trajectory,
                     timestamp=timestamp
                 )

@@ -15,10 +15,9 @@
  * of the software or derivative works thereof, you agree to be bound by this License.
  */
 
-#include <cmath>
 #include <memory>
+#include <vector>
 
-#include "common/isometry_utils.h"
 #include "sof/internal/sof_multicamera_cpu.h"
 #include "sof/sof_create.h"
 
@@ -40,7 +39,7 @@ MultiSOFCPU::MultiSOFCPU(const camera::Rig& rig, const camera::FrustumIntersecti
 
     auto& tracker_from_secondary_cam = secondary_from_primary_sof_[primary_cam_id];
     for (CameraId secondary_cam_id : secondary_cams) {
-      tracker_from_secondary_cam[secondary_cam_id] = CreateTracker(sof_settings.lr_tracker);
+      tracker_from_secondary_cam[secondary_cam_id].tracker = CreateTracker(sof_settings.lr_tracker);
     }
   }
 }
@@ -56,48 +55,82 @@ void MultiSOFCPU::LaunchTrackingPrimaryToSecondary(CameraId primary_id, CameraId
   const camera::ICameraModel& intrinsicsP = *rig_.intrinsics[primary_id];
   const camera::ICameraModel& intrinsicsS = *rig_.intrinsics[secondary_id];
 
-  const std::unique_ptr<IFeatureTracker>& tracker = secondary_from_primary_sof_[primary_id][secondary_id];
+  PrimaryToSecondaryCPUTracker& pair = secondary_from_primary_sof_.at(primary_id).at(secondary_id);
+  const std::unique_ptr<IFeatureTracker>& tracker = pair.tracker;
   assert(tracker != nullptr);
-
-  const Isometry3T secondary_from_primary =
-      rig_.camera_from_rig[secondary_id] * rig_.camera_from_rig[primary_id].inverse();
-
-  const float baseline = secondary_from_primary.translation().norm();
-  const float avg_focal = 0.5f * (intrinsicsS.getFocal().x() + intrinsicsS.getFocal().y());
-  const float cross_cam_search_radius = std::max(20.f, baseline * avg_focal * 2.f);
 
   secondary_image->build_cpu_image_pyramid(secondary_source, box_prefilter_);
   secondary_image->build_cpu_gradient_pyramid(tracker->isHorizontal());
 
-  for (const camera::Observation& trackL : primary_obs) {
-    const TrackId& trackId = trackL.id;
-    const Vector2T& xyL = trackL.xy;
-    Vector2T uvL;
-    intrinsicsP.denormalizePoint(xyL, uvL);
+  const ImagePyramidT& img_l = primary_image->cpu_image_pyramid();
+  const ImagePyramidT& img_r = secondary_image->cpu_image_pyramid();
 
-    const Vector3T ray_in_secondary = secondary_from_primary.linear() * xyL.homogeneous();
-    const float z = ray_in_secondary.z();
+  const int top_l = img_l.getLevelsCount() - 1;
+  const EpipolarCurves& epipolar_curves =
+      GetOrBuildEpipolarCurves(primary_id, secondary_id, top_l, img_l[top_l].cols(), img_l[top_l].rows());
 
-    if (z < 1e-8) {
+  const float cross_cam_search_radius = CrossCamSearchRadius(top_l);
+
+  const size_t n = primary_obs.size();
+  auto& uvL = pair.uvL;
+  auto& cands = pair.cands;
+  auto& winners = pair.winners;
+  uvL.resize(n);
+  cands.resize(n);  // inner vectors retain their allocation across frames
+  winners.assign(n, CPUWinner{});
+
+  size_t max_candidates = 0;
+  for (size_t i = 0; i < n; ++i) {
+    // A point that can't be projected gets no candidates: Candidates() would otherwise leave last
+    // frame's list in place, and uvL[i] keeps whatever it held.
+    if (!intrinsicsP.denormalizePoint(primary_obs[i].xy, uvL[i])) {
+      cands[i].clear();
       continue;
     }
+    epipolar_curves.Candidates(uvL[i], cands[i]);
+    max_candidates = std::max(max_candidates, cands[i].size());
+  }
 
-    const Vector2T xyR_init(ray_in_secondary.x() / z, ray_in_secondary.y() / z);
-    Vector2T uvR;
-    intrinsicsS.denormalizePoint(xyR_init, uvR);
+  size_t tracked_count = 0;
 
-    Matrix2T info;
-
-    if (tracker->trackPoint(primary_image->cpu_gradient_pyramid(), secondary_image->cpu_gradient_pyramid(),
-                            primary_image->cpu_image_pyramid(), secondary_image->cpu_image_pyramid(), uvL, uvR, info,
-                            cross_cam_search_radius)) {
-      Vector2T xyR;
-      intrinsicsS.normalizePoint(uvR, xyR);
-
-      if (secondary_obs) {
-        secondary_obs->push_back(
-            {secondary_id, trackId, xyR, camera::ObservationInfoUVToXY(intrinsicsS, uvR, xyR, info)});
+  // Candidate-index outer loop, observation inner loop — matches GPU semantics: first successful
+  // candidate wins per observation.
+  for (size_t k = 0; k < max_candidates; ++k) {
+    for (size_t i = 0; i < n; ++i) {
+      if (winners[i].tracked || k >= cands[i].size()) {
+        continue;
       }
+      Vector2T uvR = cands[i][k];
+      Matrix2T info;
+      if (tracker->trackPoint(primary_image->cpu_gradient_pyramid(), secondary_image->cpu_gradient_pyramid(), img_l,
+                              img_r, uvL[i], uvR, info, cross_cam_search_radius)) {
+        winners[i].uvR = uvR;
+        winners[i].info = info;
+        winners[i].tracked = 1;
+        ++tracked_count;
+      }
+    }
+
+    // Stop advancing candidate index once we've tracked at least kL2REarlyExitFraction of
+    // observations (shared with MultiSOFGPU).
+    if (static_cast<float>(tracked_count) >= kL2REarlyExitFraction * static_cast<float>(n)) {
+      break;
+    }
+  }
+
+  // Publish successful matches in observation order.
+  if (secondary_obs) {
+    for (size_t i = 0; i < n; ++i) {
+      if (!winners[i].tracked) {
+        continue;
+      }
+      Vector2T xyR;
+      Matrix2T info_xy;
+      if (!intrinsicsS.normalizePoint(winners[i].uvR, xyR) ||
+          !camera::ObservationInfoUVToXY(intrinsicsS, winners[i].uvR, xyR, winners[i].info, info_xy)) {
+        continue;
+      }
+      secondary_obs->push_back({secondary_id, primary_obs[i].id, xyR, info_xy});
     }
   }
 }

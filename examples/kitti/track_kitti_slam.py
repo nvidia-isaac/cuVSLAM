@@ -177,13 +177,13 @@ for i in [0, 1]:
 cameras[1].rig_from_camera.translation[0] = -intrinsics[1][0][3] / intrinsics[1][0][0]
 
 # Set Odometry and SLAM Configs and initialize the cuvslam tracker
-cfg = cuvslam.Tracker.OdometryConfig(
+odom_cfg = cuvslam.Odometry.Config(
     async_sba=False,
     enable_final_landmarks_export=True,
     rectified_stereo_camera=True
 )
-s_cfg = cuvslam.Tracker.SlamConfig(sync_mode=SLAM_SYNC_MODE)
-tracker = cuvslam.Tracker(cuvslam.Rig(cameras), cfg, s_cfg)
+slam_cfg = cuvslam.Slam.Config(sync_mode=SLAM_SYNC_MODE)
+tracker = cuvslam.Tracker(cuvslam.Rig(cameras), odom_cfg, slam_cfg)
 
 # Get timestamps from times.txt file
 timestamps = [
@@ -205,7 +205,7 @@ guess_pose = None
 map_saved = False
 
 # Define localization settings
-loc_settings = cuvslam.Tracker.SlamLocalizationSettings(
+loc_settings = cuvslam.Slam.LocalizationSettings(
     horizontal_search_radius=8.,
     vertical_search_radius=2.,
     horizontal_step=0.5,
@@ -232,8 +232,8 @@ if os.path.exists(map_path) and (guess_pose is not None):
     ]
     _, _ = tracker.track(timestamp, init_images)
 
-    tracker.localize_in_map(map_path, timestamp, guess_pose, init_images, loc_settings, localization_start_cb,
-                            localization_finish_cb)
+    tracker.slam.localize_in_map(map_path, timestamp, guess_pose, init_images, loc_settings, localization_start_cb,
+                                 localization_finish_cb)
 
     wait_time = 0
     wait_timestamp_ns = timestamp
@@ -300,11 +300,11 @@ for frame in range(IDX, len(timestamps)):
     current_pose = combine_poses(slam_initial_pose, odom_pose)
 
     # Get visualization data
-    observations = tracker.get_last_observations(0)  # get observation from left camera
-    landmarks = tracker.get_last_landmarks()
+    observations = tracker.odometry.get_last_observations(0)  # get observation from left camera
+    landmarks = tracker.odometry.get_last_landmarks()
 
     # Transform final landmarks by the initial pose
-    raw_final_landmarks = list(tracker.get_final_landmarks().values())
+    raw_final_landmarks = list(tracker.odometry.get_final_landmarks().values())
     final_landmarks = transform_landmarks(raw_final_landmarks, slam_initial_pose)
 
     # Prepare visualization data
@@ -318,7 +318,7 @@ for frame in range(IDX, len(timestamps)):
     trajectory_tum.append(list(slam_pose.translation) + list(slam_pose.rotation))  # slam trajectory in tum format
 
     # Get loop closure poses
-    current_lc_poses = tracker.get_loop_closure_poses()
+    current_lc_poses = tracker.slam.get_loop_closure_poses()
     if (current_lc_poses and
         (not loop_closure_poses or
          not np_array_equal(current_lc_poses[-1].pose.translation, loop_closure_poses[-1]))):
@@ -363,7 +363,7 @@ if guess_pose is None:
     print(f"Saving trajectory to {trajectory_file} of length {len(trajectory_tum)}")
     savetxt(trajectory_file, trajectory_tum)
 
-    tracker.save_map(map_path, save_callback)
+    tracker.slam.save_map(map_path, save_callback)
 
     # Wait for map saving to complete
     start_time = time.time()
@@ -385,8 +385,8 @@ try:
     del loop_closure_poses
     del tracker
     del cameras
-    del cfg
-    del s_cfg
+    del odom_cfg
+    del slam_cfg
 except Exception as e:
     print(f"Warning during cleanup: {e}")
 

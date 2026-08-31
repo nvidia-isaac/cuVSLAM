@@ -69,8 +69,8 @@ Below is an example demonstrating loop closure detection. When the vehicle revis
 To enable SLAM in PyCuVSLAM, you must provide a SLAM configuration when initializing the tracker:
 
 ```python
-odom_cfg = cuvslam.Tracker.OdometryConfig(...)
-slam_cfg = cuvslam.Tracker.SlamConfig(sync_mode=...)
+odom_cfg = cuvslam.Odometry.Config(...)
+slam_cfg = cuvslam.Slam.Config(sync_mode=...)
 tracker = cuvslam.Tracker(cuvslam.Rig(...), odom_cfg, slam_cfg)
 ```
 
@@ -102,7 +102,7 @@ At the end of the mapping process, the trajectory and map will be saved as `traj
 
 After the mapping stage, you can reuse the previously stored map and trajectory to perform localization from an arbitrary starting point. For example, you may start from frame index `IDX = 700`. PyCuVSLAM will use the corresponding stereo pair and pose from the saved trajectory as an initial guess for localization.
 
-To use SLAM localization, first configure localization parameters using `cuvslam.Tracker.SlamLocalizationSettings`. Then, pass these settings to the method `tracker.localize_in_map`. After initiating localization, PyCuVSLAM will search for matching visual features in the loaded map near the provided initial pose guess. If localization succeeds, you will see a confirmation message on the terminal, and the new initial coordinates will be updated accordingly.
+To use SLAM localization, first configure localization parameters using `cuvslam.Slam.LocalizationSettings`. Then, pass these settings to `tracker.slam.localize_in_map`. After initiating localization, PyCuVSLAM will search for matching visual features in the loaded map near the provided initial pose guess. If localization succeeds, you will see a confirmation message on the terminal, and the new initial coordinates will be updated accordingly.
 
 As a result, the initial pose displayed will reflect the localized position (no longer zero translation or unit rotation). Additionally, loop closure detection events will trigger immediately, as the complete map from the mapping stage is already loaded:
 
@@ -187,4 +187,4 @@ Run the example script to visualize the estimated trajectory, left stereo images
 python3 track_kitti_masks.py
 ```
 
-**Performance Tip:** To reduce computational overhead, run PyCuVSLAM in `Tracker.MulticameraMode.Performance` mode and provide masks only for the left-camera images. In this mode, PyCuVSLAM selects visual features exclusively from the left-camera images for pose estimation from provided stereo-pair
+**Performance Tip:** To reduce computational overhead, run PyCuVSLAM in `Odometry.MulticameraMode.Performance` mode and provide masks only for the left-camera images. In this mode, PyCuVSLAM selects visual features exclusively from the left-camera images for pose estimation from the provided stereo pair.

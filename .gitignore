@@ -9,6 +9,7 @@
 __pycache__/
 *.egg-info
 build*/
+cmake-build-*/
 compile_commands.json
 dataset/
 /datasets/

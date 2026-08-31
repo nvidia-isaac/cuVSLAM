@@ -224,7 +224,7 @@ def read_csv_data(csv_path: str, sensor_type: str) -> List[dict]:
 
 
 def prepare_frame_metadata_euroc(euroc_path: str,
-                                odometry_mode: cuvslam.Tracker.OdometryMode) -> List[dict]:
+                                odometry_mode: cuvslam.Odometry.OdometryMode) -> List[dict]:
     """Process EuRoC dataset camera files and generate synchronized frame metadata."""
     if not os.path.exists(euroc_path):
         raise ValueError(f"EuRoC dataset path does not exist: {euroc_path}")
@@ -257,7 +257,7 @@ def prepare_frame_metadata_euroc(euroc_path: str,
     } for left_cam, right_cam in zip(left_cam_data, right_cam_data)]
 
     # Add IMU data if in inertial mode
-    if odometry_mode == cuvslam.Tracker.OdometryMode.Inertial:
+    if odometry_mode == cuvslam.Odometry.OdometryMode.Inertial:
         imu_csv = os.path.join(euroc_path, 'imu0', 'data.csv')
         if not os.path.exists(imu_csv):
             raise ValueError(f"IMU data CSV file not found in {imu_csv}")

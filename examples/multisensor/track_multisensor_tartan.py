@@ -102,20 +102,20 @@ if use_imu:
     rig.imus = [build_imu_calibration()]
 
 # Configure Multisensor odometry: both cameras provide depth, depth in meters
-multisensor_settings = vslam.Tracker.OdometryMultisensorSettings(
+multisensor_settings = vslam.Odometry.MultisensorSettings(
     depth_camera_ids=[0, 1],
     depth_scale_factor=DEPTH_SCALE_MM,
     enable_depth_stereo_tracking=True,
 )
-cfg = vslam.Tracker.OdometryConfig(
-    odometry_mode=vslam.Tracker.OdometryMode.Multisensor,
+odom_cfg = vslam.Odometry.Config(
+    odometry_mode=vslam.Odometry.OdometryMode.Multisensor,
     multisensor_settings=multisensor_settings,
     enable_final_landmarks_export=True,
     rectified_stereo_camera=False,
     async_sba=False,
 )
 
-tracker = vslam.Tracker(rig, cfg)
+tracker = vslam.Tracker(rig, odom_cfg)
 print(f"cuVSLAM Tracker initialized with odometry mode: {cfg.odometry_mode}"
       f"{' (IMU disabled)' if not use_imu else ''}")
 
@@ -165,10 +165,10 @@ for record in frames_metadata:
         continue
 
     odom_pose = odom_pose_estimate.world_from_rig.pose
-    observations = [tracker.get_last_observations(i) for i in range(len(CAMERA_LIST))]
-    landmarks = tracker.get_last_landmarks()
-    final_landmarks = tracker.get_final_landmarks()
-    gravity = tracker.get_last_gravity() if use_imu else None
+    observations = [tracker.odometry.get_last_observations(i) for i in range(len(CAMERA_LIST))]
+    landmarks = tracker.odometry.get_last_landmarks()
+    final_landmarks = tracker.odometry.get_final_landmarks()
+    gravity = tracker.odometry.get_last_gravity() if use_imu else None
 
     observations_uv = [[[o.u, o.v] for o in obs] for obs in observations]
     observations_colors = [[color_from_id(o.id) for o in obs] for obs in observations]

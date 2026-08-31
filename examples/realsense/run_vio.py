@@ -221,8 +221,8 @@ def camera_thread(
                 continue
 
             # Put result in queue for main thread
-            observations = tracker.get_last_observations(0)
-            gravity = tracker.get_last_gravity() if show_gravity else None
+            observations = tracker.odometry.get_last_observations(0)
+            gravity = tracker.odometry.get_last_gravity() if show_gravity else None
             result_queue.put([current_timestamp, odom_pose_with_cov.pose, images, observations, gravity])
             thread_with_timestamp.last_low_rate_timestamp = current_timestamp
     except Exception as e:
@@ -280,18 +280,18 @@ def main() -> None:
     camera_params = setup_camera_parameters()
 
     # Configure tracker
-    cfg = vslam.Tracker.OdometryConfig(
+    odom_cfg = vslam.Odometry.Config(
         async_sba=False,
         enable_final_landmarks_export=True,
         enable_observations_export=True,
         debug_imu_mode=False,
-        odometry_mode=vslam.Tracker.OdometryMode.Inertial,
+        odometry_mode=vslam.Odometry.OdometryMode.Inertial,
         rectified_stereo_camera=True
     )
     if USE_MULTISENSOR_MODE:
         # No depth ids are needed because this rig contains an overlapping stereo pair.
-        cfg.odometry_mode = vslam.Tracker.OdometryMode.Multisensor
-        cfg.multisensor_settings = vslam.Tracker.OdometryMultisensorSettings(
+        odom_cfg.odometry_mode = vslam.Odometry.OdometryMode.Multisensor
+        odom_cfg.multisensor_settings = vslam.Odometry.MultisensorSettings(
             depth_camera_ids=[]
         )
 
@@ -299,7 +299,7 @@ def main() -> None:
     rig = get_rs_vio_rig(camera_params)
 
     # Initialize tracker
-    tracker = vslam.Tracker(rig, cfg)
+    tracker = vslam.Tracker(rig, odom_cfg)
 
     # Set up IR pipeline
     ir_pipe = rs.pipeline()

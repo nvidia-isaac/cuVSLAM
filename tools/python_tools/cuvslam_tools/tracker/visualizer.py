@@ -214,7 +214,7 @@ class RerunVisualizer:
             "world/camera_0/last_landmarks",
             rr.Points3D([ls.coords for ls in landmarks], colors=[_color_from_id(ls.id) for ls in landmarks]))
 
-    def _log_slam_landmarks(self, layer: str, landmarks: vslam.Tracker.SlamLandmarks,
+    def _log_slam_landmarks(self, layer: str, landmarks: vslam.Slam.Landmarks,
                             color: Optional[List[int]] = None, ui_radius: Optional[float] = None) -> None:
         """Log landmarks to Rerun."""
         if not landmarks or not landmarks.landmarks:
@@ -233,7 +233,7 @@ class RerunVisualizer:
             rr.Arrows3D(vectors=gravity, colors=[[255, 0, 0]], radii=radius)
         )
 
-    def _log_pose_graph(self, pose_graph: vslam.Tracker.PoseGraph) -> None:
+    def _log_pose_graph(self, pose_graph: vslam.Slam.PoseGraph) -> None:
         """Log pose graph to Rerun."""
         if not pose_graph or (not pose_graph.nodes and not pose_graph.edges):
             return
@@ -271,10 +271,10 @@ class RerunVisualizer:
                         last_landmarks: List[vslam.Landmark],
                         loop_closures: Dict[int, vslam.Pose],
                         final_landmarks: Dict[int, ArrayLike],
-                        pose_graph: Optional[vslam.Tracker.PoseGraph],
+                        pose_graph: Optional[vslam.Slam.PoseGraph],
                         timestamp: int,
-                        map_landmarks: Optional[vslam.Tracker.SlamLandmarks] = None,
-                        lc_landmarks: Optional[vslam.Tracker.SlamLandmarks] = None,
+                        map_landmarks: Optional[vslam.Slam.Landmarks] = None,
+                        lc_landmarks: Optional[vslam.Slam.Landmarks] = None,
                         gravity: Optional[np.ndarray] = None) -> None:
         """Visualize current frame state using Rerun."""
         rr.set_time_sequence("frame", sequence=frame_id)

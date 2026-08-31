@@ -23,6 +23,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 
 #include "common/camera_id.h"
 #include "common/thread_safe_queue.h"
@@ -46,6 +47,9 @@ struct AsyncSlamOptions {
   int max_pose_graph_nodes = 0;          // SLAM: limit of the node count in the pose graph
   uint64_t throttling_time_ms = 0;
   uint64_t retention_time_ms = 5000;
+  // Length of the SLAM input queue at which a warning is printed because SLAM falls behind odometry.
+  // Diagnostic only. Default: 10 commands.
+  uint32_t delay_warning_queue_size = 10;
   PoseGraphOptimizerOptions pgo_options;
   SpatialIndexOptions spatial_index_options;
   float max_landmarks_distance = std::numeric_limits<float>::max();
@@ -64,8 +68,8 @@ struct AsyncSlamLCTelemetry {
 };
 
 struct LoopClosureStamped {
-  FrameId frame_id;
-  uint64_t timestamp_ns;
+  FrameId frame_id = InvalidFrameId;
+  uint64_t timestamp_ns = 0;
   Isometry3T pose;
 };
 
@@ -106,29 +110,10 @@ public:
 
 private:
   struct VOTrackData {
-    FrameId end_frame_id;
-    uint64_t timestamp_ns;
+    FrameId end_frame_id = InvalidFrameId;
+    uint64_t timestamp_ns = 0;
     Isometry3T from_keyframe = Isometry3T::Identity();
   };
-
-  bool reproduce_mode_ = false;
-  camera::Rig rig_;
-  const std::vector<CameraId> cameras_;
-  AsyncSlamOptions options_;
-  mutable std::mutex slam_mutex_;
-  std::unique_ptr<LocalizerAndMapper> slam_;                 // should be protected by slam_mutex_
-  Tail tail_;                                                // thread-safe
-  std::unique_ptr<ILoopClosureSolver> loop_closure_solver_;  // should be accessed from slam thread only
-  std::map<FrameId, VOTrackData> trajectory_;
-
-  std::thread thread_;
-
-  bool is_first_frame_ = true;
-  VOTrackData track_data_;
-
-  // profiler
-  profiler::SLAMProfiler::DomainHelper profiler_domain_ = profiler::SLAMProfiler::DomainHelper("SLAM");
-  uint32_t profiler_color_ = 0x00FF00;
 
   class ICommand {
   public:
@@ -143,10 +128,6 @@ private:
     Isometry3T vo_pose_at_this_frame;
     std::shared_ptr<ICommand> command;
   };
-
-  //
-  std::mutex processing_images_mutex_;
-  Images processing_images_;  // should be protected by processing_images_mutex_
 
   class LocalizeInMapCmd : public ICommand {
   public:
@@ -170,38 +151,75 @@ private:
   class CopyToDatabaseCmd : public ICommand {
   public:
     std::string path_;
-    explicit CopyToDatabaseCmd(const std::string& path) : path_(path) {}
+    explicit CopyToDatabaseCmd(std::string path) : path_(std::move(path)) {}
     ~CopyToDatabaseCmd() override = default;
 
-    void Execute(AsyncSlam& async_slam, FrameId, const Isometry3T&) override {
-      async_slam.CopyToDatabase_internal(path_);
-    }
+    void Execute(AsyncSlam& async_slam, FrameId, const Isometry3T&) override;
   };
 
+  // --- Immutable after construction; read by both the caller's thread and the background worker thread ---
+  const camera::Rig rig_;
+  const std::vector<CameraId> cameras_;
+  const AsyncSlamOptions options_;
+
+  // --- Accessed only from the caller's thread (e.g. TrackResult(), GetPoseForFrame() callers) ---
+  bool reproduce_mode_ = false;
+  std::thread thread_;
+  bool is_first_frame_ = true;
+  VOTrackData track_data_;
+  std::map<FrameId, VOTrackData> trajectory_;
+  AsyncSlamLCTelemetry last_telemetry_;  // cache of the telemetry last popped from telemetry_queue_
+
+  // --- Shared between the caller's thread and the background worker thread (see async_slam_worker.cpp) ---
+  mutable std::mutex slam_mutex_;
+  std::unique_ptr<LocalizerAndMapper> slam_;  // protected by slam_mutex_
+  Tail tail_;                                 // thread-safe
+  std::mutex processing_images_mutex_;
+  Images processing_images_;  // protected by processing_images_mutex_
   ThreadSafeQueue<std::shared_ptr<VOKeyframeInfo>> input_queue_;
   ThreadSafeQueue<std::shared_ptr<AsyncSlamLCTelemetry>> telemetry_queue_;
-  // telemetry of last ProcessInput()
-  AsyncSlamLCTelemetry last_telemetry_;
+  std::list<LoopClosureStamped> last_loop_closures_stamped_;     // TODO: check for raise condition
+  std::shared_ptr<ViewManager<ViewLandmarks>> landmarks_view_;   // TODO: check for raise condition
+  std::shared_ptr<ViewManager<ViewLandmarks>> loop_close_view_;  // TODO: check for raise condition
+  std::shared_ptr<ViewManager<ViewPoseGraph>> pose_graph_view_;  // TODO: check for raise condition
+  std::function<void(bool)> copy_to_database_callback_;          // TODO: check for raise condition
+  const profiler::SLAMProfiler::DomainHelper profiler_domain_ = profiler::SLAMProfiler::DomainHelper("SLAM");
+  const uint32_t profiler_color_ = 0x00FF00;
 
-  // set max size for list of the last loop closure poses with timestamps and frame_ids
-  uint32_t max_num_last_lcs_ = 10;
-  // set time interval allowed between successive loop closures;
-  uint64_t throttling_time_ns_ = 0;
-  std::list<LoopClosureStamped> last_loop_closures_stamped_;
+  // --- Accessed only from the background worker thread ---
+  const std::unique_ptr<ILoopClosureSolver> loop_closure_solver_;
+  // max size for the list of last loop closure poses with timestamps/frame_ids
+  static constexpr uint32_t max_num_last_lcs_ = 10;
+  const uint64_t throttling_time_ns_;  // min time interval allowed between successive loop closures
 
-  std::shared_ptr<ViewManager<ViewLandmarks>> landmarks_view_;
-  std::shared_ptr<ViewManager<ViewLandmarks>> loop_close_view_;
-  std::shared_ptr<ViewManager<ViewPoseGraph>> pose_graph_view_;
-
-  std::function<void(bool)> copy_to_database_callback_;
-
-  void Run();
   void Shutdown();
 
-  void ProcessInput();
+  // Background thread entry point (launched via thread_ = std::thread{&AsyncSlam::Run_worker, this}).
+  void Run_worker();
+
+  void ProcessInput_worker();
+
+  // Pops all pending items from input_queue_, executing commands and adding VO keyframes to slam_.
+  // Writes the last processed keyframe's frame_id/timestamp_ns/world_from_rig_guess (used by the caller
+  // to run loop closure / pose graph optimization once on the freshest state of the batch).
+  // Returns true if at least one VO keyframe was added.
+  bool AddKeyframesAndRunCommands_worker(FrameId& frame_id, uint64_t& timestamp_ns, Isometry3T& world_from_rig_guess);
+
+  // Returns the current processing_images_ if they match frame_id, false otherwise.
+  bool GetLatestProcessingImages_worker(FrameId frame_id, Images& current_images);
+
+  // Loop closure detection + pose graph optimization for the given batch's latest state.
+  void DetectLoopClosure_worker(FrameId frame_id, uint64_t timestamp_ns, const Isometry3T& world_from_rig_guess,
+                                const Images& current_images);
+
+  // Runs pose graph optimization if lc_found or planar_constraints. Returns true if optimization ran.
+  bool OptimizePoseGraph_worker(bool lc_found);
+
+  // Publishes landmarks and pose graph to their respective views, if attached.
+  void PublishViews_worker(uint64_t timestamp_ns);
 
   // Copy to database
-  bool CopyToDatabase_internal(const std::string& path);
+  bool CopyToDatabase_worker(const std::string& path);
 
   // reset VOFrameData (if data was post to ProcessVOFrameData)
   static void VO_ResetFrameData(FrameId frame_id, uint64_t timestamp_ns, VOTrackData& track_data);

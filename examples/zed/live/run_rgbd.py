@@ -45,16 +45,16 @@ def main():
     image_jitter_threshold_ns = (1000 / actual_fps + 2) * 1e6  # ms -> ns, +2 ms buffer
 
     # Configure RGBD settings
-    rgbd_settings = vslam.Tracker.OdometryRGBDSettings()
+    rgbd_settings = vslam.Odometry.RGBDSettings()
     rgbd_settings.depth_scale_factor = 1000
     rgbd_settings.depth_camera_id = 0
     rgbd_settings.enable_depth_stereo_tracking = RUN_STEREO
 
     # Configure tracker
-    cfg = vslam.Tracker.OdometryConfig(
+    odom_cfg = vslam.Odometry.Config(
         async_sba=True,
         enable_final_landmarks_export=True,
-        odometry_mode=vslam.Tracker.OdometryMode.RGBD,
+        odometry_mode=vslam.Odometry.OdometryMode.RGBD,
         rgbd_settings=rgbd_settings,
         rectified_stereo_camera=RUN_STEREO
     )
@@ -63,7 +63,7 @@ def main():
     rig = get_zed_rgbd_rig(camera_info, RUN_STEREO)
 
     # Initialize tracker and visualizer
-    tracker = vslam.Tracker(rig, cfg)
+    tracker = vslam.Tracker(rig, odom_cfg)
     visualizer = RerunVisualizer(num_viz_cameras=2+RUN_STEREO)
 
     # Create and set RuntimeParameters after opening the camera
@@ -134,7 +134,7 @@ def main():
 
                 # Visualize results for color and depth cameras
                 # Same observations for both, since we only have one image
-                observations = tracker.get_last_observations(0)
+                observations = tracker.odometry.get_last_observations(0)
                 visualizer.visualize_frame(
                     frame_id=frame_id,
                     images=[left_rgb, depth_data, right_rgb] if RUN_STEREO else [left_rgb, depth_data],

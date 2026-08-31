@@ -19,6 +19,7 @@ set(HEADERS
     basic_image_downscaler.h
     box_blur.h
     convolutor.h
+    epipolar_curves.h
     feature_prediction_interface.h
     feature_tracker.h
     gaussian_coefficients.h
@@ -54,6 +55,7 @@ set(SOURCES
     basic_image_downscaler.cpp
     box_blur.cpp
     convolutor.cpp
+    epipolar_curves.cpp
     gftt.cpp
     gradient_pyramid.cpp
     image_context.cpp

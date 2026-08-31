@@ -16,8 +16,10 @@
 
 import argparse
 import os
+import sys
 from typing import Optional
 
+from cuvslam_tools.dataset_preparation.common import PreparationError
 
 DEFAULT_DATA_ROOT = "dataset/tartan_ground/"
 
@@ -50,7 +52,14 @@ def download_tartan_ground(variant: str, data_root: str = DEFAULT_DATA_ROOT) -> 
     """Download one supported TartanGround variant using the tartanair package."""
     variant_config = VARIANTS[variant]
 
-    import tartanair as ta
+    try:
+        import tartanair as ta
+    except ImportError as exc:
+        raise PreparationError(
+            "the tartanair package is required to download TartanGround data; install it with "
+            "'pip install tartanair'. It only works on x86_64: on aarch64 it fails at import, so "
+            "download on an x86_64 machine and transfer the data to the target."
+        ) from exc
 
     os.makedirs(data_root, exist_ok=True)
     ta.init(data_root)
@@ -80,7 +89,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    download_tartan_ground(args.variant, args.data_root)
+    try:
+        download_tartan_ground(args.variant, args.data_root)
+    except PreparationError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     return 0
 
 

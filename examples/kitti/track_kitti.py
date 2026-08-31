@@ -83,12 +83,12 @@ for i in [0, 1]:
 cameras[1].rig_from_camera.translation[0] = -intrinsics[1][0][3] / intrinsics[1][0][0]
 
 # Initialize the cuvslam tracker
-cfg = cuvslam.Tracker.OdometryConfig(
+odom_cfg = cuvslam.Odometry.Config(
     async_sba=False,
     enable_final_landmarks_export=True,
     rectified_stereo_camera=True
 )
-tracker = cuvslam.Tracker(cuvslam.Rig(cameras), cfg)
+tracker = cuvslam.Tracker(cuvslam.Rig(cameras), odom_cfg)
 
 # Get timestamps from times.txt file
 timestamps = [
@@ -116,9 +116,9 @@ for frame in range(len(timestamps)):
     odom_pose = odom_pose_estimate.world_from_rig.pose
 
     # Get visualization data
-    observations = tracker.get_last_observations(0)  # get observation from left camera
-    landmarks = tracker.get_last_landmarks()
-    final_landmarks = tracker.get_final_landmarks()
+    observations = tracker.odometry.get_last_observations(0)  # get observation from left camera
+    landmarks = tracker.odometry.get_last_landmarks()
+    final_landmarks = tracker.odometry.get_final_landmarks()
 
     # Prepare visualization data
     observations_uv = [[o.u, o.v] for o in observations]

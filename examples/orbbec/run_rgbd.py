@@ -142,22 +142,22 @@ def main() -> None:
     print(f"Depth scale factor for cuVSLAM: {depth_scale_factor}")
 
     # Configure RGBD settings
-    rgbd_settings = vslam.Tracker.OdometryRGBDSettings()
+    rgbd_settings = vslam.Odometry.RGBDSettings()
     rgbd_settings.depth_scale_factor = depth_scale_factor
     rgbd_settings.depth_camera_id = 0
     rgbd_settings.enable_depth_stereo_tracking = False
 
     # Configure tracker
-    cfg = vslam.Tracker.OdometryConfig(
+    odom_cfg = vslam.Odometry.Config(
         async_sba=True,
         enable_final_landmarks_export=True,
         enable_observations_export=True,
-        odometry_mode=vslam.Tracker.OdometryMode.RGBD,
+        odometry_mode=vslam.Odometry.OdometryMode.RGBD,
         rgbd_settings=rgbd_settings
     )
 
     # Initialize tracker and visualizer
-    tracker = vslam.Tracker(rig, cfg)
+    tracker = vslam.Tracker(rig, odom_cfg)
     visualizer = RerunVisualizer(num_viz_cameras=NUM_VIZ_CAMERAS)
 
     frame_id = 0
@@ -234,7 +234,7 @@ def main() -> None:
                 trajectory.append(odom_pose.translation)
 
                 # Visualize results for color and depth cameras
-                observations = tracker.get_last_observations(0)
+                observations = tracker.odometry.get_last_observations(0)
                 visualizer.visualize_frame(
                     frame_id=frame_id,
                     images=[color_rgb, depth_data],

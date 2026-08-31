@@ -21,16 +21,23 @@
 
 #include <functional>
 #include <list>
+#include <unordered_map>
 #include <vector>
 
 #include "common/camera_id.h"
 #include "odometry/svo_config.h"
 #include "profiler/profiler.h"
 
+#include "sof/epipolar_curves.h"
 #include "sof/kf_selector.h"
 #include "sof/sof.h"
 
 namespace cuvslam::sof {
+
+// Multi-launch L2R scan stops advancing the candidate index once this fraction of observations
+// is tracked. Later candidates are more likely to produce spurious matches for the still-
+// untracked points, so dropping them cleanly beats capturing decoys.
+inline constexpr float kL2REarlyExitFraction = 0.8f;
 
 class MultiSOFBase : public IMultiSOF {
 protected:
@@ -62,13 +69,33 @@ protected:
   bool is_keyframe(const MulticamTracksVector& tracks, const int64_t current_timestamp_ns,
                    const odom::KeyFrameSettings& kf_settings);
 
+  // Return the epipolar curve grid for the given (primary, secondary) pair, building it lazily on
+  // first request. Derived classes call this after their per-implementation pyramids are built and
+  // pass in the top-level dimensions from those pyramids. Left and right cameras are assumed to
+  // have the same base resolution (hence the same top-level dimensions). Depth range is taken
+  // from `sof::Settings::min_depth` / `max_depth` captured at construction (any negative
+  // value, e.g. -1, auto-detects from baseline).
+  const EpipolarCurves& GetOrBuildEpipolarCurves(CameraId primary_id, CameraId secondary_id, int top_level,
+                                                 size_t top_width, size_t top_height);
+
+  // LK search-radius cap for L2R initial guesses. With epipolar-guided starting points already
+  // within a few pixels of the true match, LK only needs local refinement. Sized at an
+  // empirically-tuned multiple of top-level pixel size (see .cpp for tuning notes) — large enough
+  // to permit refinement, small enough to prevent lateral drift onto decoy features. Shared by
+  // MultiSOFCPU and MultiSOFGPU so both paths use the same reach, and by LK and LKHorizontal alike
+  // — rectified stereo gets the same radius as the general case.
+  static float CrossCamSearchRadius(int top_level);
+
   camera::Rig rig_;
   camera::FrustumIntersectionGraph fid_;
   bool box_prefilter_ = false;
+  float min_depth_ = -1.f;
+  float max_depth_ = -1.f;
   std::list<std::unique_ptr<IMonoSOF>> mono_sof_;
   KFSelector kf_selector_;
   std::unordered_map<CameraId, TracksVector> last_kf_tracks_;
   int64_t last_kf_timestamp_ = 0;
+  std::unordered_map<CameraId, std::unordered_map<CameraId, EpipolarCurves>> epipolar_curves_by_pair_;
 
   // keep allocated memory for is_keyframe
   TracksVector all_tracks_vec_;

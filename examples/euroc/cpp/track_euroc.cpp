@@ -499,25 +499,25 @@ int main(int argc, char **argv) {
     // Get camera rig
     cuvslam::Rig rig = getRig(dataset_path);
 
-    // Configure tracker for visual-inertial odometry
-    cuvslam::Odometry::Config config;
-    config.odometry_mode = cuvslam::Odometry::OdometryMode::Inertial;
-    config.async_sba = false;
-    config.rectified_stereo_camera = false;
-    config.enable_observations_export = true;
-    config.enable_landmarks_export = true;
-    config.enable_final_landmarks_export = true;
+    // Configure the tracker for visual-inertial odometry with SLAM
+    cuvslam::Odometry::Config odometry_config;
+    odometry_config.odometry_mode = cuvslam::Odometry::OdometryMode::Inertial;
+    odometry_config.async_sba = false;
+    odometry_config.rectified_stereo_camera = false;
+    odometry_config.enable_observations_export = true;
+    odometry_config.enable_landmarks_export = true;
+    odometry_config.enable_final_landmarks_export = true;
 
-    std::cout << "Initializing odometry..." << std::endl;
-    cuvslam::Odometry odom(rig, config);
-
-    // Configure and initialize SLAM
     cuvslam::Slam::Config slam_config;
     slam_config.sync_mode = true;
     slam_config.enable_reading_internals = true;
 
-    std::cout << "Initializing SLAM..." << std::endl;
-    cuvslam::Slam slam(rig, odom.GetPrimaryCameras(), slam_config);
+    std::cout << "Initializing tracker (odometry + SLAM)..." << std::endl;
+    cuvslam::Tracker tracker(rig, odometry_config, &slam_config);
+
+    // Reading SLAM data layers is not mirrored on Tracker, so reach the SLAM instance directly.
+    // It is non-null here because the config above enables SLAM.
+    cuvslam::Slam &slam = tracker.GetSlam();
 
     // Enable SLAM data layers for visualization
     slam.EnableReadingData(cuvslam::Slam::DataLayer::Map, 100000);         // Map landmarks
@@ -571,7 +571,7 @@ int main(int argc, char **argv) {
       while (imu_index < imu_data.size() && imu_data[imu_index].timestamp_ns < current_timestamp) {
         // Only register IMU after first camera frame
         if (last_camera_timestamp >= 0) {
-          odom.RegisterImuMeasurement(0, imu_data[imu_index]);
+          tracker.RegisterImuMeasurement(0, imu_data[imu_index]);
           imu_count++;
         }
         imu_index++;
@@ -598,17 +598,13 @@ int main(int argc, char **argv) {
       initializeImage(images[0], img_left, current_timestamp, 0);
       initializeImage(images[1], img_right, current_timestamp, 1);
 
-      // Track
-      auto pose_estimate = odom.Track(images);
+      // Track: runs odometry and, since SLAM is enabled, feeds it the odometry state
+      auto result = tracker.Track(images);
 
-      if (pose_estimate.world_from_rig.has_value()) {
-        const auto &pose = pose_estimate.world_from_rig.value().pose;
+      if (result.odometry.world_from_rig.has_value()) {
+        const auto &pose = result.odometry.world_from_rig.value().pose;
         const auto &t = pose.translation;
         const auto &q = pose.rotation;
-
-        cuvslam::Odometry::State state;
-        odom.GetState(state);
-        slam.Track(state);
 
         std::cout << std::setw(5) << frame << " | " << std::setw(14) << current_timestamp << " | " << std::fixed
                   << std::setprecision(3) << "[" << std::setw(7) << t[0] << ", " << std::setw(7) << t[1] << ", "
@@ -639,9 +635,8 @@ int main(int argc, char **argv) {
         rec.log_static("world/trajectory_odom", rerun::LineStrips3D(rerun::components::LineStrip3D(trajectory_odom))
                                                     .with_colors({rerun::Color(0, 64, 255)}));
 
-        // Log SLAM trajectory
-        const auto slam_pose = slam.GetPose();
-        const auto &st = slam_pose.translation;
+        // Log SLAM trajectory. Track() already returned the SLAM pose for this frame.
+        const auto &st = result.slam->translation;
         trajectory_slam.push_back({st[0], st[1], st[2]});
         rec.log_static("world/trajectory_slam", rerun::LineStrips3D(rerun::components::LineStrip3D(trajectory_slam))
                                                     .with_colors({rerun::Color(0, 224, 0)}));
@@ -701,7 +696,7 @@ int main(int argc, char **argv) {
         rec.log("world/camera_0/axes", rerun::Arrows3D::from_vectors(axes_vectors).with_colors(axes_colors));
 
         // Log observations
-        auto observations = odom.GetLastObservations(0);
+        auto observations = tracker.GetOdometry().GetLastObservations(0);
         if (!observations.empty()) {
           std::vector<rerun::Vec2D> points;
           std::vector<rerun::Color> colors;
@@ -725,7 +720,7 @@ int main(int argc, char **argv) {
                     img_right.data, {static_cast<uint32_t>(img_right.width), static_cast<uint32_t>(img_right.height)}));
 
         // Log gravity vector
-        auto gravity = odom.GetLastGravity();
+        auto gravity = tracker.GetOdometry().GetLastGravity();
         if (gravity.has_value()) {
           const auto &g = gravity.value();
           rec.log("world/camera_0/gravity",

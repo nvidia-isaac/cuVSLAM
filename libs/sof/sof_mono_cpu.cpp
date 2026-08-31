@@ -223,14 +223,6 @@ void MonoSOFCPU::collapseTracks(const ImageContextPtr &image, TracksVector &trac
 
 void MonoSOFCPU::ransacFilter(const camera::ICameraModel &intrinsics, const TracksVector &last_keyframe_tracks,
                               TracksVector &tracks) {
-#ifdef DECREASE_RANSAC_AREA
-  const Vector2T furthestLocation((float)currentImage().cols() * 0.5f, (float)currentImage().rows() * 0.5f);
-  float radius = furthestLocation.norm();
-  const float boundaryPercentage = 0.9f;
-  radius *= boundaryPercentage;
-  const Vector2T lensPrincipal = intrinsics.getPrincipal();
-  Vector2TPairVector sampleSequenceForRansac;
-#endif
   auto lastIt = last_keyframe_tracks.cbegin();
   auto lastEnd = last_keyframe_tracks.cend();
   Vector2TPairVector sampleSequence;
@@ -248,20 +240,11 @@ void MonoSOFCPU::ransacFilter(const camera::ICameraModel &intrinsics, const Trac
     assert(lastIt != lastEnd);
     // @TODO: come back and revisit to make sure we do normalization only once
     Vector2T v1, v2;  // in xy coordinates
-    intrinsics.normalizePoint(lastIt->position(), v1);
-    intrinsics.normalizePoint(track.position(), v2);
-    sampleSequence.emplace_back(v1, v2);
-
-#ifdef DECREASE_RANSAC_AREA
-    const Vector2T trackRadius = track.position() - lensPrincipal;
-
-    if (trackRadius.norm() > radius) {
+    if (!intrinsics.normalizePoint(lastIt->position(), v1) || !intrinsics.normalizePoint(track.position(), v2)) {
+      tracks.kill(i);  // drop it, so the inlier loop below stays in step with sampleSequence
       continue;
     }
-
-    sampleSequenceForRansac.emplace_back(intrinsics.normalizePoint(lastIt->position()),
-                                         intrinsics.normalizePoint(track.position()));
-#endif
+    sampleSequence.emplace_back(v1, v2);
   }
 
   const float threshold = RANSAC_ACCURACY_THRESHOLD;
@@ -269,12 +252,7 @@ void MonoSOFCPU::ransacFilter(const camera::ICameraModel &intrinsics, const Trac
   Matrix3T essential;
   math::Ransac<epipolar::Fundamental> fr;
   fr.setOptions(math::Ransac<epipolar::Fundamental>::Epipolar, threshold, 0.002f);
-#ifdef DECREASE_RANSAC_AREA
-  if (!fr(essential, sampleSequenceForRansac.begin(), sampleSequenceForRansac.end()))
-#else
-  if (!fr(essential, sampleSequence.begin(), sampleSequence.end()))
-#endif
-  {
+  if (!fr(essential, sampleSequence.begin(), sampleSequence.end())) {
     return;
   }
 

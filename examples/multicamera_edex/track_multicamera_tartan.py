@@ -91,9 +91,9 @@ for i, camera in enumerate(cameras):
 rig = vslam.Rig()
 rig.cameras = cameras
 
-cfg = vslam.Tracker.OdometryConfig(enable_final_landmarks_export = True, rectified_stereo_camera=True)
+odom_cfg = vslam.Odometry.Config(enable_final_landmarks_export = True, rectified_stereo_camera=True)
 
-tracker = vslam.Tracker(rig, cfg)
+tracker = vslam.Tracker(rig, odom_cfg)
 
 trajectory = []
 
@@ -117,9 +117,9 @@ for frame_id in range(num_frames):
     odom_pose = odom_pose_estimate.world_from_rig.pose
 
     # get visualization data
-    observations = [tracker.get_last_observations(i) for i in range(len(CAMERA_LIST))]
-    landmarks = tracker.get_last_landmarks()
-    final_landmarks = tracker.get_final_landmarks()
+    observations = [tracker.odometry.get_last_observations(i) for i in range(len(CAMERA_LIST))]
+    landmarks = tracker.odometry.get_last_landmarks()
+    final_landmarks = tracker.odometry.get_final_landmarks()
     # prepare visualization data
     observations_uv = [[[o.u, o.v] for o in obs_instance] for obs_instance in observations]
     observations_colors = [[color_from_id(o.id) for o in obs_instance] for obs_instance in observations]

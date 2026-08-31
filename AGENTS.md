@@ -6,7 +6,7 @@ AI agent guidance for working in this repository. **Start by reading `README.md`
 
 ```text
 libs/            # 24 modular C++ libraries (camera, slam, odometry, cuda_modules, …)
-python/          # PyCuVSLAM: nanobind bindings + high-level Tracker wrapper
+python/          # PyCuVSLAM nanobind bindings for Tracker, Odometry, and Slam
 examples/        # Runnable Python examples per dataset/camera (kitti, euroc, tum, realsense, zed, …)
 tools/           # C++ analysis and visualization tools (tracker, reporter, visualizer)
 test_data/       # Small reference datasets (edex, sof, navsim)
@@ -17,7 +17,7 @@ cuvslam-skills/  # Claude Code skills (cuvslam-onboard, cuvslam-troubleshoot, cu
 
 Key files:
 - `libs/cuvslam/cuvslam2.h` — primary C++ public API (the only public header)
-- `python/tracker.py` — high-level Python `Tracker` class
+- `libs/cuvslam/tracker.cpp` — high-level `Tracker` class combining odometry and SLAM
 - `python/cuvslam2.cpp` — nanobind Python bindings (must stay in sync with `cuvslam2.h`)
 - `CMakeLists.txt` — root CMake build definition
 - `build_release.sh` — convenience script for build + tests
@@ -31,7 +31,7 @@ Key files:
 
 ```bash
 cd <build-dir>
-GTEST_FILTER=-*SpeedUp* ctest --output-on-failure
+ctest --output-on-failure
 ```
 
 Test sources live in `libs/*/test/` directories. Each library has its own test CMakeLists.
@@ -114,6 +114,7 @@ Load-bearing rules:
 - Don't put implementation details in `cuvslam2.h`; it is the public C++ API boundary
 - Don't use non-ABI-stable types (`std::string`, `std::map`, etc.) in `cuvslam2.h`; `std::vector` is the explicit exception. Otherwise, use `std::string_view`, raw pointers with a count, or plain structs of primitive types only
 - Don't mix different `CMAKE_BUILD_TYPE` values in the same `CUVSLAM_DST_DIR`
+- Don't add test directories or standalone unit tests for `scripts/` or `examples/`, and don't reach into them from `tools/python_tools/cuvslam_tools/tests/`; validate changes there with focused invocations and the relevant pre-commit hooks
 - Don't commit directly to `main` — the pre-commit hook blocks it
 - Don't skip pre-commit with `--no-verify` except to unblock a known false positive
 - Never run `git push`
@@ -130,7 +131,11 @@ Load-bearing rules:
 - `[test]` — test-only changes, new or updated tests
 - `[infra]` — infrastructure not tied to product source code (for example `AGENTS.md`, repo configs, `.gitignore`)
 
+**Length:** Keep the git commit message title (the first line) to 70 characters or fewer.
+
 **Unit tests:** `[fix]` and `[feat]` MRs must include unit tests (C++ in `libs/*/test/` and/or Python under `python/test/` as appropriate).
+
+Changes confined to `examples/` or `scripts/` are exempt. Neither tree is product source, neither has a test directory, and adding one would mean import shims or harnesses that cost more to maintain than they catch. Validate those changes with focused invocations plus the relevant pre-commit hooks, and record the commands and their output in the MR description. An MR that touches one of these trees *and* product source still needs tests for the product source part.
 
 **Scope:** Do not mix several unrelated changes in one MR. Keep each MR as small as is reasonable; every change in the MR should clearly relate to its stated topic.
 
@@ -144,7 +149,7 @@ Refer to these files when implementing new features or tests:
 | Stereo-inertial (IMU) example | `examples/euroc/track_euroc.py` |
 | Monocular-depth example | `examples/tum/track_tum.py` |
 | Multi-camera example | `examples/realsense/` |
-| High-level Python Tracker | `python/tracker.py` |
+| High-level Tracker (odometry + SLAM) | `libs/cuvslam/tracker.cpp` |
 | nanobind binding pattern | `python/cuvslam2.cpp` (see `nb::class_<>` usage) |
 | GTest unit test pattern | `libs/common/test/common_test.cpp` |
 | CMake library definition | any `libs/*/CMakeLists.txt` |

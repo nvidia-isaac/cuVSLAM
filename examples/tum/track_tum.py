@@ -86,21 +86,21 @@ camera.border_left = 10
 camera.border_right = 50
 
 # Set up RGBD settings
-rgbd_settings = cuvslam.Tracker.OdometryRGBDSettings()
+rgbd_settings = cuvslam.Odometry.RGBDSettings()
 rgbd_settings.depth_scale_factor = config_data['depth_camera']['scale']
 rgbd_settings.depth_camera_id = 0
 rgbd_settings.enable_depth_stereo_tracking = False
 
 # Configure tracker
-cfg = cuvslam.Tracker.OdometryConfig(
+odom_cfg = cuvslam.Odometry.Config(
     async_sba=True,
     enable_final_landmarks_export=True,
-    odometry_mode=cuvslam.Tracker.OdometryMode.RGBD,
+    odometry_mode=cuvslam.Odometry.OdometryMode.RGBD,
     rgbd_settings=rgbd_settings
 )
 
 # Initialize tracker
-tracker = cuvslam.Tracker(cuvslam.Rig([camera]), cfg)
+tracker = cuvslam.Tracker(cuvslam.Rig([camera]), odom_cfg)
 
 frame_id = 0
 prev_timestamp = None
@@ -142,7 +142,7 @@ for rgb_time, rgb_path, depth_path in rgbd_pairs:
     trajectory.append(odom_pose.translation)
 
     # Get observations
-    observations = [tracker.get_last_observations(0)]
+    observations = [tracker.odometry.get_last_observations(0)]
 
     # Extract observation points and colors
     obs_uv = [[o.u, o.v] for o in observations[0]]

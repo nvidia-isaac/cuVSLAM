@@ -72,9 +72,9 @@ Reinstall the binding after rebuilding `libcuvslam.so`.
 | Command | Purpose |
 |---|---|
 | `prepare_kitti` | Download KITTI odometry archives, convert them to cuVSLAM format, and generate KITTI reporter configs. |
-| `prepare_euroc` | Download the EuRoC MAV Machine Hall bundle and convert `MH_01_easy` to EDEX plus TUM-format ground truth. |
+| `prepare_euroc` | Download and convert all 11 official EuRoC MAV sequences, or an explicit subset, to portable EDEX and reporter configs. |
 | `prepare_tartan` | Download TartanGround data and convert TartanGround stereo pairs or compatible TartanAir-layout sequences to EDEX. |
-| `prepare_tum` | Download and lay out the TUM RGB-D `freiburg3_long_office_household` dataset. |
+| `prepare_tum` | Download and convert the 15 evaluated TUM RGB-D freiburg3 sequences, or an explicit subset, to portable EDEX and a reporter config. |
 | `cuvslam_tracker` | Run one EDEX sequence or supported video input through cuVSLAM. |
 | `cuvslam_reporter` | Run one dataset config and generate report outputs. |
 | `cuvslam_validator` | Run multiple reporter configs, combine results, and apply validation checks. |
@@ -103,7 +103,7 @@ undistort_edex_images --help
 
 ## Dataset Preparation
 
-`prepare_kitti` is the installed CLI wrapper for the `cuvslam_tools.dataset_preparation.kitti` workflow. It downloads the KITTI odometry archives when needed, converts them to cuVSLAM format, and writes the reporter config files produced by that workflow, including:
+`prepare_kitti` runs `cuvslam_tools.dataset_preparation.kitti.prepare`. It downloads the KITTI odometry archives when needed, converts them to cuVSLAM format, and writes the reporter config files produced by that workflow, including:
 
 - `kitti-vio_gt.cfg`
 - `kitti-slam_gt.cfg`
@@ -120,7 +120,18 @@ prepare_kitti \
 
 The converted dataset layout is suitable for tracker and reporter workflows. Pass one of the generated KITTI config files to `cuvslam_reporter --test_config`.
 
-`prepare_euroc` downloads the EuRoC MAV Machine Hall bundle, extracts `MH_01_easy`, and writes converted data under `euroc/MH_01_easy`.
+Without `--raw-dir` and `--output-dir`, the command uses `./datasets/kitti/raw` and `./datasets/converted`, relative to
+the current directory. The same workflow is importable, so scripts can prepare a dataset without going through the CLI:
+
+```python
+from cuvslam_tools.dataset_preparation.kitti.prepare import prepare
+
+converted_root = prepare(raw_dir="/data/kitti/raw", output_dir="/data/converted")
+```
+
+`prepare_euroc` runs `cuvslam_tools.dataset_preparation.euroc.prepare`. It downloads the official Machine Hall,
+Vicon Room 1, and Vicon Room 2 bundles and converts all 11 EuRoC MAV sequences. The output is portable: camera
+images are copied under each prepared sequence instead of being linked to raw data outside the prepared root.
 
 ```bash
 prepare_euroc \
@@ -128,7 +139,38 @@ prepare_euroc \
     --output-dir /path/to/datasets/converted
 ```
 
-`prepare_tartan` downloads a TartanGround variant, stages each available `lcam_*`/`rcam_*` stereo pair into the classic TartanAir layout expected by the converter, and converts the staged sequences to EDEX.
+Use `--sequences` for a smaller conversion. Only bundles needed by the selected sequences are downloaded:
+
+```bash
+prepare_euroc \
+    --raw-dir /path/to/datasets/euroc/raw \
+    --output-dir /path/to/datasets/converted \
+    --sequences MH_01_easy
+```
+
+The prepared root is `/path/to/datasets/converted/euroc`. It contains ODOM, SLAM, and combined reporter configs
+plus `dataset_metadata.json`. Every sequence contains `stereo.edex`, `frame_metadata.jsonl`, `IMU.jsonl`,
+camera-aligned `gt.txt`, and copied `00/` and `01/` media directories.
+
+The reporter layout intentionally uses the recalibrated cam0-relative fisheye parameters checked in under
+`examples/euroc/` to reproduce the technical-report and benchmark results. It does not use the original
+per-sequence camera calibration from the source archives. The official EuRoC cam0 body-from-sensor transform is
+used only to express body-frame ground truth in the cam0 frame.
+
+Run the combined inertial ODOM+SLAM report with:
+
+```bash
+cuvslam_reporter \
+    --test_config /path/to/datasets/converted/euroc/euroc-vio_slam.cfg \
+    --datasets_root /path/to/datasets/converted \
+    --output_root /tmp/cuvslam-euroc-reports \
+    --odometry_mode inertial \
+    --rectified_stereo_camera false \
+    --async_sba false \
+    --use_segments
+```
+
+`prepare_tartan` runs `cuvslam_tools.dataset_preparation.tartan.prepare`. It downloads a TartanGround variant, stages each available `lcam_*`/`rcam_*` stereo pair into the classic TartanAir layout expected by the converter, and converts the staged sequences to EDEX.
 
 ```bash
 prepare_tartan \
@@ -137,17 +179,56 @@ prepare_tartan \
     --output-dir /path/to/datasets/converted
 ```
 
+This command needs the [tartanair](https://tartanair.org/installation.html) package for the download step
+(`pip install tartanair`). That package is x86_64-only, so on aarch64 download on an x86_64 machine and transfer the
+data.
+
 Use `--variant multicamera` for EDEX conversion from the 12-camera TartanGround image variant. Both TartanGround variants also download metadata, including `pose_lcam_*` and `pose_rcam_*` files. The multicamera variant converts each complete stereo orientation, for example `P2000_front`, `P2000_left`, and `P2000_right`. The `multisensor` variant is intended for the RGB-D/IMU example data and can be downloaded with `--download-only`.
 
-`prepare_tum` downloads and lays out the TUM RGB-D `freiburg3_long_office_household` dataset and copies the bundled rig calibration into the sequence folder.
+`prepare_tum` runs `cuvslam_tools.dataset_preparation.tum.prepare`. It downloads the 15 evaluated TUM RGB-D
+freiburg3 sequence archives and converts them to portable EDEX with a reporter config.
 
 ```bash
 prepare_tum \
     --raw-dir /path/to/datasets/tum/raw \
     --output-dir /path/to/datasets/converted
+
+# One sequence, for a quick check (roughly 1.5 GB of source data)
+prepare_tum \
+    --raw-dir /path/to/datasets/tum/raw \
+    --output-dir /path/to/datasets/converted \
+    --sequences rgbd_dataset_freiburg3_long_office_household
 ```
 
-All dataset preparation commands support `--force-download` and `--download-only`.
+The prepared root is `/path/to/datasets/converted/tum`. It contains `tum-rgbd_slam.cfg` and
+`dataset_metadata.json`. Every sequence contains `stereo.edex`, `frame_metadata.jsonl`, camera-aligned `gt.txt`,
+colour PNGs under `00/`, and depth PNGs under `01/`.
+
+Colour and depth frames are associated within 1 ms, which pairs the two views of a single Kinect capture and
+rejects pairs stitched across neighbouring captures. Ground truth is interpolated onto the associated frame times
+(linear translation, slerp rotation) and written relative to the first frame. Frames outside the ground-truth time
+span are dropped so every frame has a pose.
+
+Depth is copied from the source unchanged: 16-bit PNG in TUM units, declared in the EDEX as
+`depth_scale_factor: 5000`. All 15 sequences come from the freiburg3 camera series, whose published pinhole
+intrinsics carry no distortion, so one calibration covers the selection.
+
+Run the combined RGB-D ODOM+SLAM report with:
+
+```bash
+cuvslam_reporter \
+    --test_config /path/to/datasets/converted/tum/tum-rgbd_slam.cfg \
+    --datasets_root /path/to/datasets/converted \
+    --output_root /tmp/cuvslam-tum-reports \
+    --odometry_mode rgbd \
+    --async_sba false \
+    --use_segments
+```
+
+All dataset preparation commands support `--force-download` and `--download-only`, default to `./datasets/<dataset>/raw`
+and `./datasets/converted` relative to the current directory, and are implemented as
+`cuvslam_tools.dataset_preparation.<dataset>.prepare`. Each module exposes a `prepare()` function that scripts can call
+directly and a `main()` entry point behind the console command.
 
 ## Tracking
 
@@ -175,7 +256,6 @@ cuvslam_reporter \
     --odometry_mode multicamera \
     --rectified_stereo_camera true \
     --async_sba false \
-    --multicam_mode moderate \
     --use_segments
 ```
 

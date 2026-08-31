@@ -200,20 +200,20 @@ def main() -> None:
     camera_params, depth_scale = setup_camera_parameters()
     rig = get_rs_multisensor_rig(camera_params)
 
-    multisensor_settings = vslam.Tracker.OdometryMultisensorSettings(
+    multisensor_settings = vslam.Odometry.MultisensorSettings(
         depth_camera_ids=[0],
         depth_scale_factor=1 / depth_scale,
         enable_depth_stereo_tracking=True
     )
-    cfg = vslam.Tracker.OdometryConfig(
+    odom_cfg = vslam.Odometry.Config(
         async_sba=False,
         enable_final_landmarks_export=True,
         enable_observations_export=True,
-        odometry_mode=vslam.Tracker.OdometryMode.Multisensor,
+        odometry_mode=vslam.Odometry.OdometryMode.Multisensor,
         multisensor_settings=multisensor_settings,
         rectified_stereo_camera=False
     )
-    tracker = vslam.Tracker(rig, cfg)
+    tracker = vslam.Tracker(rig, odom_cfg)
 
     video_pipe = rs.pipeline()
     video_config = rs.config()
@@ -293,8 +293,8 @@ def main() -> None:
 
             odom_pose = odom_pose_with_cov.pose
             trajectory.append(odom_pose.translation)
-            observations = tracker.get_last_observations(0)
-            gravity = tracker.get_last_gravity() if SHOW_GRAVITY else None
+            observations = tracker.odometry.get_last_observations(0)
+            gravity = tracker.odometry.get_last_gravity() if SHOW_GRAVITY else None
             if gravity is not None:
                 gravity = np.asarray(gravity, dtype=np.float32)
 

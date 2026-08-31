@@ -18,12 +18,14 @@ import cuvslam as vslam
 class TestApi(unittest.TestCase):
     def test_public_api(self):
         self.assertIn('Tracker', dir(vslam))
-        self.assertNotIn('Odometry', dir(vslam))
-        self.assertNotIn('Slam', dir(vslam))
+        self.assertIn('Odometry', dir(vslam))
+        self.assertIn('Slam', dir(vslam))
 
-    def test_core_api(self):
-        self.assertIn('Odometry', dir(vslam.core))
-        self.assertIn('Slam', dir(vslam.core))
+    def test_core_api_is_deprecated(self):
+        with self.assertWarns(DeprecationWarning):
+            core = vslam.core
+        self.assertIs(core.Odometry, vslam.Odometry)
+        self.assertIs(core.Slam, vslam.Slam)
 
 if __name__ == "__main__":
     unittest.main()

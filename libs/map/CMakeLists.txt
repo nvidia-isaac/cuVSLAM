@@ -31,6 +31,7 @@ set(LIBS
     camera
     common
     dense_hash_map::dense_hash_map
+    epipolar
     imu
     profiler
 )

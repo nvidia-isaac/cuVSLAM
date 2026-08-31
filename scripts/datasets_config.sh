@@ -2,10 +2,10 @@ S3_DATASETS_BUCKET="${S3_DATASETS_BUCKET:?Set repository variable S3_DATASETS_BU
 AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:?Set repository variable AWS_DEFAULT_REGION, e.g. us-west-2}"
 
 PROVISIONABLE_DATASETS=(kitti euroc tum tartan)
-DATASET_PREPARATION_ROOT="tools/python_tools/cuvslam_tools/dataset_preparation"
 
 EVAL_DATASET_NAMES=(
   kitti
+  euroc
 )
 
 is_provisionable_dataset() {
@@ -27,26 +27,30 @@ dataset_upload_subdir() {
   esac
 }
 
-dataset_prepare_script() {
-  is_provisionable_dataset "$1" || {
-    echo "Error: unknown dataset '$1' (expected: ${PROVISIONABLE_DATASETS[*]})" >&2
-    return 1
-  }
-  echo "$DATASET_PREPARATION_ROOT/$1/prepare_$1.sh"
+s3_dataset_bucket() {
+  local _s3_path="${S3_DATASETS_BUCKET#s3://}"
+  echo "${_s3_path%%/*}"
 }
 
-s3_tarball_uri() {
+# Object key for one dataset tarball. S3_DATASETS_BUCKET may name a bucket root,
+# in which case there is no prefix at all, and it may carry a trailing slash,
+# which must not survive into the key: S3 treats "prefix//name.tar" as a
+# different object than "prefix/name.tar".
+s3_dataset_key() {
   local name="$1"
   local _s3_path="${S3_DATASETS_BUCKET#s3://}"
-  local bucket="${_s3_path%%/*}"
   local prefix=""
   case "$_s3_path" in
     */*) prefix="${_s3_path#*/}" ;;
   esac
   while [ "${prefix%/}" != "$prefix" ]; do prefix="${prefix%/}"; done
   if [ -n "$prefix" ]; then
-    echo "s3://${bucket}/${prefix}/${name}.tar"
+    echo "${prefix}/${name}.tar"
   else
-    echo "s3://${bucket}/${name}.tar"
+    echo "${name}.tar"
   fi
+}
+
+s3_tarball_uri() {
+  echo "s3://$(s3_dataset_bucket)/$(s3_dataset_key "$1")"
 }

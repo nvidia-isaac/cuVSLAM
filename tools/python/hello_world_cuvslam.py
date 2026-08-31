@@ -29,11 +29,11 @@ for i in range(2):
     cameras.append(cam)
 rig = vslam.Rig(cameras=cameras, imus=[])
 # Create a tracker with horizontal (rectified) stereo camera; SLAM is disabled.
-cfg = vslam.Tracker.OdometryConfig(rectified_stereo_camera=True)
-tracker = vslam.Tracker(rig, cfg)
+odom_cfg = vslam.Odometry.Config(rectified_stereo_camera=True)
+tracker = vslam.Tracker(rig, odom_cfg)
 
 print("cuVSLAM version:", vslam.get_version())
-print("OdometryConfig:")
+print("Odometry.Config:")
 for attr in dir(cfg):
     if not callable(getattr(cfg, attr)) and not attr.startswith("__"):
         print(f"  {attr}: {getattr(cfg, attr)}")

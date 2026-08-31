@@ -253,23 +253,24 @@ With Rerun: `cmake -S . -B build -DUSE_RERUN=ON && cmake --build build --target 
 
 1. **Map:** Run tracker with SLAM config to collect map
 2. **Save:** Map stored as `map/data.mdb` (LMDB)
-3. **Localize:** Load saved map, provide initial pose hint, call `tracker.localize_in_map()`
+3. **Localize:** Load saved map, provide initial pose hint, call `tracker.slam.localize_in_map()`
 
 ```python
-odom_cfg = cuvslam.Tracker.OdometryConfig(...)
-slam_cfg = cuvslam.Tracker.SlamConfig(sync_mode=True)  # sync for reproducibility
+odom_cfg = cuvslam.Odometry.Config(...)
+slam_cfg = cuvslam.Slam.Config(sync_mode=True)  # sync for reproducibility
 tracker = cuvslam.Tracker(cuvslam.Rig(...), odom_cfg, slam_cfg)
 
 odom_pose, slam_pose = tracker.track(...)
+slam = tracker.slam
 
 # Save map
 def map_saved(success):
     print(f"Map save {'succeeded' if success else 'failed'}")
 
-tracker.save_map("map/", map_saved)
+slam.save_map("map/", map_saved)
 
 # Later: localize
-loc_settings = cuvslam.Tracker.SlamLocalizationSettings()
+loc_settings = cuvslam.Slam.LocalizationSettings()
 
 def localization_started():
     print("Localization started")
@@ -280,7 +281,7 @@ def localization_finished(pose, error_message):
     else:
         print(f"Localization failed: {error_message}")
 
-tracker.localize_in_map(
+slam.localize_in_map(
     "map/",
     timestamp,
     pose_hint,

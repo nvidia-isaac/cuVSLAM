@@ -74,6 +74,7 @@ set(SOURCES
     debug_dump.h
     ground_constraint2.cpp
     ground_constraint2.h
+    tracker.cpp
     version.cpp
     )
 
@@ -96,3 +97,5 @@ endif()
 # interface target for projects that link cuvslam libraries but not cuvslam top-level target
 add_library(cuvslam_libs INTERFACE)
 target_link_libraries(cuvslam_libs INTERFACE ${LIBS})
+
+add_subdirectory(test)

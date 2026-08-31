@@ -77,11 +77,11 @@ The config file must contain the cuVSLAM parameters the user had active when the
 |---|---|
 | Isaac ROS cuVSLAM | ROS 2 parameters YAML (passed via `ros2 launch … params_file:=…`) |
 | C++ API | Source snippet or struct dump showing `CUVSLAM_Configuration` fields |
-| Python API | Source snippet showing `OdometryConfig` / `SlamConfig` fields |
+| Python API | Source snippet showing `Odometry.Config` / `Slam.Config` fields |
 
 If the user has not provided a config, say:
 
-> "To root cause this accurately I need the cuVSLAM configuration you were using. Please share the parameters file (for Isaac ROS) or the relevant `OdometryConfig` / `CUVSLAM_Configuration` settings you had set when the issue occurred."
+> "To root cause this accurately I need the cuVSLAM configuration you were using. Please share the parameters file (for Isaac ROS) or the relevant `Odometry.Config` / `CUVSLAM_Configuration` settings you had set when the issue occurred."
 
 Key parameters to note once you have the config:
 - `tracking_mode` (Isaac ROS) / `OdometryMode` (Python) — `0`/`Multicamera` is VO-only, while

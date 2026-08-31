@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `Slam::Config::delay_warning_queue_size`: warns in verbose mode when more than the configured number of commands
+  are queued to the SLAM thread, meaning SLAM falls behind odometry
+
+### Fixed
+
+- Unsynchronized reads of the SLAM engine during map localization (`LocalizeInMapCmd::Execute`)
+- Unnecessary mutex contention in `AsyncSlam::GetSlamPose()`
+
 ## [17.0.0] - 2026-07-21
 
 Adds cuNLS-based multisensor fusion, improves tracking and SLAM robustness, and expands evaluation tooling.

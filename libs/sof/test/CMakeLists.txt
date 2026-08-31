@@ -25,6 +25,7 @@ set(SOURCES
     image_test.cpp
     kf_selector_test.cpp
     lk_tracker_test.cpp
+    sof_l2r_test.cpp
     st_tracker_test.cpp
 )
 
@@ -38,6 +39,7 @@ set(LIBS
     cuvslam_math
     camera
     camera_rig_edex
+    pnp
     log
     common
     profiler
@@ -45,6 +47,10 @@ set(LIBS
 
 if(USE_CUDA)
     set(LIBS ${LIBS} cuda_modules)
+endif()
+
+if(USE_RERUN)
+    set(LIBS ${LIBS} visualizer rerun::sdk)
 endif()
 
 setup_test_project(

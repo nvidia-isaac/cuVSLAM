@@ -53,13 +53,15 @@ converted_dir="$WORK_DIR/converted"
 tarball="$WORK_DIR/${DATASET}.tar"
 s3_tarball="$(s3_tarball_uri "$DATASET")"
 
-prepare_rel="$(dataset_prepare_script "$DATASET")"
 upload_subdir="$(dataset_upload_subdir "$DATASET")"
 upload_src="$converted_dir${upload_subdir:+/$upload_subdir}"
-prepare_script="$REPO_ROOT/$prepare_rel"
 
-if [ ! -f "$prepare_script" ]; then
-  echo "Error: dataset preparation script not found: $prepare_rel" >&2
+PYTHON_TOOLS_DIR="$REPO_ROOT/tools/python_tools"
+prepare_module="cuvslam_tools.dataset_preparation.${DATASET}.prepare"
+prepare_module_file="$PYTHON_TOOLS_DIR/${prepare_module//.//}.py"
+
+if [ ! -f "$prepare_module_file" ]; then
+  echo "Error: dataset preparation module not found: $prepare_module" >&2
   exit 1
 fi
 
@@ -83,7 +85,8 @@ fi
 rm -rf "$raw_dir" "$converted_dir" "$tarball"
 mkdir -p "$raw_dir" "$converted_dir"
 
-bash "$prepare_script" \
+echo "=== Preparing $DATASET with $prepare_module ==="
+PYTHONPATH="$PYTHON_TOOLS_DIR${PYTHONPATH:+:$PYTHONPATH}" python3 -m "$prepare_module" \
   --raw-dir "$raw_dir" \
   --output-dir "$converted_dir" \
   "${download_args[@]}"
@@ -116,6 +119,6 @@ if [ "$DRY_RUN" = "true" ]; then
 fi
 
 echo "=== Uploading to $s3_tarball ==="
-aws s3 cp "$tarball" "$s3_tarball"
+aws s3 cp "$tarball" "$s3_tarball" --no-progress
 aws s3 ls "$s3_tarball" --summarize
 echo "Provision complete: $s3_tarball"

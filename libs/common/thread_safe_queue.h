@@ -91,6 +91,11 @@ public:
     std::unique_lock<std::mutex> locker(mutex_);
     return queue_.empty();
   }
+  // number of commands not yet taken by the consumer thread
+  size_t Size() {
+    std::unique_lock<std::mutex> locker(mutex_);
+    return queue_.size();
+  }
 };
 
 }  // namespace cuvslam

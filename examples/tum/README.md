@@ -11,7 +11,7 @@ Running PyCuVSLAM in Mono-Depth tracking mode requires synchronized rectified de
 - **Images**: must be grayscale or RGB with format `uint8`
 - **Depth maps**: must be represented as `uint16`
 
-To initialize the PyCuVSLAM tracker, set `odometry_mode` to `Tracker.OdometryMode.RGBD` and configure depth settings via `Tracker.OdometryRGBDSettings` with the following parameters:
+To initialize the PyCuVSLAM tracker, set `odometry_mode` to `Odometry.OdometryMode.RGBD` and configure depth settings via `Odometry.RGBDSettings` with the following parameters:
 
 - `depth_scale_factor`: defines the mapping between pixel values and real-world depth values
 - `depth_camera_id`: the camera index in the camera rig providing the visual image corresponding to the depth map

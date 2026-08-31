@@ -32,7 +32,7 @@
   }
 
 #define RETURN_IF_FAILED(status) \
-  if (status != cudaSuccess) {   \
+  if ((status) != cudaSuccess) { \
     return false;                \
   }
 
@@ -63,9 +63,12 @@ public:
   const int max_poses = 20;
 
 private:
+  // Result of the last evaluate_cost(), readable once its stream has been synchronized.
+  float evaluated_cost(int num_observations) const;
+
   cuda::GPUArrayPinned<float> gpu_cost_{1};
   cuda::GPUArrayPinned<int> gpu_num_skipped_{1};
-  cuda::GPUArrayPinned<float> relative_reduction_result{1};
+  cuda::GPUArrayPinned<float> predicted_reduction_{1};
   cuda::GPUArrayPinned<float> points_poses_update_max_{2};
 
   ProfilerDomain profiler_domain_ = ProfilerDomain("SBA GPU");
@@ -80,7 +83,7 @@ private:
   cuda::sba::GPULinearSystem gpu_full_system_{max_points, max_poses};
   cuda::sba::GPULinearSystem gpu_reduced_system_{max_points, max_poses};
 
-  cuda::sba::GPUParameterUpdater parameter_updater_{max_points, max_poses};
+  cuda::sba::GPULevenbergMarquardtStep lm_step_{max_points, max_poses};
 };
 
 SchurComplementBundlerGpu::SchurComplementBundlerGpu() : impl(std::make_unique<Impl>()) {}
@@ -97,6 +100,17 @@ bool SchurComplementBundlerGpu::solve(BundleAdjustmentProblem& problem) {
 }
 
 SchurComplementBundlerGpu::Impl::Impl(int max_points, int max_poses) : max_points(max_points), max_poses(max_poses) {}
+
+float SchurComplementBundlerGpu::Impl::evaluated_cost(int num_observations) const {
+  // An observation closer than the near plane is skipped and adds nothing, so a state that hides
+  // every one of them would otherwise score a perfect zero. That is infeasible, not optimal - the
+  // IMU bundler reports it the same way.
+  if (gpu_num_skipped_[0] == num_observations) {
+    return std::numeric_limits<float>::infinity();
+  }
+
+  return gpu_cost_[0];
+}
 
 bool SchurComplementBundlerGpu::Impl::solve(BundleAdjustmentProblem& problem) {
   TRACE_EVENT ev = profiler_domain_.trace_event("SchurComplementBundlerGpu::Impl::solve()", profiler_color_);
@@ -136,9 +150,10 @@ bool SchurComplementBundlerGpu::Impl::solve(BundleAdjustmentProblem& problem) {
                                  problem.robustifier_scale, stream_.get_stream()));
 
   gpu_cost_.copy(cuda::GPUCopyDirection::ToCPU, stream_.get_stream());
+  gpu_num_skipped_.copy(cuda::GPUCopyDirection::ToCPU, stream_.get_stream());
   RETURN_IF_FAILED(cudaStreamSynchronize(stream_.get_stream()));
 
-  const float initial_cost = gpu_cost_[0];
+  const float initial_cost = evaluated_cost(num_observations);
   float current_cost = initial_cost;
   problem.initial_cost = initial_cost;
   problem.last_cost = initial_cost;
@@ -169,23 +184,32 @@ bool SchurComplementBundlerGpu::Impl::solve(BundleAdjustmentProblem& problem) {
           gpu_problem_.num_poses() - problem.num_fixed_key_frames, lambda, threshold, stream_.get_stream()));
     }
 
-    RETURN_IF_FALSE(parameter_updater_.compute_update(
+    RETURN_IF_FALSE(lm_step_.compute_update(
         gpu_update_.meta(), gpu_reduced_system_.meta(), gpu_problem_.num_points() - problem.num_fixed_points,
         gpu_problem_.num_poses() - problem.num_fixed_key_frames, points_poses_update_max_, stream_.get_stream()));
 
     RETURN_IF_FAILED(evaluate_cost(gpu_cost_.ptr(), gpu_num_skipped_.ptr(), gpu_problem_.meta(), gpu_update_.meta(),
                                    problem.robustifier_scale, stream_.get_stream()));
 
-    RETURN_IF_FALSE(parameter_updater_.relative_reduction(
+    RETURN_IF_FALSE(lm_step_.predict_reduction(
         current_cost, lambda, gpu_update_.meta(), gpu_full_system_.meta(), num_points - problem.num_fixed_points,
-        num_poses - problem.num_fixed_key_frames, relative_reduction_result.ptr(), stream_.get_stream()));
+        num_poses - problem.num_fixed_key_frames, predicted_reduction_.ptr(), stream_.get_stream()));
     points_poses_update_max_.copy(cuda::GPUCopyDirection::ToCPU, stream_.get_stream());
-    relative_reduction_result.copy(cuda::GPUCopyDirection::ToCPU, stream_.get_stream());
+    predicted_reduction_.copy(cuda::GPUCopyDirection::ToCPU, stream_.get_stream());
     gpu_cost_.copy(cuda::GPUCopyDirection::ToCPU, stream_.get_stream());
+    gpu_num_skipped_.copy(cuda::GPUCopyDirection::ToCPU, stream_.get_stream());
 
     RETURN_IF_FAILED(cudaStreamSynchronize(stream_.get_stream()));
-    auto cost = gpu_cost_[0];
-    float predicted_relative_reduction = relative_reduction_result[0];
+
+    if (!lm_step_.solve_succeeded()) {
+      // A pose block that is not positive definite leaves a partial factor, and the step
+      // back-substituted from it is meaningless. Damping is the cure, so reject the step.
+      lambda *= 5.f;
+      continue;
+    }
+
+    const float cost = evaluated_cost(num_observations);
+    float predicted_relative_reduction = predicted_reduction_[0];
 
     if (current_cost < initial_cost * std::numeric_limits<float>::epsilon()) {
       break;
@@ -196,14 +220,13 @@ bool SchurComplementBundlerGpu::Impl::solve(BundleAdjustmentProblem& problem) {
       break;
     }
 
-    // We guarantee that initial cost is not infinity and we will
+    // We guarantee that initial cost is not infinity, and we will
     // never accept a step that leads to an infinite cost.
     // This mean that we will never have a situation when
     // cost = inf and current_cost = inf.
     // The only possible case is cost = inf (step leads outside of feasible region).
     assert(std::isfinite(current_cost));
-#warning Fix assert(std::isfinite(predicted_relative_reduction))
-    // FIXME assert(std::isfinite(predicted_relative_reduction));
+    assert(std::isfinite(predicted_relative_reduction));
     TraceDebugIf(!std::isfinite(predicted_relative_reduction), "predicted_relative_reduction is not finite");
     auto rho = (1.f - cost / current_cost) / predicted_relative_reduction;
 
@@ -216,7 +239,7 @@ bool SchurComplementBundlerGpu::Impl::solve(BundleAdjustmentProblem& problem) {
 
       current_cost = cost;
       problem.last_cost = cost;
-      RETURN_IF_FALSE(parameter_updater_.update_state(
+      RETURN_IF_FALSE(lm_step_.apply_update(
           gpu_problem_.meta(), gpu_update_.meta(), gpu_problem_.num_points() - problem.num_fixed_points,
           gpu_problem_.num_poses() - problem.num_fixed_key_frames, stream_.get_stream()));
 

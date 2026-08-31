@@ -87,10 +87,10 @@ blueprint_path = os.path.join(os.path.dirname(__file__), "cpp", "euroc_blueprint
 # 2: RGBD - Visual tracking using monocular camera + depth (supports grayscale input)
 # 3: Mono - Visual tracking using monocular camera (without scale, accurate rotation only)
 
-euroc_tracking_mode = cuvslam.Tracker.OdometryMode.Inertial
+euroc_tracking_mode = cuvslam.Odometry.OdometryMode.Inertial
 
 # Configure tracker
-cfg = cuvslam.Tracker.OdometryConfig(
+odom_cfg = cuvslam.Odometry.Config(
     async_sba=False,
     enable_observations_export=True,
     enable_final_landmarks_export=True,
@@ -102,7 +102,7 @@ cfg = cuvslam.Tracker.OdometryConfig(
 rig = get_rig(sequence_path)
 
 # Initialize tracker
-tracker = cuvslam.Tracker(rig, cfg)
+tracker = cuvslam.Tracker(rig, odom_cfg)
 print(f"cuVSLAM Tracker initilized with odometry mode: {cfg.odometry_mode}")
 
 # Track frames
@@ -133,7 +133,7 @@ for frame_metadata in frames_metadata:
     images = [load_frame(image_path) for image_path in frame_metadata['images_paths']]
 
     # Check IMU measurements before tracking
-    if (cfg.odometry_mode == cuvslam.Tracker.OdometryMode.Inertial
+    if (cfg.odometry_mode == cuvslam.Odometry.OdometryMode.Inertial
             and last_camera_timestamp is not None):
         if imu_count_since_last_camera == 0:
             print(
@@ -154,14 +154,14 @@ for frame_metadata in frames_metadata:
 
     # Get current pose and observations for the main camera and gravity in rig frame
     odom_pose = odom_pose_estimate.world_from_rig.pose
-    current_observations_main_cam = tracker.get_last_observations(0)
+    current_observations_main_cam = tracker.odometry.get_last_observations(0)
     trajectory.append(odom_pose.translation)
     odom_trajectory.append([timestamp] + list(odom_pose.translation) + list(odom_pose.rotation))
 
     gravity = None
-    if cfg.odometry_mode == cuvslam.Tracker.OdometryMode.Inertial:
+    if cfg.odometry_mode == cuvslam.Odometry.OdometryMode.Inertial:
         # Gravity estimation requires collecting sufficient number of keyframes with motion diversity
-        gravity = tracker.get_last_gravity()
+        gravity = tracker.odometry.get_last_gravity()
 
     # Visualize
     rr.set_time("frame", sequence=frame_id)
@@ -198,7 +198,7 @@ for frame_metadata in frames_metadata:
             rr.Arrows3D(vectors=gravity, colors=[[255, 0, 0]], radii=0.015)
         )
 
-    if cfg.odometry_mode == cuvslam.Tracker.OdometryMode.Inertial:
+    if cfg.odometry_mode == cuvslam.Odometry.OdometryMode.Inertial:
         rr.log("world/imu/accel/x", rr.Scalars(accel_data[0]), static=False)
         rr.log("world/imu/accel/y", rr.Scalars(accel_data[1]), static=False)
         rr.log("world/imu/accel/z", rr.Scalars(accel_data[2]), static=False)

@@ -330,13 +330,13 @@ class TestBindings(unittest.TestCase):
         np.testing.assert_array_equal(lm.coords, [1.0, 2.0, 3.0])
 
     def test_rgbd_settings_default(self):
-        s = vslam.Tracker.OdometryRGBDSettings()
+        s = vslam.Odometry.RGBDSettings()
         self.assertEqual(s.depth_scale_factor, 1.0)
         self.assertEqual(s.depth_camera_id, -1)
         self.assertFalse(s.enable_depth_stereo_tracking)
 
     def test_rgbd_settings_constructor(self):
-        s = vslam.Tracker.OdometryRGBDSettings(
+        s = vslam.Odometry.RGBDSettings(
             depth_scale_factor=5000.0,
             depth_camera_id=0,
             enable_depth_stereo_tracking=True,
@@ -347,10 +347,10 @@ class TestBindings(unittest.TestCase):
 
         # unnamed parameters are not supported (kw_only)
         with self.assertRaises(TypeError):
-            vslam.Tracker.OdometryRGBDSettings(5000.0, 0, True)  # type: ignore
+            vslam.Odometry.RGBDSettings(5000.0, 0, True)  # type: ignore
 
     def test_rgbd_settings_assignment(self):
-        s = vslam.Tracker.OdometryRGBDSettings()
+        s = vslam.Odometry.RGBDSettings()
         s.depth_scale_factor = 5000.0
         s.depth_camera_id = 2
         s.enable_depth_stereo_tracking = True
@@ -358,11 +358,11 @@ class TestBindings(unittest.TestCase):
         self.assertEqual(s.depth_camera_id, 2)
         self.assertTrue(s.enable_depth_stereo_tracking)
 
-    def test_tracker_config_constructor(self):
+    def test_odometry_config_constructor(self):
         # Test default constructor
-        cfg = vslam.Tracker.OdometryConfig()
-        self.assertEqual(cfg.multicam_mode, vslam.Tracker.MulticameraMode.Precision)
-        self.assertEqual(cfg.odometry_mode, vslam.Tracker.OdometryMode.Multicamera)
+        cfg = vslam.Odometry.Config()
+        self.assertEqual(cfg.multicam_mode, vslam.Odometry.MulticameraMode.Precision)
+        self.assertEqual(cfg.odometry_mode, vslam.Odometry.OdometryMode.Multicamera)
         self.assertTrue(cfg.use_gpu)
         self.assertTrue(cfg.async_sba)
         self.assertTrue(cfg.use_motion_model)
@@ -377,9 +377,9 @@ class TestBindings(unittest.TestCase):
 
         # Test constructor with keyword arguments
         # Adjacent bool params must alternate True/False to catch any ordering bugs
-        cfg = vslam.Tracker.OdometryConfig(
-            multicam_mode=vslam.Tracker.MulticameraMode.Performance,
-            odometry_mode=vslam.Tracker.OdometryMode.Inertial,
+        cfg = vslam.Odometry.Config(
+            multicam_mode=vslam.Odometry.MulticameraMode.Performance,
+            odometry_mode=vslam.Odometry.OdometryMode.Inertial,
             use_gpu=True,
             async_sba=False,
             use_motion_model=True,
@@ -392,8 +392,8 @@ class TestBindings(unittest.TestCase):
             debug_dump_directory="/tmp/debug",
             debug_imu_mode=True,
         )
-        self.assertEqual(cfg.multicam_mode, vslam.Tracker.MulticameraMode.Performance)
-        self.assertEqual(cfg.odometry_mode, vslam.Tracker.OdometryMode.Inertial)
+        self.assertEqual(cfg.multicam_mode, vslam.Odometry.MulticameraMode.Performance)
+        self.assertEqual(cfg.odometry_mode, vslam.Odometry.OdometryMode.Inertial)
         self.assertTrue(cfg.use_gpu)
         self.assertFalse(cfg.async_sba)
         self.assertTrue(cfg.use_motion_model)
@@ -407,8 +407,8 @@ class TestBindings(unittest.TestCase):
         self.assertTrue(cfg.debug_imu_mode)
 
         # test rgbd_settings passthrough
-        cfg2 = vslam.Tracker.OdometryConfig(
-            rgbd_settings=vslam.Tracker.OdometryRGBDSettings(
+        cfg2 = vslam.Odometry.Config(
+            rgbd_settings=vslam.Odometry.RGBDSettings(
                 depth_scale_factor=5000.0,
                 depth_camera_id=0,
                 enable_depth_stereo_tracking=True,
@@ -419,14 +419,14 @@ class TestBindings(unittest.TestCase):
 
         # unnamed parameters are not supported (kw_only)
         with self.assertRaises(TypeError):
-            vslam.Tracker.OdometryConfig(
-                vslam.Tracker.MulticameraMode.Performance,  # type: ignore
-                vslam.Tracker.OdometryMode.Inertial)
+            vslam.Odometry.Config(
+                vslam.Odometry.MulticameraMode.Performance,  # type: ignore
+                vslam.Odometry.OdometryMode.Inertial)
 
-    def test_tracker_config_modifiers(self):
-        cfg = vslam.Tracker.OdometryConfig()
-        cfg.multicam_mode = vslam.Tracker.MulticameraMode.Moderate
-        cfg.odometry_mode = vslam.Tracker.OdometryMode.Mono
+    def test_odometry_config_modifiers(self):
+        cfg = vslam.Odometry.Config()
+        cfg.multicam_mode = vslam.Odometry.MulticameraMode.Moderate
+        cfg.odometry_mode = vslam.Odometry.OdometryMode.Mono
         cfg.use_gpu = False
         cfg.async_sba = False
         cfg.use_motion_model = False
@@ -438,11 +438,11 @@ class TestBindings(unittest.TestCase):
         cfg.max_frame_delta_s = 2.0
         cfg.debug_dump_directory = "/tmp/test"
         cfg.debug_imu_mode = True
-        cfg.rgbd_settings = vslam.Tracker.OdometryRGBDSettings(
+        cfg.rgbd_settings = vslam.Odometry.RGBDSettings(
             depth_scale_factor=5000.0, depth_camera_id=0, enable_depth_stereo_tracking=True)
 
-        self.assertEqual(cfg.multicam_mode, vslam.Tracker.MulticameraMode.Moderate)
-        self.assertEqual(cfg.odometry_mode, vslam.Tracker.OdometryMode.Mono)
+        self.assertEqual(cfg.multicam_mode, vslam.Odometry.MulticameraMode.Moderate)
+        self.assertEqual(cfg.odometry_mode, vslam.Odometry.OdometryMode.Mono)
         self.assertFalse(cfg.use_gpu)
         self.assertFalse(cfg.async_sba)
         self.assertFalse(cfg.use_motion_model)
@@ -459,7 +459,7 @@ class TestBindings(unittest.TestCase):
         self.assertTrue(cfg.rgbd_settings.enable_depth_stereo_tracking)
 
     def test_multisensor_settings_default(self):
-        s = vslam.Tracker.OdometryMultisensorSettings()
+        s = vslam.Odometry.MultisensorSettings()
         self.assertEqual(list(s.depth_camera_ids), [])
         self.assertEqual(s.depth_scale_factor, 1.0)
         # Multisensor defaults enable_depth_stereo_tracking=True (multisensor mode benefits
@@ -467,7 +467,7 @@ class TestBindings(unittest.TestCase):
         self.assertTrue(s.enable_depth_stereo_tracking)
 
     def test_multisensor_settings_constructor(self):
-        s = vslam.Tracker.OdometryMultisensorSettings(
+        s = vslam.Odometry.MultisensorSettings(
             depth_camera_ids=[0, 2],
             depth_scale_factor=5000.0,
             enable_depth_stereo_tracking=False,
@@ -478,10 +478,10 @@ class TestBindings(unittest.TestCase):
 
         # kw_only
         with self.assertRaises(TypeError):
-            vslam.Tracker.OdometryMultisensorSettings([0], 1.0, False)  # type: ignore
+            vslam.Odometry.MultisensorSettings([0], 1.0, False)  # type: ignore
 
     def test_multisensor_settings_assignment(self):
-        s = vslam.Tracker.OdometryMultisensorSettings()
+        s = vslam.Odometry.MultisensorSettings()
         s.depth_camera_ids = [1, 3]
         s.depth_scale_factor = 1000.0
         s.enable_depth_stereo_tracking = False
@@ -491,13 +491,13 @@ class TestBindings(unittest.TestCase):
 
     def test_multisensor_mode_in_enum(self):
         # The Multisensor odometry mode must be exposed and selectable.
-        self.assertTrue(hasattr(vslam.Tracker.OdometryMode, 'Multisensor'))
-        cfg = vslam.Tracker.OdometryConfig(
-            odometry_mode=vslam.Tracker.OdometryMode.Multisensor,
-            multisensor_settings=vslam.Tracker.OdometryMultisensorSettings(
+        self.assertTrue(hasattr(vslam.Odometry.OdometryMode, 'Multisensor'))
+        cfg = vslam.Odometry.Config(
+            odometry_mode=vslam.Odometry.OdometryMode.Multisensor,
+            multisensor_settings=vslam.Odometry.MultisensorSettings(
                 depth_camera_ids=[0, 1], depth_scale_factor=2.0,
                 enable_depth_stereo_tracking=True))
-        self.assertEqual(cfg.odometry_mode, vslam.Tracker.OdometryMode.Multisensor)
+        self.assertEqual(cfg.odometry_mode, vslam.Odometry.OdometryMode.Multisensor)
         self.assertEqual(list(cfg.multisensor_settings.depth_camera_ids), [0, 1])
         self.assertEqual(cfg.multisensor_settings.depth_scale_factor, 2.0)
         self.assertTrue(cfg.multisensor_settings.enable_depth_stereo_tracking)
@@ -513,11 +513,11 @@ class TestBindings(unittest.TestCase):
         vslam.warm_up_gpu()
 
     def test_slam_config_default(self):
-        cfg = vslam.Tracker.SlamConfig()
+        cfg = vslam.Slam.Config()
         self.assertEqual(cfg.map_cache_path, "")
         self.assertTrue(cfg.use_gpu)
         self.assertFalse(cfg.sync_mode)
-        self.assertFalse(cfg.enable_reading_internals)
+        self.assertTrue(cfg.enable_reading_internals)
         self.assertFalse(cfg.planar_constraints)
         self.assertFalse(cfg.gt_align_mode)
         self.assertEqual(cfg.map_cell_size, 0.0)
@@ -527,7 +527,7 @@ class TestBindings(unittest.TestCase):
 
     def test_slam_config_constructor(self):
         # Adjacent bools alternate to catch ordering bugs
-        cfg = vslam.Tracker.SlamConfig(
+        cfg = vslam.Slam.Config(
             map_cache_path="/tmp/cache",
             use_gpu=False,
             sync_mode=True,
@@ -552,10 +552,10 @@ class TestBindings(unittest.TestCase):
 
         # unnamed parameters are not supported (kw_only)
         with self.assertRaises(TypeError):
-            vslam.Tracker.SlamConfig("/tmp/cache", False, True)  # type: ignore
+            vslam.Slam.Config("/tmp/cache", False, True)  # type: ignore
 
     def test_slam_config_modifiers(self):
-        cfg = vslam.Tracker.SlamConfig()
+        cfg = vslam.Slam.Config()
         cfg.map_cache_path = "/tmp/test"
         cfg.use_gpu = False
         cfg.sync_mode = True
@@ -579,7 +579,7 @@ class TestBindings(unittest.TestCase):
         self.assertEqual(cfg.throttling_time_ms, 500)
 
     def test_slam_localization_settings(self):
-        s = vslam.Tracker.SlamLocalizationSettings(
+        s = vslam.Slam.LocalizationSettings(
             horizontal_search_radius=1.0,
             vertical_search_radius=0.5,
             horizontal_step=0.25,
@@ -594,19 +594,19 @@ class TestBindings(unittest.TestCase):
 
         # unnamed parameters are not supported (kw_only)
         with self.assertRaises(TypeError):
-            vslam.Tracker.SlamLocalizationSettings(1.0, 0.5, 0.25, 0.125, 0.1)  # type: ignore
+            vslam.Slam.LocalizationSettings(1.0, 0.5, 0.25, 0.125, 0.1)  # type: ignore
 
     def test_slam_data_layer_enum(self):
         # Verify all exposed enum values exist
-        self.assertIsNotNone(vslam.Tracker.SlamDataLayer.Landmarks)
-        self.assertIsNotNone(vslam.Tracker.SlamDataLayer.Map)
-        self.assertIsNotNone(vslam.Tracker.SlamDataLayer.LoopClosure)
+        self.assertIsNotNone(vslam.Slam.DataLayer.Landmarks)
+        self.assertIsNotNone(vslam.Slam.DataLayer.Map)
+        self.assertIsNotNone(vslam.Slam.DataLayer.LoopClosure)
 
         # Values should be distinct
         values = [
-            vslam.Tracker.SlamDataLayer.Landmarks,
-            vslam.Tracker.SlamDataLayer.Map,
-            vslam.Tracker.SlamDataLayer.LoopClosure,
+            vslam.Slam.DataLayer.Landmarks,
+            vslam.Slam.DataLayer.Map,
+            vslam.Slam.DataLayer.LoopClosure,
         ]
         self.assertEqual(len(values), len(set(values)))
 

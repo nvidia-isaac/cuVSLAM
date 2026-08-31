@@ -71,7 +71,9 @@ void DrawCovariance(cv::Mat& dest, const camera::ICameraModel& intrinsics, const
                     cv::Scalar color) {
   Vector2T uv;
   Matrix2T uv_cov;
-  intrinsics.denormalizePoint(track.xy, uv);
+  if (!intrinsics.denormalizePoint(track.xy, uv)) {
+    return;
+  }
 
   const Matrix2T focal = intrinsics.getFocal().asDiagonal();
 
@@ -98,7 +100,9 @@ void LineIfExists(cv::InputOutputArray img, TrackId track_id, const Vector2T& or
 
   if (target != target_points.end()) {
     Vector2T uvTo;
-    target_cam.denormalizePoint(target->xy, uvTo);
+    if (!target_cam.denormalizePoint(target->xy, uvTo)) {
+      return;
+    }
     cv::line(img, {(int)origin.x(), (int)origin.y()}, {(int)uvTo.x(), (int)uvTo.y()}, color);
     if (target_primary) {
       cv::circle(img, {(int)uvTo.x(), (int)uvTo.y()}, 2, color, cv::FILLED);
@@ -279,7 +283,9 @@ static void DoStereoTrack(const std::string& edexFile, std::string outputFolder,
           DrawCovariance(drawings[cam], intrinsics, track, rgb);
         }
         Vector2T uv;
-        intrinsics.denormalizePoint(track.xy, uv);
+        if (!intrinsics.denormalizePoint(track.xy, uv)) {
+          continue;
+        }
         if (frameState == sof::FrameState::Key) {
           if (is_primary[cam]) {
             cv::circle(drawings[cam], {(int)uv.x(), (int)uv.y()}, 2, rgb, cv::FILLED);

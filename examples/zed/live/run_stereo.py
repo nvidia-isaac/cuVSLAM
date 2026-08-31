@@ -45,7 +45,7 @@ def main():
     image_jitter_threshold_ns = (1000 / actual_fps + 2) * 1e6  # ms -> ns, +2 ms buffer
 
     # Configure tracker
-    cfg = vslam.Tracker.OdometryConfig(
+    odom_cfg = vslam.Odometry.Config(
         async_sba=False,
         enable_final_landmarks_export=True,
         enable_observations_export=True
@@ -60,7 +60,7 @@ def main():
     rig = get_zed_stereo_rig(camera_info, raw = RAW)
 
     # Initialize tracker
-    tracker = vslam.Tracker(rig, cfg)
+    tracker = vslam.Tracker(rig, odom_cfg)
     visualizer = RerunVisualizer()
 
     # Create and set RuntimeParameters after opening the camera
@@ -129,7 +129,7 @@ def main():
                     frame_id=frame_id,
                     images=[left_rgb],
                     pose=odom_pose,
-                    observations_main_cam=[tracker.get_last_observations(0)],
+                    observations_main_cam=[tracker.odometry.get_last_observations(0)],
                     trajectory=trajectory,
                     timestamp=timestamp
                 )

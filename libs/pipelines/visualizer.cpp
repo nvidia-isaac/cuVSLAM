@@ -20,6 +20,8 @@
 
 #include <unordered_map>
 
+#include "epipolar/camera_selection.h"
+
 #include <rerun/archetypes/arrows3d.hpp>
 #include <rerun/archetypes/line_strips3d.hpp>
 #include <rerun/archetypes/mesh3d.hpp>
@@ -92,8 +94,8 @@ void logLandmarks(const std::unordered_map<TrackId, Vector3T>& landmarks, const 
     // Transform landmark from world frame to camera frame
     Vector3T landmark_camera = camera_from_world * landmark_world;
 
-    // OpenCV camera: +Z forward; skip behind or on the focal plane.
-    if (landmark_camera.z() <= 0.0f) {
+    // OpenCV camera: +Z forward; skip anything behind the camera or inside the near plane.
+    if (!epipolar::IsDepthInFront(landmark_camera.z())) {
       continue;
     }
 
@@ -138,8 +140,8 @@ void logLandmarks(const std::vector<pipelines::Landmark>& landmarks, const Isome
     // Transform landmark from world frame to camera frame
     Vector3T landmark_camera = camera_from_world * landmark_world;
 
-    // OpenCV camera: +Z forward; skip behind or on the focal plane.
-    if (landmark_camera.z() <= 0.0f) {
+    // OpenCV camera: +Z forward; skip anything behind the camera or inside the near plane.
+    if (!epipolar::IsDepthInFront(landmark_camera.z())) {
       continue;
     }
 

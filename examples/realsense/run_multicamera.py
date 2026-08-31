@@ -211,12 +211,12 @@ def main() -> None:
     rig = get_rs_multi_rig(camera_params)
 
     # Initialize tracker
-    cfg = vslam.Tracker.OdometryConfig(
+    odom_cfg = vslam.Odometry.Config(
         async_sba=False,
         enable_final_landmarks_export=True,
         rectified_stereo_camera=True
     )
-    tracker = vslam.Tracker(rig, cfg)
+    tracker = vslam.Tracker(rig, odom_cfg)
 
     # Configure all devices
     configure_all_devices(pipelines, configs)
@@ -273,7 +273,7 @@ def main() -> None:
             # Visualize results (showing only left cameras)
             left_images = [all_images[i] for i in range(0, len(all_images), 2)]
             left_observations = [
-                tracker.get_last_observations(i)
+                tracker.odometry.get_last_observations(i)
                 for i in range(0, len(all_images), 2)
             ]
 
