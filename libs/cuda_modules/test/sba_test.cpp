@@ -20,6 +20,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <random>
 
 #include "benchmark_utils.h"
@@ -1394,9 +1395,10 @@ TEST(Cuda, SBANearFieldObservationsCarryWeightGpu) {
   EXPECT_TRUE(std::isfinite(problem.initial_cost)) << "every near-field observation was skipped on the GPU";
 }
 
-// The other side of the boundary: tightening the IMU bundlers off a bare zero only means anything
-// if points inside the near plane are still refused. A problem made entirely of them is infeasible,
-// which is what the num_skipped path reports.
+// The other side of the boundary: moving the guard onto MINIMUM_HITHER only means something if
+// points inside the near plane are still refused. A problem made entirely of them is infeasible,
+// which is what the num_skipped path reports. Checked on both implementations, because each kernel
+// carries its own copy of the comparison.
 TEST(Cuda, SBAObservationsInsideTheNearPlaneAreSkipped) {
   camera::Rig rig = MakeDefaultRig();
 
@@ -1415,6 +1417,48 @@ TEST(Cuda, SBAObservationsInsideTheNearPlaneAreSkipped) {
   update.point.resize(problem.points.size(), Vector3T::Zero());
   update.pose.resize(problem.rig_from_world.size(), Isometry3T::Identity());
   EXPECT_FALSE(std::isfinite(EvaluateCost(problem, update)));
+
+  const int num_points = static_cast<int>(problem.points.size());
+  const int num_poses = static_cast<int>(problem.rig_from_world.size());
+  const int num_observations = static_cast<int>(problem.observation_xys.size());
+
+  cuda::sba::GPUBundleAdjustmentProblem gpu_problem(num_points, num_poses, num_observations);
+  cuda::sba::GPUModelFunction gpu_function(num_observations);
+  cuda::sba::GPUParameterUpdate gpu_update(num_points, num_poses);
+  gpu_problem.set_rig(rig);
+
+  cuda::GPUArrayPinned<float> gpu_cost{1};
+  cuda::GPUArrayPinned<int> gpu_num_skipped{1};
+  cuda::Stream s;
+
+  sba::BundleAdjustmentProblem gpu_side = problem;
+  ASSERT_TRUE(gpu_problem.set(gpu_side, s.get_stream()));
+  CUDA_CHECK(update_model(gpu_function.meta(), gpu_problem.meta(), gpu_side.robustifier_scale, s.get_stream()));
+
+  cuda::sba::temporary::ParameterUpdate update_temp = to_temporary(update);
+  ASSERT_TRUE(gpu_update.set(update_temp, s.get_stream()));
+  CUDA_CHECK(evaluate_cost(gpu_cost.ptr(), gpu_num_skipped.ptr(), gpu_problem.meta(), gpu_update.meta(),
+                           gpu_side.robustifier_scale, s.get_stream()));
+
+  gpu_cost.copy(cuda::GPUCopyDirection::ToCPU, s.get_stream());
+  gpu_num_skipped.copy(cuda::GPUCopyDirection::ToCPU, s.get_stream());
+  CUDA_CHECK(cudaStreamSynchronize(s.get_stream()));
+
+  ASSERT_TRUE(gpu_problem.get(gpu_side, s.get_stream()));
+  ModelFunction gpu_model;
+  ASSERT_TRUE(gpu_function.get(gpu_side.observation_xys.size(), gpu_model, s.get_stream()));
+  for (int i = 0; i < num_observations; ++i) {
+    EXPECT_EQ(gpu_model.point_jacobians[i].norm(), 0.f) << "GPU observation " << i << " inside the near plane was kept";
+    EXPECT_EQ(gpu_model.robustifier_weights[i], 0.f);
+  }
+
+  // evaluate_cost_kernel leaves a fully skipped problem at a cost of zero; the infinity is applied
+  // by SchurComplementBundlerGpu::Impl::evaluated_cost from num_skipped, so assert on that and map
+  // it the way the bundler does to line the check up with the CPU one above.
+  EXPECT_EQ(gpu_num_skipped[0], num_observations);
+  const float gpu_evaluated_cost =
+      gpu_num_skipped[0] == num_observations ? std::numeric_limits<float>::infinity() : gpu_cost[0];
+  EXPECT_FALSE(std::isfinite(gpu_evaluated_cost));
 }
 
 TEST(Cuda, DISABLED_SBABuildReducedSystem) {
