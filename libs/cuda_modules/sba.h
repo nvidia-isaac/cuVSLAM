@@ -167,13 +167,16 @@ private:
 // Dense Cholesky solve of a small symmetric positive definite system - the reduced pose block, in
 // this library. Nothing here runs when you call it: the work is queued on the stream you pass and
 // the call returns before the GPU has started. There is no completion signal of its own. You own
-// the stream, so wait on it yourself and only then read the result:
+// the stream, so wait on it yourself and only then read the result or the status:
 //
 //   solver.solve(A, A_pitch, b, x, system_order, s);
 //   cudaStreamSynchronize(s);  // any wait on s does, an event recorded on it for instance
-//   // x is readable here
+//   if (!solver.solve_succeeded()) {
+//     // x is garbage - damp the system and queue it again
+//   }
 //
-// One instance carries one workspace, and so one solve at a time.
+// Read the status any earlier, and you get the previous solve's value, since one instance carries
+// one status buffer and so one solve at a time.
 class GPUCholeskySolver {
 public:
   explicit GPUCholeskySolver(int max_system_order);
@@ -186,8 +189,13 @@ public:
   // Queues the Cholesky solve of A x = b on the lower triangle of A - it does not solve anything by
   // the time it returns. A and b are only read; x holds the system_order floats of the result once
   // the stream has run it. Nothing fails loudly: a matrix that is not positive definite still
-  // produces an x, and nothing here tells you that x is garbage.
+  // produces an x, and only solve_succeeded() tells you that x is garbage.
   void solve(const float* A, size_t A_pitch, const float* b, float* x, int system_order, cudaStream_t s);
+
+  // cuSOLVER reports a matrix that is not positive definite through a status it writes on the
+  // device, not through its return code. False means the factor, and anything back-substituted from
+  // it, is garbage.
+  bool solve_succeeded() const;
 
 private:
   int max_system_order_;
@@ -210,8 +218,10 @@ private:
 // compute_update() fills it, the other two read it.
 //
 // Like GPUCholeskySolver, nothing here runs when you call it. Each method queues work on the
-// stream and returns, so a true return says the work was queued, not that it worked or finished,
-// and everything these methods write is only readable once the caller has synchronized the stream.
+// stream and returns, so a true return says the work was queued, not that it worked or finished.
+// Whether the linear solve inside compute_update() actually succeeded is solve_succeeded(), and
+// that - like everything these methods write - is only readable once the caller has synchronized
+// the stream.
 class GPULevenbergMarquardtStep {
 public:
   explicit GPULevenbergMarquardtStep(int max_points, int max_poses);
@@ -240,6 +250,9 @@ public:
   bool predict_reduction(float current_cost, float lambda, const GPUParameterUpdateMeta& update,
                          const GPULinearSystemMeta& full_system, int num_points, int num_poses, float* prediction,
                          cudaStream_t s);
+
+  /// @see GPUCholeskySolver::solve_succeeded
+  bool solve_succeeded() const;
 
 private:
   int max_points_;

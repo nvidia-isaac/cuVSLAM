@@ -21,6 +21,7 @@
 #include "common/isometry.h"
 #include "common/vector_3t.h"
 #include "cuda_modules/cuda_helper.h"
+#include "epipolar/camera_selection.h"
 
 #include "map/depth_point_map.h"
 
@@ -230,14 +231,18 @@ TEST(DepthPointMapTest, CloseButOffFrustumPointsAreKept) {
   std::vector<cuvslam::map::DepthCameraInfo> cams1{cam.info(pose1)};
 
   // Record which old points are still "close" to the new camera pose. All of
-  // these MUST still be present after update().
+  // these MUST still be present after update(). The near bound has to be the
+  // same IsDepthInFront the eviction predicate uses: a point the yaw pushed
+  // inside the near plane is legitimately dropped, so expecting it back here
+  // would pin the boundary this test is not about.
   std::vector<Vector3T> close_before = map.get_points();
-  close_before.erase(std::remove_if(close_before.begin(), close_before.end(),
-                                    [&](const Vector3T& p) {
-                                      const Vector3T p_cam = pose1.inverse() * p;
-                                      return !(p_cam.z() > 0.f && p_cam.z() <= settings.visible_max_depth);
-                                    }),
-                     close_before.end());
+  close_before.erase(
+      std::remove_if(close_before.begin(), close_before.end(),
+                     [&](const Vector3T& p) {
+                       const Vector3T p_cam = pose1.inverse() * p;
+                       return !(epipolar::IsDepthInFront(p_cam.z()) && p_cam.z() <= settings.visible_max_depth);
+                     }),
+      close_before.end());
   ASSERT_FALSE(close_before.empty()) << "Test precondition: at least some points should still be close.";
 
   map.update(cams1);

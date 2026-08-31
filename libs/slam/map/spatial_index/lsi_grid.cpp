@@ -21,6 +21,7 @@
 #include "camera/rig.h"
 #include "common/log_types.h"
 #include "common/rerun.h"
+#include "epipolar/camera_selection.h"
 
 #include "slam/common/blob_eigen.h"
 #include "slam/common/slam_log_types.h"
@@ -37,7 +38,7 @@ bool IsLandmarkInFrustum(const camera::ICameraModel& intrinsics, const Isometry3
   const Vector3T point = cam_from_world * landmark_xyz;
 
   // Behind camera or too close for stable projection (+Z forward, OpenCV).
-  if (point.z() <= 0.f) {
+  if (!epipolar::IsDepthInFront(point.z())) {
     return false;
   }
 

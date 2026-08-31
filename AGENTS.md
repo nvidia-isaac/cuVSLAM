@@ -98,7 +98,7 @@ Load-bearing rules:
 - Don't put implementation details in `cuvslam2.h`; it is the public C++ API boundary
 - Don't use non-ABI-stable types (`std::string`, `std::map`, etc.) in `cuvslam2.h`; `std::vector` is the explicit exception. Otherwise, use `std::string_view`, raw pointers with a count, or plain structs of primitive types only
 - Don't mix different `CMAKE_BUILD_TYPE` values in the same `CUVSLAM_DST_DIR`
-- Don't add standalone unit tests under `scripts/tests/` for CI or helper scripts; validate script changes with focused invocations and the relevant pre-commit hooks
+- Don't add test directories or standalone unit tests for `scripts/` or `examples/`, and don't reach into them from `tools/python_tools/cuvslam_tools/tests/`; validate changes there with focused invocations and the relevant pre-commit hooks
 - Don't commit directly to `main` — the pre-commit hook blocks it
 - Don't skip pre-commit with `--no-verify` except to unblock a known false positive
 - Never run `git push`
@@ -118,6 +118,8 @@ Load-bearing rules:
 **Length:** Keep the git commit message title (the first line) to 70 characters or fewer.
 
 **Unit tests:** `[fix]` and `[feat]` MRs must include unit tests (C++ in `libs/*/test/` and/or Python under `python/test/` as appropriate).
+
+Changes confined to `examples/` or `scripts/` are exempt. Neither tree is product source, neither has a test directory, and adding one would mean import shims or harnesses that cost more to maintain than they catch. Validate those changes with focused invocations plus the relevant pre-commit hooks, and record the commands and their output in the MR description. An MR that touches one of these trees *and* product source still needs tests for the product source part.
 
 **Scope:** Do not mix several unrelated changes in one MR. Keep each MR as small as is reasonable; every change in the MR should clearly relate to its stated topic.
 

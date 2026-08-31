@@ -392,12 +392,27 @@ def collect_kpis(stat_folder):
         raise ValueError(f"No dataset folders found in: {stat_folder}")
 
     kpis = {}
+    key_source = {}
     print(f"Processing {len(dataset_folders)} dataset folders...")
     for dataset_folder in dataset_folders:
-        print(f"  Processing: {os.path.basename(dataset_folder)}")
+        folder_name = os.path.basename(dataset_folder)
+        print(f"  Processing: {folder_name}")
         result = process_dataset_folder(dataset_folder)
-        if result:
-            kpis.update(result)
+        if not result:
+            continue
+        # The dataset prefix is the first hyphen-delimited token of the reporter
+        # config name, so two configs that share it produce identical keys and one
+        # would silently replace the other's whole report.
+        collisions = sorted(set(result) & set(kpis))
+        if collisions:
+            sources = ", ".join(sorted({key_source[key] for key in collisions}))
+            raise ValueError(
+                f"KPI key collision: '{folder_name}' produces keys already produced by {sources}: "
+                f"{', '.join(collisions)}. Give one of the reporter configs a distinct dataset "
+                "prefix, keeping underscores inside it (tartan_flaky-... not tartan-flaky-...)."
+            )
+        kpis.update(result)
+        key_source.update(dict.fromkeys(result, folder_name))
     if not kpis:
         raise ValueError("output KPI JSON is empty; check the input stats format")
     return kpis

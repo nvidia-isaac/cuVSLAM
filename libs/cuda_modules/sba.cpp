@@ -587,6 +587,9 @@ const GPUBundleAdjustmentProblemMeta& GPUBundleAdjustmentProblem::meta() const {
 
 GPUCholeskySolver::GPUCholeskySolver(int max_system_order)
     : max_system_order_(max_system_order), workspace_(workspace_size_), factor_(max_system_order_ * max_system_order_) {
+  // Nothing has been solved yet, so report failure instead of whatever the pinned buffer came with.
+  factorization_status_[0] = -1;
+
   CUSOLVER_CHECK(cusolverDnCreate(&cusolver_handle_));
   CUBLAS_CHECK(cublasCreate(&cublas_handle_));
 }
@@ -627,10 +630,16 @@ void GPUCholeskySolver::solve(const float* A, size_t A_pitch, const float* b, fl
   CUSOLVER_CHECK(cusolverDnSpotrf(cusolver_handle_, CUBLAS_FILL_MODE_LOWER, system_order, factor_.ptr(), system_order,
                                   workspace_.ptr(), workspace_size_, factorization_status_.ptr()));
 
+  // Read the factorization status back before the triangular solve below overwrites it with its
+  // own. The caller checks it after synchronizing the stream.
+  factorization_status_.copy(GPUCopyDirection::ToCPU, s);
+
   CUDA_CHECK(cudaMemcpyAsync(x, b, sizeof(float) * system_order, cudaMemcpyDeviceToDevice, s));
   CUSOLVER_CHECK(cusolverDnSpotrs(cusolver_handle_, CUBLAS_FILL_MODE_LOWER, system_order, 1, factor_.ptr(),
                                   system_order, x, system_order, factorization_status_.ptr()));
 }
+
+bool GPUCholeskySolver::solve_succeeded() const { return factorization_status_[0] == 0; }
 
 GPULevenbergMarquardtStep::GPULevenbergMarquardtStep(int max_points, int max_poses)
     : max_points_(max_points), max_poses_(max_poses), solver_(6 * max_poses) {}
@@ -641,6 +650,12 @@ bool GPULevenbergMarquardtStep::compute_update(const GPUParameterUpdateMeta& upd
                                                cudaStream_t s) {
   int system_order = 6 * num_poses;
   if (max_poses_ < num_poses || max_points_ < num_points) {
+    return false;
+  }
+
+  // Either count at zero leaves a kernel below with a zero grid or block dimension, which CUDA
+  // rejects as an invalid configuration rather than running as a no-op. Say so instead.
+  if (num_points <= 0 || num_poses <= 0) {
     return false;
   }
 
@@ -667,6 +682,8 @@ bool GPULevenbergMarquardtStep::apply_update(const GPUBundleAdjustmentProblemMet
       update_parameters(problem.points, update.point, problem.rig_from_world, update.pose, num_points, num_poses, s));
   return true;
 }
+
+bool GPULevenbergMarquardtStep::solve_succeeded() const { return solver_.solve_succeeded(); }
 
 bool GPULevenbergMarquardtStep::predict_reduction(float current_cost, float lambda,
                                                   const GPUParameterUpdateMeta& update,

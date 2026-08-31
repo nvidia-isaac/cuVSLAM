@@ -23,6 +23,7 @@
 
 #include "common/log.h"
 #include "common/vector_3t.h"
+#include "epipolar/camera_selection.h"
 
 namespace cuvslam::camera {
 
@@ -81,7 +82,7 @@ std::vector<CameraGraphNode> BuildCameraGraph(const camera::Rig& rig) {
           Isometry3T T_i_j = rig.camera_from_rig[cam_id_i] * rig.camera_from_rig[cam_id_j].inverse();
           Vector3T point_d_min_j = T_i_j * point_d_min_i;
           Vector3T point_d_max_j = T_i_j * point_d_max_i;
-          if (point_d_min_j.z() <= 0.f || point_d_max_j.z() <= 0.f) {
+          if (!epipolar::IsDepthInFront(point_d_min_j.z()) || !epipolar::IsDepthInFront(point_d_max_j.z())) {
             continue;
           }
           Vector2T xy_d_min_j = point_d_min_j.topRows(2) / point_d_min_j.z();
