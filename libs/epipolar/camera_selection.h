@@ -25,17 +25,9 @@
 #include "common/types.h"
 #include "common/vector_2t.h"
 #include "common/vector_3t.h"
+#include "epipolar/near_plane.h"
 
 namespace cuvslam::epipolar {
-
-namespace FrustumProperties {
-/// Minimum positive depth (camera +Z forward, OpenCV) for a point to be considered in front of the camera.
-const float MINIMUM_HITHER = 0.1f;
-}  // namespace FrustumProperties
-
-/// True when a camera-local depth clears the near plane. Prefer this over a hand-written
-/// comparison so every guard treats the boundary the same way.
-inline bool IsDepthInFront(float z) { return z > FrustumProperties::MINIMUM_HITHER; }
 
 enum class TriangulationState { None, Triangulated, AlmostParallel };
 

@@ -102,7 +102,7 @@ bool SchurComplementBundlerGpu::solve(BundleAdjustmentProblem& problem) {
 SchurComplementBundlerGpu::Impl::Impl(int max_points, int max_poses) : max_points(max_points), max_poses(max_poses) {}
 
 float SchurComplementBundlerGpu::Impl::evaluated_cost(int num_observations) const {
-  // An observation that lands behind its camera is skipped and adds nothing, so a state that hides
+  // An observation closer than the near plane is skipped and adds nothing, so a state that hides
   // every one of them would otherwise score a perfect zero. That is infeasible, not optimal - the
   // IMU bundler reports it the same way.
   if (gpu_num_skipped_[0] == num_observations) {
