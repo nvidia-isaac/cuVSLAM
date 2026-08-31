@@ -139,7 +139,7 @@ class TestMap(unittest.TestCase):
 
         # Configure tracker for map creation
         odom_cfg, slam_cfg, _ = self.get_localization_configs()
-        tracker = vslam.Tracker(self.rig, odom_cfg, slam_cfg)
+        tracker = vslam.Tracker(self.rig, vslam.Tracker.Mode.OdometryWithSlamOffline, odom_cfg, slam_cfg)
 
         subplots = None
 
@@ -187,7 +187,7 @@ class TestMap(unittest.TestCase):
         Returns True if localization was successful.
         """
         odom_cfg, slam_cfg, loc_settings = self.get_localization_configs()
-        tracker = vslam.Tracker(self.rig, odom_cfg, slam_cfg)
+        tracker = vslam.Tracker(self.rig, vslam.Tracker.Mode.OdometryWithSlamOffline, odom_cfg, slam_cfg)
 
         images, z = img.generate_zoomed_images(step)
         timestamp = step * 1_000_000

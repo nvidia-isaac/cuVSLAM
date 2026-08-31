@@ -100,7 +100,7 @@ odom_cfg = cuvslam.Odometry.Config(
 )
 
 # Initialize tracker
-tracker = cuvslam.Tracker(cuvslam.Rig([camera]), odom_cfg)
+tracker = cuvslam.Tracker(cuvslam.Rig([camera]), cuvslam.Tracker.Mode.OdometryOnlyRealtime, odom_cfg)
 
 frame_id = 0
 prev_timestamp = None

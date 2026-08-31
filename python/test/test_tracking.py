@@ -22,6 +22,8 @@ os.environ.setdefault("RERUN", "0")
 import cuvslam as vslam
 import data_gen as data
 
+TrackerMode = vslam.Tracker.Mode
+
 class TestTracking(unittest.TestCase):
     def setUp(self):
         cameras = data.generate_stereo_camera(640, 480, baseline=0.25)
@@ -31,43 +33,74 @@ class TestTracking(unittest.TestCase):
 
     def test_init_arguments(self):
         # accept partial, positional & keyword arguments
-        _ = vslam.Tracker(self.rig, vslam.Odometry.Config())
-        _ = vslam.Tracker(self.rig)
-        _ = vslam.Tracker(rig=self.rig, odom_config=vslam.Odometry.Config())
-        _ = vslam.Tracker(rig=self.rig)
-        _ = vslam.Tracker(rig=self.rig, slam_config=vslam.Slam.Config())
+        _ = vslam.Tracker(self.rig, TrackerMode.OdometryOnlyRealtime, vslam.Odometry.Config())
+        _ = vslam.Tracker(self.rig, TrackerMode.OdometryOnlyRealtime)
+        _ = vslam.Tracker(rig=self.rig, mode=TrackerMode.OdometryOnlyRealtime,
+                          odom_config=vslam.Odometry.Config())
+        _ = vslam.Tracker(rig=self.rig, mode=TrackerMode.OdometryOnlyRealtime)
+        _ = vslam.Tracker(rig=self.rig, mode=TrackerMode.OdometryWithSlamRealtime,
+                          slam_config=vslam.Slam.Config())
 
         with self.assertRaises(TypeError):
             vslam.Tracker()  # type: ignore # missing required argument "rig"
 
+        with self.assertRaises(TypeError):
+            vslam.Tracker(self.rig)  # type: ignore # missing required argument "mode"
+
     def test_component_accessors(self):
-        tracker = vslam.Tracker(self.rig)
+        tracker = vslam.Tracker(self.rig, TrackerMode.OdometryOnlyRealtime)
         self.assertIsInstance(tracker.odometry, vslam.Odometry)
         self.assertFalse(tracker.is_slam_enabled())
         with self.assertRaisesRegex(RuntimeError, "SLAM is not enabled"):
             _ = tracker.slam
 
-        tracker_with_slam = vslam.Tracker(self.rig, slam_config=vslam.Slam.Config())
+        tracker_with_slam = vslam.Tracker(self.rig, TrackerMode.OdometryWithSlamRealtime,
+                                          slam_config=vslam.Slam.Config())
         self.assertTrue(tracker_with_slam.is_slam_enabled())
         self.assertIsInstance(tracker_with_slam.slam, vslam.Slam)
+
+    def test_init_mode_must_match_configs(self):
+        # The mode and the configurations have to say the same thing. The tracker checks them
+        # instead of rewriting them, so a disagreement is an error rather than a silent override.
+        offline = vslam.Odometry.Config(async_sba=False)
+        blocking_slam = vslam.Slam.Config(sync_mode=True)
+
+        with self.assertRaisesRegex(ValueError, "async_sba"):
+            vslam.Tracker(self.rig, TrackerMode.OdometryOnlyOffline, vslam.Odometry.Config())
+        with self.assertRaisesRegex(ValueError, "async_sba"):
+            vslam.Tracker(self.rig, TrackerMode.OdometryOnlyRealtime, offline)
+
+        with self.assertRaisesRegex(ValueError, "sync_mode"):
+            vslam.Tracker(self.rig, TrackerMode.OdometryWithSlamOffline, offline, vslam.Slam.Config())
+        with self.assertRaisesRegex(ValueError, "sync_mode"):
+            vslam.Tracker(self.rig, TrackerMode.OdometryWithSlamRealtime,
+                          vslam.Odometry.Config(), blocking_slam)
+
+        # A SLAM configuration is meaningless without a SLAM mode.
+        with self.assertRaisesRegex(ValueError, "slam_config must be null"):
+            vslam.Tracker(self.rig, TrackerMode.OdometryOnlyOffline, offline, blocking_slam)
+
+        # The combinations that agree are accepted.
+        _ = vslam.Tracker(self.rig, TrackerMode.OdometryOnlyOffline, offline)
+        _ = vslam.Tracker(self.rig, TrackerMode.OdometryWithSlamOffline, offline, blocking_slam)
 
     @unittest.skip("TODO: add a check that cameras don't have the same pose")
     def test_init_same_cameras(self):
         # don't accept rig with duplicate cameras
         bad_rig = vslam.Rig(cameras=[self.rig.cameras[0], self.rig.cameras[0]])
         with self.assertRaises(ValueError):
-            vslam.Tracker(bad_rig)
+            vslam.Tracker(bad_rig, TrackerMode.OdometryOnlyRealtime)
 
     def test_init_no_cameras(self):
         # don't accept empty rig with no cameras
         with self.assertRaises(ValueError):
-            vslam.Tracker(vslam.Rig([]))
+            vslam.Tracker(vslam.Rig([]), TrackerMode.OdometryOnlyRealtime)
 
     def test_init_different_sizes(self):
         # don't accept cameras with different sizes
         self.rig.cameras[1].size[0] = 480
         with self.assertRaises(ValueError):
-            vslam.Tracker(self.rig)
+            vslam.Tracker(self.rig, TrackerMode.OdometryOnlyRealtime)
 
     def test_init_inertial_no_imus(self):
         # don't accept rig with no IMUs in inertial mode
@@ -75,7 +108,7 @@ class TestTracking(unittest.TestCase):
         cfg = vslam.Odometry.Config()
         cfg.odometry_mode = vslam.Odometry.OdometryMode.Inertial
         with self.assertRaises(ValueError):
-            vslam.Tracker(self.rig, cfg)
+            vslam.Tracker(self.rig, TrackerMode.OdometryOnlyRealtime, cfg)
 
     def test_init_multiple_imus(self):
         # don't accept rig with multiple IMUs
@@ -83,14 +116,14 @@ class TestTracking(unittest.TestCase):
         cfg = vslam.Odometry.Config()
         cfg.odometry_mode = vslam.Odometry.OdometryMode.Inertial
         with self.assertRaises(ValueError):
-            vslam.Tracker(self.rig)
+            vslam.Tracker(self.rig, TrackerMode.OdometryOnlyRealtime)
 
     def test_init_negative_image_size(self):
         # image sizes should be positive
         self.rig.cameras[0].size[0] = -1
         self.rig.cameras[1].size[0] = -1
         with self.assertRaises(ValueError):
-            vslam.Tracker(self.rig)
+            vslam.Tracker(self.rig, TrackerMode.OdometryOnlyRealtime)
 
     def test_tracking(self):
         modes = [vslam.Odometry.OdometryMode.Multicamera, vslam.Odometry.OdometryMode.Inertial,
@@ -108,7 +141,7 @@ class TestTracking(unittest.TestCase):
                     cfg.rgbd_settings.depth_scale_factor = 1000.0
                     cfg.rgbd_settings.depth_camera_id = 0
                     cfg.rgbd_settings.enable_depth_stereo_tracking = False
-                    tracker = vslam.Tracker(self.rig, cfg)
+                    tracker = vslam.Tracker(self.rig, TrackerMode.OdometryOnlyRealtime, cfg)
                     for i in range(60):
                         # Add 10 IMU measurements between frames
                         if mode == vslam.Odometry.OdometryMode.Inertial:
@@ -147,7 +180,7 @@ class TestTracking(unittest.TestCase):
                 multisensor_settings=vslam.Odometry.MultisensorSettings(
                     depth_camera_ids=[0], depth_scale_factor=1000.0))
             rig = vslam.Rig([self.rig.cameras[0]])
-            tracker = vslam.Tracker(rig, config)
+            tracker = vslam.Tracker(rig, TrackerMode.OdometryOnlyRealtime, config)
             tracker.track(1000, [image], depths=[depth])
             tracker.track(2000, [image], depths=[depth])
 
@@ -155,7 +188,7 @@ class TestTracking(unittest.TestCase):
             config = vslam.Odometry.Config(
                 odometry_mode=vslam.Odometry.OdometryMode.Multisensor)
             rig = vslam.Rig(self.rig.cameras)
-            tracker = vslam.Tracker(rig, config)
+            tracker = vslam.Tracker(rig, TrackerMode.OdometryOnlyRealtime, config)
             stereo_images = [image.copy(), image.copy()]
             tracker.track(1000, stereo_images)
             tracker.track(2000, stereo_images)
@@ -166,7 +199,7 @@ class TestTracking(unittest.TestCase):
                 multisensor_settings=vslam.Odometry.MultisensorSettings(
                     depth_camera_ids=[0], depth_scale_factor=1000.0))
             rig = vslam.Rig([self.rig.cameras[0]], [vslam.ImuCalibration()])
-            tracker = vslam.Tracker(rig, config)
+            tracker = vslam.Tracker(rig, TrackerMode.OdometryOnlyRealtime, config)
             for frame in range(2):
                 frame_start_ns = frame * 1100
                 for sample in range(10):
@@ -182,7 +215,7 @@ class TestTracking(unittest.TestCase):
             odometry_mode=vslam.Odometry.OdometryMode.Multisensor)
         rig = vslam.Rig([self.rig.cameras[0]])
         with self.assertRaisesRegex(ValueError, "at least one RGB-D camera.*or one camera pair"):
-            vslam.Tracker(rig, config)
+            vslam.Tracker(rig, TrackerMode.OdometryOnlyRealtime, config)
 
     def test_multisensor_rejects_duplicate_depth_camera_ids(self):
         config = vslam.Odometry.Config(
@@ -191,7 +224,7 @@ class TestTracking(unittest.TestCase):
                 depth_camera_ids=[0, 0]))
         rig = vslam.Rig([self.rig.cameras[0]])
         with self.assertRaisesRegex(ValueError, "duplicate camera id"):
-            vslam.Tracker(rig, config)
+            vslam.Tracker(rig, TrackerMode.OdometryOnlyRealtime, config)
 
     def _run_keyframe_overrides(self, mode, overrides):
         """Track a fixed feature-rich frame repeatedly, applying a per-frame keyframe override.
@@ -270,7 +303,7 @@ class TestTracking(unittest.TestCase):
         cfg.odometry_mode = vslam.Odometry.OdometryMode.Multicamera
         cfg.enable_observations_export = True
         cfg.enable_landmarks_export = True
-        tracker = vslam.Tracker(self.rig, cfg)
+        tracker = vslam.Tracker(self.rig, TrackerMode.OdometryOnlyRealtime, cfg)
 
         # Track a few frames to build up features
         for i in range(5):
@@ -299,7 +332,7 @@ class TestTracking(unittest.TestCase):
         cfg = vslam.Odometry.Config()
         cfg.odometry_mode = vslam.Odometry.OdometryMode.Multicamera
         cfg.enable_final_landmarks_export = True
-        tracker = vslam.Tracker(self.rig, cfg)
+        tracker = vslam.Tracker(self.rig, TrackerMode.OdometryOnlyRealtime, cfg)
 
         for i in range(5):
             images, _ = img.generate_zoomed_images(i)
@@ -311,7 +344,7 @@ class TestTracking(unittest.TestCase):
     def test_get_gravity_non_inertial(self):
         cfg = vslam.Odometry.Config()
         cfg.odometry_mode = vslam.Odometry.OdometryMode.Multicamera
-        tracker = vslam.Tracker(self.rig, cfg)
+        tracker = vslam.Tracker(self.rig, TrackerMode.OdometryOnlyRealtime, cfg)
 
         images = [np.zeros((480, 640), dtype=np.uint8) for _ in range(self.num_cameras)]
         tracker.track(1000, images)
@@ -325,9 +358,10 @@ class TestTracking(unittest.TestCase):
 
         cfg = vslam.Odometry.Config()
         cfg.odometry_mode = vslam.Odometry.OdometryMode.Multicamera
+        cfg.async_sba = False
         s_cfg = vslam.Slam.Config()
         s_cfg.sync_mode = True
-        tracker = vslam.Tracker(self.rig, cfg, s_cfg)
+        tracker = vslam.Tracker(self.rig, TrackerMode.OdometryWithSlamOffline, cfg, s_cfg)
 
         for i in range(3):
             images, _ = img.generate_zoomed_images(i)
@@ -343,9 +377,10 @@ class TestTracking(unittest.TestCase):
 
         cfg = vslam.Odometry.Config()
         cfg.odometry_mode = vslam.Odometry.OdometryMode.Multicamera
+        cfg.async_sba = False
         s_cfg = vslam.Slam.Config()
         s_cfg.sync_mode = True
-        tracker = vslam.Tracker(self.rig, cfg, s_cfg)
+        tracker = vslam.Tracker(self.rig, TrackerMode.OdometryWithSlamOffline, cfg, s_cfg)
 
         for i in range(3):
             images, _ = img.generate_zoomed_images(i)
@@ -360,9 +395,10 @@ class TestTracking(unittest.TestCase):
 
         cfg = vslam.Odometry.Config()
         cfg.odometry_mode = vslam.Odometry.OdometryMode.Multicamera
+        cfg.async_sba = False
         s_cfg = vslam.Slam.Config()
         s_cfg.sync_mode = True
-        tracker = vslam.Tracker(self.rig, cfg, s_cfg)
+        tracker = vslam.Tracker(self.rig, TrackerMode.OdometryWithSlamOffline, cfg, s_cfg)
 
         for i in range(5):
             images, _ = img.generate_zoomed_images(i)
@@ -379,10 +415,11 @@ class TestTracking(unittest.TestCase):
 
         cfg = vslam.Odometry.Config()
         cfg.odometry_mode = vslam.Odometry.OdometryMode.Multicamera
+        cfg.async_sba = False
         s_cfg = vslam.Slam.Config()
         s_cfg.sync_mode = True
         s_cfg.enable_reading_internals = True
-        tracker = vslam.Tracker(self.rig, cfg, s_cfg)
+        tracker = vslam.Tracker(self.rig, TrackerMode.OdometryWithSlamOffline, cfg, s_cfg)
 
         for i in range(5):
             images, _ = img.generate_zoomed_images(i)
@@ -398,10 +435,11 @@ class TestTracking(unittest.TestCase):
 
         cfg = vslam.Odometry.Config()
         cfg.odometry_mode = vslam.Odometry.OdometryMode.Multicamera
+        cfg.async_sba = False
         s_cfg = vslam.Slam.Config()
         s_cfg.sync_mode = True
         s_cfg.enable_reading_internals = True
-        tracker = vslam.Tracker(self.rig, cfg, s_cfg)
+        tracker = vslam.Tracker(self.rig, TrackerMode.OdometryWithSlamOffline, cfg, s_cfg)
 
         for i in range(5):
             images, _ = img.generate_zoomed_images(i)
@@ -419,10 +457,11 @@ class TestTracking(unittest.TestCase):
         cfg = vslam.Odometry.Config()
         cfg.odometry_mode = vslam.Odometry.OdometryMode.Multicamera
 
+        cfg.async_sba = False
         s_cfg = vslam.Slam.Config()
         s_cfg.sync_mode = True
 
-        tracker = vslam.Tracker(self.rig, cfg, s_cfg)
+        tracker = vslam.Tracker(self.rig, TrackerMode.OdometryWithSlamOffline, cfg, s_cfg)
 
         identity = vslam.Pose(translation=[0.0, 0.0, 0.0], rotation=[0.0, 0.0, 0.0, 1.0])
         odom_pose, slam_pose = tracker.track(1000, synthetic_images)
