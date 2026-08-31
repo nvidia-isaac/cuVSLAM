@@ -23,6 +23,7 @@
 
 #include "common/vector_2t.h"
 #include "common/vector_3t.h"
+#include "epipolar/camera_selection.h"
 
 namespace cuvslam::sof {
 namespace {
@@ -134,7 +135,7 @@ EpipolarCurves::EpipolarCurves(const camera::ICameraModel& cam_l, const camera::
       float log_d = log_max;
       for (int s = 0; s < kNumDepthSamples; ++s, log_d -= log_step) {
         const Vector3T p_r = right_from_left * (std::exp(log_d) * ray_l);
-        if (p_r.z() <= 0.0f) {
+        if (!epipolar::IsDepthInFront(p_r.z())) {
           continue;
         }
         Vector2T uv_r_base;

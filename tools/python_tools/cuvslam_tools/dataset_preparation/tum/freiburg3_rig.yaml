@@ -1,8 +1,0 @@
-rgb_camera:
-  focal_length: [535.4, 539.2]
-  principal_point: [320.1, 247.6]
-  image_width: 640
-  image_height: 480
-
-depth_camera:
-  scale: 5000

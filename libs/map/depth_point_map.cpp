@@ -19,25 +19,26 @@
 #include <algorithm>
 
 #include "cuda_modules/cuda_kernels/cuda_kernels.h"
+#include "epipolar/camera_selection.h"
 
 namespace cuvslam::map {
 
 namespace {
 
 // Eviction predicate: the point is "close" to camera `cam` iff its camera-frame
-// z is in (0, max_depth]. No frustum check — a point close but momentarily off
-// the image rect is still worth keeping because small yaw / vibration will
+// z is in (near plane, max_depth]. No frustum check — a point close but momentarily
+// off the image rect is still worth keeping because small yaw / vibration will
 // routinely bring it back into view.
 inline bool close_to_cam(const Vector3T& p_world, const DepthCameraInfo& cam, float max_depth) {
   const Vector3T p_cam = cam.world_from_cam.inverse() * p_world;
-  return p_cam.z() > 0.f && p_cam.z() <= max_depth;
+  return epipolar::IsDepthInFront(p_cam.z()) && p_cam.z() <= max_depth;
 }
 
 // Counting predicate: close AND projects inside this camera's image rect. This
 // is the quantity the ICP factor can actually exploit on the next solve.
 inline bool close_and_visible(const Vector3T& p_world, const DepthCameraInfo& cam, float max_depth) {
   const Vector3T p_cam = cam.world_from_cam.inverse() * p_world;
-  if (p_cam.z() <= 0.f || p_cam.z() > max_depth) {
+  if (!epipolar::IsDepthInFront(p_cam.z()) || p_cam.z() > max_depth) {
     return false;
   }
   const float inv_z = 1.f / p_cam.z();

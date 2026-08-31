@@ -9,9 +9,7 @@ RUNNER_LOCAL_DATASETS_ROOT="${RUNNER_LOCAL_DATASETS_ROOT:-${HOME:-/tmp}/.cache/c
 LOCAL_DATASETS_DIR="$RUNNER_LOCAL_DATASETS_ROOT/datasets/vslam"
 FORCE_RESTAGE="${FORCE_RESTAGE:-false}"
 
-_s3_path="${S3_DATASETS_BUCKET#s3://}"
-S3_BUCKET="${_s3_path%%/*}"
-S3_KEY_PREFIX="${_s3_path#*/}"
+S3_BUCKET="$(s3_dataset_bucket)"
 
 mkdir -p "$LOCAL_DATASETS_DIR"
 
@@ -43,8 +41,9 @@ report_staging_profile() {
 
 stage_one() {
   local name="$1"
-  local s3_key="${S3_KEY_PREFIX}/${name}.tar"
-  local s3_uri="s3://${S3_BUCKET}/${s3_key}"
+  local s3_key s3_uri
+  s3_key="$(s3_dataset_key "$name")"
+  s3_uri="$(s3_tarball_uri "$name")"
   local dest="$LOCAL_DATASETS_DIR/$name"
   local etag_file="$dest/.s3_etag"
 

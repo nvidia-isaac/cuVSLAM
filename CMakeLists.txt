@@ -69,7 +69,6 @@ option(USE_CUDA "Use CUDA Toolkit" ON)
 option(ENFORCE_GPU "Disable the usage of pure CPU version of cuVSLAM" ON)
 option(CUVSLAM_LOG_ENABLE "Enable root cuvslam::Log." OFF)
 option(SOF_USE_SMALLER_NCC "Use 3-pixel area for NCC. Possible it is useful for fisheye. By default, NCC uses 5 pixels." OFF)
-option(DECREASE_RANSAC_AREA "Do not use 10% tracks for RANSAC near the image border. Possible useful for fisheye. The Default is to use all tracks." OFF)
 option(CUVSLAM_BUILD_SHARED_LIB "Build shared library version of cuVSLAM" TRUE)
 option(USE_RERUN "Use Rerun for visualization" OFF)
 

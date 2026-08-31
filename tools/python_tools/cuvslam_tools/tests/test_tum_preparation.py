@@ -12,7 +12,7 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
-"""Archive extraction safety for the TUM RGB-D preparation.
+"""Archive extraction safety and sequence discovery for the TUM RGB-D preparation.
 
 Extraction is hand-rolled on Python tarfile instead of tar, which validates
 member names and link targets separately. One case covers each branch.
@@ -56,13 +56,47 @@ class TestTumSafeExtraction(unittest.TestCase):
 
     def test_traversing_link_target_is_rejected(self):
         def build(tar):
-            info = tarfile.TarInfo(f"{tum_prepare.SEQUENCE_NAME}/link")
+            info = tarfile.TarInfo("rgbd_dataset_freiburg3_cabinet/link")
             info.type = tarfile.SYMTYPE
             info.linkname = "../../outside"
             tar.addfile(info)
 
         with self.assertRaisesRegex(PreparationError, "unsafe link target"):
             tum_prepare.extract_archive(self._archive(build), self.destination)
+
+
+class TestTumSequenceDiscovery(unittest.TestCase):
+    """extract_sequence locates the sequence directory rather than assuming its name."""
+
+    def setUp(self):
+        self._temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self._temporary.name)
+        self.destination = self.root / "out"
+        self.destination.mkdir()
+
+    def tearDown(self):
+        self._temporary.cleanup()
+
+    def _archive(self, directories) -> Path:
+        archive = self.root / "archive.tgz"
+        with tarfile.open(archive, "w:gz") as tar:
+            for directory in directories:
+                info = tarfile.TarInfo(f"{directory}/rgb.txt")
+                payload = b"# timestamp filename\n"
+                info.size = len(payload)
+                tar.addfile(info, io.BytesIO(payload))
+        return archive
+
+    def test_single_directory_is_returned(self):
+        archive = self._archive(["rgbd_dataset_freiburg3_teddy"])
+        extracted = tum_prepare.extract_sequence(archive, self.destination)
+        self.assertEqual(extracted.name, "rgbd_dataset_freiburg3_teddy")
+        self.assertTrue((extracted / "rgb.txt").is_file())
+
+    def test_unexpected_archive_shape_is_reported(self):
+        archive = self._archive(["first", "second"])
+        with self.assertRaisesRegex(PreparationError, "expected one top-level directory"):
+            tum_prepare.extract_sequence(archive, self.destination)
 
 
 if __name__ == "__main__":
