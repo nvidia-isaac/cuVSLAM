@@ -131,18 +131,30 @@ The cuVSLAM 2D engine expects the images to form a sequential video stream with 
 Missing frames can significantly degrade quality, up to “tracking lost.” They can also make tracking results
 non-deterministic—something you definitely don’t want during troubleshooting.
 
-**Why a single missed frame can be fatal.** The front-end tracker uses
+**Why a missed frame can cost you tracking.** The front-end tracker uses
 Lucas-Kanade, which assumes a small motion vector between adjacent frames so
-that the same image patch can be matched in the new frame. If one frame is
-dropped during fast motion, the apparent motion between the surviving frames
-doubles; patches no longer match; features die; the tracker reports tracking
-loss; the system must relocalize from the origin. This is why
-`max_frame_delta_s` exists — it is not a soft hint, it gates whether the LK
-assumption holds. Linux is not a real-time OS, so cuVSLAM is typically the
-first component to fail when motion planners and DNNs contend for GPU/CPU.
+that the same image patch can be matched in the new frame. A dropped frame
+widens the interval between the frames that do arrive, so the apparent
+displacement grows. During fast motion it can grow past what LK can match, and
+then features die, the tracker may report tracking loss, and the system has to
+relocalize. During slow motion the same gap is usually survivable.
 
-To diagnose this, enable verbose logging and check the `max_frame_delta_s` parameter. You’ll see a console message
-whenever a frame drop is detected.
+`max_frame_delta_s` (default 1 s) is how you notice this. It is a diagnostic
+threshold on the elapsed time between consecutive frames, not a gate on the LK
+assumption: exceeding it logs a warning and nothing more — the frame is still
+tracked.
+
+```text
+[WARNING] Delta between frames at frame N is X ms that is longer than desired
+          Y ms. Check camera fps and sync settings.
+```
+
+Set it near your expected frame interval so the warning fires on real gaps
+rather than only on multi-second stalls. Linux is not a real-time OS, so
+cuVSLAM is typically the first component to fail when motion planners and DNNs
+contend for GPU/CPU.
+
+Enable verbose logging to see these warnings, and set the threshold to match your expected frame interval.
 
 **C++ API**
 
@@ -635,16 +647,19 @@ For real-time or high-throughput operation, enable async mode. Adjust these para
 **Async mode does not solve GPU contention.** When other GPU consumers (motion
 planners, DNN inference) saturate the device, the cuVSLAM main thread can be
 starved of GPU cycles, miss its deadline, and lose tracking — see [Step 2:
-Verify you have no missing frames](#verify-you-have-no-missing-frames) for the
-Lucas-Kanade causal chain.
+Verify you have no missing frames](#verify-you-have-no-missing-frames) for why
+a widened frame interval hurts Lucas-Kanade.
 
-On modern NVIDIA GPUs, the production mitigation is **CUDA green contexts**:
-allocate a fixed percentage of the GPU (for example 20 %) reserved for
-cuVSLAM. The allocation is static — that fraction stays reserved even when
-cuVSLAM is idle or disabled — but in exchange the main thread gets a real-
-time-friendly slice it can rely on. Pair this with `async_sba = true` to
-keep SBA off the reserved slice. Green contexts are a deployment concern, not
-a library setting; configure them in your application's CUDA initialization.
+If your CUDA version supports partitioning device resources (CUDA green
+contexts, for example), you can carve out a share of the GPU for cuVSLAM
+instead of leaving it to compete with every other consumer. cuVSLAM has no API
+for creating a partition and makes no concurrency guarantee about one: build
+the partition and its streams in your own application, then hand those streams
+to cuVSLAM through `RegisterCudaStreamProvider` (see
+`libs/cuvslam/cuvslam_gpu.h`) so tracking work is submitted onto them. Note
+that `async_sba` only moves SBA to a background thread — it is not a
+GPU-partitioning control. A static partition also reserves that share even
+while cuVSLAM is idle, so benchmark the trade-off on your own hardware.
 
 ### Verify SLAM keeps up with odometry
 

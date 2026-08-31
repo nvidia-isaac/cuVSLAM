@@ -83,10 +83,14 @@ cuVSLAM is a highly optimized visual tracking library validated across numerous 
 
 <img src="examples/assets/cuvslam_performance.png" alt="cuVSLAM performance" width="800" />
 
-**Reference load** for a healthy stereo deployment at 60 FPS, VGA resolution:
-GPU ≈ 5 %, CPU ≈ 5 %; in pure-CPU mode on a Jetson Orin, less than one CPU
-core. Significantly higher load with an otherwise idle system usually points
-to misconfiguration before it points to a tuning problem.
+**Reference load** for a healthy stereo deployment at 60 FPS, VGA resolution,
+in blocking mode: GPU ≈ 5 %, CPU ≈ 5 %; in pure-CPU mode on a Jetson Orin,
+less than one CPU core. These are order-of-magnitude expectations rather than a
+calibrated benchmark — see
+[DEVELOPMENT.md — Performance benchmarking](DEVELOPMENT.md#performance-benchmarking-manual)
+for what is and is not pinned down about them. Load several times higher than
+this — not a few percent — on an otherwise idle system usually points to
+misconfiguration before it points to a tuning problem.
 
 The accuracy and robustness of cuVSLAM can be influenced by several factors. If you experience performance issues, please check your system against these common causes:
 

@@ -57,8 +57,8 @@ gates are two reporter-based workflows that run outside the unit-test
 infrastructure:
 
 - **Accuracy regression** — run `tools/cuvslam_app` (or the legacy reporter)
-  on the full dataset list before/after a change and compare the PDF outputs
-  side-by-side.
+  before/after a change on the datasets enabled in `scripts/run_eval.sh`
+  (KITTI and EuRoC today) and compare the PDF outputs side-by-side.
 - **Performance benchmarking** — manual, NVTX + Nsight Systems based, run
   roughly monthly.
 

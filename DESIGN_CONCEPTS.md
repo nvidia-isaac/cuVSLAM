@@ -160,35 +160,43 @@ behaviour of another.
 
 | Thread | Owns | Real-time? | What it costs to skip work |
 |---|---|---|---|
-| **Main** | Feature selection, LK tracking, keyframe decision, triangulation | Yes — must finish every frame, or tracking is lost | Skipping a frame is fatal (see below). |
+| **Main** | Feature selection, LK tracking, keyframe decision, triangulation | Yes — must finish every frame, or tracking is lost | A skipped frame can cost tracking during fast motion (see below). |
 | **SBA** (background) | Sparse bundle adjustment — fine-tuning of 3D landmark positions | No | Free. Skipping SBA on a frame causes no measurable accuracy loss; it is purely an optimization pass. |
 | **SLAM** (background) | Long-term map, loop-closure search | No — operates "in the past" with a command queue | Free at the cost of latency. The SLAM thread can be hundreds of frames (seconds) behind the main thread; that is the design, not a bug. |
 
 **Why this matters:**
 
 The main thread uses Lucas-Kanade, which assumes a small motion vector between
-adjacent frames. One missed frame at fast motion → no matchable patches →
-tracking loss → relocalize from origin. Linux is not a real-time OS, so
-cuVSLAM is typically the first system component to fail when motion planners
-and DNNs contend for GPU/CPU. This is what `Odometry::Config::async_sba` and
+adjacent frames. During fast motion one missed frame can leave no matchable
+patches, and then features die, tracking is lost and the system relocalizes
+from the origin; during slow motion the same gap is usually survivable. Linux
+is not a real-time OS, so cuVSLAM is typically the first system component to
+fail when motion planners and DNNs contend for GPU/CPU. This is what `Odometry::Config::async_sba` and
 `Slam::Config::sync_mode` exist to control. For reproducible debugging, force
 SBA and SLAM onto the main thread (`async_sba = false`, `sync_mode = true`).
 For production deployment, leave them on background threads and accept that
 loop-closure corrections arrive late.
 
 **Loop closures are retroactive.** When the SLAM thread finds a loop closure
-"three minutes ago," it sends a correction back through the queue. The main
-thread applies the correction to the current pose on the next frame, which
-the user sees as a small jump in the trajectory. This is correct behaviour —
-the jump is removing accumulated drift, not introducing error.
+"three minutes ago," it writes the corrected pose straight into the shared
+`Tail` (`slam::Tail::UpdatePoseBySLAM`, mutex-guarded) — it does not queue a
+correction for the main thread to apply. The correction is composed as a delta
+onto that pose and every retained pose after it, so it moves the recent
+trajectory, not just the current frame. An update older than the `Tail`
+retention window is rejected and logged rather than applied. The resulting
+shift is however large the accumulated drift was: usually small, but nothing
+guarantees that. This is correct behaviour — the shift removes drift, it does
+not introduce error.
 
 **What to avoid:**
 
 - Do not move main-thread work onto the SBA or SLAM thread "because they have
   spare cycles." They do not — they are working in the past.
 - Do not add a synchronous wait from the main thread into the SLAM thread.
-  That converts a real-time-soft system into a real-time-hard one and will
-  cause tracking loss on real robots.
+  It removes the asynchronous decoupling the design depends on: the main
+  thread's per-frame deadline then has to cover SLAM's runtime too, so
+  whenever SLAM overruns its budget the main thread misses its deadline, and
+  that can lose tracking on real robots.
 
 ---
 
@@ -239,19 +247,22 @@ Design a stable public API for that feature instead.
 ## 7. Memory backends are pluggable through the image manager
 
 **Rule:** New memory backends (different allocator kinds, different devices)
-plug in through `sof/image_manager.{h,cpp}`, not through scattered allocation
-sites.
+plug in through `sof/image_manager.{h,cpp}` and `sof/image_context.{h,cpp}`,
+not through scattered allocation sites.
 
-**Why:** The image manager already abstracts over two allocator kinds — CUDA
-device memory and plain C host buffers — by storing a pointer plus a tag of
-which allocator owns it. Call sites do not branch on allocator kind; they go
-through the manager. This is the extension point. Adding a third or fourth
-allocator kind (pinned host memory, unified memory, a non-CUDA accelerator
-buffer) is a localized change to the manager and its enum, not a global
-refactor.
+**Why:** `ImageManager` is a mutex-guarded pool of `ImageContext` objects.
+`init()` fixes the image shape, the pool size and the `use_gpu` choice; call
+sites then take what they need with `acquire()` / `acquire_with_depth()` and
+hold an `ImageContextPtr`. The allocation itself is done by `ImageContext` and
+the `cuda::` image and pyramid types it owns, not by the manager. Because call
+sites neither allocate image memory nor branch on where it came from, the pool
+plus the context is the extension point: adding another backend (pinned host
+memory, unified memory, a non-CUDA accelerator buffer) means changing how a
+context is built and pooled, not a global refactor.
 
 **What to avoid:**
 
-- Do not introduce a parallel pointer + kind pair in another library.
+- Do not introduce a parallel image pool or allocation path in another
+  library.
 - Do not branch on `cudaPointerGetAttributes(...)` at call sites; the
-  manager already knows.
+  `ImageContext` you acquired already knows which backend it is on.

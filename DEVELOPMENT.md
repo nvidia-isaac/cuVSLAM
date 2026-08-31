@@ -8,10 +8,13 @@ The reporter is the primary tool for evaluating any change that may affect
 tracking accuracy. The development loop is:
 
 1. Implement the change behind a build flag, CLI flag, or branch.
-2. Run `tools/cuvslam_app` (Python reporter) — or the legacy C++ reporter — on
-   the full dataset list, once with the flag off and once with the flag on.
-   Each run produces a PDF with one page per sequence (trajectory + ground
-   truth + green dots for loop closures + per-sequence metrics).
+2. Run `tools/cuvslam_app` (Python reporter) — or the legacy C++ reporter —
+   once with the flag off and once with the flag on, over the datasets enabled
+   in `scripts/run_eval.sh`. Only KITTI and EuRoC are enabled today; TartanAir,
+   M3ED-Spot, TUM-RGBD, AR-table and ICL-NUIM are listed but commented out, so
+   a genuinely full-dataset run means uncommenting them and provisioning the
+   data first. Each run produces a PDF with one page per sequence (trajectory +
+   ground truth + green dots for loop closures + per-sequence metrics).
 3. Open the two PDFs side-by-side and compare visually.
 
 Visual inspection matters because good metrics do not always mean good
@@ -47,23 +50,34 @@ The cuVSLAM code base has NVTX ranges around every main pipeline stage
 (feature selection, LK tracking, triangulation, SBA, SLAM message handling).
 In the Nsight timeline you will see them as named, colored bands.
 
-Reference loads on a healthy system (stereo, 60 FPS, VGA):
+Reference loads on a healthy system (stereo, 60 FPS, VGA, blocking mode):
 - GPU: ≈ 5 %
 - CPU: ≈ 5 %
-- Pure-CPU mode on a Tegra Orin: < 1 core.
+- Pure-CPU mode on a Jetson Orin: < 1 core.
 
-If you measure significantly higher load with the same config, something is
-wrong before you start tuning.
+Treat these as order-of-magnitude expectations, not a calibrated benchmark:
+the host GPU/CPU model, the Jetson power mode and the utilization-measurement
+method they were taken with are not recorded, so they are a smell test rather
+than a number to reproduce. Compare against your own baseline captured on the
+same hardware, power mode, tracker mode and sequence. A result several times
+higher — not a few percent — is what points at misconfiguration before it
+points at tuning.
 
 ### Tracker execution modes
 
-`tools/tracker` (and the new `tools/cuvslam_api_launcher`) has two execution
-modes, intended for different purposes:
+`tools/cuvslam_api_launcher` has two feed rates, intended for different
+purposes (`tools/tracker` has no equivalent flag):
 
 | Mode | Selector | Use it for |
 |---|---|---|
-| Blocking (default) | no flag | Maximum-quality reference trajectory. Main thread waits for every background thread each frame. Throughput ≈ 20–30 FPS, low GPU/CPU load because most of the time is spent waiting. |
-| FPS simulation | `--max_fps <hz>` | Real-time benchmarking. Images are fed at the simulated rate; SBA and SLAM threads run as fast as they can and may skip work. Use this to measure whether the system keeps up at a target hardware FPS. |
+| Free-running (default) | no flag | Maximum-quality reference trajectory. Frames are fed as fast as they can be read. |
+| FPS simulation | `--max_fps <hz>` | Real-time benchmarking. Use this to measure whether the system keeps up at a target hardware FPS; SBA and SLAM run as fast as they can and may skip work. |
+
+`--max_fps` only throttles how quickly frames are fed to the tracker — it
+changes no threading setting. Blocking execution is a library config, not a
+tool mode: set `Odometry::Config::async_sba = false` and
+`Slam::Config::sync_mode = true` to pull SBA and SLAM onto the main thread.
+Neither of those is the default, and no tool flag sets them.
 
 **IO warm-up trick.** The first run of a sequence pays the disk-read cost
 (TGA files page in). The second run reads from the OS page cache, so the
@@ -77,7 +91,7 @@ Two levels, with different cadences:
 | Level | Cadence | What runs |
 |---|---|---|
 | Unit tests (ctest in `libs/*/test/`, `python3 -m unittest` in `python/test/`) | Per commit | Fast — minutes. |
-| Reporter integration tests | Nightly | All datasets, full PDF output. Catches end-to-end regressions that unit tests miss. |
+| Reporter integration tests | Nightly | Every dataset enabled in `scripts/run_eval.sh` (KITTI and EuRoC today), full PDF output. Catches end-to-end regressions that unit tests miss. |
 
 Before opening a non-trivial MR, run the reporter locally on at least KITTI
 and EuRoC. The full nightly run will catch what you missed, but it is faster
