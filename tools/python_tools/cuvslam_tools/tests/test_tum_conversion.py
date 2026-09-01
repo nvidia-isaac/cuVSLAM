@@ -197,8 +197,7 @@ class TestGroundTruthSampling(unittest.TestCase):
 
     def test_first_row_is_exactly_the_identity(self):
         trajectory = self._trajectory()
-        pairs = [(0, "a", 0, "a"), (1_000_000_000, "b", 1_000_000_000, "b")]
-        lines = rgbd.relative_ground_truth_lines(trajectory, pairs)
+        lines = rgbd.relative_ground_truth_lines(trajectory, [0, 1_000_000_000])
         self.assertEqual(len(lines), 2)
         self.assertEqual([float(value) for value in lines[0].split()][0], 1.0)
         self.assertEqual([float(value) for value in lines[0].split()][3], 0.0)
@@ -206,8 +205,7 @@ class TestGroundTruthSampling(unittest.TestCase):
     def test_poses_are_relative_to_the_first_frame(self):
         # Frame 0 sits at the midpoint, so frame 1 must be 1 m ahead of it, not 2.
         trajectory = self._trajectory()
-        pairs = [(500_000_000, "a", 500_000_000, "a"), (1_000_000_000, "b", 1_000_000_000, "b")]
-        lines = rgbd.relative_ground_truth_lines(trajectory, pairs)
+        lines = rgbd.relative_ground_truth_lines(trajectory, [500_000_000, 1_000_000_000])
         values = [float(value) for value in lines[1].split()]
         translation = [values[3], values[7], values[11]]
         self.assertAlmostEqual(math.hypot(*translation[:2]), 1.0, places=6)

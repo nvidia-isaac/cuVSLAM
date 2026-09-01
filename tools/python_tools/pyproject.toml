@@ -8,6 +8,7 @@ version = "0.1.0"
 requires-python = ">=3.9"
 dependencies = [
     "av",
+    "h5py",
     "jinja2",
     "matplotlib",
     "numpy==2.2.3",
@@ -55,6 +56,7 @@ prepare_euroc = "cuvslam_tools.dataset_preparation.euroc.prepare:main"
 prepare_tartan = "cuvslam_tools.dataset_preparation.tartan.prepare:main"
 prepare_tum = "cuvslam_tools.dataset_preparation.tum.prepare:main"
 prepare_icl_nuim = "cuvslam_tools.dataset_preparation.icl_nuim.prepare:main"
+prepare_m3ed_spot = "cuvslam_tools.dataset_preparation.m3ed_spot.prepare:main"
 cuvslam_tracker = "cuvslam_tools.tracker.cli:main"
 cuvslam_reporter = "cuvslam_tools.reporter.cli:main"
 cuvslam_validator = "cuvslam_tools.datasets_validator.cli:main"
