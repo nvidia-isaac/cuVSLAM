@@ -146,7 +146,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         metavar="SEQUENCE",
         help=(
             "Convert an explicit sequence subset, such as traj2_frei_png. "
-            "The default is all eight trajectories."
+            "The default is all eight trajectories. A subset run rewrites "
+            "dataset_metadata.json and the reporter config to describe only the "
+            "selected sequences, but leaves any previously converted sequence "
+            "directories in place, so an output directory reused this way holds "
+            "sequences the config no longer lists."
         ),
     )
     args = parser.parse_args(argv)

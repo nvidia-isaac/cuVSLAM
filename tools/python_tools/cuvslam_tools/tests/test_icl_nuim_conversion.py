@@ -20,6 +20,7 @@ sequences below use placeholder file contents.
 
 import inspect
 import json
+import shutil
 import tempfile
 import unittest
 import unittest.mock
@@ -159,6 +160,16 @@ class TestAssociations(unittest.TestCase):
         with self.assertRaisesRegex(convert_icl_nuim.ConversionError, "unexpected media path"):
             convert_icl_nuim.read_associations("1 depth/1.jpg 1 rgb/1.png\n", "assoc")
 
+    def test_traversing_media_path_is_rejected(self):
+        # convert_sequence joins these paths onto the extracted sequence root, so
+        # the pattern is what keeps a repackaged archive from reaching outside it.
+        for path in ("../../etc/passwd", "rgb/../../1.png", "/abs/1.png"):
+            with self.subTest(path=path):
+                with self.assertRaisesRegex(
+                    convert_icl_nuim.ConversionError, "unexpected media path"
+                ):
+                    convert_icl_nuim.read_associations(f"1 {path} 1 rgb/1.png\n", "assoc")
+
     def test_empty_file_is_rejected(self):
         with self.assertRaisesRegex(convert_icl_nuim.ConversionError, "no associations"):
             convert_icl_nuim.read_associations("# nothing\n", "assoc")
@@ -291,6 +302,38 @@ class TestConvertSequence(unittest.TestCase):
         with self.assertRaisesRegex(convert_icl_nuim.ConversionError, "missing associations.txt"):
             convert_icl_nuim.convert_sequence(source, self.spec, self.root / "out")
 
+    def test_symlinked_output_directory_is_refused(self):
+        # Converting would otherwise delete whatever the link points at.
+        source = self._write_source()
+        output = self.root / "out"
+        output.mkdir()
+        elsewhere = self.root / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "keep.txt").write_text("keep", encoding="utf-8")
+        (output / self.spec.name).symlink_to(elsewhere, target_is_directory=True)
+
+        with self.assertRaisesRegex(convert_icl_nuim.ConversionError, "symlinked output"):
+            convert_icl_nuim.convert_sequence(source, self.spec, output)
+        self.assertTrue((elsewhere / "keep.txt").is_file())
+
+    def test_reconversion_removes_stale_frames(self):
+        # A shorter second run must not leave frames from the longer first one,
+        # which would be listed by neither frame_metadata.jsonl nor gt.txt.
+        output = self.root / "out"
+        long_source = self._write_source(image_indices=(1, 2, 3, 4), pose_indices=(2, 3, 4))
+        convert_icl_nuim.convert_sequence(long_source, self.spec, output)
+        self.assertEqual(len(list((output / self.spec.name / "00").iterdir())), 3)
+
+        shutil.rmtree(long_source)
+        short_source = self._write_source(image_indices=(1, 2, 3), pose_indices=(2, 3))
+        convert_icl_nuim.convert_sequence(short_source, self.spec, output)
+
+        frames = sorted(path.name for path in (output / self.spec.name / "00").iterdir())
+        self.assertEqual(frames, ["000000.png", "000001.png"])
+        self.assertEqual(
+            len((output / self.spec.name / "gt.txt").read_text().splitlines()), len(frames)
+        )
+
 
 class TestReporterConfig(unittest.TestCase):
     def setUp(self):
@@ -393,7 +436,7 @@ class TestSequenceDiscovery(unittest.TestCase):
         destination = self.root / "out"
         (destination / "rgb").mkdir(parents=True)
         with unittest.mock.patch.object(icl_prepare, "extract_tar_archive"):
-            with self.assertRaisesRegex(Exception, "rgb/ and depth/"):
+            with self.assertRaisesRegex(icl_prepare.PreparationError, "rgb/ and depth/"):
                 icl_prepare.extract_sequence(Path("archive.tar.gz"), destination)
 
 
