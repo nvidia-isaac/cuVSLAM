@@ -62,6 +62,29 @@ class TestGitSourceMetadata(unittest.TestCase):
         self.assertEqual((commit_sha, branch_name, commit_ts), ("unknown", "unknown", "unknown"))
         self.assertIn("git is not installed", warning)
 
+    def test_commit_date_failure_keeps_the_resolved_fields_and_the_reason(self):
+        error = subprocess.CalledProcessError(128, ["git", "show"])
+        error.stderr = "fatal: bad object HEAD\n"
+        with mock.patch.object(generate_report.subprocess, "run") as run:
+            run.side_effect = [mock.Mock(stdout="1234567890abcdef\n"), mock.Mock(stdout="feature/branch\n"), error]
+            commit_sha, branch_name, commit_ts, warning = generate_report._git_source_metadata("/cuvslam")
+
+        self.assertEqual((commit_sha, branch_name, commit_ts), ("1234567890abcdef", "feature/branch", "unknown"))
+        self.assertIn("commit date: fatal: bad object HEAD", warning)
+
+    def test_both_secondary_failures_are_reported(self):
+        branch_error = subprocess.CalledProcessError(128, ["git", "rev-parse", "--abbrev-ref", "HEAD"])
+        branch_error.stderr = "fatal: no branch\n"
+        date_error = subprocess.CalledProcessError(128, ["git", "show"])
+        date_error.stderr = "fatal: bad object HEAD\n"
+        with mock.patch.object(generate_report.subprocess, "run") as run:
+            run.side_effect = [mock.Mock(stdout="1234567890abcdef\n"), branch_error, date_error]
+            commit_sha, branch_name, commit_ts, warning = generate_report._git_source_metadata("/cuvslam")
+
+        self.assertEqual((commit_sha, branch_name, commit_ts), ("1234567890abcdef", "unknown", "unknown"))
+        self.assertIn("branch name: fatal: no branch", warning)
+        self.assertIn("commit date: fatal: bad object HEAD", warning)
+
     def test_git_failure_is_not_written_to_the_process_log(self):
         """A directory outside any repository must not leak git's fatal error to stderr."""
         script = (
