@@ -64,6 +64,12 @@
         <td>Commit Date/Time</td>
         <td>{{commit_ts}}</td>
     </tr>
+    {% if provenance_warning %}
+    <tr class="summary">
+        <td>Provenance</td>
+        <td>{{provenance_warning}}</td>
+    </tr>
+    {% endif %}
     <tr class="summary">
         <td>Comments</td>
         <td>{{comments}}</td>

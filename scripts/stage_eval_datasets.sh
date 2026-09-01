@@ -115,8 +115,21 @@ stage_one() {
   report_staging_profile "$name" "$remote_bytes" "$stream_seconds" "$file_count"
 }
 
-for name in "${EVAL_DATASET_NAMES[@]}"; do
+# Fails in seconds on a registry fault, rather than after a download.
+dataset_registry validate
+
+# Captured rather than piped into the loop, so an empty listing is an error
+# instead of a staging run that silently does nothing.
+if ! eval_datasets="$(dataset_registry list --eval)" || [ -z "$eval_datasets" ]; then
+  echo "Error: the dataset registry lists no evaluation datasets." >&2
+  exit 1
+fi
+
+while read -r name; do
   stage_one "$name"
-done
+  # The reporter resolves sequences through the "dataset_folder" recorded in the
+  # shipped config, which must agree with the mount this script just created.
+  dataset_registry verify-staged "$name" --root "$LOCAL_DATASETS_DIR/$name"
+done <<< "$eval_datasets"
 
 echo "Dataset staging complete: $LOCAL_DATASETS_DIR"
