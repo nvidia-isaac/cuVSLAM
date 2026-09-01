@@ -157,7 +157,8 @@ rr.log("xyz", rr.Arrows3D(
     labels=['[x]', '[y]', '[z]']
 ), static=True)
 
-SLAM_SYNC_MODE = False  # async slam thread is enabled
+TRACKER_MODE = cuvslam.Tracker.Mode.OdometryWithSlamRealtime  # async slam thread is enabled
+SLAM_SYNC_MODE = TRACKER_MODE == cuvslam.Tracker.Mode.OdometryWithSlamOffline
 IDX = 700  # starting index of the sequence after localization
 max_wait_time = 10.0  # seconds
 
@@ -178,12 +179,12 @@ cameras[1].rig_from_camera.translation[0] = -intrinsics[1][0][3] / intrinsics[1]
 
 # Set Odometry and SLAM Configs and initialize the cuvslam tracker
 odom_cfg = cuvslam.Odometry.Config(
-    async_sba=False,
+    async_sba=not SLAM_SYNC_MODE,
     enable_final_landmarks_export=True,
     rectified_stereo_camera=True
 )
 slam_cfg = cuvslam.Slam.Config(sync_mode=SLAM_SYNC_MODE)
-tracker = cuvslam.Tracker(cuvslam.Rig(cameras), odom_cfg, slam_cfg)
+tracker = cuvslam.Tracker(cuvslam.Rig(cameras), TRACKER_MODE, odom_cfg, slam_cfg)
 
 # Get timestamps from times.txt file
 timestamps = [

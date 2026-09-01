@@ -23,12 +23,73 @@ namespace cuvslam {
 
 namespace {
 
-Odometry::Config TrackerOdometryConfig(const Odometry::Config& odometry_config, const Slam::Config* slam_config) {
-  if (slam_config != nullptr && slam_config->gt_align_mode) {
-    throw std::invalid_argument{"Tracker does not support gt_align_mode; use standalone Odometry and Slam instances."};
+/// Does this mode run SLAM alongside odometry?
+bool SlamEnabled(Tracker::Mode mode) {
+  switch (mode) {
+    case Tracker::Mode::OdometryOnlyRealtime:
+    case Tracker::Mode::OdometryOnlyOffline:
+      return false;
+    case Tracker::Mode::OdometryWithSlamRealtime:
+    case Tracker::Mode::OdometryWithSlamOffline:
+      return true;
   }
+  throw std::invalid_argument{"Tracker: unknown Mode"};
+}
+
+/// Does this mode give the bundle adjuster and SLAM threads of their own?
+bool Realtime(Tracker::Mode mode) {
+  switch (mode) {
+    case Tracker::Mode::OdometryOnlyRealtime:
+    case Tracker::Mode::OdometryWithSlamRealtime:
+      return true;
+    case Tracker::Mode::OdometryOnlyOffline:
+    case Tracker::Mode::OdometryWithSlamOffline:
+      return false;
+  }
+  throw std::invalid_argument{"Tracker: unknown Mode"};
+}
+
+/// The SLAM configuration Tracker will use. An omitted one means the defaults.
+Slam::Config TrackerSlamConfig(const Slam::Config* slam_config) {
+  return slam_config != nullptr ? *slam_config : Slam::GetDefaultConfig();
+}
+
+/// Tracker runs the configs as written, so it has to turn away anything the mode contradicts.
+void CheckModeMatchesConfigs(Tracker::Mode mode, const Odometry::Config& odometry_config,
+                             const Slam::Config* slam_config) {
+  const bool background = Realtime(mode);
+
+  if (odometry_config.async_sba != background) {
+    throw std::invalid_argument{
+        "Tracker: mode and Odometry::Config::async_sba disagree. A realtime mode requires async_sba == true, an "
+        "offline mode requires async_sba == false."};
+  }
+
+  if (SlamEnabled(mode)) {
+    const bool blocking_slam = !background;
+    const Slam::Config slam = TrackerSlamConfig(slam_config);
+    if (slam.sync_mode != blocking_slam) {
+      throw std::invalid_argument{
+          "Tracker: mode and Slam::Config::sync_mode disagree. A realtime mode requires sync_mode == false, an "
+          "offline mode requires sync_mode == true."};
+    }
+    if (slam.gt_align_mode) {
+      throw std::invalid_argument{
+          "Tracker does not support gt_align_mode; use standalone Odometry and Slam instances."};
+    }
+  } else if (slam_config != nullptr) {
+    throw std::invalid_argument{
+        "Tracker: slam_config must be null in an odometry-only mode; pick an OdometryWithSlam mode to enable SLAM."};
+  }
+}
+
+/// The odometry configuration Tracker will use: the caller's, plus the exports SLAM cannot run without.
+Odometry::Config TrackerOdometryConfig(Tracker::Mode mode, const Odometry::Config& odometry_config,
+                                       const Slam::Config* slam_config) {
+  CheckModeMatchesConfigs(mode, odometry_config, slam_config);
+
   Odometry::Config odometry = odometry_config;
-  if (slam_config != nullptr) {
+  if (SlamEnabled(mode)) {
     odometry.enable_observations_export = true;
     odometry.enable_landmarks_export = true;
   }
@@ -37,10 +98,10 @@ Odometry::Config TrackerOdometryConfig(const Odometry::Config& odometry_config, 
 
 }  // namespace
 
-Tracker::Tracker(const Rig& rig, const Odometry::Config& odometry_config, const Slam::Config* slam_config)
-    : odometry_{rig, TrackerOdometryConfig(odometry_config, slam_config)} {
-  if (slam_config != nullptr) {
-    slam_ = std::make_unique<Slam>(rig, odometry_.GetPrimaryCameras(), *slam_config);
+Tracker::Tracker(const Rig& rig, Mode mode, const Odometry::Config& odometry_config, const Slam::Config* slam_config)
+    : odometry_{rig, TrackerOdometryConfig(mode, odometry_config, slam_config)} {
+  if (SlamEnabled(mode)) {
+    slam_ = std::make_unique<Slam>(rig, odometry_.GetPrimaryCameras(), TrackerSlamConfig(slam_config));
   }
 }
 

@@ -102,7 +102,7 @@ odom_cfg = cuvslam.Odometry.Config(
 rig = get_rig(sequence_path)
 
 # Initialize tracker
-tracker = cuvslam.Tracker(rig, odom_cfg)
+tracker = cuvslam.Tracker(rig, cuvslam.Tracker.Mode.OdometryOnlyOffline, odom_cfg)
 print(f"cuVSLAM Tracker initilized with odometry mode: {cfg.odometry_mode}")
 
 # Track frames

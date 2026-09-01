@@ -1027,9 +1027,9 @@ private:
 /**
  * @brief Visual odometry with optional SLAM, combined behind a single interface
  *
- * Tracker owns an Odometry instance and, when constructed with a non-null SLAM configuration,
- * a Slam instance. It runs the standard per-frame sequence for you: Odometry::Track(), then
- * Odometry::GetState() and Slam::Track() when odometry produced a pose, then Slam::GetPose().
+ * Tracker owns an Odometry instance and, in the SLAM modes, a Slam instance. It runs the standard
+ * per-frame sequence for you: Odometry::Track(), then Odometry::GetState() and Slam::Track() when
+ * odometry produced a pose, then Slam::GetPose().
  *
  * Everything Tracker does can be done by driving Odometry and Slam directly; use those when you
  * need full control over the two components. Tracker is the recommended entry point otherwise.
@@ -1048,6 +1048,29 @@ public:
   using ImageSet = Odometry::ImageSet;
 
   /**
+   * @brief What the tracker runs, and in which thread
+   *
+   * The mode states both decisions in one place: whether SLAM runs at all, and whether the bundle
+   * adjuster and SLAM get threads of their own. A realtime mode keeps Track() fast, at the cost of
+   * results that are still being refined after the call returns. An offline mode runs everything in
+   * the calling thread, so each Track() result is final and a run is reproducible.
+   *
+   * The mode does not change the configurations passed to the constructor; it has to agree with
+   * them. `Odometry::Config::async_sba` must be true in a realtime mode and false in an offline one,
+   * and `Slam::Config::sync_mode` the other way round. A mismatch is rejected at construction.
+   */
+  enum class Mode {
+    /// Odometry only, bundle adjustment on a background thread.
+    OdometryOnlyRealtime,
+    /// Odometry only, bundle adjustment in the calling thread.
+    OdometryOnlyOffline,
+    /// Odometry in the calling thread, bundle adjustment and SLAM on background threads.
+    OdometryWithSlamRealtime,
+    /// Odometry and SLAM, both in the calling thread.
+    OdometryWithSlamOffline,
+  };
+
+  /**
    * @brief Result of a single Track() call
    */
   struct TrackResult {
@@ -1061,18 +1084,28 @@ public:
   /**
    * @brief Construct a tracker
    *
-   * When `slam_config` is non-null, Tracker enables observation and landmark export on its own copy
-   * of `odometry_config`, because SLAM needs both. The configs passed by the caller are not modified.
+   * `mode` selects whether SLAM runs and whether the bundle adjuster and SLAM run on their own
+   * threads, and it must agree with the configurations: a realtime mode needs
+   * `Odometry::Config::async_sba == true` and `Slam::Config::sync_mode == false`, an offline mode
+   * needs the opposite. Tracker never rewrites those fields, so what you configure is what runs.
+   * Note that both default to the realtime values, so the offline modes need configs that say so.
+   *
+   * The one thing Tracker does set is export: in the SLAM modes it enables observation and landmark
+   * export on its own copy of `odometry_config`, because SLAM needs both. The configs passed by the
+   * caller are not modified.
    *
    * @param[in] rig               rig setup
+   * @param[in] mode              what to run, and whether to run it in the background
    * @param[in] odometry_config   odometry configuration
-   * @param[in] slam_config       optional SLAM configuration; pass nullptr (the default) to disable
-   * SLAM. `Slam::Config::gt_align_mode` is not supported by Tracker; use standalone Odometry and
-   * Slam instances for ground-truth-aligned map building.
+   * @param[in] slam_config       SLAM configuration, used only in the SLAM modes; nullptr (the
+   * default) means `Slam::GetDefaultConfig()`, which suits `Mode::OdometryWithSlamRealtime`. Must be
+   * nullptr in the odometry-only modes. `Slam::Config::gt_align_mode` is not supported by Tracker;
+   * use standalone Odometry and Slam instances for ground-truth-aligned map building.
    * @throws std::runtime_error if odometry or SLAM fails to initialize
-   * @throws std::invalid_argument if rig or configuration is invalid
+   * @throws std::invalid_argument if the rig or a configuration is invalid, if a configuration
+   * disagrees with `mode`, or if `slam_config` is given in an odometry-only mode
    */
-  explicit Tracker(const Rig& rig, const Odometry::Config& odometry_config = Odometry::GetDefaultConfig(),
+  explicit Tracker(const Rig& rig, Mode mode, const Odometry::Config& odometry_config = Odometry::GetDefaultConfig(),
                    const Slam::Config* slam_config = nullptr);
 
   /**
@@ -1094,8 +1127,8 @@ public:
    * Odometry poses stay in the same coordinate frame until a loss of tracking. SLAM poses jump when
    * a loop closure is detected and the pose graph is optimized; they are never adjusted
    * retroactively, so use GetSlam().GetAllSlamPoses() to get a smooth trajectory up to the latest
-   * frame. In asynchronous mode loop closure runs on a separate thread to keep Track() fast, so
-   * SLAM poses are not updated immediately.
+   * frame. In a realtime mode loop closure runs on a separate thread to keep Track() fast, so SLAM
+   * poses are not updated immediately.
    *
    * @param[in]  images     synchronized images, no more than the number of cameras in the rig
    * @param[in]  masks      (Optional) corresponding masks
@@ -1122,7 +1155,7 @@ public:
   /**
    * @brief Is SLAM enabled
    *
-   * @return true when the tracker was constructed with a SLAM configuration
+   * @return true when the tracker was constructed with one of the SLAM modes
    */
   bool IsSlamEnabled() const;
 

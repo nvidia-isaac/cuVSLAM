@@ -93,7 +93,7 @@ rig.cameras = cameras
 
 odom_cfg = vslam.Odometry.Config(enable_final_landmarks_export = True, rectified_stereo_camera=True)
 
-tracker = vslam.Tracker(rig, odom_cfg)
+tracker = vslam.Tracker(rig, vslam.Tracker.Mode.OdometryOnlyRealtime, odom_cfg)
 
 trajectory = []
 

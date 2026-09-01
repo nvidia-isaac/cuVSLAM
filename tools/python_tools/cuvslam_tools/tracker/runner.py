@@ -112,9 +112,12 @@ class Tracker:
             if args.visualize_rerun:
                 self.slam_cfg.enable_reading_internals = True
 
+        self.mode = self._tracker_mode(self.slam_cfg is not None, self.odom_cfg.async_sba)
+
         if args.print_config:
             print(
                 f"cuVSLAM version: {vslam.get_version()}\n"
+                f"Tracker mode: {self.mode}\n"
                 f"Odometry config:\n{conv.to_str(self.odom_cfg)}"
             )
             if self.slam_cfg:
@@ -122,7 +125,7 @@ class Tracker:
 
         self.stat = Stat()
         self.stat.odometry_mode = str(self.odom_cfg.odometry_mode)
-        self.tracker = vslam.Tracker(rig, self.odom_cfg, self.slam_cfg)
+        self.tracker = vslam.Tracker(rig, self.mode, self.odom_cfg, self.slam_cfg)
 
         self.frame_id_from_ts = {}
         self.world_from_rig = {}
@@ -140,6 +143,19 @@ class Tracker:
                 not self.odom_cfg.enable_landmarks_export and
                 not self.odom_cfg.enable_final_landmarks_export ):
                 print("Exporting landmarks or observations is disabled, skipping visualization in Rerun")
+
+    @staticmethod
+    def _tracker_mode(use_slam: bool, async_sba: bool) -> vslam.Tracker.Mode:
+        """Pick the tracker mode from --use_slam and --async_sba.
+
+        --sync_slam has to be the opposite of --async_sba; the Tracker constructor rejects the
+        combinations that disagree, so the rule lives in one place.
+        """
+        if use_slam:
+            return (vslam.Tracker.Mode.OdometryWithSlamRealtime if async_sba
+                    else vslam.Tracker.Mode.OdometryWithSlamOffline)
+        return (vslam.Tracker.Mode.OdometryOnlyRealtime if async_sba
+                else vslam.Tracker.Mode.OdometryOnlyOffline)
 
     def configure_tracker(self, args: argparse.Namespace) -> None:
         """Configure tracker with default and user settings"""

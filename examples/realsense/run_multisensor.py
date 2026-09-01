@@ -213,7 +213,7 @@ def main() -> None:
         multisensor_settings=multisensor_settings,
         rectified_stereo_camera=False
     )
-    tracker = vslam.Tracker(rig, odom_cfg)
+    tracker = vslam.Tracker(rig, vslam.Tracker.Mode.OdometryOnlyOffline, odom_cfg)
 
     video_pipe = rs.pipeline()
     video_config = rs.config()
