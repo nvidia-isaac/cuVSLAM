@@ -12,7 +12,7 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
-"""Convert the M3ED SPOT stereo sequences to the cuVSLAM reporter layout.
+"""Convert the 19 M3ED SPOT stereo sequences to the cuVSLAM reporter layout.
 
 Produces, per sequence::
 
@@ -75,15 +75,21 @@ SOURCE_CITATION = (
     "Multi-Environment Event Dataset, CVPRW 2023"
 )
 
-# The 16 SPOT sequences the retired nightly evaluated, in report order, paired
-# with their published names. The retired output used these short names as
-# directory names and they stay the sequence folders here, so its per-sequence
-# KPI history remains comparable.
+# The 19 SPOT sequences the retired pipeline converted, paired with their
+# published names. The retired output used these short names as directory names
+# and they stay the sequence folders here, so its per-sequence results remain
+# comparable.
+#
+# Its reporter config enabled only 16 of them: hard, srt_green_loop and
+# stairwell were converted but never evaluated. They are converted here too, so
+# the corpus matches what the retired pipeline held, and enabling them is a
+# separate decision made in the registry.
 SEQUENCES: Tuple[Tuple[str, str], ...] = (
     ("art_plaza_loop", "spot_outdoor_day_art_plaza_loop"),
     ("building_loop", "spot_indoor_building_loop"),
     ("easy_1", "spot_forest_easy_1"),
     ("easy_2", "spot_forest_easy_2"),
+    ("hard", "spot_forest_hard"),
     ("obstacles", "spot_indoor_obstacles"),
     ("penno_plaza_lights", "spot_outdoor_night_penno_plaza_lights"),
     ("penno_short_loop", "spot_outdoor_day_penno_short_loop"),
@@ -93,10 +99,15 @@ SEQUENCES: Tuple[Tuple[str, str], ...] = (
     ("rocky_steps", "spot_outdoor_day_rocky_steps"),
     ("skatepark_1", "spot_outdoor_day_skatepark_1"),
     ("skatepark_2", "spot_outdoor_day_skatepark_2"),
+    ("srt_green_loop", "spot_outdoor_day_srt_green_loop"),
     ("srt_under_bridge_1", "spot_outdoor_day_srt_under_bridge_1"),
     ("srt_under_bridge_2", "spot_outdoor_day_srt_under_bridge_2"),
     ("stairs", "spot_indoor_stairs"),
+    ("stairwell", "spot_indoor_stairwell"),
 )
+
+# The three the retired reporter config left out.
+UNEVALUATED_SEQS: Tuple[str, ...] = ("hard", "srt_green_loop", "stairwell")
 
 ALL_SEQS: Tuple[str, ...] = tuple(short for short, _ in SEQUENCES)
 _SOURCE_BY_SHORT: Dict[str, str] = dict(SEQUENCES)
@@ -293,6 +304,24 @@ def left_from_right(left: CameraCalibration, right: CameraCalibration):
     )
 
 
+def edex_camera_transform(
+    rotation: Sequence[Sequence[float]], translation: Sequence[float]
+) -> List[List[float]]:
+    """Render a camera pose into the EDEX ``transform`` matrix.
+
+    The EDEX matrix is not a homogeneous transform. The reader consumes its
+    rotation block as camera-from-rig while taking the translation as the camera
+    centre in rig coordinates, so it means ``p_camera = R (p_rig - c)``. Passing
+    a homogeneous rig-from-camera pose instead leaves the rotation transposed,
+    which on a 120 mm baseline at 1050 px focal biases every disparity: measured
+    on skatepark_2, that scores 134% ATE where this convention scores 3.5%.
+
+    ``rotation`` and ``translation`` are the camera's pose in the rig frame.
+    """
+    transposed = [[rotation[column][row] for column in range(3)] for row in range(3)]
+    return [list(transposed[row]) + [float(translation[row])] for row in range(3)]
+
+
 def _intrinsics_document(camera: CameraCalibration) -> Dict[str, object]:
     return {
         "distortion_model": "polynomial",
@@ -325,9 +354,7 @@ def edex_document(
                     "intrinsics": _intrinsics_document(left),
                 },
                 {
-                    "transform": [
-                        list(rotation[row]) + [translation[row]] for row in range(3)
-                    ],
+                    "transform": edex_camera_transform(rotation, translation),
                     "intrinsics": _intrinsics_document(right),
                 },
             ],
@@ -499,11 +526,11 @@ def convert_sequence(
     }
 
 
-def _config_entries(sequences: Sequence[str]) -> List[List[Tuple[str, object]]]:
+def _config_entries(sequences: Sequence[str], modes: Sequence[bool]) -> List[List[Tuple[str, object]]]:
     entries = []
     for sequence in sequences:
         title = f"M3ED-{sequence.replace('_', '-')}"
-        for use_slam in (False, True):
+        for use_slam in modes:
             entries.append(
                 rgbd.reporter_sequence_entry(
                     sequence_folder=sequence,
@@ -515,14 +542,17 @@ def _config_entries(sequences: Sequence[str]) -> List[List[Tuple[str, object]]]:
 
 
 def _write_configs(output_dir: Path, sequences: Sequence[str]) -> List[str]:
-    """Write the reporter config, returning its name.
+    """Write the reporter configs, returning their names.
 
-    M3ED-SPOT is a full-suite corpus, so there is one config covering every
-    converted sequence in both modes. Its name sets the KPI prefix: the
-    collector takes everything before the first hyphen, so this yields
-    ``M3ED_SPOT``.
+    Three, as for KITTI and EuRoC: odometry only, SLAM only, and both. All three
+    start with the dataset ID, which is what sets the KPI prefix, since the
+    collector takes everything before the first hyphen and yields ``M3ED_SPOT``.
     """
-    configs = {f"{DATASET_ID}-vo_slam.cfg": _config_entries(sequences)}
+    configs = {
+        f"{DATASET_ID}-vo.cfg": _config_entries(sequences, (False,)),
+        f"{DATASET_ID}-slam.cfg": _config_entries(sequences, (True,)),
+        f"{DATASET_ID}-vo_slam.cfg": _config_entries(sequences, (False, True)),
+    }
     for name, entries in configs.items():
         (output_dir / name).write_text(
             rgbd.format_reporter_config(entries, f"{DATASET_ID}/", SEGMENT_LENGTHS),

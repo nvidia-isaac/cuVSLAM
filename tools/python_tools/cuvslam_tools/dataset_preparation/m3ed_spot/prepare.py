@@ -12,7 +12,7 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
-"""Convert the 16 evaluated M3ED SPOT sequences to portable cuVSLAM data.
+"""Convert the 19 M3ED SPOT stereo sequences to portable cuVSLAM data.
 
 The OVC stereo images live inside the published ``_data.h5``, which also carries
 the event, LiDAR and IMU streams and so runs 25-42 GB per sequence. Those images
@@ -44,6 +44,8 @@ OBJECT_PREFIX = "processed"
 
 DATASET_ARTIFACTS = (
     "dataset_metadata.json",
+    "m3ed_spot-vo.cfg",
+    "m3ed_spot-slam.cfg",
     "m3ed_spot-vo_slam.cfg",
 )
 SEQUENCE_ARTIFACTS = (
@@ -124,7 +126,7 @@ def prepare(
     """Convert the selected sequences and return the prepared root.
 
     Reads from S3 unless ``raw_dir`` names a directory of downloaded files.
-    ``sequences`` defaults to all 16 evaluated SPOT sequences.
+    ``sequences`` defaults to all 19 published SPOT sequences.
     """
     output_dir = resolve_output_dir(output_dir)
     selected = list(sequences) if sequences is not None else None
@@ -170,7 +172,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="prepare_m3ed_spot",
         description=(
-            "Convert the 16 evaluated M3ED SPOT stereo sequences to portable cuVSLAM EDEX data, "
+            "Convert the 19 M3ED SPOT stereo sequences to portable cuVSLAM EDEX data, "
             "reading the source HDF5 directly from the public bucket."
         ),
     )
@@ -186,7 +188,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         nargs="+",
         choices=convert_m3ed_spot.ALL_SEQS,
         metavar="SEQUENCE",
-        help="Convert an explicit sequence subset, such as skatepark_2. The default is all 16.",
+        help="Convert an explicit sequence subset, such as skatepark_2. The default is all 19.",
     )
     parser.add_argument(
         "--frame-limit",

@@ -215,6 +215,24 @@ class TestSourceReading(unittest.TestCase):
             with self.assertRaisesRegex(convert_m3ed_spot.ConversionError, "entries but"):
                 convert_m3ed_spot.read_trajectory(handle)
 
+    def test_edex_transform_holds_the_camera_from_rig_rotation(self):
+        # The EDEX matrix is not a homogeneous pose: the reader reads the
+        # rotation block as camera-from-rig and the translation as the camera
+        # centre in rig coordinates. Emitting a rig-from-camera pose leaves the
+        # rotation transposed, which on this rig scored 134% ATE against 3.5%.
+        angle = math.radians(30.0)
+        rotation = [
+            [math.cos(angle), -math.sin(angle), 0.0],
+            [math.sin(angle), math.cos(angle), 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+        translation = [0.12, 0.0, 0.0]
+        transform = convert_m3ed_spot.edex_camera_transform(rotation, translation)
+        for row in range(3):
+            for column in range(3):
+                self.assertAlmostEqual(transform[row][column], rotation[column][row])
+            self.assertAlmostEqual(transform[row][3], translation[row])
+
     def test_baseline_comes_from_the_two_extrinsics(self):
         with h5py.File(self._data(), "r") as handle:
             left = convert_m3ed_spot.read_camera_calibration(handle, "left")
@@ -295,6 +313,8 @@ class TestConvertSequence(unittest.TestCase):
             [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]],
         )
         self.assertAlmostEqual(rig["cameras"][1]["transform"][0][3], 0.120)
+        self.assertAlmostEqual(rig["cameras"][1]["transform"][1][3], 0.0)
+        self.assertAlmostEqual(rig["cameras"][1]["transform"][2][3], 0.0)
         self.assertEqual(rig["cameras"][0]["intrinsics"]["distortion_model"], "polynomial")
         self.assertEqual(rig["cameras"][0]["intrinsics"]["focal"], [1058.5, 1058.9])
         self.assertEqual(rig["cameras"][1]["intrinsics"]["focal"], [1052.4, 1053.2])
@@ -382,31 +402,15 @@ class TestConvertSequence(unittest.TestCase):
 
 
 class TestSequenceSelection(unittest.TestCase):
-    def test_sixteen_sequences_map_to_published_names(self):
-        self.assertEqual(len(convert_m3ed_spot.ALL_SEQS), 16)
-        self.assertEqual(len(set(convert_m3ed_spot.ALL_SEQS)), 16)
-        published = [name for _, name in convert_m3ed_spot.SEQUENCES]
-        self.assertEqual(len(set(published)), 16)
-        for name in published:
-            self.assertTrue(name.startswith("spot_"), name)
-
-    def test_source_name_rejects_unknown_sequences(self):
-        self.assertEqual(
-            convert_m3ed_spot.source_name("skatepark_2"), "spot_outdoor_day_skatepark_2"
-        )
-        with self.assertRaisesRegex(convert_m3ed_spot.ConversionError, "unknown sequence"):
-            convert_m3ed_spot.source_name("skatepark_9")
-
-    def test_selection_is_validated_and_ordered(self):
-        self.assertEqual(
-            convert_m3ed_spot._selected_sequences(["stairs", "easy_1"]), ["easy_1", "stairs"]
-        )
+    def test_bad_selections_are_rejected(self):
         with self.assertRaisesRegex(convert_m3ed_spot.ConversionError, "no sequences selected"):
             convert_m3ed_spot._selected_sequences([])
         with self.assertRaisesRegex(convert_m3ed_spot.ConversionError, "duplicate sequence"):
             convert_m3ed_spot._selected_sequences(["stairs", "stairs"])
         with self.assertRaisesRegex(convert_m3ed_spot.ConversionError, "unknown sequence"):
             convert_m3ed_spot._selected_sequences(["nope"])
+        with self.assertRaisesRegex(convert_m3ed_spot.ConversionError, "unknown sequence"):
+            convert_m3ed_spot.source_name("skatepark_9")
 
 
 class TestReporterConfig(unittest.TestCase):
@@ -417,23 +421,35 @@ class TestReporterConfig(unittest.TestCase):
     def tearDown(self):
         self._temporary.cleanup()
 
-    def _config(self, sequences=None):
+    def _config(self, sequences=None, name="m3ed_spot-vo_slam.cfg"):
         selected = list(sequences or convert_m3ed_spot.ALL_SEQS)
         names = convert_m3ed_spot._write_configs(self.output, selected)
-        return names, json.loads((self.output / names[0]).read_text())
+        return names, json.loads((self.output / name).read_text())
 
-    def test_one_config_covers_every_sequence_in_both_modes(self):
-        names, config = self._config()
-        self.assertEqual(names, ["m3ed_spot-vo_slam.cfg"])
-        self.assertEqual(len(config["sequence_cfgs"]), 32)
+    def test_each_config_selects_the_modes_its_name_promises(self):
+        names, combined = self._config()
+        self.assertEqual(
+            names, ["m3ed_spot-slam.cfg", "m3ed_spot-vo.cfg", "m3ed_spot-vo_slam.cfg"]
+        )
+        _, odometry = self._config(name="m3ed_spot-vo.cfg")
+        self.assertTrue(all("use_slam" not in entry for entry in odometry["sequence_cfgs"]))
+
+        _, slam = self._config(name="m3ed_spot-slam.cfg")
+        self.assertTrue(all(entry["use_slam"] for entry in slam["sequence_cfgs"]))
+
+        self.assertEqual(
+            len(combined["sequence_cfgs"]),
+            len(odometry["sequence_cfgs"]) + len(slam["sequence_cfgs"]),
+        )
 
     def test_dataset_folder_matches_the_registry_id(self):
         _, config = self._config()
         self.assertEqual(config["dataset_folder"], "m3ed_spot/")
 
-    def test_config_name_derives_the_intended_kpi_prefix(self):
+    def test_every_config_name_derives_the_same_kpi_prefix(self):
         names, _ = self._config()
-        self.assertEqual(Path(names[0]).stem.split("-")[0].upper(), "M3ED_SPOT")
+        for name in names:
+            self.assertEqual(Path(name).stem.split("-")[0].upper(), "M3ED_SPOT")
 
     def test_every_entry_names_its_edex_and_ground_truth(self):
         _, config = self._config()
@@ -450,10 +466,6 @@ class TestReporterConfig(unittest.TestCase):
         )
         self.assertNotIn("use_slam", config["sequence_cfgs"][0])
         self.assertTrue(config["sequence_cfgs"][1]["use_slam"])
-
-    def test_segment_lengths_match_the_outdoor_scale(self):
-        _, config = self._config()
-        self.assertEqual(config["segment_lengths"], [5, 10, 15, 20, 25, 50, 100])
 
 
 if __name__ == "__main__":

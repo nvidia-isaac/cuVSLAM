@@ -77,7 +77,7 @@ Reinstall the binding after rebuilding `libcuvslam.so`.
 | `prepare_tum` | Download and convert the 15 evaluated TUM RGB-D freiburg3 sequences, or an explicit subset, to portable EDEX and a reporter config. |
 | `prepare_icl_nuim` | Download and convert the eight ICL-NUIM living-room and office trajectories, or an explicit subset, to portable EDEX and a reporter config. |
 | `prepare_coda` | Convert manually downloaded CODa sequence archives to portable EDEX and reporter configs. |
-| `prepare_m3ed_spot` | Convert the 16 evaluated M3ED SPOT stereo sequences, or an explicit subset, to portable EDEX and a reporter config, reading the source HDF5 straight from the public bucket. |
+| `prepare_m3ed_spot` | Convert the 19 M3ED SPOT stereo sequences, or an explicit subset, to portable EDEX and reporter configs, reading the source HDF5 straight from the public bucket. |
 | `cuvslam_tracker` | Run one EDEX sequence or supported video input through cuVSLAM. |
 | `cuvslam_reporter` | Run one dataset config and generate report outputs. |
 | `cuvslam_validator` | Run multiple reporter configs, combine results, and apply validation checks. |
@@ -304,9 +304,10 @@ derived from cam0's `disparity_matrix`, which agrees with the cam0-to-cam1 extri
 (sequences 8, 14, and 15), moved from the LiDAR frame onto cam0, and written relative to the first frame. Frames past
 the end of the pose file are dropped from both the images and `gt.txt` so the two stay one-to-one.
 
-`prepare_m3ed_spot` runs `cuvslam_tools.dataset_preparation.m3ed_spot.prepare`. It converts the 16 evaluated M3ED
-SPOT stereo sequences, reading `/ovc/{left,right}/data` out of the published `_data.h5` and the FasterLIO poses out
-of `_pose_gt.h5`.
+`prepare_m3ed_spot` runs `cuvslam_tools.dataset_preparation.m3ed_spot.prepare`. It converts the 19 M3ED SPOT stereo
+sequences, reading `/ovc/{left,right}/data` out of the published `_data.h5` and the FasterLIO poses out of
+`_pose_gt.h5`. The retired reporter config evaluated 16 of them; `hard`, `srt_green_loop` and `stairwell` were
+converted but never enabled.
 
 ```bash
 prepare_m3ed_spot --output-dir /path/to/datasets/converted
@@ -325,8 +326,9 @@ downloading 25-42 GB, and nothing is staged on disk. `--force-download` and `--d
 same reason. Pass `--raw-dir` to read already-downloaded files instead, laid out as
 `<raw-dir>/<published-sequence>/<published-sequence>_{data,pose_gt}.h5`.
 
-The prepared root is `/path/to/datasets/converted/m3ed_spot`. It contains `m3ed_spot-vo_slam.cfg` and
-`dataset_metadata.json`. Every sequence contains `stereo.edex`, `frame_metadata.jsonl`, camera-aligned `gt.txt`, and
+The prepared root is `/path/to/datasets/converted/m3ed_spot`. It contains `dataset_metadata.json` and, as for KITTI
+and EuRoC, three reporter configs: `m3ed_spot-vo.cfg`, `m3ed_spot-slam.cfg` and `m3ed_spot-vo_slam.cfg`. Every
+sequence contains `stereo.edex`, `frame_metadata.jsonl`, camera-aligned `gt.txt`, and
 mono8 PNGs under `00/` (OVC left) and `01/` (OVC right). Calibration is read per sequence from the source, and the
 radtan coefficients map onto cuVSLAM's `polynomial` model, whose first four parameters are the same OpenCV values.
 
@@ -345,7 +347,7 @@ Run the combined stereo ODOM+SLAM report for M3ED with:
 
 ```bash
 cuvslam_reporter \
-    --test_config /path/to/datasets/converted/m3ed_spot/m3ed_spot-vo_slam.cfg \
+    --test_config /path/to/datasets/converted/m3ed_spot/m3ed_spot-vo.cfg \
     --datasets_root /path/to/datasets/converted \
     --output_root /tmp/cuvslam-m3ed-reports \
     --odometry_mode multicamera \

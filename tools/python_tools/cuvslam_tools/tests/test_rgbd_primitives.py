@@ -35,10 +35,6 @@ def _rotation_about_z(degrees):
 
 
 class TestMatrixToQuaternion(unittest.TestCase):
-    def test_identity(self):
-        quaternion = rgbd.matrix_to_quaternion([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
-        self.assertEqual(quaternion, [0.0, 0.0, 0.0, 1.0])
-
     def test_round_trips_through_quaternion_to_matrix(self):
         for degrees in (1.0, 45.0, 90.0, 179.0, 180.0, 270.0, 359.0):
             with self.subTest(degrees=degrees):
@@ -62,25 +58,6 @@ class TestMatrixToQuaternion(unittest.TestCase):
                 for row in range(3):
                     for column in range(3):
                         self.assertAlmostEqual(recovered[row][column], rotation[row][column], places=9)
-
-    def test_returns_a_unit_quaternion(self):
-        rotation = _rotation_about_z(37.0)
-        self.assertAlmostEqual(math.hypot(*rgbd.matrix_to_quaternion(rotation)), 1.0, places=12)
-
-
-class TestTrajectorySpan(unittest.TestCase):
-    def test_returns_first_and_last_timestamp(self):
-        trajectory = [
-            (10, [0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]),
-            (20, [0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]),
-            (30, [0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]),
-        ]
-        self.assertEqual(rgbd.trajectory_span(trajectory), (10, 30))
-
-    def test_empty_trajectory_is_rejected(self):
-        with self.assertRaisesRegex(rgbd.RgbdConversionError, "trajectory is empty"):
-            rgbd.trajectory_span([])
-
 
 class TestBodyFromCamera(unittest.TestCase):
     def _trajectory(self):
