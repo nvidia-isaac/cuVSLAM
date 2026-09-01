@@ -72,14 +72,14 @@ Before making code changes or designing new features, read **[DESIGN_CONCEPTS.md
 
 ## CI/CD pipelines
 
-The GitHub Actions CI/CD (build, test, lint, dataset evaluation, nightly release, dataset provisioning, and branch rulesets) is documented in the `cuvslam-ci` skill at [cuvslam-skills/cuvslam-ci/SKILL.md](cuvslam-skills/cuvslam-ci/SKILL.md). Read it before changing any `.github/workflows/**`, CI script under `scripts/`, dataset preparation code under `tools/python_tools/cuvslam_tools/dataset_preparation/`, or the test matrix.
+The GitHub Actions CI/CD (build, test, lint, dataset evaluation, nightly release, and dataset provisioning) is documented in the `cuvslam-ci` skill at [cuvslam-skills/cuvslam-ci/SKILL.md](cuvslam-skills/cuvslam-ci/SKILL.md). Read it before changing any `.github/workflows/**`, CI script under `scripts/`, dataset preparation code under `tools/python_tools/cuvslam_tools/dataset_preparation/`, or the test matrix.
 
 Load-bearing rules:
 
 - Dataset and eval steps are fork-gated; never run fork code on dataset runners.
 - Eval uses the read-only `AWS_S3_RO_*` secrets; only `provision-datasets.yml` uses the read-write `AWS_S3_*` pair.
 - KPI history directories and eval artifact names carry the `platform-cuda-ubuntu` slug so matrix configs never overwrite each other.
-- Ruleset, CODEOWNERS, and `.github/workflows/**` changes go in their own `[infra]` MR (enforced by the `isolated-ruleset-change` pre-commit hook).
+- CODEOWNERS and CI workflow changes go in their own `[infra]` MR (enforced by the `isolated-ruleset-change` pre-commit hook). `PROTECTED_REGEX` in `scripts/check-isolated-ruleset-change.sh` lists the paths this covers; it is narrower than `.github/workflows/**`.
 
 ## Dos and Don'ts
 

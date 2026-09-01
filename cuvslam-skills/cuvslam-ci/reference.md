@@ -14,7 +14,9 @@ playbooks are in [SKILL.md](SKILL.md).
 - `pr-verify.yml`: lint in the CI image, then build + unit test on x86 (fork-gated), Orin, and Thor. The x86 job stages datasets, runs eval, and posts a KPI table to the PR comment. A status job aggregates the required checks.
 - `nightly.yml`: build + test matrix across four x86 CUDA/Ubuntu configs plus Orin and Thor. The four x86 configs run eval (`eval: true`) and generate KPI data and PDF reports; Orin and Thor run CUDA micro-benchmarks (`benchmark: true`) and generate structured speed reports. Scheduled and ordinary manual runs retain versioned Actions artifacts but never create a Release. A successful manual dispatch from a matching `release/vX.Y.Z` branch promotes the same consumer artifacts to an unpublished draft Release.
 - `provision-datasets.yml`: manual `workflow_dispatch`, gated to the default branch. Builds the CI image, runs `provision_dataset.sh` for the chosen dataset, uploads `<name>.tar`. The only writer of dataset storage.
-- `sync-rulesets.yml`: applies `.github/rulesets/default-branch-ruleset.json` through the GitHub API using `RULESET_ADMIN_TOKEN`, on push to the ruleset path, weekly, and on demand.
+Branch protection is not part of this repository. The default-branch ruleset is configured in the
+GitHub UI, so nothing here applies or verifies it; read the live rules with
+`gh api repos/<owner>/<repo>/rules/branches/main`.
 
 ## Eval data flow
 
@@ -28,7 +30,7 @@ flowchart TD
     prereq --> build --> stage --> wrapper
   end
   subgraph container [cuvslam:local container]
-    inner["run_eval.sh (DATASETS[])"]
+    inner["run_eval.sh (registry eval-records)"]
     app["cuvslam_app.py per dataset"]
     kpi["cuvslam_kpi_report.py collect\nraw + report JSON"]
     inner --> app --> kpi
@@ -62,14 +64,14 @@ Repository secrets, split read from write so fork-reachable jobs never hold a ke
 
 - `AWS_S3_RO_ACCESS_KEY_ID` / `AWS_S3_RO_SECRET_ACCESS_KEY` - read-only S3; eval staging in `pr-verify.yml` and `nightly.yml`. Passed as `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`.
 - `AWS_S3_ACCESS_KEY_ID` / `AWS_S3_SECRET_ACCESS_KEY` - read-write S3; `provision-datasets.yml` only.
-- `RULESET_ADMIN_TOKEN` - used by `sync-rulesets.yml` to apply branch rulesets.
 
 ## Dataset registry and layout
 
-- `PROVISIONABLE_DATASETS` (datasets the Provision workflow can build) and `EVAL_DATASET_NAMES` (datasets eval stages) live in `datasets_config.sh`.
-- `run_eval.sh` `DATASETS[]` records are pipe-delimited: `LABEL|link_name|subdir|test_config|app_flags`. KITTI and
-  EuRoC are active; the others are commented until provisioned.
-- Tarball: uncompressed `<name>.tar` at `<S3_DATASETS_BUCKET>/<name>.tar`. Staged to `<RUNNER_LOCAL_DATASETS_ROOT>/datasets/vslam/<name>/` and mounted read-only into the eval container at `/datasets`. An ETag file skips re-download when the cache is current.
+- `DATASETS` in `tools/python_tools/cuvslam_tools/dataset_registry.py` is the single source of truth. A `DatasetSpec` holds the ID, the preparation module, and its `EvalSpec` records; an `EvalSpec` holds the reporter config filename, the `cuvslam_app` flags, suite membership, and gating. Provisionable means the dataset is present; eval-enabled means it has at least one `EvalSpec`. KITTI and EuRoC are eval-enabled; `tum` and `tartan` are provisionable only.
+- The module is standard library only and imports converters lazily, so shell wrappers call it with `PYTHONPATH=tools/python_tools` inside `cuvslam-ci:local` before anything is installed. `datasets_config.sh` wraps it as `dataset_registry`; `run_eval.sh` defines its own shim because the S3 variables `datasets_config.sh` requires are absent in the eval container.
+- Subcommands: `validate`, `list [--eval] [--suite]`, `eval-records` (tab-separated `id`, KPI prefix, config path, flags), `prepare-module`, `prepare --root-file`, `verify-staged --root`.
+- Derived, never declared: `<id>.tar`, the staged directory, the `/sequences` mount, and the KPI prefix (first hyphen-delimited token of the config filename, upper-cased). Validation rejects two records that derive the same prefix and `--odometry_mode`.
+- Tarball: uncompressed `<id>.tar` at `<S3_DATASETS_BUCKET>/<id>.tar`, whose root is the directory `prepare()` returned. Staged to `<RUNNER_LOCAL_DATASETS_ROOT>/datasets/vslam/<id>/` and mounted read-only into the eval container at `/datasets`. An ETag file skips re-download when the cache is current. After extraction, `verify-staged` checks the shipped config's `dataset_folder` equals `<id>/`.
 
 ## KPI outputs
 
@@ -133,7 +135,10 @@ Repository secrets, split read from write so fork-reachable jobs never hold a ke
 - Version provenance: `scripts/Dockerfile` keeps `git-lfs` filters configured system-wide because nightly materializes
   LFS files before mounting the source read-only into the product build container. Runner-specific build configuration
   must use Docker build arguments rather than rewriting tracked source files.
-- Change isolation: ruleset, CODEOWNERS, and `.github/workflows/**` changes go in their own MR, enforced by the `isolated-ruleset-change` pre-commit hook. Use the `[infra]` MR prefix.
+- Change isolation: CODEOWNERS and CI workflow changes go in their own MR, enforced by the `isolated-ruleset-change` pre-commit hook and re-run as `isolated-ruleset-change-ci` in the `Lint` job. `PROTECTED_REGEX` in `scripts/check-isolated-ruleset-change.sh` is the authority on which paths qualify; it is narrower than `.github/workflows/**`. Use the `[infra]` MR prefix.
+- Branch protection is UI-only: no file in this repository describes the default-branch ruleset, so a
+  change here can never be reviewed as code and drift cannot be detected by CI. Verify what is
+  enforced with `gh api repos/<owner>/<repo>/rules/branches/main` rather than trusting any document.
 
 ## Learnings
 
