@@ -662,8 +662,11 @@ Registration has a strict contract: call it exactly once, from a
 single-threaded initialization path, before you construct any `Odometry` or
 `Slam` instance. The call is not thread-safe, your `ICudaStreamProvider` must
 stay alive for as long as any cuVSLAM API is in use, and registering after an
-`Odometry` or `Slam` instance exists is undefined behavior. Pass `nullptr` to
-go back to the default provider.
+`Odometry` or `Slam` instance exists is undefined behavior. Resetting to the
+built-in provider is permitted — pass `nullptr` — but it is the same call and
+inherits the same constraints, so do it during single-threaded initialization
+before any `Odometry` or `Slam` instance exists, never to swap providers on a
+live tracker.
 
 Note that `async_sba` only moves SBA to a background thread — it is not a
 GPU-partitioning control. A static partition also reserves that share even

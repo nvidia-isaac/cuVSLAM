@@ -200,10 +200,10 @@ not introduce error.
 
 ---
 
-## 5. SLAM is a benchmark; odometry is the product
+## 5. Odometry is the product; SLAM is supported but secondary
 
-**Rule:** Treat odometry as the externally consumed surface and SLAM as an
-internal benchmark feature. Reviewer expectations differ accordingly.
+**Rule:** Treat odometry as the primary externally consumed surface and SLAM
+as a supported but secondary one. Reviewer expectations differ accordingly.
 
 **This is about emphasis, not support status.** The SLAM APIs are supported
 public API: `Slam::Config`, map persistence, `LocalizeInMap()`,
@@ -228,8 +228,13 @@ state-of-the-art.
 
 - An odometry change that affects accuracy is a high-bar review. Run the
   reporter on all datasets, both VO and VIO modes, before requesting review.
-- A SLAM-only change that does not touch odometry is a lower-bar review —
-  benchmark numbers must not regress, but production impact is bounded.
+- A SLAM-only change that does not touch odometry is a lower-bar review *for
+  accuracy*: benchmark numbers must not regress, and the accuracy risk to most
+  users is bounded because they run their own mapping stack.
+- The lower bar stops at accuracy. `Slam` is public API, so its signatures,
+  semantics and on-disk map format carry the same compatibility weight as
+  anything else in `cuvslam2.h`, and a SLAM-only change that breaks them is a
+  high-bar review.
 - When in doubt about scope, ask: "would a user with their own SLAM stack
   notice this?" If yes, treat it as odometry-class.
 
