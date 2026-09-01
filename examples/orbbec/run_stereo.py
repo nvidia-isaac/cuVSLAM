@@ -166,7 +166,7 @@ def main() -> None:
     )
 
     # Initialize tracker and visualizer
-    tracker = vslam.Tracker(rig, odom_cfg)
+    tracker = vslam.Tracker(rig, vslam.Tracker.Mode.OdometryOnlyOffline, odom_cfg)
     visualizer = RerunVisualizer()
 
     frame_id = 0

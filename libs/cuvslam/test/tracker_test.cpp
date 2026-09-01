@@ -31,6 +31,7 @@ using cuvslam::Odometry;
 using cuvslam::Rig;
 using cuvslam::Slam;
 using cuvslam::Tracker;
+using Mode = Tracker::Mode;
 
 static_assert(std::is_same_v<decltype(std::declval<Tracker&>().GetOdometry()), const Odometry&>);
 static_assert(std::is_same_v<decltype(std::declval<Tracker&>().GetSlam()), Slam&>);
@@ -57,7 +58,7 @@ Rig MakeStereoRig() {
 /// Checks that the rig is rejected as invalid, with a message naming the field that is at fault.
 testing::AssertionResult RejectedWith(const Rig& rig, std::string_view field) {
   try {
-    Tracker{rig};
+    Tracker{rig, Mode::OdometryOnlyRealtime};
   } catch (const std::invalid_argument& e) {
     if (std::string_view{e.what()}.find(field) != std::string_view::npos) {
       return testing::AssertionSuccess();
@@ -67,14 +68,16 @@ testing::AssertionResult RejectedWith(const Rig& rig, std::string_view field) {
   return testing::AssertionFailure() << "rig was accepted";
 }
 
-/// Run the bundler and SLAM in the calling thread so the tests do not depend on background workers.
-struct SyncConfig {
+/// The configs an offline mode demands: bundler and SLAM in the calling thread, so the tests do not
+/// depend on background workers. Tracker checks these rather than setting them, so every offline
+/// test has to spell them out.
+struct OfflineConfig {
   Odometry::Config odometry;
   Slam::Config slam;
 };
 
-SyncConfig MakeSyncConfig() {
-  SyncConfig cfg;
+OfflineConfig MakeOfflineConfig() {
+  OfflineConfig cfg;
   cfg.odometry.async_sba = false;
   cfg.slam.sync_mode = true;
   cfg.slam.enable_reading_internals = true;
@@ -108,8 +111,8 @@ private:
   int64_t timestamp_ns_{0};
 };
 
-TEST_F(TrackerTest, SlamIsDisabledByDefault) {
-  Tracker tracker{rig};
+TEST_F(TrackerTest, OdometryOnlyModeHasNoSlam) {
+  Tracker tracker{rig, Mode::OdometryOnlyRealtime};
 
   EXPECT_FALSE(tracker.IsSlamEnabled());
   EXPECT_THROW(tracker.GetSlam(), std::logic_error);
@@ -120,10 +123,52 @@ TEST_F(TrackerTest, SlamIsDisabledByDefault) {
 }
 
 TEST_F(TrackerTest, GtAlignModeRequiresManualDispatch) {
-  SyncConfig cfg = MakeSyncConfig();
+  OfflineConfig cfg = MakeOfflineConfig();
   cfg.slam.gt_align_mode = true;
 
-  EXPECT_THROW(Tracker(rig, cfg.odometry, &cfg.slam), std::invalid_argument);
+  EXPECT_THROW(Tracker(rig, Mode::OdometryWithSlamOffline, cfg.odometry, &cfg.slam), std::invalid_argument);
+}
+
+// The mode says what runs and where; the configs have to say the same thing, and Tracker leaves them
+// alone rather than quietly rewriting them to fit. The realtime cases below only construct, so they
+// still do not depend on what the background threads do.
+TEST_F(TrackerTest, RealtimeModeAcceptsDefaultConfigs) {
+  Tracker odometry_only{rig, Mode::OdometryOnlyRealtime};
+  EXPECT_FALSE(odometry_only.IsSlamEnabled());
+
+  Tracker with_slam{rig, Mode::OdometryWithSlamRealtime};
+  EXPECT_TRUE(with_slam.IsSlamEnabled());
+}
+
+TEST_F(TrackerTest, ModeAndSbaSettingMustAgree) {
+  Odometry::Config realtime;  // async_sba defaults to true
+  EXPECT_THROW(Tracker(rig, Mode::OdometryOnlyOffline, realtime), std::invalid_argument);
+
+  Odometry::Config offline = MakeOfflineConfig().odometry;
+  EXPECT_THROW(Tracker(rig, Mode::OdometryOnlyRealtime, offline), std::invalid_argument);
+}
+
+TEST_F(TrackerTest, ModeAndSlamSettingMustAgree) {
+  OfflineConfig cfg = MakeOfflineConfig();
+
+  Slam::Config async_slam = cfg.slam;
+  async_slam.sync_mode = false;
+  EXPECT_THROW(Tracker(rig, Mode::OdometryWithSlamOffline, cfg.odometry, &async_slam), std::invalid_argument);
+
+  // A realtime mode with no SLAM config takes Slam::GetDefaultConfig(), which is asynchronous and so
+  // agrees; a blocking one handed in explicitly does not.
+  Odometry::Config realtime;
+  EXPECT_THROW(Tracker(rig, Mode::OdometryWithSlamRealtime, realtime, &cfg.slam), std::invalid_argument);
+}
+
+TEST_F(TrackerTest, RejectsSlamConfigInOdometryOnlyMode) {
+  OfflineConfig cfg = MakeOfflineConfig();
+
+  EXPECT_THROW(Tracker(rig, Mode::OdometryOnlyOffline, cfg.odometry, &cfg.slam), std::invalid_argument);
+
+  Odometry::Config realtime;
+  Slam::Config slam;
+  EXPECT_THROW(Tracker(rig, Mode::OdometryOnlyRealtime, realtime, &slam), std::invalid_argument);
 }
 
 TEST_F(TrackerTest, RejectsNonFiniteCalibration) {
@@ -163,8 +208,8 @@ TEST_F(TrackerTest, StandaloneSlamChecksTheWholeRig) {
 }
 
 TEST_F(TrackerTest, TrackReturnsSlamPoseWhenEnabled) {
-  SyncConfig cfg = MakeSyncConfig();
-  Tracker tracker{rig, cfg.odometry, &cfg.slam};
+  OfflineConfig cfg = MakeOfflineConfig();
+  Tracker tracker{rig, Mode::OdometryWithSlamOffline, cfg.odometry, &cfg.slam};
 
   EXPECT_TRUE(tracker.IsSlamEnabled());
   EXPECT_NO_THROW(tracker.GetSlam());
@@ -177,13 +222,15 @@ TEST_F(TrackerTest, TrackReturnsSlamPoseWhenEnabled) {
   EXPECT_NO_THROW(tracker.GetSlam().GetSlamMetrics(metrics));
 }
 
-// A SLAM configuration must turn on the exports SLAM depends on, whatever the odometry config said.
+// A SLAM mode must turn on the exports SLAM depends on, whatever the odometry config said. The
+// exports are the one thing Tracker overrides rather than checks: SLAM cannot run without them, so
+// there is no caller intent to preserve.
 TEST_F(TrackerTest, SlamConfigEnablesRequiredExports) {
-  SyncConfig cfg = MakeSyncConfig();
+  OfflineConfig cfg = MakeOfflineConfig();
   cfg.odometry.enable_observations_export = false;
   cfg.odometry.enable_landmarks_export = false;
 
-  Tracker tracker{rig, cfg.odometry, &cfg.slam};
+  Tracker tracker{rig, Mode::OdometryWithSlamOffline, cfg.odometry, &cfg.slam};
   tracker.Track(NextFrame());
 
   EXPECT_NO_THROW(tracker.GetOdometry().GetLastObservations(0));
@@ -196,11 +243,11 @@ TEST_F(TrackerTest, SlamConfigEnablesRequiredExports) {
 
 // Without SLAM the exports stay as configured, which is what makes the test above meaningful.
 TEST_F(TrackerTest, ExportsStayDisabledWithoutSlam) {
-  SyncConfig cfg = MakeSyncConfig();
+  OfflineConfig cfg = MakeOfflineConfig();
   cfg.odometry.enable_observations_export = false;
   cfg.odometry.enable_landmarks_export = false;
 
-  Tracker tracker{rig, cfg.odometry};
+  Tracker tracker{rig, Mode::OdometryOnlyOffline, cfg.odometry};
   tracker.Track(NextFrame());
 
   EXPECT_THROW(tracker.GetOdometry().GetLastObservations(0), std::invalid_argument);
@@ -208,8 +255,8 @@ TEST_F(TrackerTest, ExportsStayDisabledWithoutSlam) {
 }
 
 TEST_F(TrackerTest, ExposesUnderlyingComponents) {
-  SyncConfig cfg = MakeSyncConfig();
-  Tracker tracker{rig, cfg.odometry, &cfg.slam};
+  OfflineConfig cfg = MakeOfflineConfig();
+  Tracker tracker{rig, Mode::OdometryWithSlamOffline, cfg.odometry, &cfg.slam};
 
   EXPECT_FALSE(tracker.GetOdometry().GetPrimaryCameras().empty());
 
@@ -225,8 +272,8 @@ TEST_F(TrackerTest, ExposesUnderlyingComponents) {
 // to match against, so the tracker legitimately reports no pose from the second frame onwards; this
 // test is about the moved-to tracker still owning working components, not about tracking success.
 TEST_F(TrackerTest, MoveKeepsComponentsUsable) {
-  SyncConfig cfg = MakeSyncConfig();
-  Tracker tracker{rig, cfg.odometry, &cfg.slam};
+  OfflineConfig cfg = MakeOfflineConfig();
+  Tracker tracker{rig, Mode::OdometryWithSlamOffline, cfg.odometry, &cfg.slam};
   tracker.Track(NextFrame());
 
   Tracker moved{std::move(tracker)};

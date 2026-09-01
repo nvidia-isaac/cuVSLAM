@@ -72,7 +72,7 @@ def main() -> None:
     rig = get_rs_stereo_rig(camera_params)
 
     # Initialize tracker and visualizer
-    tracker = vslam.Tracker(rig, odom_cfg)
+    tracker = vslam.Tracker(rig, vslam.Tracker.Mode.OdometryOnlyOffline, odom_cfg)
 
     # Get device product line for setting a supporting resolution
     pipeline_wrapper = rs.pipeline_wrapper(pipeline)

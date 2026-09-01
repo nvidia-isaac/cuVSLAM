@@ -60,7 +60,7 @@ def main():
     rig = get_zed_stereo_rig(camera_info, raw = RAW)
 
     # Initialize tracker
-    tracker = vslam.Tracker(rig, odom_cfg)
+    tracker = vslam.Tracker(rig, vslam.Tracker.Mode.OdometryOnlyOffline, odom_cfg)
     visualizer = RerunVisualizer()
 
     # Create and set RuntimeParameters after opening the camera
