@@ -22,14 +22,23 @@ if [ "${GITHUB_ACTIONS:-}" = "true" ] && ! $have_aws; then
   exit 1
 fi
 
+dataset_registry validate
+
+# Captured rather than piped into the loop: a failing or empty listing would
+# otherwise skip the body and leave cache_ok true, reporting success.
+if ! eval_datasets="$(dataset_registry list --eval)" || [ -z "$eval_datasets" ]; then
+  echo "Error: the dataset registry lists no evaluation datasets." >&2
+  exit 1
+fi
+
 cache_ok=true
-for name in "${EVAL_DATASET_NAMES[@]}"; do
+while read -r name; do
   dest="$LOCAL_DATASETS_DIR/$name"
   if [ ! -d "$dest" ] || [ -z "$(find "$dest" -type f ! -name '.s3_etag' -print -quit 2>/dev/null)" ]; then
     cache_ok=false
     break
   fi
-done
+done <<< "$eval_datasets"
 
 if $have_aws; then
   echo "Eval prerequisites OK (S3 tarball staging; KPI history under $RUNNER_STORAGE_ROOT)"

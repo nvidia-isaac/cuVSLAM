@@ -1,30 +1,15 @@
 S3_DATASETS_BUCKET="${S3_DATASETS_BUCKET:?Set repository variable S3_DATASETS_BUCKET to the dataset tarball location, e.g. s3://your-bucket/datasets/vslam}"
 AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:?Set repository variable AWS_DEFAULT_REGION, e.g. us-west-2}"
 
-PROVISIONABLE_DATASETS=(kitti euroc tum tartan)
+# Dataset names, evaluation records, and the archive layout live in
+# tools/python_tools/cuvslam_tools/dataset_registry.py. That module is standard
+# library only and imports converter code lazily, so it runs here with
+# PYTHONPATH alone, before anything is installed in the image.
+CUVSLAM_REPO_ROOT="${CUVSLAM_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)}"
 
-EVAL_DATASET_NAMES=(
-  kitti
-  euroc
-)
-
-is_provisionable_dataset() {
-  local name="$1" d
-  for d in "${PROVISIONABLE_DATASETS[@]}"; do
-    [ "$d" = "$name" ] && return 0
-  done
-  return 1
-}
-
-dataset_upload_subdir() {
-  is_provisionable_dataset "$1" || {
-    echo "Error: unknown dataset '$1' (expected: ${PROVISIONABLE_DATASETS[*]})" >&2
-    return 1
-  }
-  case "$1" in
-    kitti) echo "" ;;
-    *)     echo "$1" ;;
-  esac
+dataset_registry() {
+  PYTHONPATH="$CUVSLAM_REPO_ROOT/tools/python_tools${PYTHONPATH:+:$PYTHONPATH}" \
+    python3 -m cuvslam_tools.dataset_registry "$@"
 }
 
 s3_dataset_bucket() {

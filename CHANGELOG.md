@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Changed
+
+- `Tracker` now takes a required `Tracker::Mode` (`cuvslam.Tracker.Mode` in Python) as its second
+  constructor argument, choosing between odometry alone or odometry with SLAM, and between running
+  the bundle adjuster and SLAM on background threads (realtime) or in the calling thread (offline).
+  The mode has to agree with `Odometry::Config::async_sba` and `Slam::Config::sync_mode`: `Tracker`
+  checks them and throws `std::invalid_argument` on a mismatch rather than overwriting them. A
+  `slam_config` is now rejected in the odometry-only modes
+
 ### Added
 
 - `Slam::Config::delay_warning_queue_size`: warns in verbose mode when more than the configured number of commands

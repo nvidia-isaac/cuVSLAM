@@ -94,7 +94,7 @@ odom_cfg = cuvslam.Odometry.Config(
     enable_final_landmarks_export=True,
     rectified_stereo_camera=True
 )
-tracker = cuvslam.Tracker(cuvslam.Rig(cameras), odom_cfg)
+tracker = cuvslam.Tracker(cuvslam.Rig(cameras), cuvslam.Tracker.Mode.OdometryOnlyOffline, odom_cfg)
 
 timestamps = [
     int(10 ** 9 * float(sec_str))

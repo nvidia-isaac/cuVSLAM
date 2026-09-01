@@ -75,11 +75,13 @@ def init_cuvslam_from_zed(zed_calibration: sl.CalibrationParameters):
                                                  rectified_stereo_camera=True,
                                                  multicam_mode=cuvslam.Odometry.MulticameraMode.Performance)
     if enable_slam:
+        cu_mode = cuvslam.Tracker.Mode.OdometryWithSlamOffline
         cu_slam_cfg = cuvslam.Slam.Config(enable_reading_internals=True, map_cell_size=2,
                                                  sync_mode=True, max_map_size=10000)
     else:
+        cu_mode = cuvslam.Tracker.Mode.OdometryOnlyOffline
         cu_slam_cfg = None
-    return cuvslam.Tracker(cuvslam.Rig(cu_cameras), cu_odom_cfg, cu_slam_cfg)
+    return cuvslam.Tracker(cuvslam.Rig(cu_cameras), cu_mode, cu_odom_cfg, cu_slam_cfg)
 
 
 # Generate pseudo-random colour from integer identifier for visualization

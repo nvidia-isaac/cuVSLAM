@@ -168,17 +168,28 @@ In this mode, SBA and SLAM run on the main thread and block until completion rat
 This makes computation more stable and tests more reproducible, but it does not support high frame rates.
 Feed images to cuVSLAM frame by frame.
 
+Pick one of the `Tracker` offline modes and set the two configuration fields to match; `Tracker`
+rejects a mode that disagrees with them.
+
 **C++ API**
 
 ```cpp
-cuvslam::Odometry::Config::async_sba = false;
-cuvslam::Slam::Config::sync_mode = true;
+cuvslam::Odometry::Config odometry_config;
+odometry_config.async_sba = false;
+cuvslam::Slam::Config slam_config;
+slam_config.sync_mode = true;
+cuvslam::Tracker tracker{rig, cuvslam::Tracker::Mode::OdometryWithSlamOffline, odometry_config, &slam_config};
 ```
 
 **Python API**
 
-1. [cuvslam.Odometry.Config.async_sba](https://nvidia-isaac.github.io/cuVSLAM/python/api.html#cuvslam.Odometry.Config.async_sba)
-2. [cuvslam.Slam.Config.sync_mode](https://nvidia-isaac.github.io/cuVSLAM/python/api.html#cuvslam.Slam.Config.sync_mode)
+1. [cuvslam.Tracker.Mode](https://nvidia-isaac.github.io/cuVSLAM/python/api.html#cuvslam.Tracker.Mode) —
+   `OdometryOnlyOffline` or `OdometryWithSlamOffline`
+2. [cuvslam.Odometry.Config.async_sba](https://nvidia-isaac.github.io/cuVSLAM/python/api.html#cuvslam.Odometry.Config.async_sba)
+3. [cuvslam.Slam.Config.sync_mode](https://nvidia-isaac.github.io/cuVSLAM/python/api.html#cuvslam.Slam.Config.sync_mode)
+
+`sync_mode` is a `Slam.Config` field, so it only applies to `OdometryWithSlamOffline`. The
+odometry-only modes take no `slam_config` at all — pass one and the tracker rejects it.
 
 **Isaac ROS**
 
@@ -616,11 +627,16 @@ to match your environment and accuracy requirements.
 
 ## Step 14: Run in async mode
 
-For real-time or high-throughput operation, enable async mode. Adjust these parameters to balance latency and throughput:
+For real-time or high-throughput operation, switch to a realtime `Tracker::Mode` and set the two
+configuration fields to match. Adjust these parameters to balance latency and throughput:
 
-1. `Odometry::Config::async_sba`
-2. `Slam::Config::throttling_time_ms`
-3. `Slam::Config::sync_mode`
+1. `Tracker::Mode::OdometryOnlyRealtime` or `Tracker::Mode::OdometryWithSlamRealtime`
+2. `Odometry::Config::async_sba` (must be `true` in a realtime mode)
+3. `Slam::Config::sync_mode` (must be `false` in a realtime mode)
+4. `Slam::Config::throttling_time_ms`
+
+Items 3 and 4 are `Slam::Config` fields, so they only apply to `OdometryWithSlamRealtime`. In
+`OdometryOnlyRealtime`, omit `slam_config` entirely.
 
 ### Verify SLAM keeps up with odometry
 

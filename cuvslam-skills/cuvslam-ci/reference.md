@@ -28,7 +28,7 @@ flowchart TD
     prereq --> build --> stage --> wrapper
   end
   subgraph container [cuvslam:local container]
-    inner["run_eval.sh (DATASETS[])"]
+    inner["run_eval.sh (registry eval-records)"]
     app["cuvslam_app.py per dataset"]
     kpi["cuvslam_kpi_report.py collect\nraw + report JSON"]
     inner --> app --> kpi
@@ -66,10 +66,11 @@ Repository secrets, split read from write so fork-reachable jobs never hold a ke
 
 ## Dataset registry and layout
 
-- `PROVISIONABLE_DATASETS` (datasets the Provision workflow can build) and `EVAL_DATASET_NAMES` (datasets eval stages) live in `datasets_config.sh`.
-- `run_eval.sh` `DATASETS[]` records are pipe-delimited: `LABEL|link_name|subdir|test_config|app_flags`. KITTI and
-  EuRoC are active; the others are commented until provisioned.
-- Tarball: uncompressed `<name>.tar` at `<S3_DATASETS_BUCKET>/<name>.tar`. Staged to `<RUNNER_LOCAL_DATASETS_ROOT>/datasets/vslam/<name>/` and mounted read-only into the eval container at `/datasets`. An ETag file skips re-download when the cache is current.
+- `DATASETS` in `tools/python_tools/cuvslam_tools/dataset_registry.py` is the single source of truth. A `DatasetSpec` holds the ID, the preparation module, and its `EvalSpec` records; an `EvalSpec` holds the reporter config filename, the `cuvslam_app` flags, suite membership, and gating. Provisionable means the dataset is present; eval-enabled means it has at least one `EvalSpec`. KITTI and EuRoC are eval-enabled; `tum` and `tartan` are provisionable only.
+- The module is standard library only and imports converters lazily, so shell wrappers call it with `PYTHONPATH=tools/python_tools` inside `cuvslam-ci:local` before anything is installed. `datasets_config.sh` wraps it as `dataset_registry`; `run_eval.sh` defines its own shim because the S3 variables `datasets_config.sh` requires are absent in the eval container.
+- Subcommands: `validate`, `list [--eval] [--suite]`, `eval-records` (tab-separated `id`, KPI prefix, config path, flags), `prepare-module`, `prepare --root-file`, `verify-staged --root`.
+- Derived, never declared: `<id>.tar`, the staged directory, the `/sequences` mount, and the KPI prefix (first hyphen-delimited token of the config filename, upper-cased). Validation rejects two records that derive the same prefix and `--odometry_mode`.
+- Tarball: uncompressed `<id>.tar` at `<S3_DATASETS_BUCKET>/<id>.tar`, whose root is the directory `prepare()` returned. Staged to `<RUNNER_LOCAL_DATASETS_ROOT>/datasets/vslam/<id>/` and mounted read-only into the eval container at `/datasets`. An ETag file skips re-download when the cache is current. After extraction, `verify-staged` checks the shipped config's `dataset_folder` equals `<id>/`.
 
 ## KPI outputs
 

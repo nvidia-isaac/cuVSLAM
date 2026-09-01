@@ -23,14 +23,14 @@ Workflows (`.github/workflows/`):
 CI scripts (`scripts/`):
 
 - `Dockerfile.ci` - the shared `cuvslam-ci:local` image (git, python3, pre-commit, GPG-verified AWS CLI, jq).
-- `datasets_config.sh` - dataset registry: `PROVISIONABLE_DATASETS`, `EVAL_DATASET_NAMES`, path helpers, `s3_tarball_uri` (names `<name>.tar`).
-- `provision_dataset.sh` - runs the dataset preparation module (`python3 -m cuvslam_tools.dataset_preparation.<name>.prepare` with `PYTHONPATH=tools/python_tools`), tars the converted output (uncompressed `.tar`), uploads to S3.
-- `stage_eval_datasets.sh` - downloads `<name>.tar` from S3, extracts to the local cache.
+- `datasets_config.sh` - S3 location plus the `dataset_registry` shell shim; dataset names and evaluation records live in `tools/python_tools/cuvslam_tools/dataset_registry.py`.
+- `provision_dataset.sh` - runs `dataset_registry prepare`, tars the directory `prepare()` returned (uncompressed `.tar`), uploads to S3.
+- `stage_eval_datasets.sh` - validates the registry, downloads each eval dataset's `<id>.tar` from S3, streams it into the local cache, and checks the staged reporter config against the registry.
 - `check_eval_prerequisites.sh` - verifies credentials/cache and `RUNNER_STORAGE_ROOT`.
 - `benchmark_cuvslam_in_docker.sh` - runs the active `cuda_modules_test` speed benchmarks in the product container and captures runner metadata, raw output, and GoogleTest XML.
 - `cuvslam_benchmark_report.py` - validates benchmark XML properties and renders per-Jetson JSON and Markdown reports.
 - `eval_cuvslam_in_docker.sh` - host wrapper: mounts datasets and KPI history, starts the eval container.
-- `run_eval.sh` - in container: the active dataset set `DATASETS[]`, runs `cuvslam_app.py`, then collects
+- `run_eval.sh` - in container: reads evaluation records from the registry, runs `cuvslam_app.py`, then collects
   machine-readable KPI JSON.
 - `cuvslam_kpi_report.py` - owns KPI collection, rolling diffs, cross-config aggregation, soft drift data, and all
   KPI Markdown rendering. `collect` writes raw and report JSON; `render` and `aggregate` produce publication Markdown.
@@ -43,12 +43,14 @@ Dataset tooling: `tools/python_tools/cuvslam_tools/dataset_preparation/<name>/` 
 
 ## Task: add a dataset
 
-1. In `scripts/datasets_config.sh`, add the name to `PROVISIONABLE_DATASETS` and add its `dataset_upload_subdir` case (empty string means the converted root; otherwise the subdir under the converted output).
-2. Add `tools/python_tools/cuvslam_tools/dataset_preparation/<name>/prepare.py` (plus a downloader) exposing `prepare()` and `main()`, which converts raw data to the edex layout under `--output-dir`. `provision_dataset.sh` resolves the module as `cuvslam_tools.dataset_preparation.<name>.prepare` and requires it to accept `--raw-dir`, `--output-dir`, and `--force-download`.
-3. Add the dataset to the `dataset` choice input in `provision-datasets.yml`.
-4. Run Provision dataset (`workflow_dispatch`) on the default branch. It writes `<S3_DATASETS_BUCKET>/<name>.tar`.
-5. Add the name to `EVAL_DATASET_NAMES` in `datasets_config.sh`, and add a record to `DATASETS[]` in `scripts/run_eval.sh`: `LABEL|link_name|subdir|test_config|app_flags`.
-6. Add expected KPI ranges for the dataset to `scripts/kpi_baseline_ranges.json`.
+The dataset ID is the only name: it is the preparation module, the `<id>.tar` object, the staged directory, and the `/sequences` mount.
+
+1. Add `tools/python_tools/cuvslam_tools/dataset_preparation/<id>/prepare.py` (plus a downloader) exposing `prepare()` and `main()`. It must accept `--raw-dir`, `--output-dir`, and `--force-download`, and **return the directory to archive** — that directory becomes the tar root and the staged dataset root. Each generated reporter config must set `"dataset_folder": "<id>/"`.
+2. Add a `DatasetSpec` to `DATASETS` in `tools/python_tools/cuvslam_tools/dataset_registry.py` with the ID and the preparation module, and no `evals` yet. Run `python3 -m cuvslam_tools.dataset_registry validate`.
+3. Add the ID to the `dataset` choice input in `provision-datasets.yml`. A registry test asserts every choice resolves.
+4. Run Provision dataset (`workflow_dispatch`) on the default branch. It writes `<S3_DATASETS_BUCKET>/<id>.tar`.
+5. Enable evaluation by adding one or more `EvalSpec` records to that `DatasetSpec`: the reporter config filename, the `cuvslam_app` flags, and suite membership. Nothing else needs editing; staging and eval both read the registry.
+6. Add expected KPI ranges to `scripts/kpi_baseline_ranges.json`. The key prefix is derived from the config filename (first hyphen-delimited token, upper-cased), so name configs with underscores inside the prefix and a hyphen only as its terminator: `tartan_flaky-vo_slam.cfg` gives `TARTAN_FLAKY`, whereas `tartan-flaky-vo_slam.cfg` would collide with `TARTAN`.
 
 ## Task: change dataset format or packing
 
@@ -66,7 +68,7 @@ Do not reintroduce gzip: provisioning uses uncompressed `.tar` to cap memory on 
 - Nightly configs: `nightly.yml` `strategy.matrix.include`. Eval runs on entries flagged `eval: true` (currently the four x86 configs). Every eval-enabled config needs the `RUNNER_STORAGE_ROOT` mount and configured repo secrets/variables; the `cuvslam-ci:local` image supplies the AWS CLI.
 - Jetson CUDA micro-benchmarks run only on nightly entries flagged `benchmark: true` (currently Orin and Thor). The normal C++ test invocation continues to exclude `*SpeedUp*` and `*Speedup*`; the dedicated benchmark wrapper runs the positive filter and excludes `DISABLED_` tests.
 - PR config: `pr-verify.yml` runs eval only on `build-test-x86` (fork-gated). `EVAL_CONFIG` is the static slug label for the PR table.
-- Active dataset set: `DATASETS[]` in `run_eval.sh` is global; PR and nightly run the same set. There is no per-pipeline dataset selection today. To run a different set in PR vs nightly, add an env-selected subset in `run_eval.sh` and have each workflow pass the selector.
+- Active dataset set: `run_eval.sh` reads every record from `dataset_registry eval-records`, so PR and nightly run the same set. There is no per-pipeline selection today. To differ, filter the records by suite in the registry and have each workflow pass the selector; `EvalSpec.suites` already carries the membership.
 
 ## Task: preserve nightly version provenance
 

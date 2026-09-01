@@ -1111,22 +1111,42 @@ NB_MODULE(pycuvslam, m) {
                                          "Submit frames and IMU measurements through this class. Use the `odometry` "
                                          "and `slam` properties for module-specific queries and operations.");
 
+  nb::enum_<Tracker::Mode>(tracker_cls, "Mode", "What the tracker runs, and in which thread")
+      .value("OdometryOnlyRealtime", Tracker::Mode::OdometryOnlyRealtime,
+             "Odometry only, bundle adjustment on a background thread.")
+      .value("OdometryOnlyOffline", Tracker::Mode::OdometryOnlyOffline,
+             "Odometry only, bundle adjustment in the calling thread, so every `track()` result is final.")
+      .value("OdometryWithSlamRealtime", Tracker::Mode::OdometryWithSlamRealtime,
+             "Odometry in the calling thread, bundle adjustment and SLAM on background threads.")
+      .value("OdometryWithSlamOffline", Tracker::Mode::OdometryWithSlamOffline,
+             "Odometry and SLAM, both in the calling thread, which makes a run reproducible.");
+
   tracker_cls
       .def(
           "__init__",
-          [](Tracker* self, const Rig& rig, const std::optional<Odometry::Config>& odom_config,
+          [](Tracker* self, const Rig& rig, Tracker::Mode mode, const std::optional<Odometry::Config>& odom_config,
              const std::optional<Slam::Config>& slam_config) {
             // An omitted config means the Python default, which is not the C++ default.
             const Odometry::Config odometry_config = odom_config.value_or(PyDefaultOdometryConfig());
-            new (self) Tracker(rig, odometry_config, slam_config.has_value() ? &*slam_config : nullptr);
+            new (self) Tracker(rig, mode, odometry_config, slam_config.has_value() ? &*slam_config : nullptr);
           },
-          nb::arg("rig"), nb::arg("odom_config") = nb::none(), nb::arg("slam_config") = nb::none(),
+          nb::arg("rig"), nb::arg("mode"), nb::arg("odom_config") = nb::none(), nb::arg("slam_config") = nb::none(),
           "Initialize the cuVSLAM system. Each `Odometry.OdometryMode` has specific `rig` requirements.\n\n"
+          "`mode` picks whether SLAM runs and whether the bundle adjuster and SLAM get threads of their own. It has "
+          "to agree with the configurations: a realtime mode needs `odom_config.async_sba == True` and "
+          "`slam_config.sync_mode == False`, an offline mode needs the opposite. The tracker checks these rather than "
+          "changing them, so what you configure is what runs. Both fields default to the realtime values, so the "
+          "offline modes need configurations that say so.\n\n"
           "Parameters:\n"
           "    rig: Camera rig configuration\n"
+          "    mode: What to run, and whether to run it in the background, see :class:`cuvslam.Tracker.Mode`\n"
           "    odom_config: Optional odometry configuration (uses defaults if omitted)\n"
-          "    slam_config: Optional SLAM configuration (disables SLAM if None). `gt_align_mode` requires standalone "
-          "Odometry and Slam instances.")
+          "    slam_config: SLAM configuration, used only in the SLAM modes; None uses the SLAM defaults, which suit "
+          "`Mode.OdometryWithSlamRealtime`. Must be None in the odometry-only modes. `gt_align_mode` requires "
+          "standalone Odometry and Slam instances.\n\n"
+          "Raises:\n"
+          "    ValueError: If the rig is invalid, if a configuration disagrees with `mode`, or if `slam_config` is "
+          "given in an odometry-only mode.")
       .def(
           "track",
           [](Tracker& self, int64_t timestamp, const std::vector<nb::ndarray<nb::ro>>& images,
@@ -1157,11 +1177,11 @@ NB_MODULE(pycuvslam, m) {
           "If after several calls of Track() visual odometry is not able to recover, then invalid pose will be "
           "returned.\n"
           "Odometry will output poses in the same coordinate frame until a loss of tracking.\n\n"
-          "To get SLAM poses, SLAM must be enabled in the constructor by providing a non-null `slam_config`.\n"
+          "To get SLAM poses, the tracker must be constructed with one of the `Mode.OdometryWithSlam*` modes.\n"
           "SLAM poses may have loop closure (LC) jumps when LC is detected and pose graph is optimized.\n"
           "SLAM poses cannot be adjusted retroactively, so use `slam.get_all_slam_poses()` to get a smooth "
           "trajectory up to the latest frame.\n"
-          "Also, in asynchronous mode, LC is done in a separate work thread to keep `track` call fast, so SLAM poses "
+          "Also, in a realtime mode, LC is done in a separate work thread to keep `track` call fast, so SLAM poses "
           "are not updated immediately.\n\n"
           "All cameras must be synchronized. If a camera rig provides 'almost synchronized' frames, the timestamps "
           "should be within 1 millisecond.\n\n"
