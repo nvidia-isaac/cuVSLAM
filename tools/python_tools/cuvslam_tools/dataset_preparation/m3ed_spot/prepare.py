@@ -122,6 +122,7 @@ def prepare(
     force_download: bool = False,
     download_only: bool = False,
     frame_limit: Optional[int] = None,
+    skip_existing: bool = False,
 ) -> Path:
     """Convert the selected sequences and return the prepared root.
 
@@ -153,7 +154,11 @@ def prepare(
     dataset_dir = output_dir / DATASET_NAME
     try:
         convert_m3ed_spot.convert(
-            dataset_dir, selected, open_sequence=opener, frame_limit=frame_limit
+            dataset_dir,
+            selected,
+            open_sequence=opener,
+            frame_limit=frame_limit,
+            skip_existing=skip_existing,
         )
     except convert_m3ed_spot.ConversionError as exc:
         raise PreparationError(str(exc)) from exc
@@ -191,6 +196,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="Convert an explicit sequence subset, such as skatepark_2. The default is all 19.",
     )
     parser.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help=(
+            "Leave sequences that already converted completely alone. Converting all 19 takes "
+            "hours of network reads, so an interrupted run can be resumed."
+        ),
+    )
+    parser.add_argument(
         "--frame-limit",
         type=int,
         default=None,
@@ -206,6 +219,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             force_download=args.force_download,
             download_only=args.download_only,
             frame_limit=args.frame_limit,
+            skip_existing=args.skip_existing,
         )
     )
 

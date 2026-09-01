@@ -18,25 +18,19 @@ The sequences are 25-42 GB each, so these build small synthetic HDF5 files with
 the same structure as the published ones.
 """
 
+import contextlib
 import json
 import math
 import tempfile
 import unittest
 from pathlib import Path
 
+import h5py
 import numpy as np
 from PIL import Image
 
 from cuvslam_tools.dataset_preparation import rgbd
 from cuvslam_tools.dataset_preparation.m3ed_spot import convert_m3ed_spot
-
-h5py = None
-try:
-    import h5py as _h5py
-
-    h5py = _h5py
-except ImportError:  # pragma: no cover - h5py is a declared dependency
-    pass
 
 WIDTH = 8
 HEIGHT = 4
@@ -127,7 +121,6 @@ def write_pose_file(path, poses=None, stamps=None):
     return path
 
 
-@unittest.skipIf(h5py is None, "h5py is required to build the synthetic sources")
 class TestSourceReading(unittest.TestCase):
     def setUp(self):
         self._temporary = tempfile.TemporaryDirectory()
@@ -243,7 +236,6 @@ class TestSourceReading(unittest.TestCase):
         self.assertAlmostEqual(translation[2], 0.0)
 
 
-@unittest.skipIf(h5py is None, "h5py is required to build the synthetic sources")
 class TestConvertSequence(unittest.TestCase):
     def setUp(self):
         self._temporary = tempfile.TemporaryDirectory()
@@ -393,12 +385,82 @@ class TestConvertSequence(unittest.TestCase):
         with self.assertRaisesRegex(convert_m3ed_spot.ConversionError, "ovc/ts has"):
             self._convert(frames=6, ts=np.arange(5, dtype=np.int64) * FRAME_INTERVAL_US)
 
+    def test_a_partial_conversion_is_not_mistaken_for_a_complete_one(self):
+        self._convert()
+        sequence_dir = self.output / self.sequence
+        self.assertEqual(convert_m3ed_spot.existing_frame_count(sequence_dir), 6)
+
+        # Each of these is how an interrupted run leaves the directory.
+        (sequence_dir / "01" / "000005.png").unlink()
+        self.assertIsNone(convert_m3ed_spot.existing_frame_count(sequence_dir))
+
+        self._convert()
+        (sequence_dir / "gt.txt").unlink()
+        self.assertIsNone(convert_m3ed_spot.existing_frame_count(sequence_dir))
+
+        self._convert()
+        (sequence_dir / "frame_metadata.jsonl").write_text("", encoding="utf-8")
+        self.assertIsNone(convert_m3ed_spot.existing_frame_count(sequence_dir))
+
+        self.assertIsNone(convert_m3ed_spot.existing_frame_count(self.output / "absent"))
+
     def test_rerunning_replaces_the_previous_output(self):
         self._convert()
         stale = self.output / self.sequence / "00" / "999999.png"
         stale.write_bytes(b"stale")
         self._convert()
         self.assertFalse(stale.exists())
+
+
+class TestSkipExisting(unittest.TestCase):
+    def setUp(self):
+        self._temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self._temporary.name)
+        self.output = self.root / "out"
+        self.sequence = convert_m3ed_spot.ALL_SEQS[0]
+        write_data_file(self.root / "data.h5")
+        write_pose_file(self.root / "pose.h5")
+
+    def tearDown(self):
+        self._temporary.cleanup()
+
+    @contextlib.contextmanager
+    def _open(self, published, kind):
+        self.opened.append((published, kind))
+        name = "data.h5" if kind == "data" else "pose.h5"
+        with h5py.File(self.root / name, "r") as handle:
+            yield handle, {"path": name}
+
+    def _convert(self, **kwargs):
+        self.opened = []
+        return convert_m3ed_spot.convert(
+            self.output, [self.sequence], open_sequence=self._open, **kwargs
+        )
+
+    def test_a_complete_sequence_is_not_read_again(self):
+        self._convert()
+        self.assertEqual(len(self.opened), 2)
+
+        metadata = self._convert(skip_existing=True)
+        # Nothing opened, so nothing was transferred.
+        self.assertEqual(self.opened, [])
+        entry = metadata["sequences"][0]
+        self.assertTrue(entry["reused_existing_output"])
+        self.assertEqual(entry["converted_counts"]["frames"], 6)
+
+    def test_an_interrupted_sequence_is_converted_again(self):
+        self._convert()
+        (self.output / self.sequence / "frame_metadata.jsonl").unlink()
+        self._convert(skip_existing=True)
+        self.assertEqual(len(self.opened), 2)
+
+    def test_configs_cover_skipped_sequences(self):
+        self._convert()
+        self._convert(skip_existing=True)
+        config = json.loads((self.output / "m3ed_spot-vo.cfg").read_text())
+        self.assertEqual(
+            [entry["sequence_folder"] for entry in config["sequence_cfgs"]], [self.sequence]
+        )
 
 
 class TestSequenceSelection(unittest.TestCase):

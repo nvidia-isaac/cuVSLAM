@@ -36,6 +36,7 @@ reads of a few hundred bytes.
 
 import http.client
 import io
+import sys
 import time
 import urllib.parse
 from typing import Dict, Optional, Tuple
@@ -50,7 +51,13 @@ DEFAULT_CACHE_BLOCKS = 32
 DIRECT_READ_THRESHOLD = 256 << 10
 
 DEFAULT_RETRIES = 5
-DEFAULT_TIMEOUT_SECONDS = 300
+
+# A chunk read is under a megabyte and completes in about a second, so this is
+# ample headroom while still bounding a socket that has silently died. The
+# previous 300 s meant one dead connection could stall a conversion for five
+# minutes with no output.
+DEFAULT_TIMEOUT_SECONDS = 60
+
 MAX_REDIRECTS = 5
 
 
@@ -95,6 +102,7 @@ class HttpRangeFile(io.RawIOBase):
         self._cache: Dict[int, bytes] = {}
         self.request_count = 0
         self.bytes_read = 0
+        self.retry_count = 0
         self._host, self._path = self._split_url(url)
         self.size, self.etag = self._head()
 
@@ -147,6 +155,15 @@ class HttpRangeFile(io.RawIOBase):
             except (http.client.HTTPException, OSError) as exc:
                 last_error = exc
                 self._drop_connection()
+                self.retry_count += 1
+                # Retries were previously silent, which made a slow transfer and
+                # a retry storm look identical from the outside.
+                print(
+                    f"warning: {method} {headers.get('Range', '')} failed "
+                    f"(attempt {attempt + 1}/{self.retries}): {exc!r}",
+                    file=sys.stderr,
+                    flush=True,
+                )
                 if attempt + 1 < self.retries:
                     time.sleep(min(2**attempt, 30))
         raise HttpRangeError(f"{self.url}: {self.retries} attempts failed: {last_error}")

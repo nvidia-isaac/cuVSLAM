@@ -54,6 +54,7 @@ Four things are deliberately different:
 import hashlib
 import json
 import shutil
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -134,6 +135,9 @@ _PNG_COMPRESS_LEVEL = 1
 # network wastes most of each range request. Pulling a run of frames per camera
 # turns the read pattern into two long sequential scans.
 _FRAME_BATCH = 16
+
+# Frames between progress lines. A multiple of the batch size.
+_PROGRESS_EVERY = 256
 
 _OVC_TIMESTAMP_UNIT_NS = 1_000  # /ovc/ts and pose ts are microseconds
 
@@ -471,7 +475,18 @@ def convert_sequence(
 
     names: List[str] = []
     frame_timestamps: List[int] = []
+    started = time.monotonic()
     for batch_start in range(0, len(selected), _FRAME_BATCH):
+        # A sequence takes tens of minutes of network reads, so report often
+        # enough that a stall is visible in the log rather than only in file
+        # timestamps.
+        if batch_start and batch_start % _PROGRESS_EVERY == 0:
+            elapsed = time.monotonic() - started
+            print(
+                f"  {sequence}: {batch_start}/{len(selected)} frames, "
+                f"{elapsed:.0f} s, {batch_start / elapsed:.2f} frames/s",
+                flush=True,
+            )
         batch = selected[batch_start : batch_start + _FRAME_BATCH]
         left_batch = left_images[batch[0] : batch[-1] + 1]
         right_batch = right_images[batch[0] : batch[-1] + 1]
@@ -524,6 +539,30 @@ def convert_sequence(
         },
         "frame_limit": frame_limit,
     }
+
+
+def existing_frame_count(sequence_dir: Path) -> Optional[int]:
+    """Return the frame count of a complete conversion in ``sequence_dir``.
+
+    Returns ``None`` unless every artifact is present and both cameras hold one
+    image per frame, so a conversion interrupted partway through is not mistaken
+    for a finished one. ``frame_metadata.jsonl`` is written after the images, but
+    that alone would not catch a truncated image directory.
+    """
+    sequence_dir = Path(sequence_dir)
+    metadata = sequence_dir / rgbd.FRAME_METADATA_FILE
+    required = (metadata, sequence_dir / rgbd.GROUND_TRUTH_FILE, sequence_dir / rgbd.EDEX_FILE)
+    if not all(path.is_file() and path.stat().st_size for path in required):
+        return None
+    with metadata.open(encoding="utf-8") as stream:
+        frames = sum(1 for line in stream if line.strip())
+    if frames == 0:
+        return None
+    for directory in (LEFT_DIR, RIGHT_DIR):
+        images = sequence_dir / directory
+        if not images.is_dir() or sum(1 for _ in images.glob("*.png")) != frames:
+            return None
+    return frames
 
 
 def _config_entries(sequences: Sequence[str], modes: Sequence[bool]) -> List[List[Tuple[str, object]]]:
@@ -603,6 +642,7 @@ def convert(
     *,
     open_sequence,
     frame_limit: Optional[int] = None,
+    skip_existing: bool = False,
 ) -> Dict[str, object]:
     """Convert the selected sequences into ``output_dir``.
 
@@ -610,6 +650,10 @@ def convert(
     ``kind`` in ``{"data", "pose_gt"}`` together with a provenance dictionary.
     Injecting it keeps the transport, whether an HTTP range reader or a local
     file, out of the conversion logic.
+
+    ``skip_existing`` leaves sequences that already converted completely alone.
+    Converting all 19 reads tens of gigabytes over the network across several
+    hours, so an interrupted run can be resumed rather than restarted.
     """
     selected = _selected_sequences(sequences)
     output_dir = Path(output_dir)
@@ -618,6 +662,19 @@ def convert(
     sequence_metadata = []
     for sequence in selected:
         published = source_name(sequence)
+        if skip_existing:
+            frames = existing_frame_count(output_dir / sequence)
+            if frames is not None:
+                print(f"Skipping {sequence}: already converted, {frames} frames")
+                sequence_metadata.append(
+                    {
+                        "sequence": sequence,
+                        "source_sequence": published,
+                        "converted_counts": {"frames": frames, "ground_truth_poses": frames},
+                        "reused_existing_output": True,
+                    }
+                )
+                continue
         print(f"Converting {sequence} from {published} …")
         with open_sequence(published, "data") as (data_handle, data_provenance):
             with open_sequence(published, "pose_gt") as (pose_handle, pose_provenance):
