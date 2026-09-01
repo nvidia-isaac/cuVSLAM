@@ -48,6 +48,10 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 # ---------------------------------------------------------------------------
 GT_SEQS = {f"{i:02d}" for i in range(11)}  # '00'..'10'
 
+
+class ConversionError(ValueError):
+    """Raised when the raw KITTI odometry archives cannot be converted."""
+
 # ---------------------------------------------------------------------------
 # Calibration: exact string representations matched to the reference converted
 # folder.  Keyed by rounded focal length (integer) to identify the recording
@@ -293,12 +297,9 @@ def convert(raw_dir: Path, out_dir: Path):
     poses_zip = raw_dir / "data_odometry_poses.zip"
     calib_zip = raw_dir / "data_odometry_calib.zip"
 
-    if not gray_zip.exists():
-        sys.exit(f"ERROR: {gray_zip} not found")
-    if not poses_zip.exists():
-        sys.exit(f"ERROR: {poses_zip} not found")
-    if not calib_zip.exists():
-        sys.exit(f"ERROR: {calib_zip} not found")
+    for archive in (gray_zip, poses_zip, calib_zip):
+        if not archive.exists():
+            raise ConversionError(f"{archive} not found")
 
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -388,4 +389,7 @@ if __name__ == "__main__":
 
     print(f"RAW dir : {raw}")
     print(f"OUT dir : {out}\n")
-    convert(raw, out)
+    try:
+        convert(raw, out)
+    except ConversionError as exc:
+        sys.exit(f"ERROR: {exc}")

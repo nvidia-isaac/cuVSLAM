@@ -2,12 +2,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 source "$SCRIPT_DIR/datasets_config.sh"
 
 if [ "$#" -ne 1 ]; then
   echo "Usage: $0 <dataset>" >&2
-  echo "  Datasets: ${PROVISIONABLE_DATASETS[*]}" >&2
+  echo "  Datasets: $(dataset_registry list | tr '\n' ' ')" >&2
   exit 1
 fi
 
@@ -17,10 +16,7 @@ export AWS_DEFAULT_REGION
 FORCE_DOWNLOAD="${FORCE_DOWNLOAD:-false}"
 DRY_RUN="${DRY_RUN:-false}"
 
-if ! is_provisionable_dataset "$DATASET"; then
-  echo "Error: '$DATASET' is not a provisionable dataset (expected: ${PROVISIONABLE_DATASETS[*]})." >&2
-  exit 1
-fi
+dataset_registry validate --dataset "$DATASET"
 
 if [ "$DRY_RUN" != "true" ] && ! command -v aws >/dev/null 2>&1; then
   echo "Error: aws CLI not found. This script runs inside the cuvslam-ci:local image." >&2
@@ -51,17 +47,8 @@ esac
 raw_dir="$WORK_DIR/raw"
 converted_dir="$WORK_DIR/converted"
 tarball="$WORK_DIR/${DATASET}.tar"
+root_file="$WORK_DIR/archive_root"
 s3_tarball="$(s3_tarball_uri "$DATASET")"
-
-prepare_rel="$(dataset_prepare_script "$DATASET")"
-upload_subdir="$(dataset_upload_subdir "$DATASET")"
-upload_src="$converted_dir${upload_subdir:+/$upload_subdir}"
-prepare_script="$REPO_ROOT/$prepare_rel"
-
-if [ ! -f "$prepare_script" ]; then
-  echo "Error: dataset preparation script not found: $prepare_rel" >&2
-  exit 1
-fi
 
 if [ "$DRY_RUN" != "true" ]; then
   echo "=== Verifying AWS credentials for S3 upload ==="
@@ -80,13 +67,24 @@ if [ "$DRY_RUN" != "true" ]; then
   echo "AWS credentials OK ($caller_arn)"
 fi
 
-rm -rf "$raw_dir" "$converted_dir" "$tarball"
+rm -rf "$raw_dir" "$converted_dir" "$tarball" "$root_file"
 mkdir -p "$raw_dir" "$converted_dir"
 
-bash "$prepare_script" \
+echo "=== Preparing $DATASET with $(dataset_registry prepare-module "$DATASET") ==="
+# prepare() returns the directory to archive, so the tar root is always the
+# dataset root and no per-dataset subdirectory mapping is needed here.
+dataset_registry prepare "$DATASET" \
   --raw-dir "$raw_dir" \
   --output-dir "$converted_dir" \
+  --root-file "$root_file" \
   "${download_args[@]}"
+
+upload_src="$(cat "$root_file")"
+case "$upload_src" in
+  "$WORK_DIR"/*) : ;;
+  *) echo "Error: $DATASET prepare() returned '$upload_src', outside the work dir." >&2; exit 1 ;;
+esac
+echo "Archive root: $upload_src"
 
 file_count="$(find "$upload_src" -type f | wc -l)"
 if [ "$file_count" -eq 0 ]; then
@@ -116,6 +114,6 @@ if [ "$DRY_RUN" = "true" ]; then
 fi
 
 echo "=== Uploading to $s3_tarball ==="
-aws s3 cp "$tarball" "$s3_tarball"
+aws s3 cp "$tarball" "$s3_tarball" --no-progress
 aws s3 ls "$s3_tarball" --summarize
 echo "Provision complete: $s3_tarball"

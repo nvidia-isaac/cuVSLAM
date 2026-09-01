@@ -9,6 +9,8 @@
 
 """cuVSLAM Python bindings."""
 
+import warnings
+
 # Import select bindings for the main namespace
 from .pycuvslam import (
     get_version,
@@ -24,20 +26,20 @@ from .pycuvslam import (
     PoseWithCovariance,
     PoseEstimate,
     Observation,
-    Landmark)
-# Import all bindings under core namespace
-from . import pycuvslam as core
-
-# Import the wrapper class
-from .tracker import Tracker
+    Landmark,
+    Odometry,
+    Slam,
+    Tracker)
+from . import pycuvslam as _core
 
 # Python helper functions for file-based config loading
 from . import utils
 
 # # Explicit exports for better IntelliSense
 __all__ = [
+    'Odometry',
+    'Slam',
     'Tracker',
-    'core',
     'utils',
     'get_version',
     'set_verbosity',
@@ -55,3 +57,13 @@ __all__ = [
     'Landmark']
 
 __version__ = get_version()[0].split('+')[0]
+
+
+def __getattr__(name):
+    if name == 'core':
+        warnings.warn(
+            'cuvslam.core is deprecated; use cuvslam.Odometry and cuvslam.Slam directly.',
+            DeprecationWarning,
+            stacklevel=2)
+        return _core
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

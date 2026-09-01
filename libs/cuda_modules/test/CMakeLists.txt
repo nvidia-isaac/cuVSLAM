@@ -13,6 +13,7 @@
 # of the software or derivative works thereof, you agree to be bound by this License.
 
 set(SOURCES
+        benchmark_utils.h
         cuda_helper_test.cpp
         convolutor_test.cpp
         image_pyramid_test.cpp

@@ -17,9 +17,7 @@
 
 #pragma once
 
-#include <cstdint>
 #include <optional>
-#include <string>
 #include <vector>
 
 #include "camera/frustum_intersection_graph.h"
@@ -48,6 +46,14 @@ struct Settings {
 
   // left-to-right tracker (stereo only)
   TrackerType lr_tracker = TrackerType::LK;
+
+  // Depth range (meters) sampled along the epipolar curve when generating LK initial guesses for
+  // left-to-right (L2R) tracking. Used wherever MultiSOF tracks between overlapping camera pairs;
+  // ignored by MonoSOF, which has no L2R stage.
+  // Any negative value (e.g. -1) auto-detects from the pair baseline. See
+  // `Odometry::Config::min_depth` in the public API for the auto-detection anchors.
+  float min_depth = -1.f;
+  float max_depth = -1.f;
 
   SelectorStereoSettings feature_selection_settings;
 

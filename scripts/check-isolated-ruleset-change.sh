@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-PROTECTED_REGEX='^(\.github/rulesets/.*|\.github/CODEOWNERS|\.github/workflows/(pr-verify|nightly|provision-datasets)\.yml|scripts/Dockerfile\.ci|\.pre-commit-config\.yaml|scripts/check-isolated-ruleset-change\.sh)$'
+PROTECTED_REGEX='^(\.github/rulesets/.*|\.github/CODEOWNERS|\.github/workflows/(pr-verify|nightly|provision-datasets)\.yml|scripts/Dockerfile\.(ci|dataset-provision)|\.pre-commit-config\.yaml|scripts/check-isolated-ruleset-change\.sh)$'
 
 # Base resolution order: explicit ISOLATION_BASE_REF, then CI's GITHUB_BASE_REF,
 # then the optional positional fallback base (passed by the local pre-push hook).

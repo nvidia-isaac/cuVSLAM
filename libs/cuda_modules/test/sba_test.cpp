@@ -15,23 +15,33 @@
  * of the software or derivative works thereof, you agree to be bound by this License.
  */
 
+#include <array>
 #include <chrono>
+#include <cmath>
+#include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <random>
 
+#include "benchmark_utils.h"
 #include "common/environment.h"
 #include "common/include_gtest.h"
 #include "cuda_modules/cuda_kernels/cuda_sba_v1.h"
 #include "cuda_modules/sba.h"
+#include "epipolar/near_plane.h"
 #include "math/twist.h"
 #include "profiler/profiler.h"
 #include "sba/bundle_adjustment_problem.h"
 #include "sba/schur_complement_bundler_cpu.h"
+#include "sba/schur_complement_bundler_gpu.h"
 namespace {
 using namespace cuvslam;
 
 using ProfilerDomain = cuvslam::profiler::DefaultProfiler::DomainHelper;
 ProfilerDomain helper("SBA_TEST");
+
+// Keeps the randomly generated parity problems away from the near plane, where 1/z blows up.
+constexpr float kWellConditionedDepth = 1.f;
 
 void GenerateProblem(sba::BundleAdjustmentProblem& problem, const camera::Rig& rig,
                      const Matrix2T& obs_info = Matrix2T::Identity(), const int num_points = 400,
@@ -60,7 +70,7 @@ void GenerateProblem(sba::BundleAdjustmentProblem& problem, const camera::Rig& r
   }
 
   for (int i = 0; i < num_points; ++i) {
-    problem.points.push_back(Vector3T(xy(rng), xy(rng), depth(rng)));
+    problem.points.emplace_back(xy(rng), xy(rng), depth(rng));
   }
 
   ASSERT_EQ(num_poses, static_cast<int>(problem.rig_from_world.size()));
@@ -77,7 +87,11 @@ void GenerateProblem(sba::BundleAdjustmentProblem& problem, const camera::Rig& r
         // cam space
         Vec3 p = rig.camera_from_rig[cam_idx] * rig_from_world[pose_idx] * points[point_idx];
 
-        if (p.z() <= 1.f) {
+        // Not the near plane: this is scene construction. The parity tests compare CPU and GPU
+        // solutions with isApprox, and an observation just past MINIMUM_HITHER has 1/z Jacobian
+        // entries that wreck the conditioning of the random problem. Where the guard actually sits
+        // is pinned by the near-field tests below.
+        if (p.z() <= kWellConditionedDepth) {
           continue;
         }
 
@@ -113,6 +127,55 @@ static camera::Rig MakeDefaultRig() {
   return rig;
 }
 
+// GenerateProblem draws depths in [2, 16] m, so nothing in the suite ever lands in the band between
+// the near plane and the 1 m the bundlers used to carry. This one places every point at a chosen
+// camera-frame depth instead, and projects without a near filter, so a test can put observations
+// deliberately on either side of MINIMUM_HITHER.
+void GenerateFixedDepthProblem(sba::BundleAdjustmentProblem& problem, const camera::Rig& rig, float min_depth,
+                               float max_depth, int num_points = 60, int num_poses = 3) {
+  using namespace cuvslam;
+  problem = {};
+
+  std::mt19937 rng(7);
+  std::uniform_real_distribution<float> depth(min_depth, max_depth);
+  std::uniform_real_distribution<float> xy(-0.05f, 0.05f);
+  // Keep the pose perturbation far smaller than the depth band so every observation stays on the
+  // side of the near plane the caller asked for.
+  std::uniform_real_distribution<float> dt(-0.01f, 0.01f);
+  std::uniform_real_distribution<float> domega(-0.01f, 0.01f);
+
+  for (int i = 0; i < num_poses; ++i) {
+    Vector6T log_pose;
+    log_pose << domega(rng), domega(rng), domega(rng), dt(rng), dt(rng), dt(rng);
+    Isometry3T pose;
+    math::Exp(pose, log_pose);
+    problem.rig_from_world.push_back(pose);
+  }
+
+  for (int i = 0; i < num_points; ++i) {
+    problem.points.emplace_back(xy(rng), xy(rng), depth(rng));
+  }
+
+  for (int pose_idx = 0; pose_idx < num_poses; ++pose_idx) {
+    for (int point_idx = 0; point_idx < num_points; ++point_idx) {
+      for (int8_t cam_idx = 0; cam_idx < rig.num_cameras; ++cam_idx) {
+        const Vector3T p = rig.camera_from_rig[cam_idx] * problem.rig_from_world[pose_idx] * problem.points[point_idx];
+        problem.observation_xys.push_back(p.topRows(2) / p.z());
+        problem.observation_infos.push_back(Matrix2T::Identity());
+        problem.camera_ids.push_back(cam_idx);
+        problem.point_ids.push_back(point_idx);
+        problem.pose_ids.push_back(pose_idx);
+      }
+    }
+  }
+
+  problem.num_fixed_points = 0;
+  problem.num_fixed_key_frames = 1;
+  problem.rig.num_cameras = rig.num_cameras;
+  problem.rig.camera_from_rig[0] = rig.camera_from_rig[0];
+  problem.rig.camera_from_rig[1] = rig.camera_from_rig[1];
+}
+
 cuda::sba::temporary::ReducedSystem to_temporary(
     const sba::schur_complement_bundler_cpu_internal::ReducedSystem& system) {
   cuda::sba::temporary::ReducedSystem out;
@@ -143,28 +206,6 @@ cuda::sba::temporary::ParameterUpdate to_temporary(
   out.pose = update.pose;
   out.point_step = update.point_step;
   out.point = update.point;
-  return out;
-}
-
-sba::schur_complement_bundler_cpu_internal::ReducedSystem from_temporary(
-    const cuda::sba::temporary::ReducedSystem& system) {
-  sba::schur_complement_bundler_cpu_internal::ReducedSystem out;
-  out.pose_block = system.pose_block;
-  out.pose_rhs = system.pose_rhs;
-  out.camera_backsub_block = system.camera_backsub_block;
-  out.point_rhs = system.point_rhs;
-  out.inverse_point_block = system.inverse_point_block;
-  return out;
-}
-
-sba::schur_complement_bundler_cpu_internal::FullSystem from_temporary(const cuda::sba::temporary::FullSystem& system) {
-  sba::schur_complement_bundler_cpu_internal::FullSystem out;
-
-  out.pose_block = system.pose_block;
-  out.pose_rhs = system.pose_rhs;
-  out.point_block = system.point_block;
-  out.point_rhs = system.point_rhs;
-  out.point_pose_block = system.point_pose_block;
   return out;
 }
 
@@ -228,14 +269,11 @@ TEST(Cuda, SpeedupSBAUpdateModel) {
   auto duration_cuda =
       std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - time_cuda_start);
 
-  std::cout << "Basic time, nano_sec = " << duration_basic.count() / 100 << std::endl;
-  std::cout << "Cuda time, nano_sec = " << duration_cuda.count() / 100 << std::endl;
-  float speedup = static_cast<float>(duration_basic.count()) / static_cast<float>(duration_cuda.count());
-  std::cout << "Speedup, times = " << speedup << std::endl;
+  ReportSpeedBenchmark(duration_basic, duration_cuda, 100);
   ASSERT_TRUE(duration_basic >= duration_cuda);
 }
 
-TEST(Cuda, DISABLED_SBAUpdateModel) {
+TEST(Cuda, SBAUpdateModel) {
   const float thresh = 1;
   const float robustifier_scale = 1.f;
   const int num_points = 400;
@@ -291,13 +329,9 @@ TEST(Cuda, DISABLED_SBAUpdateModel) {
       ASSERT_TRUE((mf_cpu.residuals[j] - mf_gpu.residuals[jj]).norm() < thresh);
     }
 
-    for (size_t j = 0; j < problem_input1.points.size(); j++) {
-      if (!problem_input1.info_matrix[j].isApprox(problem_input2.info_matrix[j], thresh)) {
-        std::cout << "gpu info_matrix = " << std::endl << problem_input2.info_matrix[j] << std::endl;
-        std::cout << "cpu info_matrix = " << std::endl << problem_input1.info_matrix[j] << std::endl;
-      }
-      ASSERT_TRUE(problem_input1.info_matrix[j].isApprox(problem_input2.info_matrix[j], thresh));
-    }
+    // BundleAdjustmentProblem::info_matrix used to be compared here. Nothing fills it - not
+    // GenerateProblem, not GPUBundleAdjustmentProblem::set/get - so both vectors are empty and the
+    // comparison read past the end of them.
 
     for (size_t jj = 0; jj < problem_input1.observation_xys.size(); jj++) {
       const int j = gpu_problem.original_observation_index(jj);
@@ -365,10 +399,7 @@ TEST(Cuda, SBABuildFullSystemSpeedUp) {
   auto duration_cuda =
       std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - time_cuda_start);
 
-  std::cout << "Basic time, nano_sec = " << duration_basic.count() / 100 << std::endl;
-  std::cout << "Cuda time, nano_sec = " << duration_cuda.count() / 100 << std::endl;
-  float speedup = static_cast<float>(duration_basic.count()) / static_cast<float>(duration_cuda.count());
-  std::cout << "Speedup, times = " << speedup << std::endl;
+  ReportSpeedBenchmark(duration_basic, duration_cuda, 100);
   ASSERT_TRUE(duration_basic >= duration_cuda);
 }
 
@@ -497,14 +528,13 @@ TEST(Cuda, DISABLED_SBASolverSpeedUp) {
   camera::Rig rig = MakeDefaultRig();
 
   ReducedSystem reduced_system;
-  Eigen::VectorXf cpu_sollution, gpu_sollution;
+  Eigen::VectorXf cpu_sollution, gpu_solution;
 
   int max_system_order = 200;
-
   int max_points = 400;
   int max_poses = 5;
 
-  cuda::sba::GPUSolver solver{max_system_order};
+  cuda::sba::GPUCholeskySolver solver{max_system_order};
   cuda::sba::GPULinearSystem gpu_reduced_system{max_points, max_poses};
   float* x;
 
@@ -524,7 +554,7 @@ TEST(Cuda, DISABLED_SBASolverSpeedUp) {
     // prepare all the data
     CUDA_CHECK(cudaMalloc((void**)&x, max_system_order * sizeof(float)));
     current_system_order = reduced_system.pose_block.cols();
-    gpu_sollution.resize(current_system_order);
+    gpu_solution.resize(current_system_order);
     ASSERT_TRUE(reduced_system.pose_block.cols() == reduced_system.pose_block.rows());
     // gpu part
 
@@ -566,12 +596,12 @@ TEST(Cuda, DISABLED_SBASolverSpeedUp) {
 }
 
 TEST(Cuda, SBASolver) {
-  const float thresh = 0.01;
+  constexpr float thresh = 0.01;
   camera::Rig rig = MakeDefaultRig();
   int max_points = 400;
   int max_poses = 5;
   int max_system_order = 400;
-  cuda::sba::GPUSolver solver{1};
+  cuda::sba::GPUCholeskySolver solver{1};
   cuda::sba::GPULinearSystem gpu_reduced_system{max_points, max_poses};
   float* x;
   CUDA_CHECK(cudaMalloc((void**)&x, max_system_order * sizeof(float)));
@@ -602,10 +632,11 @@ TEST(Cuda, SBASolver) {
       cpu_sollution = usv.solve(reduced_system.pose_rhs);
     }
 
-    Eigen::VectorXf gpu_sollution;
+    Eigen::VectorXf gpu_solution;
+
     {
       int current_system_order = reduced_system.pose_block.cols();
-      gpu_sollution.resize(current_system_order);
+      gpu_solution.resize(current_system_order);
       ASSERT_TRUE(reduced_system.pose_block.cols() == reduced_system.pose_block.rows());
       // gpu part
 
@@ -614,26 +645,85 @@ TEST(Cuda, SBASolver) {
 
       const auto& meta = gpu_reduced_system.meta();
       solver.solve(meta.pose_block, meta.pose_block_pitch, meta.pose_rhs, x, current_system_order, s.get_stream());
-      CUDA_CHECK(cudaMemcpyAsync((void*)gpu_sollution.data(), (void*)x, current_system_order * sizeof(float),
-                                 cudaMemcpyDeviceToHost, s.get_stream()));
+      CUDA_CHECK(cudaMemcpyAsync(gpu_solution.data(), x, current_system_order * sizeof(float), cudaMemcpyDeviceToHost,
+                                 s.get_stream()));
       cudaStreamSynchronize(s.get_stream());
     }
 
-    if (!gpu_sollution.isApprox(cpu_sollution, thresh)) {
+    if (!gpu_solution.isApprox(cpu_sollution, thresh)) {
       std::cout << "cpu = " << cpu_sollution.block<5, 1>(0, 0) << std::endl;
-      std::cout << "gpu = " << gpu_sollution.block<5, 1>(0, 0) << std::endl;
+      std::cout << "gpu = " << gpu_solution.block<5, 1>(0, 0) << std::endl;
     }
-    ASSERT_TRUE(gpu_sollution.isApprox(cpu_sollution, thresh));
+    ASSERT_TRUE(gpu_solution.isApprox(cpu_sollution, thresh));
   }
 
   CUDA_CHECK(cudaFree(x));
+}
+
+// A factorization that gives up says so in a status on the device, and the triangular solve queued
+// right after writes its own over the same buffer. So the status a caller reads is only the
+// factorization's because solve() copies it back in between. Pin that: a system that is not
+// positive definite has to still report failure once the stream has run.
+TEST(Cuda, SBACholeskySolverReportsFactorizationStatus) {
+  constexpr int system_order = 3;
+  constexpr int matrix_size = system_order * system_order;
+  constexpr float thresh = 1e-4f;
+
+  cuda::sba::GPUCholeskySolver solver{system_order};
+
+  // A is square and dense with nothing padding its rows, so its pitch is just one row of it.
+  constexpr size_t pitch = system_order * sizeof(float);
+  cuda::GPUArrayPinned<float> A{matrix_size};
+  cuda::GPUArrayPinned<float> b{system_order};
+  cuda::GPUArrayPinned<float> x{system_order};
+  cuda::Stream s;
+
+  // nothing has been queued yet, so there is no factor to trust
+  EXPECT_FALSE(solver.solve_succeeded());
+
+  const auto solve = [&](const std::array<float, matrix_size>& matrix, const std::array<float, system_order>& rhs) {
+    for (int i = 0; i < matrix_size; ++i) {
+      A[i] = matrix[i];
+    }
+    for (int i = 0; i < system_order; ++i) {
+      b[i] = rhs[i];
+    }
+    A.copy(cuda::GPUCopyDirection::ToGPU, s.get_stream());
+    b.copy(cuda::GPUCopyDirection::ToGPU, s.get_stream());
+
+    solver.solve(A.ptr(), pitch, b.ptr(), x.ptr(), system_order, s.get_stream());
+
+    x.copy(cuda::GPUCopyDirection::ToCPU, s.get_stream());
+    cudaStreamSynchronize(s.get_stream());
+  };
+
+  // symmetric positive definite, with the right hand side picked so the solution is exactly (1, 2, 3)
+  const std::array<float, matrix_size> positive_definite = {4.f, 1.f, 0.f, 1.f, 3.f, 1.f, 0.f, 1.f, 2.f};
+  const std::array<float, system_order> rhs = {6.f, 10.f, 8.f};
+
+  solve(positive_definite, rhs);
+  EXPECT_TRUE(solver.solve_succeeded());
+  EXPECT_NEAR(x[0], 1.f, thresh);
+  EXPECT_NEAR(x[1], 2.f, thresh);
+  EXPECT_NEAR(x[2], 3.f, thresh);
+
+  // symmetric with a positive diagonal, but its leading 2x2 minor is negative, so the second pivot
+  // is the square root of a negative number and the factorization stops there
+  const std::array<float, matrix_size> indefinite = {1.f, 2.f, 0.f, 2.f, 1.f, 0.f, 0.f, 0.f, 1.f};
+
+  solve(indefinite, rhs);
+  EXPECT_FALSE(solver.solve_succeeded());
+
+  // and the status is the last solve's rather than a latch, so the same instance recovers
+  solve(positive_definite, rhs);
+  EXPECT_TRUE(solver.solve_succeeded());
 }
 
 TEST(Cuda, SBAEvaluateCostSpeedUp) {
   camera::Rig rig = MakeDefaultRig();
   int max_points = 400;
   int max_poses = 5;
-  const int num_cameras = 2;
+  constexpr int num_cameras = 2;
 
   sba::BundleAdjustmentProblem problem_input_cpu, problem_input_gpu;
   ModelFunction model;
@@ -690,19 +780,16 @@ TEST(Cuda, SBAEvaluateCostSpeedUp) {
   auto duration_cuda =
       std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - time_cuda_start);
 
-  std::cout << "Basic time, nano_sec = " << duration_basic.count() / 100 << std::endl;
-  std::cout << "Cuda time, nano_sec = " << duration_cuda.count() / 100 << std::endl;
-  float speedup = static_cast<float>(duration_basic.count()) / static_cast<float>(duration_cuda.count());
-  std::cout << "Speedup, times = " << speedup << std::endl;
+  ReportSpeedBenchmark(duration_basic, duration_cuda, 100);
   ASSERT_TRUE(duration_basic >= duration_cuda);
 }
 
 TEST(Cuda, SBAEvaluateCost) {
-  const float thresh = 10;
+  constexpr float thresh = 10;
   camera::Rig rig = MakeDefaultRig();
   int max_points = 400;
   int max_poses = 5;
-  const int num_cameras = 2;
+  constexpr int num_cameras = 2;
   cuda::sba::GPUBundleAdjustmentProblem gpu_problem(max_points, max_poses, max_points * max_poses * num_cameras);
   cuda::sba::GPUModelFunction gpu_function(max_points * max_poses * num_cameras);
   cuda::sba::GPUParameterUpdate gpu_update(max_points, max_poses);
@@ -771,7 +858,7 @@ TEST(Cuda, SBAParameterUpdaterComputeUpdateSpeedUp) {
   int max_poses = 20;
   cuda::sba::GPULinearSystem gpu_reduced_system(max_points, max_poses);
   cuda::sba::GPUParameterUpdate gpu_update(max_points, max_poses);
-  cuda::sba::GPUParameterUpdater gpu_parameter_updater(max_points, max_poses);
+  cuda::sba::GPULevenbergMarquardtStep lm_step(max_points, max_poses);
   cuda::GPUArrayPinned<float> points_poses_update_max{2};
   cuda::Stream s;
 
@@ -808,17 +895,14 @@ TEST(Cuda, SBAParameterUpdaterComputeUpdateSpeedUp) {
   auto time_cuda_start = std::chrono::high_resolution_clock::now();
   for (int i = 0; i < 100; i++) {
     TRACE_EVENT ev = helper.trace_event("GPU_ComputeUpdate");
-    ASSERT_TRUE(gpu_parameter_updater.compute_update(gpu_update.meta(), gpu_reduced_system.meta(), num_points,
-                                                     num_poses, points_poses_update_max, s.get_stream()));
+    ASSERT_TRUE(lm_step.compute_update(gpu_update.meta(), gpu_reduced_system.meta(), num_points, num_poses,
+                                       points_poses_update_max, s.get_stream()));
   }
   cudaStreamSynchronize(s.get_stream());
   auto duration_cuda =
       std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - time_cuda_start);
 
-  std::cout << "Basic time, nano_sec = " << duration_basic.count() / 100 << std::endl;
-  std::cout << "Cuda time, nano_sec = " << duration_cuda.count() / 100 << std::endl;
-  float speedup = static_cast<float>(duration_basic.count()) / static_cast<float>(duration_cuda.count());
-  std::cout << "Speedup, times = " << speedup << std::endl;
+  ReportSpeedBenchmark(duration_basic, duration_cuda, 100);
   ASSERT_TRUE(duration_basic >= duration_cuda);
 }
 
@@ -829,7 +913,7 @@ TEST(Cuda, SBAParameterUpdaterComputeUpdate) {
   int max_poses = 5;
   cuda::sba::GPULinearSystem gpu_reduced_system(max_points, max_poses);
   cuda::sba::GPUParameterUpdate gpu_update(max_points, max_poses);
-  cuda::sba::GPUParameterUpdater gpu_parameter_updater(max_points, max_poses);
+  cuda::sba::GPULevenbergMarquardtStep lm_step(max_points, max_poses);
   cuda::GPUArrayPinned<float> points_poses_update_max{2};
   cuda::Stream s;
 
@@ -865,8 +949,8 @@ TEST(Cuda, SBAParameterUpdaterComputeUpdate) {
       reduced_temp.inverse_point_block = reduced_system.inverse_point_block;
 
       ASSERT_TRUE(gpu_reduced_system.set(reduced_temp, s.get_stream()));
-      ASSERT_TRUE(gpu_parameter_updater.compute_update(gpu_update.meta(), gpu_reduced_system.meta(), num_points,
-                                                       num_poses, points_poses_update_max, s.get_stream()));
+      ASSERT_TRUE(lm_step.compute_update(gpu_update.meta(), gpu_reduced_system.meta(), num_points, num_poses,
+                                         points_poses_update_max, s.get_stream()));
 
       points_poses_update_max.copy(cuda::GPUCopyDirection::ToCPU, s.get_stream());
       ASSERT_TRUE(gpu_update.get(num_points, num_poses, update_temp, s.get_stream()));
@@ -894,6 +978,52 @@ TEST(Cuda, SBAParameterUpdaterComputeUpdate) {
   }
 }
 
+// compute_update() returns true for anything it managed to queue, so the linear solve inside it can
+// still have failed. GPULevenbergMarquardtStep owns the solver and forwards its status, which is
+// what tells SchurComplementBundlerGpu the step it just queued is meaningless and needs more damping.
+TEST(Cuda, SBALevenbergMarquardtStepForwardsSolveStatus) {
+  camera::Rig rig = MakeDefaultRig();
+  const int max_points = 400;
+  const int max_poses = 5;
+  cuda::sba::GPULinearSystem gpu_reduced_system(max_points, max_poses);
+  cuda::sba::GPUParameterUpdate gpu_update(max_points, max_poses);
+  cuda::sba::GPULevenbergMarquardtStep lm_step(max_points, max_poses);
+  cuda::GPUArrayPinned<float> points_poses_update_max{2};
+  cuda::Stream s;
+
+  sba::BundleAdjustmentProblem problem;
+  GenerateProblem(problem, rig, Matrix2T::Identity(), max_points, max_poses);
+  const int num_points = static_cast<int>(problem.points.size()) - problem.num_fixed_points;
+  const int num_poses = static_cast<int>(problem.rig_from_world.size()) - problem.num_fixed_key_frames;
+
+  ModelFunction model;
+  sba::schur_complement_bundler_cpu_internal::FullSystem full_system;
+  ReducedSystem reduced_system;
+
+  UpdateModel(model, problem);
+  BuildFullSystem(full_system, model, problem);
+  BuildReducedSystem(reduced_system, full_system, 0.1f);
+
+  const auto queue_update = [&](const ReducedSystem& system) {
+    const bool queued = gpu_reduced_system.set(to_temporary(system), s.get_stream()) &&
+                        lm_step.compute_update(gpu_update.meta(), gpu_reduced_system.meta(), num_points, num_poses,
+                                               points_poses_update_max, s.get_stream());
+    cudaStreamSynchronize(s.get_stream());
+    return queued;
+  };
+
+  // damping leaves the reduced pose block positive definite, so this one factorizes
+  ASSERT_TRUE(queue_update(reduced_system));
+  EXPECT_TRUE(lm_step.solve_succeeded());
+
+  // flipping its sign keeps it symmetric and turns every pivot negative
+  ReducedSystem negated_system = reduced_system;
+  negated_system.pose_block = -reduced_system.pose_block;
+
+  ASSERT_TRUE(queue_update(negated_system));
+  EXPECT_FALSE(lm_step.solve_succeeded());
+}
+
 TEST(Cuda, SBAParameterUpdaterUpdateStateSpeedUp) {
   camera::Rig rig = MakeDefaultRig();
   int max_points = 2000;
@@ -902,7 +1032,7 @@ TEST(Cuda, SBAParameterUpdaterUpdateStateSpeedUp) {
   cuda::sba::GPUBundleAdjustmentProblem gpu_problem{max_points, max_poses, max_observations};
   gpu_problem.set_rig(rig);
   cuda::sba::GPUParameterUpdate gpu_update(max_points, max_poses);
-  cuda::sba::GPUParameterUpdater gpu_parameter_updater(max_points, max_poses);
+  cuda::sba::GPULevenbergMarquardtStep lm_step(max_points, max_poses);
   cuda::GPUGraph graph;
   cuda::Stream s;
 
@@ -916,7 +1046,7 @@ TEST(Cuda, SBAParameterUpdaterUpdateStateSpeedUp) {
   update.point.resize(num_points, Vector3T::Zero());
   update.pose.resize(num_poses, Isometry3T::Identity());
   auto lambda = [&](cudaStream_t s_) {
-    ASSERT_TRUE(gpu_parameter_updater.update_state(gpu_problem.meta(), gpu_update.meta(), num_points, num_poses, s_));
+    ASSERT_TRUE(lm_step.apply_update(gpu_problem.meta(), gpu_update.meta(), num_points, num_poses, s_));
   };
   graph.launch(lambda, s.get_stream());
   cudaStreamSynchronize(s.get_stream());
@@ -938,25 +1068,22 @@ TEST(Cuda, SBAParameterUpdaterUpdateStateSpeedUp) {
   auto duration_cuda =
       std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - time_cuda_start);
 
-  std::cout << "Basic time, nano_sec = " << duration_basic.count() / 100 << std::endl;
-  std::cout << "Cuda time, nano_sec = " << duration_cuda.count() / 100 << std::endl;
-  float speedup = static_cast<float>(duration_basic.count()) / static_cast<float>(duration_cuda.count());
-  std::cout << "Speedup, times = " << speedup << std::endl;
+  ReportSpeedBenchmark(duration_basic, duration_cuda, 100);
   ASSERT_TRUE(duration_basic >= duration_cuda);
 }
 
 TEST(Cuda, SBAParameterUpdaterUpdateState) {
-  const float thresh = 0.01f;
+  constexpr float thresh = 0.01f;
   camera::Rig rig = MakeDefaultRig();
   int max_points = 400;
   int max_poses = 5;
-  cuda::sba::GPUBundleAdjustmentProblem gpu_problem{max_points, max_poses};
+  int max_observations = 20000;
+  cuda::sba::GPUBundleAdjustmentProblem gpu_problem{max_points, max_poses, max_observations};
   gpu_problem.set_rig(rig);
   cuda::sba::GPULinearSystem gpu_reduced_system(max_points, max_poses);
   cuda::sba::GPUParameterUpdate gpu_update(max_points, max_poses);
-  cuda::sba::GPUParameterUpdater gpu_parameter_updater(max_points, max_poses);
+  cuda::sba::GPULevenbergMarquardtStep lm_step(max_points, max_poses);
   cuda::GPUArrayPinned<float> points_poses_update_max{2};
-  cuda::GPUGraph graph;
   cuda::Stream s;
 
   for (int i = 0; i < 100; i++) {
@@ -987,10 +1114,9 @@ TEST(Cuda, SBAParameterUpdaterUpdateState) {
     {
       ASSERT_TRUE(gpu_problem.set(problem_input_gpu, s.get_stream()));
       ASSERT_TRUE(gpu_reduced_system.set(reduced_temp, s.get_stream()));
-      ASSERT_TRUE(gpu_parameter_updater.compute_update(gpu_update.meta(), gpu_reduced_system.meta(), num_points,
-                                                       num_poses, points_poses_update_max, s.get_stream()));
-      ASSERT_TRUE(gpu_parameter_updater.update_state(gpu_problem.meta(), gpu_update.meta(), num_points, num_poses,
-                                                     s.get_stream()));
+      ASSERT_TRUE(lm_step.compute_update(gpu_update.meta(), gpu_reduced_system.meta(), num_points, num_poses,
+                                         points_poses_update_max, s.get_stream()));
+      ASSERT_TRUE(lm_step.apply_update(gpu_problem.meta(), gpu_update.meta(), num_points, num_poses, s.get_stream()));
       ASSERT_TRUE(gpu_problem.get(problem_input_gpu, s.get_stream()));
 
       cudaStreamSynchronize(s.get_stream());
@@ -1016,7 +1142,7 @@ TEST(Cuda, SBAComputePredictedRelativeReductionSpeedUp) {
   int max_poses = 200;
   cuda::sba::GPULinearSystem gpu_full_system(max_points, max_poses);
   cuda::sba::GPUParameterUpdate gpu_update(max_points, max_poses);
-  cuda::sba::GPUParameterUpdater gpu_parameter_updater(max_points, max_poses);
+  cuda::sba::GPULevenbergMarquardtStep lm_step(max_points, max_poses);
   cuda::GPUGraph graph;
   cuda::GPUArrayPinned<float> prediction{1};
   cuda::Stream s;
@@ -1052,8 +1178,8 @@ TEST(Cuda, SBAComputePredictedRelativeReductionSpeedUp) {
   ASSERT_TRUE(gpu_update.set(update_temp, s.get_stream()));
   ASSERT_TRUE(gpu_full_system.set(full_system_2, s.get_stream()));
   auto lambda = [&](cudaStream_t s_) {
-    ASSERT_TRUE(gpu_parameter_updater.relative_reduction(10, 0.01, gpu_update.meta(), gpu_full_system.meta(),
-                                                         num_points, num_poses, prediction.ptr(), s_));
+    ASSERT_TRUE(lm_step.predict_reduction(10, 0.01, gpu_update.meta(), gpu_full_system.meta(), num_points, num_poses,
+                                          prediction.ptr(), s_));
   };
   graph.launch(lambda, s.get_stream());
   cudaStreamSynchronize(s.get_stream());
@@ -1076,10 +1202,7 @@ TEST(Cuda, SBAComputePredictedRelativeReductionSpeedUp) {
   auto duration_cuda =
       std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - time_cuda_start);
 
-  std::cout << "Basic time, nano_sec = " << duration_basic.count() / 100 << std::endl;
-  std::cout << "Cuda time, nano_sec = " << duration_cuda.count() / 100 << std::endl;
-  float speedup = static_cast<float>(duration_basic.count()) / static_cast<float>(duration_cuda.count());
-  std::cout << "Speedup, times = " << speedup << std::endl;
+  ReportSpeedBenchmark(duration_basic, duration_cuda, 100);
   ASSERT_TRUE(duration_basic >= duration_cuda);
 }
 
@@ -1090,7 +1213,7 @@ TEST(Cuda, SBAComputePredictedRelativeReduction) {
   int max_poses = 5;
   cuda::sba::GPULinearSystem gpu_full_system(max_points, max_poses);
   cuda::sba::GPUParameterUpdate gpu_update(max_points, max_poses);
-  cuda::sba::GPUParameterUpdater gpu_parameter_updater(max_points, max_poses);
+  cuda::sba::GPULevenbergMarquardtStep lm_step(max_points, max_poses);
   cuda::GPUArrayPinned<float> prediction{1};
   cuda::GPUGraph graph;
   cuda::Stream s;
@@ -1127,8 +1250,8 @@ TEST(Cuda, SBAComputePredictedRelativeReduction) {
       ASSERT_TRUE(gpu_full_system.set(full_system_2, s.get_stream()));
       graph.launch(
           [&](cudaStream_t s_) {
-            ASSERT_TRUE(gpu_parameter_updater.relative_reduction(10, 0.01, gpu_update.meta(), gpu_full_system.meta(),
-                                                                 num_points, num_poses, prediction.ptr(), s_));
+            ASSERT_TRUE(lm_step.predict_reduction(10, 0.01, gpu_update.meta(), gpu_full_system.meta(), num_points,
+                                                  num_poses, prediction.ptr(), s_));
           },
           s.get_stream());
       CUDA_CHECK(
@@ -1142,6 +1265,200 @@ TEST(Cuda, SBAComputePredictedRelativeReduction) {
     }
     ASSERT_TRUE(std::abs(cpu_prediction - gpu_prediction) < thresh);
   }
+}
+
+// predict_reduction() divides the hessian and scaling terms by current_cost, so the caller has to
+// stop iterating before that cost collapses - SchurComplementBundlerGpu does it at the top of the
+// loop, the way the CPU bundler does. This pins the precondition: hand it a vanished cost and the
+// prediction is not a number the bundler can test, since every comparison a NaN meets is false.
+TEST(Cuda, SBARelativeReductionRequiresPositiveCost) {
+  camera::Rig rig = MakeDefaultRig();
+  const int max_points = 400;
+  const int max_poses = 5;
+  cuda::sba::GPULinearSystem gpu_full_system(max_points, max_poses);
+  cuda::sba::GPUParameterUpdate gpu_update(max_points, max_poses);
+  cuda::sba::GPULevenbergMarquardtStep lm_step(max_points, max_poses);
+  cuda::GPUArrayPinned<float> prediction{1};
+  cuda::Stream s;
+
+  sba::BundleAdjustmentProblem problem;
+  GenerateProblem(problem, rig, Matrix2T::Identity(), max_points, max_poses);
+  const int num_points = static_cast<int>(problem.points.size()) - problem.num_fixed_points;
+  const int num_poses = static_cast<int>(problem.rig_from_world.size()) - problem.num_fixed_key_frames;
+
+  ModelFunction model;
+  sba::schur_complement_bundler_cpu_internal::FullSystem full_system;
+  ReducedSystem reduced_system;
+  ParameterUpdate update;
+  update.point.resize(num_points, Vector3T::Zero());
+  update.pose.resize(num_poses, Isometry3T::Identity());
+
+  UpdateModel(model, problem);
+  BuildFullSystem(full_system, model, problem);
+  BuildReducedSystem(reduced_system, full_system, 0.1f);
+  ComputeUpdate(update, reduced_system, full_system);
+
+  cuda::sba::temporary::FullSystem full_system_gpu = to_temporary(full_system);
+  cuda::sba::temporary::ParameterUpdate update_gpu = to_temporary(update);
+  ASSERT_TRUE(gpu_update.set(update_gpu, s.get_stream()));
+  ASSERT_TRUE(gpu_full_system.set(full_system_gpu, s.get_stream()));
+
+  const auto predict = [&](float current_cost) {
+    float result = 0.f;
+    EXPECT_TRUE(lm_step.predict_reduction(current_cost, 0.01f, gpu_update.meta(), gpu_full_system.meta(), num_points,
+                                          num_poses, prediction.ptr(), s.get_stream()));
+    CUDA_CHECK(cudaMemcpyAsync(&result, prediction.ptr(), sizeof(float), cudaMemcpyDeviceToHost, s.get_stream()));
+    cudaStreamSynchronize(s.get_stream());
+    return result;
+  };
+
+  EXPECT_TRUE(std::isfinite(predict(10.f)));
+  EXPECT_FALSE(std::isfinite(predict(0.f)));
+}
+
+// Exact observations put the optimum at zero cost, which is what drives current_cost below
+// initial_cost * epsilon during the solve - the state the guard above exists for. The solver has to
+// come back from it converged, not having spent its whole budget rejecting steps.
+TEST(Cuda, SBASolverConvergesOnExactObservations) {
+  // This one drives a whole solve to convergence rather than checking a single kernel, so pin the
+  // problem instead of taking whatever GenerateProblem draws from the run's seed.
+  std::srand(1);
+
+  camera::Rig rig = MakeDefaultRig();
+
+  sba::BundleAdjustmentProblem problem;
+  GenerateProblem(problem, rig, Matrix2T::Identity(), 200, 5);
+
+  // replace the generated noise with exact projections of the generated state
+  for (size_t i = 0; i < problem.observation_xys.size(); ++i) {
+    const Vector3T p = rig.camera_from_rig[problem.camera_ids[i]] * problem.rig_from_world[problem.pose_ids[i]] *
+                       problem.points[problem.point_ids[i]];
+    problem.observation_xys[i] = p.topRows(2) / p.z();
+  }
+
+  // then nudge the free key frames off the optimum. The fixed ones sit at the end of the vector and
+  // anchor the gauge, so the solver can get back to exactly where the observations were taken.
+  const size_t free_poses = problem.rig_from_world.size() - static_cast<size_t>(problem.num_fixed_key_frames);
+  for (size_t i = 0; i < free_poses; ++i) {
+    problem.rig_from_world[i].translation() += Vector3T(0.01f, -0.01f, 0.01f);
+  }
+
+  problem.max_iterations = 50;
+
+  sba::SchurComplementBundlerGpu bundler;
+  ASSERT_TRUE(bundler.solve(problem));
+
+  EXPECT_TRUE(std::isfinite(problem.initial_cost));
+  EXPECT_TRUE(std::isfinite(problem.last_cost));
+  EXPECT_LT(problem.last_cost, problem.initial_cost);
+  EXPECT_LT(problem.iterations, problem.max_iterations);
+}
+
+// The visual bundlers used to skip anything closer than a hard-coded 1 m while the rest of the
+// system guarded at MINIMUM_HITHER (0.1). Landmarks in that band reached the bundler, then carried
+// zero weight in the cost and in both Jacobians. These pin the guard where the shared predicate
+// puts it, in the two places the CPU bundler applies it.
+TEST(Cuda, SBANearFieldObservationsCarryWeightCpu) {
+  camera::Rig rig = MakeDefaultRig();
+
+  sba::BundleAdjustmentProblem problem;
+  GenerateFixedDepthProblem(problem, rig, 0.3f, 0.8f);
+  ASSERT_FALSE(problem.observation_xys.empty());
+
+  ModelFunction model;
+  UpdateModel(model, problem);
+
+  for (size_t i = 0; i < problem.observation_xys.size(); ++i) {
+    EXPECT_GT(model.point_jacobians[i].norm(), 0.f) << "near-field observation " << i << " was skipped";
+    EXPECT_GT(model.robustifier_weights[i], 0.f) << "near-field observation " << i << " got zero weight";
+  }
+
+  ParameterUpdate update;
+  update.point.resize(problem.points.size(), Vector3T::Zero());
+  update.pose.resize(problem.rig_from_world.size(), Isometry3T::Identity());
+  // Observations are exact projections, so a fed-back state costs nothing - the point is that the
+  // cost is a real number rather than the infinity a fully skipped problem reports.
+  EXPECT_TRUE(std::isfinite(EvaluateCost(problem, update)));
+}
+
+// Same problem through the GPU bundler: the two implementations have always agreed on where this
+// plane sits, and they still have to.
+TEST(Cuda, SBANearFieldObservationsCarryWeightGpu) {
+  camera::Rig rig = MakeDefaultRig();
+
+  sba::BundleAdjustmentProblem problem;
+  GenerateFixedDepthProblem(problem, rig, 0.3f, 0.8f);
+  problem.max_iterations = 10;
+
+  sba::SchurComplementBundlerGpu bundler;
+  EXPECT_TRUE(bundler.solve(problem));
+  EXPECT_TRUE(std::isfinite(problem.initial_cost)) << "every near-field observation was skipped on the GPU";
+}
+
+// The other side of the boundary: moving the guard onto MINIMUM_HITHER only means something if
+// points inside the near plane are still refused. A problem made entirely of them is infeasible,
+// which is what the num_skipped path reports. Checked on both implementations, because each kernel
+// carries its own copy of the comparison.
+TEST(Cuda, SBAObservationsInsideTheNearPlaneAreSkipped) {
+  camera::Rig rig = MakeDefaultRig();
+
+  sba::BundleAdjustmentProblem problem;
+  GenerateFixedDepthProblem(problem, rig, 0.02f, 0.08f);
+  ASSERT_FALSE(problem.observation_xys.empty());
+
+  ModelFunction model;
+  UpdateModel(model, problem);
+  for (size_t i = 0; i < problem.observation_xys.size(); ++i) {
+    EXPECT_EQ(model.point_jacobians[i].norm(), 0.f) << "observation " << i << " inside the near plane was kept";
+    EXPECT_EQ(model.robustifier_weights[i], 0.f);
+  }
+
+  ParameterUpdate update;
+  update.point.resize(problem.points.size(), Vector3T::Zero());
+  update.pose.resize(problem.rig_from_world.size(), Isometry3T::Identity());
+  EXPECT_FALSE(std::isfinite(EvaluateCost(problem, update)));
+
+  const int num_points = static_cast<int>(problem.points.size());
+  const int num_poses = static_cast<int>(problem.rig_from_world.size());
+  const int num_observations = static_cast<int>(problem.observation_xys.size());
+
+  cuda::sba::GPUBundleAdjustmentProblem gpu_problem(num_points, num_poses, num_observations);
+  cuda::sba::GPUModelFunction gpu_function(num_observations);
+  cuda::sba::GPUParameterUpdate gpu_update(num_points, num_poses);
+  gpu_problem.set_rig(rig);
+
+  cuda::GPUArrayPinned<float> gpu_cost{1};
+  cuda::GPUArrayPinned<int> gpu_num_skipped{1};
+  cuda::Stream s;
+
+  sba::BundleAdjustmentProblem gpu_side = problem;
+  ASSERT_TRUE(gpu_problem.set(gpu_side, s.get_stream()));
+  CUDA_CHECK(update_model(gpu_function.meta(), gpu_problem.meta(), gpu_side.robustifier_scale, s.get_stream()));
+
+  cuda::sba::temporary::ParameterUpdate update_temp = to_temporary(update);
+  ASSERT_TRUE(gpu_update.set(update_temp, s.get_stream()));
+  CUDA_CHECK(evaluate_cost(gpu_cost.ptr(), gpu_num_skipped.ptr(), gpu_problem.meta(), gpu_update.meta(),
+                           gpu_side.robustifier_scale, s.get_stream()));
+
+  gpu_cost.copy(cuda::GPUCopyDirection::ToCPU, s.get_stream());
+  gpu_num_skipped.copy(cuda::GPUCopyDirection::ToCPU, s.get_stream());
+  CUDA_CHECK(cudaStreamSynchronize(s.get_stream()));
+
+  ASSERT_TRUE(gpu_problem.get(gpu_side, s.get_stream()));
+  ModelFunction gpu_model;
+  ASSERT_TRUE(gpu_function.get(gpu_side.observation_xys.size(), gpu_model, s.get_stream()));
+  for (int i = 0; i < num_observations; ++i) {
+    EXPECT_EQ(gpu_model.point_jacobians[i].norm(), 0.f) << "GPU observation " << i << " inside the near plane was kept";
+    EXPECT_EQ(gpu_model.robustifier_weights[i], 0.f);
+  }
+
+  // evaluate_cost_kernel leaves a fully skipped problem at a cost of zero; the infinity is applied
+  // by SchurComplementBundlerGpu::Impl::evaluated_cost from num_skipped, so assert on that and map
+  // it the way the bundler does to line the check up with the CPU one above.
+  EXPECT_EQ(gpu_num_skipped[0], num_observations);
+  const float gpu_evaluated_cost =
+      gpu_num_skipped[0] == num_observations ? std::numeric_limits<float>::infinity() : gpu_cost[0];
+  EXPECT_FALSE(std::isfinite(gpu_evaluated_cost));
 }
 
 TEST(Cuda, DISABLED_SBABuildReducedSystem) {
@@ -1209,10 +1526,10 @@ TEST(Cuda, DISABLED_SBABuildReducedSystem) {
     }
 
     // std::vector<Matrix3T> inverse_point_block;
-    for (int i = 0; i < num_points; i++) {
-      if (!rs_gpu.inverse_point_block[i].isApprox(rs_cpu.inverse_point_block[i], thresh)) {
-        std::cout << "rs_cpu.inverse_point_block[" << i << "] =\n" << rs_cpu.inverse_point_block[i] << '\n';
-        std::cout << "rs_gpu.inverse_point_block[" << i << "] =\n" << rs_gpu.inverse_point_block[i] << '\n';
+    for (int k = 0; k < num_points; k++) {
+      if (!rs_gpu.inverse_point_block[k].isApprox(rs_cpu.inverse_point_block[k], thresh)) {
+        std::cout << "rs_cpu.inverse_point_block[" << k << "] =\n" << rs_cpu.inverse_point_block[k] << '\n';
+        std::cout << "rs_gpu.inverse_point_block[" << k << "] =\n" << rs_gpu.inverse_point_block[k] << '\n';
         ASSERT_TRUE(false);
       }
     }

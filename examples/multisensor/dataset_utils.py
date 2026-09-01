@@ -104,7 +104,7 @@ def load_depth(depth_path: str) -> np.ndarray:
     https://tartanair.org/modalities.html. The cuvslam Python binding requires
     `(H, W) uint16`, so we convert to millimetres and clip to the uint16 range
     (sky pixels would otherwise wrap around). cuvslam undoes the scale via
-    `OdometryMultisensorSettings.depth_scale_factor=DEPTH_SCALE_MM`.
+    `Odometry.MultisensorSettings.depth_scale_factor=DEPTH_SCALE_MM`.
 
     PNG path uses cv2.imread + view('<f4') exactly as the official TartanAir tools loader
     (castacks/tartanairpy reader.depth_rgba_float32) — cv2 returns the file's 4 channel bytes

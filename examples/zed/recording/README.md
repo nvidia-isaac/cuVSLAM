@@ -43,8 +43,8 @@ the current `examples/requirements.txt` NumPy pin.
   * `rich_vis` - Draw observation and landmarks in addition to the trajectory. May slow down visualization.
   * `border_*` - (top, bottom, left, right) from `cuvslam.Camera`.
     See [Static Masks](../../tum/README.md#masking-regions-to-prevent-feature-selection)
-  * `map_cell_size` - from `cuvslam.Tracker.SlamConfig`. Size of map cell (0 for auto-calculate from camera baseline).
-  * `max_map_size` -  from `cuvslam.Tracker.SlamConfig`. Maximum number of poses in SLAM pose graph (0 for unlimited).
+  * `map_cell_size` - from `cuvslam.Slam.Config`. Size of map cell (0 for auto-calculate from camera baseline).
+  * `max_map_size` -  from `cuvslam.Slam.Config`. Maximum number of poses in SLAM pose graph (0 for unlimited).
 
 ## Tested environment
 

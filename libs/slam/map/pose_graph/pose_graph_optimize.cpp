@@ -15,6 +15,7 @@
  * of the software or derivative works thereof, you agree to be bound by this License.
  */
 
+#include <algorithm>
 #include <exception>
 
 #include "common/log_types.h"
@@ -177,28 +178,115 @@ bool PoseGraph::Optimize(const PoseGraphHypothesis& pose_graph_hypothesis_src,
                          PoseGraphHypothesis& pose_graph_hypothesis_dst, bool planar_constraint,
                          Isometry3T& vo_to_head) const {
   keyframes_to_optimize_.clear();
-  keyframes_to_optimize_.reserve(keyframes_.size());
-  for (const auto& it : keyframes_) {
-    keyframes_to_optimize_.push_back(it.first);
-  }
-
   edges_to_optimize_.clear();
-  edges_to_optimize_.reserve(edges_.size());
-  for (const auto& it : edges_) {
-    edges_to_optimize_.push_back(it.first);
+  constrained_keyframes_.clear();
+  bfs_visited_.clear();
+  bfs_merge_buffer_.clear();
+
+  KeyFrameId start_keyframe;
+  if (!GetHeadKeyframe(start_keyframe)) {
+    return false;
   }
 
-  constrained_keyframes_.clear();
-  KeyFrameId min_keyframe_id = InvalidKeyFrameId;
-  for (const KeyFrameId keyframe_id : keyframes_to_optimize_) {
-    if (min_keyframe_id == InvalidKeyFrameId || keyframe_id < min_keyframe_id) {
-      min_keyframe_id = keyframe_id;
+  // Level-based BFS — O(K*d*log K) worst case, no hash collisions.
+  // K = max_keyframes_to_optimize_, d = avg node degree.
+  // keyframes_to_optimize_: sorted visited set, grown each level via merge.
+  // edges_to_optimize_: nodes added in the previous level, to be expanded next (sorted).
+  // bfs_visited_: raw neighbor scratch buffer for the current level.
+  // bfs_merge_buffer_: merge output buffer, swapped in and cleared each level.
+  if (max_keyframes_to_optimize_ == 0) {
+    return false;
+  }
+  keyframes_to_optimize_.reserve(max_keyframes_to_optimize_);
+  edges_to_optimize_.reserve(max_keyframes_to_optimize_);
+  keyframes_to_optimize_.push_back(start_keyframe);
+  edges_to_optimize_.push_back(start_keyframe);
+
+  while (!edges_to_optimize_.empty() && keyframes_to_optimize_.size() < max_keyframes_to_optimize_) {
+    // Collect all neighbors of nodes added in the previous level into bfs_visited_
+    bfs_visited_.clear();
+    for (const KeyFrameId frontier_node : edges_to_optimize_) {
+      auto collect_neighbor = [&](KeyFrameId from, KeyFrameId to, const Isometry3T&, const Matrix6T&) {
+        bfs_visited_.push_back((from == frontier_node) ? to : from);
+      };
+      QueryKeyframeEdges(frontier_node, collect_neighbor);
+    }
+
+    // Sort + dedup raw neighbors — O(L*d*log(L*d)), L = nodes expanded this level, d = avg degree
+    std::sort(bfs_visited_.begin(), bfs_visited_.end());
+    bfs_visited_.erase(std::unique(bfs_visited_.begin(), bfs_visited_.end()), bfs_visited_.end());
+
+    // New level = unvisited neighbors (set_difference of two sorted ranges) — O(K)
+    edges_to_optimize_.clear();
+    std::set_difference(bfs_visited_.begin(), bfs_visited_.end(), keyframes_to_optimize_.begin(),
+                        keyframes_to_optimize_.end(), std::back_inserter(edges_to_optimize_));
+
+    // Trim to remaining capacity (saturating to avoid size_t underflow)
+    const size_t remaining = max_keyframes_to_optimize_ > keyframes_to_optimize_.size()
+                                 ? max_keyframes_to_optimize_ - keyframes_to_optimize_.size()
+                                 : 0;
+    if (edges_to_optimize_.size() > remaining) {
+      edges_to_optimize_.resize(remaining);
+    }
+    if (edges_to_optimize_.empty()) {
+      break;
+    }
+
+    // Merge sorted visited set + sorted new level into visited set — O(K)
+    std::merge(keyframes_to_optimize_.begin(), keyframes_to_optimize_.end(), edges_to_optimize_.begin(),
+               edges_to_optimize_.end(), std::back_inserter(bfs_merge_buffer_));
+    std::swap(keyframes_to_optimize_, bfs_merge_buffer_);
+    bfs_merge_buffer_.clear();
+  }
+
+  // keyframes_to_optimize_[0..bfs_count) is the sorted BFS subgraph
+  const size_t bfs_count = keyframes_to_optimize_.size();
+  edges_to_optimize_.clear();
+
+  auto in_bfs = [&](KeyFrameId kf) {
+    return std::binary_search(keyframes_to_optimize_.begin(), keyframes_to_optimize_.begin() + bfs_count, kf);
+  };
+
+  // Collect subgraph edges; append boundary nodes to constrained_keyframes_ (dedup deferred)
+  for (size_t i = 0; i < bfs_count; i++) {
+    const KeyFrameId current = keyframes_to_optimize_[i];
+    auto collect_edge = [&](KeyFrameId from, KeyFrameId to, const Isometry3T&, const Matrix6T&) {
+      const bool from_in = in_bfs(from);
+      const bool to_in = in_bfs(to);
+      if (!from_in && !to_in) {
+        return;
+      }
+      if (from_in && to_in && from != current) {
+        return;  // canonical direction: skip internal edges from the to-side
+      }
+      edges_to_optimize_.push_back(edges_from_to_.at({from, to}));
+      if (from_in && to_in) {
+        return;
+      }
+      constrained_keyframes_.push_back(from_in ? to : from);  // boundary node, dedup below
+    };
+    QueryKeyframeEdges(current, collect_edge);
+  }
+
+  // Dedup constrained_keyframes_ — O(B*log B), B = number of boundary nodes
+  std::sort(constrained_keyframes_.begin(), constrained_keyframes_.end());
+  constrained_keyframes_.erase(std::unique(constrained_keyframes_.begin(), constrained_keyframes_.end()),
+                               constrained_keyframes_.end());
+
+  // When the whole graph fits in the subgraph there are no boundary nodes; pin the oldest
+  // keyframe (min ID, index 0 in sorted keyframes_to_optimize_) as the fixed reference.
+  if (constrained_keyframes_.empty() && bfs_count > 0) {
+    constrained_keyframes_.push_back(keyframes_to_optimize_[0]);
+  }
+
+  // Append constraint nodes to keyframes_to_optimize_ for OptimizeSubgraph.
+  // Boundary nodes are outside the BFS subgraph and must be appended.
+  // The fallback constraint (oldest BFS node) is already in the subgraph — skip it.
+  for (const KeyFrameId kf : constrained_keyframes_) {
+    if (!std::binary_search(keyframes_to_optimize_.begin(), keyframes_to_optimize_.begin() + bfs_count, kf)) {
+      keyframes_to_optimize_.push_back(kf);
     }
   }
-  if (min_keyframe_id == InvalidKeyFrameId) {
-    return false;  // nothing to optimize
-  }
-  constrained_keyframes_.push_back(min_keyframe_id);
 
   return OptimizeSubgraph(keyframes_to_optimize_, edges_to_optimize_, constrained_keyframes_, pose_graph_hypothesis_src,
                           planar_constraint, pose_graph_hypothesis_dst, vo_to_head);

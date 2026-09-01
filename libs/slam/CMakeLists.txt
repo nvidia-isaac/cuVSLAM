@@ -53,6 +53,7 @@ set(SOURCES
     localizer/localizer.cpp
     async_slam/async_slam.cpp
     async_slam/async_slam_localize.cpp
+    async_slam/async_slam_worker.cpp
     async_slam/tail.cpp
     common/slam_common.cpp
     map/map.cpp

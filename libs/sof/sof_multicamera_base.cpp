@@ -21,7 +21,37 @@ namespace cuvslam::sof {
 
 MultiSOFBase::MultiSOFBase(const camera::Rig& rig, const camera::FrustumIntersectionGraph& fid,
                            const Settings& sof_settings, const odom::KeyFrameSettings& keyframe_settings)
-    : rig_(rig), fid_(fid), box_prefilter_(sof_settings.box3_prefilter), kf_selector_(keyframe_settings) {}
+    : rig_(rig),
+      fid_(fid),
+      box_prefilter_(sof_settings.box3_prefilter),
+      min_depth_(sof_settings.min_depth),
+      max_depth_(sof_settings.max_depth),
+      kf_selector_(keyframe_settings) {}
+
+float MultiSOFBase::CrossCamSearchRadius(int top_level) {
+  // Empirical multiplier — smaller values under-reach for jittery interpolation, larger values
+  // invite decoy matches. 3 gives best KITTI ATE with the current epipolar-curve construction.
+  // Works out to 48 base-level px for the usual 4-level pyramid.
+  constexpr float kMultiplier = 3.f;
+  return kMultiplier * static_cast<float>(1u << (top_level + 1));
+}
+
+const EpipolarCurves& MultiSOFBase::GetOrBuildEpipolarCurves(CameraId primary_id, CameraId secondary_id, int top_level,
+                                                             size_t top_width, size_t top_height) {
+  auto& row = epipolar_curves_by_pair_[primary_id];
+  auto it = row.find(secondary_id);
+  if (it != row.end()) {
+    return it->second;
+  }
+  const camera::ICameraModel& intr_l = *rig_.intrinsics[primary_id];
+  const camera::ICameraModel& intr_r = *rig_.intrinsics[secondary_id];
+  const Isometry3T right_from_left = rig_.camera_from_rig[secondary_id] * rig_.camera_from_rig[primary_id].inverse();
+  const auto [inserted_it, inserted] = row.emplace(
+      secondary_id,
+      EpipolarCurves(intr_l, intr_r, right_from_left, top_level, top_width, top_height, min_depth_, max_depth_));
+  EpipolarCurves& epipolar_curves = inserted_it->second;
+  return epipolar_curves;
+}
 
 void MultiSOFBase::reset_keyframe_selector() {
   kf_selector_.reset();

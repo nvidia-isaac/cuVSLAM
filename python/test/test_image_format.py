@@ -23,7 +23,7 @@ class TestImageFormat(unittest.TestCase):
         camera = vslam.Camera(size=(640, 480), focal=(320.0, 320.0),
                               principal=(320.0, 240.0))
         self.rig = vslam.Rig([camera])
-        self.tracker = vslam.Tracker(self.rig)
+        self.tracker = vslam.Tracker(self.rig, vslam.Tracker.Mode.OdometryOnlyRealtime)
         self.timestamp = 1000
 
     def test_valid_2d_mono_image(self):

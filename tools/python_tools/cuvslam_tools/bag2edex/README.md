@@ -83,6 +83,36 @@ rosbag_extract_urdf \
 ```
 
 
+## Generating Missing `metadata.yaml` for MCAP Files
+
+`make_mcap_metadata.py` regenerates the `metadata.yaml` file that `rosbag2` requires next to an `.mcap` file. Use it when you have a standalone `.mcap` file without its companion `metadata.yaml` — for example, after downloading only the `.mcap` from a recording system or after the metadata file was accidentally deleted.
+
+**Prerequisites:** a ROS 2 environment must be sourced with `ros2` on `PATH`, and the MCAP storage plugin must be installed (the script calls `ros2 bag info --storage mcap` internally).
+
+**Usage:**
+
+```sh
+./make_mcap_metadata.py path/to/rosbag.mcap
+```
+
+The script writes `metadata.yaml` into the same directory as the `.mcap` file. Once generated, the directory can be used with the extraction tools above.
+
+**Optional argument:**
+- `--version <int>` — sets the `rosbag2_bagfile_information.version` field in the metadata (default: `9`). Only change this if you need to match a specific rosbag2 version.
+
+**Example:**
+
+```sh
+./make_mcap_metadata.py /data/bags/my_recording/my_recording_0.mcap
+# Wrote: /data/bags/my_recording/metadata.yaml
+
+rosbag_extract_edex \
+    --config configs/my_config.yaml \
+    --rosbag_path /data/bags/my_recording \
+    --output_path /data/edex/my_recording
+```
+
+
 ## License
 
 Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.

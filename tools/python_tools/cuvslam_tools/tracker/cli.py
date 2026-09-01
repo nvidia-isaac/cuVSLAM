@@ -83,6 +83,11 @@ def add_tracker_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--save_output_tracker_data", action="store_true", help="Save output tracker data.")
     parser.add_argument(
+        "--print_config",
+        action="store_true",
+        help="Print the complete odometry and SLAM configurations.",
+    )
+    parser.add_argument(
         "--visualize_rerun",
         action="store_true",
         help="Enable real-time visualization of tracking results using Rerun viewer.",
@@ -130,7 +135,8 @@ def add_tracker_arguments(parser: argparse.ArgumentParser) -> None:
         "--async_sba",
         type=_str2bool,
         default=False,
-        help="Enable asynchronous Sparse Bundle Adjustment.",
+        help="Enable asynchronous Sparse Bundle Adjustment. Selects the realtime tracker mode, "
+             "in which case --sync_slam must be false.",
     )
     parser.add_argument(
         "--use_motion_model",
@@ -187,7 +193,8 @@ def add_tracker_arguments(parser: argparse.ArgumentParser) -> None:
         help="Enable IMU debug mode.",
     )
     parser.add_argument("--use_slam", type=_str2bool, default=False, help="Enable SLAM mode.")
-    parser.add_argument("--sync_slam", type=_str2bool, default=True, help="Use synchronous SLAM.")
+    parser.add_argument("--sync_slam", type=_str2bool, default=True,
+                        help="Run SLAM in the calling thread. Must be the opposite of --async_sba.")
 
     parser.add_argument(
         "--depth_scale_factor",

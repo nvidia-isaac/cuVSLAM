@@ -12,9 +12,11 @@ playbooks are in [SKILL.md](SKILL.md).
 ## Pipelines
 
 - `pr-verify.yml`: lint in the CI image, then build + unit test on x86 (fork-gated), Orin, and Thor. The x86 job stages datasets, runs eval, and posts a KPI table to the PR comment. A status job aggregates the required checks.
-- `nightly.yml`: build + test matrix across four x86 CUDA/Ubuntu configs plus Orin and Thor. The four x86 configs run eval (`eval: true`) and generate KPI data and PDF reports. Scheduled and ordinary manual runs retain versioned Actions artifacts but never create a Release. A successful manual dispatch from a matching `release/vX.Y.Z` branch promotes the same consumer artifacts to an unpublished draft Release.
+- `nightly.yml`: build + test matrix across four x86 CUDA/Ubuntu configs plus Orin and Thor. The four x86 configs run eval (`eval: true`) and generate KPI data and PDF reports; Orin and Thor run CUDA micro-benchmarks (`benchmark: true`) and generate structured speed reports. Scheduled and ordinary manual runs retain versioned Actions artifacts but never create a Release. A successful manual dispatch from a matching `release/vX.Y.Z` branch promotes the same consumer artifacts to an unpublished draft Release.
 - `provision-datasets.yml`: manual `workflow_dispatch`, gated to the default branch. Builds the CI image, runs `provision_dataset.sh` for the chosen dataset, uploads `<name>.tar`. The only writer of dataset storage.
-- `sync-rulesets.yml`: applies `.github/rulesets/default-branch-ruleset.json` through the GitHub API using `RULESET_ADMIN_TOKEN`, on push to the ruleset path, weekly, and on demand.
+Branch protection is not part of this repository. The default-branch ruleset is configured in the
+GitHub UI, so nothing here applies or verifies it; read the live rules with
+`gh api repos/<owner>/<repo>/rules/branches/main`.
 
 ## Eval data flow
 
@@ -28,9 +30,9 @@ flowchart TD
     prereq --> build --> stage --> wrapper
   end
   subgraph container [cuvslam:local container]
-    inner["run_eval.sh (DATASETS[])"]
+    inner["run_eval.sh (registry eval-records)"]
     app["cuvslam_app.py per dataset"]
-    kpi["cuvslam_kpi_report.py\nkpi_*.json + .table + .drift"]
+    kpi["cuvslam_kpi_report.py collect\nraw + report JSON"]
     inner --> app --> kpi
   end
   subgraph fs [runner filesystem]
@@ -62,20 +64,49 @@ Repository secrets, split read from write so fork-reachable jobs never hold a ke
 
 - `AWS_S3_RO_ACCESS_KEY_ID` / `AWS_S3_RO_SECRET_ACCESS_KEY` - read-only S3; eval staging in `pr-verify.yml` and `nightly.yml`. Passed as `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`.
 - `AWS_S3_ACCESS_KEY_ID` / `AWS_S3_SECRET_ACCESS_KEY` - read-write S3; `provision-datasets.yml` only.
-- `RULESET_ADMIN_TOKEN` - used by `sync-rulesets.yml` to apply branch rulesets.
 
 ## Dataset registry and layout
 
-- `PROVISIONABLE_DATASETS` (datasets the Provision workflow can build) and `EVAL_DATASET_NAMES` (datasets eval stages) live in `datasets_config.sh`.
-- `run_eval.sh` `DATASETS[]` records are pipe-delimited: `LABEL|link_name|subdir|test_config|app_flags`. KITTI is active; the others are commented until provisioned.
-- Tarball: uncompressed `<name>.tar` at `<S3_DATASETS_BUCKET>/<name>.tar`. Staged to `<RUNNER_LOCAL_DATASETS_ROOT>/datasets/vslam/<name>/` and mounted read-only into the eval container at `/datasets`. An ETag file skips re-download when the cache is current.
+- `DATASETS` in `tools/python_tools/cuvslam_tools/dataset_registry.py` is the single source of truth. A `DatasetSpec` holds the ID, the preparation module, and its `EvalSpec` records; an `EvalSpec` holds the reporter config filename, the `cuvslam_app` flags, suite membership, and gating. Provisionable means the dataset is present; eval-enabled means it has at least one `EvalSpec`. KITTI and EuRoC are eval-enabled; `tum` and `tartan` are provisionable only.
+- The module is standard library only and imports converters lazily, so shell wrappers call it with `PYTHONPATH=tools/python_tools` inside `cuvslam-ci:local` before anything is installed. `datasets_config.sh` wraps it as `dataset_registry`; `run_eval.sh` defines its own shim because the S3 variables `datasets_config.sh` requires are absent in the eval container.
+- Subcommands: `validate`, `list [--eval] [--suite]`, `eval-records` (tab-separated `id`, KPI prefix, config path, flags), `prepare-module`, `prepare --root-file`, `verify-staged --root`.
+- Derived, never declared: `<id>.tar`, the staged directory, the `/sequences` mount, and the KPI prefix (first hyphen-delimited token of the config filename, upper-cased). Validation rejects two records that derive the same prefix and `--odometry_mode`.
+- Tarball: uncompressed `<id>.tar` at `<S3_DATASETS_BUCKET>/<id>.tar`, whose root is the directory `prepare()` returned. Staged to `<RUNNER_LOCAL_DATASETS_ROOT>/datasets/vslam/<id>/` and mounted read-only into the eval container at `/datasets`. An ETag file skips re-download when the cache is current. After extraction, `verify-staged` checks the shipped config's `dataset_folder` equals `<id>/`.
 
 ## KPI outputs
 
-- Per run: `kpi_<run_id>.json` (raw), `kpi_<run_id>.json.table` (Markdown), `kpi_<run_id>.json.drift` (soft check vs `kpi_baseline_ranges.json`). KPIs are ATE, ARE, Kabsch, tracking losts, and FPS, in ODOM and SLAM modes.
-- Nightly: one combined table with a leading `Config` column (`platform-cuda-ubuntu`); temporary per-config `eval-kpis-staging-<version>-<slug>` and `eval-reports-staging-<version>-<slug>` artifacts; KPI history per config at `<RUNNER_STORAGE_ROOT>/cuvslam-ci/kpi-history/<slug>/`. `RUN_ID` is the UTC date. After aggregation, staging artifacts are replaced by `cuvslam-evaluation-<version>.tar.gz`.
+- Per run: `kpi_<run_id>.json` contains the flat current values used for rolling history;
+  `kpi_<run_id>.report.json` contains the current values, previous per-config values, and soft drift results. KPIs are
+  ATE, ARE, Kabsch, tracking losts, and FPS, in ODOM and SLAM modes. During migration, `run_eval.sh` also emits the old
+  `.table` and `.drift` files; a follow-up script-only change removes those after CI switches to report JSON.
+- Nightly: `cuvslam_kpi_report.py aggregate` publishes one row per dataset/type/mode. KPI cells contain the mean and
+  population standard deviation across all four x86 configurations; diff cells compare current and previous
+  aggregated means. Temporary per-config `eval-kpis-staging-<version>-<slug>` and
+  `eval-reports-staging-<version>-<slug>` artifacts, raw per-config JSON, reports, and history remain namespaced by
+  `platform-cuda-ubuntu`. `RUN_ID` is the UTC date. After aggregation, staging artifacts are replaced by
+  `cuvslam-evaluation-<version>.tar.gz`.
 - Release dispatch: `release/vX.Y[.Z][-suffix]` derives tag `vX.Y[.Z][-suffix]` after validating it against `VERSION`. The draft Release contains the consumer artifacts and `cuvslam-evaluation-<version>.tar.gz` generated by the same run. Existing drafts, published Releases, and tags are never overwritten.
-- PR: a single table labeled with `EVAL_CONFIG`; `RUN_ID=pr-<number>`; KPI history mounted read-only, so PR runs never write the baseline.
+- PR: `cuvslam_kpi_report.py render` produces a single table labeled with `EVAL_CONFIG`; `RUN_ID=pr-<number>`; the
+  matching config's KPI history is mounted read-only, so PR runs never write the baseline.
+
+## Jetson benchmark outputs
+
+- The regular C++ test command excludes names containing `SpeedUp` or `Speedup`. Nightly matrix entries flagged
+  `benchmark: true` run the active matching cases from `cuda_modules_test` separately. Tests prefixed with
+  `DISABLED_` remain excluded.
+- `cuvslam_benchmark_report.py metadata` records host Jetson/JetPack, CUDA, Ubuntu, power-mode, clock, commit, and
+  kernel metadata. `benchmark_cuvslam_in_docker.sh` runs the registered `cuda_modules_test` through CTest with a fixed
+  GTest seed and writes raw output plus GoogleTest XML.
+- Each active speed test records `iterations`, `cpu_ns_per_iteration`, `gpu_ns_per_iteration`, and `speedup` as
+  GoogleTest XML properties. `cuvslam_benchmark_report.py render` validates those properties and writes
+  `cpp-benchmark-results.json` and `benchmark-summary.md`.
+- Per-config staging artifacts use
+  `benchmark-results-staging-<version>-<platform>-cuda<version>-ubuntu<version>`. The nightly summary publishes the
+  Orin and Thor tables independently, then retains `benchmark-results-<version>` for 30 days.
+- Benchmark test failures are informational during the initial soak period. Missing tests, malformed metrics, or a
+  missing Orin/Thor report fail summary consolidation because they indicate broken benchmark coverage.
+- Jetson benchmarks do not run on PRs and are CI diagnostics, not release assets. They are not added to
+  `cuvslam-evaluation-<version>.tar.gz`.
 
 ## Nightly artifacts and releases
 
@@ -93,6 +124,8 @@ Repository secrets, split read from write so fork-reachable jobs never hold a ke
 - Fork isolation: eval and dataset steps run only where `head.repo == github.repository`. Fork code never reaches dataset runners.
 - Credential split: eval steps pass the read-only `AWS_S3_RO_*` pair; only provisioning uses the read-write `AWS_S3_*` pair.
 - Per-config namespacing: KPI history directories and eval artifact names carry the `platform-cuda-ubuntu` slug. Artifact names are immutable in `upload-artifact@v7`, so a multi-config run requires per-config names to avoid an upload collision, and per-config history directories keep each config's diff-vs-previous lineage correct.
+- Benchmark namespacing: Orin and Thor benchmark artifacts carry the same full config slug. Their absolute timings and
+  speedups are not aggregated because the devices use different SoCs, CUDA versions, and JetPack releases.
 - Direct distributable uploads: `upload-artifact@v7` uses `archive: false` only for single-file C++ archives, wheels, documentation, and the evaluation record. Multi-file diagnostics retain the default ZIP container.
 - Release safety: only manual dispatches from validated `release/*` branches can publish, and they create drafts. Scheduled runs have no `contents: write` permission. Rebuilding requires explicit deletion of the previous draft; published Releases and existing tags are never moved or replaced.
 - Uncompressed `.tar`: gzip was dropped to cap memory on the provisioning runner. Packing (`provision_dataset.sh`) and extraction (`stage_eval_datasets.sh`) stay gzip-free and consistent.
@@ -102,7 +135,10 @@ Repository secrets, split read from write so fork-reachable jobs never hold a ke
 - Version provenance: `scripts/Dockerfile` keeps `git-lfs` filters configured system-wide because nightly materializes
   LFS files before mounting the source read-only into the product build container. Runner-specific build configuration
   must use Docker build arguments rather than rewriting tracked source files.
-- Change isolation: ruleset, CODEOWNERS, and `.github/workflows/**` changes go in their own MR, enforced by the `isolated-ruleset-change` pre-commit hook. Use the `[infra]` MR prefix.
+- Change isolation: CODEOWNERS and CI workflow changes go in their own MR, enforced by the `isolated-ruleset-change` pre-commit hook and re-run as `isolated-ruleset-change-ci` in the `Lint` job. `PROTECTED_REGEX` in `scripts/check-isolated-ruleset-change.sh` is the authority on which paths qualify; it is narrower than `.github/workflows/**`. Use the `[infra]` MR prefix.
+- Branch protection is UI-only: no file in this repository describes the default-branch ruleset, so a
+  change here can never be reviewed as code and drift cannot be detected by CI. Verify what is
+  enforced with `gh api repos/<owner>/<repo>/rules/branches/main` rather than trusting any document.
 
 ## Learnings
 

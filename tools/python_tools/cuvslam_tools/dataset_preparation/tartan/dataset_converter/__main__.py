@@ -14,7 +14,7 @@
 
 import argparse
 import os
-from .pipeline import TartanAirPipeline
+from .convert import convert_sequences
 
 
 def main(argv=None):
@@ -24,34 +24,14 @@ def main(argv=None):
     parser.add_argument("--save_edex_folder", default="edex")
     args = parser.parse_args(argv)
 
-    seq_path = args.seq_path
-    save_gt_folder = args.save_gt_folder
-    save_edex_folder = args.save_edex_folder
-
-    if os.path.exists(save_gt_folder):
-        print(f"{save_gt_folder} folder already exists")
+    if os.path.exists(args.save_gt_folder):
+        print(f"{args.save_gt_folder} folder already exists")
         return
-    if os.path.exists(save_edex_folder):
-        print(f"{save_edex_folder} folder already exists")
+    if os.path.exists(args.save_edex_folder):
+        print(f"{args.save_edex_folder} folder already exists")
         return
 
-    seq_folders = []
-
-    tartan_dirs = {"image_left", "image_right"} # set
-    tartan_files = {"pose_left.txt", "pose_right.txt"} # set
-
-    for (path, dirs, files) in os.walk(seq_path):
-        dirs = set(dirs)
-        files = set(files)
-        if len(tartan_dirs.intersection(dirs)) == len(tartan_dirs):
-            if len(tartan_files.intersection(files)) == len(tartan_files):
-                seq_folders.append(path)
-
-    print(seq_folders)
-
-    for seq_folder in seq_folders:
-        pipeline = TartanAirPipeline(seq_folder, save_gt_folder, save_edex_folder)
-        pipeline()
+    print(convert_sequences(args.seq_path, args.save_gt_folder, args.save_edex_folder))
 
 
 if __name__ == '__main__':

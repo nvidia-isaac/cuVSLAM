@@ -89,10 +89,10 @@ cuvslam::Odometry::Config::debug_dump_directory
 **Python API**
 
 ```python
-cuvslam.core.Odometry.Config.debug_dump_directory
+cuvslam.Odometry.Config.debug_dump_directory
 ```
 
-See [Python API Reference](https://nvidia-isaac.github.io/cuVSLAM/python/api.html#cuvslam.core.Odometry.Config.debug_dump_directory).
+See [Python API Reference](https://nvidia-isaac.github.io/cuVSLAM/python/api.html#cuvslam.Odometry.Config.debug_dump_directory).
 
 **Isaac ROS**
 
@@ -142,7 +142,7 @@ cuvslam::Odometry::Config::max_frame_delta_s
 
 **Python API**
 
-[cuvslam.core.Odometry.Config.max_frame_delta_s](https://nvidia-isaac.github.io/cuVSLAM/python/api.html#cuvslam.core.Odometry.Config.max_frame_delta_s)
+[cuvslam.Odometry.Config.max_frame_delta_s](https://nvidia-isaac.github.io/cuVSLAM/python/api.html#cuvslam.Odometry.Config.max_frame_delta_s)
 
 **Isaac ROS**
 
@@ -168,17 +168,28 @@ In this mode, SBA and SLAM run on the main thread and block until completion rat
 This makes computation more stable and tests more reproducible, but it does not support high frame rates.
 Feed images to cuVSLAM frame by frame.
 
+Pick one of the `Tracker` offline modes and set the two configuration fields to match; `Tracker`
+rejects a mode that disagrees with them.
+
 **C++ API**
 
 ```cpp
-cuvslam::Odometry::Config::async_sba = false;
-cuvslam::Slam::Config::sync_mode = true;
+cuvslam::Odometry::Config odometry_config;
+odometry_config.async_sba = false;
+cuvslam::Slam::Config slam_config;
+slam_config.sync_mode = true;
+cuvslam::Tracker tracker{rig, cuvslam::Tracker::Mode::OdometryWithSlamOffline, odometry_config, &slam_config};
 ```
 
 **Python API**
 
-1. [cuvslam.core.Odometry.Config.async_sba](https://nvidia-isaac.github.io/cuVSLAM/python/api.html#cuvslam.core.Odometry.Config.async_sba)
-2. [cuvslam.core.Slam.Config.sync_mode](https://nvidia-isaac.github.io/cuVSLAM/python/api.html#cuvslam.core.Slam.Config.sync_mode)
+1. [cuvslam.Tracker.Mode](https://nvidia-isaac.github.io/cuVSLAM/python/api.html#cuvslam.Tracker.Mode) —
+   `OdometryOnlyOffline` or `OdometryWithSlamOffline`
+2. [cuvslam.Odometry.Config.async_sba](https://nvidia-isaac.github.io/cuVSLAM/python/api.html#cuvslam.Odometry.Config.async_sba)
+3. [cuvslam.Slam.Config.sync_mode](https://nvidia-isaac.github.io/cuVSLAM/python/api.html#cuvslam.Slam.Config.sync_mode)
+
+`sync_mode` is a `Slam.Config` field, so it only applies to `OdometryWithSlamOffline`. The
+odometry-only modes take no `slam_config` at all — pass one and the tracker rejects it.
 
 **Isaac ROS**
 
@@ -214,10 +225,10 @@ cuvslam::Slam::Config::enable_reading_internals = true;
 **Python API**
 
 1. [set_verbosity()](https://nvidia-isaac.github.io/cuVSLAM/python/api.html#cuvslam.set_verbosity)
-2. [cuvslam.core.Odometry.Config.enable_observations_export](https://nvidia-isaac.github.io/cuVSLAM/python/api.html#cuvslam.core.Odometry.Config.enable_observations_export)
-3. [cuvslam.core.Odometry.Config.enable_landmarks_export](https://nvidia-isaac.github.io/cuVSLAM/python/api.html#cuvslam.core.Odometry.Config.enable_landmarks_export)
-4. [cuvslam.core.Odometry.Config.enable_final_landmarks_export](https://nvidia-isaac.github.io/cuVSLAM/python/api.html#cuvslam.core.Odometry.Config.enable_final_landmarks_export)
-5. [cuvslam.core.Slam.Config.enable_reading_internals](https://nvidia-isaac.github.io/cuVSLAM/python/api.html#cuvslam.core.Slam.Config.enable_reading_internals)
+2. [cuvslam.Odometry.Config.enable_observations_export](https://nvidia-isaac.github.io/cuVSLAM/python/api.html#cuvslam.Odometry.Config.enable_observations_export)
+3. [cuvslam.Odometry.Config.enable_landmarks_export](https://nvidia-isaac.github.io/cuVSLAM/python/api.html#cuvslam.Odometry.Config.enable_landmarks_export)
+4. [cuvslam.Odometry.Config.enable_final_landmarks_export](https://nvidia-isaac.github.io/cuVSLAM/python/api.html#cuvslam.Odometry.Config.enable_final_landmarks_export)
+5. [cuvslam.Slam.Config.enable_reading_internals](https://nvidia-isaac.github.io/cuVSLAM/python/api.html#cuvslam.Slam.Config.enable_reading_internals)
 
 **Isaac ROS**
 
@@ -361,10 +372,10 @@ cuvslam::Odometry::Config::rectified_stereo_camera
 **Python API**
 
 ```python
-cuvslam.core.Odometry.Config.rectified_stereo_camera
+cuvslam.Odometry.Config.rectified_stereo_camera
 ```
 
-See [Python API Reference](https://nvidia-isaac.github.io/cuVSLAM/python/api.html#cuvslam.core.Odometry.Config.rectified_stereo_camera).
+See [Python API Reference](https://nvidia-isaac.github.io/cuVSLAM/python/api.html#cuvslam.Odometry.Config.rectified_stereo_camera).
 
 **Isaac ROS**
 
@@ -432,10 +443,10 @@ cuvslam::Odometry::Config::use_denoising
 **Python API**
 
 ```python
-cuvslam.core.Odometry.Config.use_denoising
+cuvslam.Odometry.Config.use_denoising
 ```
 
-See [Python API Reference](https://nvidia-isaac.github.io/cuVSLAM/python/api.html#cuvslam.core.Odometry.Config.use_denoising).
+See [Python API Reference](https://nvidia-isaac.github.io/cuVSLAM/python/api.html#cuvslam.Odometry.Config.use_denoising).
 
 **Isaac ROS**
 
@@ -477,10 +488,10 @@ cuvslam::Odometry::Config::use_motion_model
 **Python API**
 
 ```python
-cuvslam.core.Odometry.Config.use_motion_model
+cuvslam.Odometry.Config.use_motion_model
 ```
 
-See [Python API Reference](https://nvidia-isaac.github.io/cuVSLAM/python/api.html#cuvslam.core.Odometry.Config.use_motion_model).
+See [Python API Reference](https://nvidia-isaac.github.io/cuVSLAM/python/api.html#cuvslam.Odometry.Config.use_motion_model).
 
 **Isaac ROS**
 
@@ -494,6 +505,32 @@ See [Step 4: Mask static image areas](#step-4-mask-static-image-areas)
 - For raw images (with high lens distortion), try to cut up to ~10% of image area near the border.
 - For stereo images, try to cut up to 10% from the left border of the left eye and up to 10% from the right border of
   the right eye to keep only the overlapped area.
+
+### Tune L2R depth range
+
+Applies to every odometry mode that tracks between overlapping camera pairs — Multicamera, Inertial, RGBD and
+Multisensor. Ignored in Mono mode, which has no L2R stage. cuVSLAM samples scene depth along each epipolar curve
+to seed initial guesses for the left-to-right (L2R) LK tracker. The sampled range must match the rig: too tight
+and near-camera features are dropped, too wide and the candidate list inflates and LK converges on decoys.
+
+Always set these to the actual near/far limits of your scene when you know them — the auto-detected defaults
+are a fallback for when the scene is unknown, not a target to leave in place. Tight bounds around the real depth
+range give shorter candidate lists, faster tracking, and fewer spurious matches.
+
+Auto-detected defaults (used only if you leave the values negative) are derived from the rig baseline:
+
+- Small stereo (~5–10 cm baseline, indoor / robot arm): `[0.1 m, 20 m]`.
+- KITTI-scale outdoor (~0.5 m baseline): `[7 m, 1000 m]`.
+
+Symptoms of a mismatched range: consistently low L2R success on near-camera or far-away features, or a quality
+drop after widening the range too much.
+
+**C++ API**
+
+```cpp
+cuvslam::Odometry::Config::min_depth  // meters; any negative value (e.g. -1) auto-detects
+cuvslam::Odometry::Config::max_depth  // meters; any negative value (e.g. -1) auto-detects
+```
 
 ## Step 9: IMU integration
 
@@ -562,7 +599,7 @@ vertical (up/down) drift is eliminated or greatly reduced. There are two ground 
    cuvslam::Slam::Config::planar_constraints
    ```
    **Python API**
-   [cuvslam.core.Slam.Config.planar_constraints](https://nvidia-isaac.github.io/cuVSLAM/python/api.html#cuvslam.core.Slam.Config.planar_constraints)
+   [cuvslam.Slam.Config.planar_constraints](https://nvidia-isaac.github.io/cuVSLAM/python/api.html#cuvslam.Slam.Config.planar_constraints)
 
    **Isaac ROS**
    ```
@@ -590,11 +627,46 @@ to match your environment and accuracy requirements.
 
 ## Step 14: Run in async mode
 
-For real-time or high-throughput operation, enable async mode. Adjust these parameters to balance latency and throughput:
+For real-time or high-throughput operation, switch to a realtime `Tracker::Mode` and set the two
+configuration fields to match. Adjust these parameters to balance latency and throughput:
 
-1. `Odometry::Config::async_sba`
-2. `Slam::Config::throttling_time_ms`
-3. `Slam::Config::sync_mode`
+1. `Tracker::Mode::OdometryOnlyRealtime` or `Tracker::Mode::OdometryWithSlamRealtime`
+2. `Odometry::Config::async_sba` (must be `true` in a realtime mode)
+3. `Slam::Config::sync_mode` (must be `false` in a realtime mode)
+4. `Slam::Config::throttling_time_ms`
+
+Items 3 and 4 are `Slam::Config` fields, so they only apply to `OdometryWithSlamRealtime`. In
+`OdometryOnlyRealtime`, omit `slam_config` entirely.
+
+### Verify SLAM keeps up with odometry
+
+In async mode SLAM runs on a background thread that is fed a queue of commands: keyframes produced by odometry, map
+localization and map saving requests. If SLAM cannot keep up, this queue grows and the poses and loop closures SLAM
+reports refer to an increasingly old point of the trajectory.
+
+To diagnose this, enable verbose logging and check the `delay_warning_queue_size` parameter. You’ll see a console
+message whenever more commands are queued to the SLAM thread than the configured number:
+
+```text
+[WARNING] SLAM is behind odometry: XXX commands are queued to the SLAM thread that is more than desired YYY.
+          Check SLAM settings: reduce max_map_size or increase throttling_time_ms.
+```
+
+Note that a single slow command—loading a large map, for example—delays every keyframe queued behind it, so the
+queue length is what matters, not only the number of keyframes.
+
+If you see this warning, reduce the SLAM workload: lower `max_map_size`, increase `throttling_time_ms` to make loop
+closures less frequent, or set `map_cache_path` so a large map is kept on disk instead of in memory.
+
+**C++ API**
+
+```cpp
+cuvslam::Slam::Config::delay_warning_queue_size
+```
+
+**Python API**
+
+[cuvslam.core.Slam.Config.delay_warning_queue_size](https://nvidia-isaac.github.io/cuVSLAM/python/api.html#cuvslam.core.Slam.Config.delay_warning_queue_size)
 
 ## EDEX file
 

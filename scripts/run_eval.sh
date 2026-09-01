@@ -18,6 +18,14 @@ if [ ! -d "$OUTPUT_DIR/build" ]; then
   exit 1
 fi
 
+# The source tree is bind-mounted from the host while this container runs as root, so
+# Git rejects it as dubiously owned. Allow-list it so the reporter can read the commit
+# SHA, branch, and commit date for the report header. Provenance is not worth failing
+# the evaluation over, so a missing or unusable Git only downgrades those fields.
+if ! git config --global --add safe.directory /cuvslam; then
+  echo "Warning: could not mark /cuvslam as a safe Git directory; report provenance will be unknown"
+fi
+
 EVAL_STATS="$OUTPUT_DIR/eval/stats"
 mkdir -p "$EVAL_STATS"
 [ "$WRITE_HISTORY" = "true" ] && mkdir -p "$KPI_HISTORY"
@@ -34,15 +42,25 @@ echo "=== Installing cuvslam tools ==="
   pip install "${python_tools_install_src}[pdf]"
 )
 
-DATASETS=(
-  "KITTI|kitti|kitti|kitti/kitti-vio_slam_gt.cfg|--odometry_mode=multicamera --rectified_stereo_camera=true --async_sba=false --multicam_mode=moderate --use_segments"
-  # "TARTAN|tartanair|tartanV1hard_selected|tartanair/tartan-osmo-vo_slam.cfg|--odometry_mode=multicamera --rectified_stereo_camera=true --async_sba=false --multicam_mode=moderate --use_segments"
-  # "M3ED_SPOT|m3ed_spot|m3ed_spot|m3ed_spot/m3ed_spot.cfg|--odometry_mode=multicamera --rectified_stereo_camera=false --async_sba=false --multicam_mode=moderate --use_segments"
-  # "EUROC|euroc|euroc_edex|euroc/euroc-vio_slam.cfg|--odometry_mode=inertial --rectified_stereo_camera=false --async_sba=false --multicam_mode=moderate --use_segments"
-  # "TUM_RGBD|tum-rgbd|tum_rgbd_edex|tum-rgbd/tum.cfg|--odometry_mode=rgbd --async_sba=false --use_segments"
-  # "AR_TABLE|ar_table|ar_table_edex|ar_table/ar_table.cfg|--odometry_mode=rgbd --async_sba=false --use_segments"
-  # "ICL_NUIM|icl-nuim|icl_nuim_edex|icl_nuim_edex/icl-nuim.cfg|--odometry_mode=rgbd --async_sba=false --use_segments"
-)
+# Evaluation records come from the dataset registry, not a local array. The
+# registry is standard library only, so PYTHONPATH is enough here; this runs
+# before the tools package is installed below.
+dataset_registry() {
+  PYTHONPATH="/cuvslam/tools/python_tools${PYTHONPATH:+:$PYTHONPATH}" \
+    python3 -m cuvslam_tools.dataset_registry "$@"
+}
+
+dataset_registry validate
+
+DATASETS=()
+while IFS= read -r record; do
+  DATASETS+=("$record")
+done < <(dataset_registry eval-records)
+
+if [ "${#DATASETS[@]}" -eq 0 ]; then
+  echo "Error: the dataset registry lists no evaluation records." >&2
+  exit 1
+fi
 
 echo "=== Datasets present under $DATASETS_ROOT ==="
 if [ -d "$DATASETS_ROOT" ]; then
@@ -55,9 +73,9 @@ fi
 requested=()
 missing=()
 for record in "${DATASETS[@]}"; do
-  IFS='|' read -r label _link subdir _cfg _flags <<< "$record"
+  IFS=$'\t' read -r name label _cfg _flags <<< "$record"
   requested+=("$label")
-  [ -d "$DATASETS_ROOT/$subdir" ] || missing+=("$label -> $DATASETS_ROOT/$subdir")
+  [ -d "$DATASETS_ROOT/$name" ] || missing+=("$label -> $DATASETS_ROOT/$name")
 done
 
 echo "=== Requested datasets (${#requested[@]}): ${requested[*]} ==="
@@ -77,9 +95,11 @@ export CUVSLAM_OUTPUT="$EVAL_STATS"
 cd /cuvslam/tools/cuvslam_app
 
 for record in "${DATASETS[@]}"; do
-  IFS='|' read -r label link_name subdir test_config app_flags <<< "$record"
+  IFS=$'\t' read -r name label test_config app_flags <<< "$record"
 
-  ln -sfn "$DATASETS_ROOT/$subdir" "/sequences/$link_name"
+  # The mount name equals the dataset ID, which is also the "dataset_folder"
+  # recorded in the shipped reporter config.
+  ln -sfn "$DATASETS_ROOT/$name" "/sequences/$name"
 
   echo "=== Running cuVSLAM eval on $label ($test_config) ==="
   # shellcheck disable=SC2086
@@ -96,7 +116,14 @@ if [ -d "$KPI_HISTORY" ]; then
 fi
 
 KPI_JSON="$OUTPUT_DIR/eval/kpi_${RUN_ID}.json"
-KPI_ARGS=(-s "$CUVSLAM_OUTPUT" -j "$KPI_JSON" -d "$RUN_ID")
+KPI_REPORT_JSON="$OUTPUT_DIR/eval/kpi_${RUN_ID}.report.json"
+KPI_ARGS=(
+  collect
+  -s "$CUVSLAM_OUTPUT"
+  -j "$KPI_JSON"
+  -r "$KPI_REPORT_JSON"
+  -d "$RUN_ID"
+)
 if [ -n "$PREV_KPI" ]; then
   echo "Using previous KPI history: $PREV_KPI"
   KPI_ARGS+=(-k "$PREV_KPI")
@@ -112,6 +139,15 @@ fi
 
 python3 /cuvslam/scripts/cuvslam_kpi_report.py "${KPI_ARGS[@]}"
 
+# Keep the old outputs until CI has switched to the report JSON. A follow-up
+# script-only change can remove them without another workflow migration.
+python3 /cuvslam/scripts/cuvslam_kpi_report.py render \
+  -r "$KPI_REPORT_JSON" \
+  -o "${KPI_JSON}.table"
+python3 /cuvslam/scripts/cuvslam_kpi_report.py drift \
+  -r "$KPI_REPORT_JSON" \
+  -o "${KPI_JSON}.drift"
+
 if [ "$WRITE_HISTORY" = "true" ]; then
   # The S3-backed history mount has no rename(2), so publish the KPI JSON with a
   # direct copy (no atomic rename available on this mount).
@@ -125,4 +161,4 @@ else
   echo "Read-only KPI history: baseline not modified (diff-only against existing history)."
 fi
 
-echo "=== Eval complete. KPI table: ${KPI_JSON}.table ==="
+echo "=== Eval complete. KPI report data: ${KPI_REPORT_JSON} ==="

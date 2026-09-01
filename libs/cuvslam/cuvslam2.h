@@ -337,7 +337,10 @@ struct Landmark {
 };
 
 /**
- * @brief Visual Inertial Odometry (VIO) Tracker
+ * @brief Estimates rig motion from camera, depth, and IMU input
+ *
+ * Processes synchronized sensor data to estimate the rig pose. Use directly for odometry-only
+ * workflows, or through Tracker when coordinating with SLAM.
  */
 class CUVSLAM_API Odometry {
 public:
@@ -509,6 +512,22 @@ public:
     RGBDSettings rgbd_settings;
     /// Multisensor odometry settings. Used only when odometry_mode == OdometryMode::Multisensor.
     MultisensorSettings multisensor_settings;
+    /// Minimum scene depth (meters) sampled along the epipolar curve when generating LK initial
+    /// guesses for left-to-right (L2R) tracking. Used in every odometry mode that tracks between
+    /// overlapping camera pairs — Multicamera, Inertial, RGBD and Multisensor. Ignored in
+    /// OdometryMode::Mono, which has no L2R stage, and in any rig without an overlapping pair.
+    /// Any negative value (e.g. -1) auto-detects from the pair baseline: small stereo (~7 cm)
+    /// → 0.1 m, KITTI-scale (~0.5 m) → 7 m. Default: -1.f (auto).
+    float min_depth = -1.f;
+    /// Maximum scene depth (meters) sampled along the epipolar curve when generating LK initial
+    /// guesses for left-to-right (L2R) tracking. Used in the same modes as min_depth.
+    /// Any negative value (e.g. -1) auto-detects from the pair baseline: small stereo (~7 cm)
+    /// → 20 m, KITTI-scale (~0.5 m) → 1000 m. Default: -1.f (auto).
+    /// This only places the farthest initial guess; nothing is clamped. Points beyond max_depth
+    /// still track and triangulate normally — the leftover disparity there (fx*B/max_depth, about
+    /// 0.4 px for KITTI at 1000 m) is well inside LK's basin. Infinity is therefore unnecessary,
+    /// and non-finite values are rejected.
+    float max_depth = -1.f;
   };
 
   // TODO(vikuznetsov): remove when https://gcc.gnu.org/bugzilla/show_bug.cgi?id=88165 is fixed
@@ -745,7 +764,10 @@ struct Result {
 };
 
 /**
- * Simultaneous Localization and Mapping (SLAM)
+ * @brief Builds and optimizes a reusable map from odometry results
+ *
+ * Consumes Odometry::State to maintain a pose graph, detect loop closures, save and load maps, and
+ * relocalize in an existing map.
  *
  * Thread safety: all methods must be called from a single thread, except LocalizeInMap()
  * and SaveMap() which may be called concurrently with any other method from another thread.
@@ -788,6 +810,12 @@ public:
     /// How long the past is preserved. Maximum time to keep odometries delta history to be able to process
     /// LocalizeInMap within timestamps from past.
     uint32_t retention_time_ms = 5000;
+    /// Length of the SLAM input queue at which cuVSLAM warns that SLAM is falling behind odometry. Diagnostic only:
+    /// exceeding it does not change tracking behavior, it only prints a warning. SLAM runs in a background thread and
+    /// is fed a queue of commands (keyframes, map localization, map saving); if it cannot keep up, the queue grows and
+    /// the poses and loop closures SLAM reports refer to an increasingly old point of the trajectory. The warning
+    /// requires verbosity Warning or higher (see SetVerbosity). Default: 10 queued commands.
+    uint32_t delay_warning_queue_size = 10;
   };
 
   // TODO(vikuznetsov): remove when https://gcc.gnu.org/bugzilla/show_bug.cgi?id=88165 is fixed
@@ -994,6 +1022,170 @@ public:
 private:
   class Impl;
   std::unique_ptr<Impl> impl;
+};
+
+/**
+ * @brief Visual odometry with optional SLAM, combined behind a single interface
+ *
+ * Tracker owns an Odometry instance and, in the SLAM modes, a Slam instance. It runs the standard
+ * per-frame sequence for you: Odometry::Track(), then Odometry::GetState() and Slam::Track() when
+ * odometry produced a pose, then Slam::GetPose().
+ *
+ * Everything Tracker does can be done by driving Odometry and Slam directly; use those when you
+ * need full control over the two components. Tracker is the recommended entry point otherwise.
+ *
+ * The underlying components stay reachable through GetOdometry() and GetSlam(). Tracker only
+ * coordinates inputs that advance the odometry/SLAM pipeline; queries and module-specific
+ * operations are performed on the component that owns them.
+ *
+ * Thread safety: same as the underlying components. Track() and RegisterImuMeasurement() must be
+ * called from a single thread in non-decreasing timestamp order. Operations performed through
+ * GetOdometry() and GetSlam() follow the thread-safety contracts of those classes.
+ */
+class CUVSLAM_API Tracker {
+public:
+  /// Image set
+  using ImageSet = Odometry::ImageSet;
+
+  /**
+   * @brief What the tracker runs, and in which thread
+   *
+   * The mode states both decisions in one place: whether SLAM runs at all, and whether the bundle
+   * adjuster and SLAM get threads of their own. A realtime mode keeps Track() fast, at the cost of
+   * results that are still being refined after the call returns. An offline mode runs everything in
+   * the calling thread, so each Track() result is final and a run is reproducible.
+   *
+   * The mode does not change the configurations passed to the constructor; it has to agree with
+   * them. `Odometry::Config::async_sba` must be true in a realtime mode and false in an offline one,
+   * and `Slam::Config::sync_mode` the other way round. A mismatch is rejected at construction.
+   */
+  enum class Mode {
+    /// Odometry only, bundle adjustment on a background thread.
+    OdometryOnlyRealtime,
+    /// Odometry only, bundle adjustment in the calling thread.
+    OdometryOnlyOffline,
+    /// Odometry in the calling thread, bundle adjustment and SLAM on background threads.
+    OdometryWithSlamRealtime,
+    /// Odometry and SLAM, both in the calling thread.
+    OdometryWithSlamOffline,
+  };
+
+  /**
+   * @brief Result of a single Track() call
+   */
+  struct TrackResult {
+    /// Odometry pose estimate. On failure `odometry.world_from_rig` is `nullopt`.
+    PoseEstimate odometry;
+    /// SLAM pose in the world frame. Empty when SLAM is disabled or when odometry failed for this
+    /// frame.
+    std::optional<Pose> slam;
+  };
+
+  /**
+   * @brief Construct a tracker
+   *
+   * `mode` selects whether SLAM runs and whether the bundle adjuster and SLAM run on their own
+   * threads, and it must agree with the configurations: a realtime mode needs
+   * `Odometry::Config::async_sba == true` and `Slam::Config::sync_mode == false`, an offline mode
+   * needs the opposite. Tracker never rewrites those fields, so what you configure is what runs.
+   * Note that both default to the realtime values, so the offline modes need configs that say so.
+   *
+   * The one thing Tracker does set is export: in the SLAM modes it enables observation and landmark
+   * export on its own copy of `odometry_config`, because SLAM needs both. The configs passed by the
+   * caller are not modified.
+   *
+   * @param[in] rig               rig setup
+   * @param[in] mode              what to run, and whether to run it in the background
+   * @param[in] odometry_config   odometry configuration
+   * @param[in] slam_config       SLAM configuration, used only in the SLAM modes; nullptr (the
+   * default) means `Slam::GetDefaultConfig()`, which suits `Mode::OdometryWithSlamRealtime`. Must be
+   * nullptr in the odometry-only modes. `Slam::Config::gt_align_mode` is not supported by Tracker;
+   * use standalone Odometry and Slam instances for ground-truth-aligned map building.
+   * @throws std::runtime_error if odometry or SLAM fails to initialize
+   * @throws std::invalid_argument if the rig or a configuration is invalid, if a configuration
+   * disagrees with `mode`, or if `slam_config` is given in an odometry-only mode
+   */
+  explicit Tracker(const Rig& rig, Mode mode, const Odometry::Config& odometry_config = Odometry::GetDefaultConfig(),
+                   const Slam::Config* slam_config = nullptr);
+
+  /**
+   * @brief Move constructor
+   *
+   * @param[in] other other tracker
+   */
+  Tracker(Tracker&& other) noexcept = default;
+
+  /// @brief Destructor
+  ~Tracker() = default;
+
+  /**
+   * @brief Track a rig pose using current frame, and update SLAM
+   *
+   * Runs Odometry::Track() and, when SLAM is enabled and odometry produced a pose, feeds the
+   * odometry state to Slam::Track() and reads back the SLAM pose.
+   *
+   * Odometry poses stay in the same coordinate frame until a loss of tracking. SLAM poses jump when
+   * a loop closure is detected and the pose graph is optimized; they are never adjusted
+   * retroactively, so use GetSlam().GetAllSlamPoses() to get a smooth trajectory up to the latest
+   * frame. In a realtime mode loop closure runs on a separate thread to keep Track() fast, so SLAM
+   * poses are not updated immediately.
+   *
+   * @param[in]  images     synchronized images, no more than the number of cameras in the rig
+   * @param[in]  masks      (Optional) corresponding masks
+   * @param[in]  depths     (Optional) depth images, see Odometry::Track()
+   *
+   * @return odometry pose estimate and, when available, the SLAM pose
+   * @throws std::invalid_argument if image parameters are invalid
+   * @throws std::runtime_error in case of unexpected errors
+   * @see Odometry::Track, Slam::Track
+   */
+  TrackResult Track(const ImageSet& images, const ImageSet& masks = {}, const ImageSet& depths = {});
+
+  /**
+   * @brief Register IMU measurement
+   *
+   * @param[in] sensor_index Sensor index; must be 0, as only one sensor is supported now
+   * @param[in] imu IMU measurements
+   * @throws std::invalid_argument if IMU fusion is disabled or if called out of the order of
+   * timestamps
+   * @see Odometry::RegisterImuMeasurement
+   */
+  void RegisterImuMeasurement(uint32_t sensor_index, const ImuMeasurement& imu);
+
+  /**
+   * @brief Is SLAM enabled
+   *
+   * @return true when the tracker was constructed with one of the SLAM modes
+   */
+  bool IsSlamEnabled() const;
+
+  /**
+   * @brief Get the underlying odometry
+   *
+   * The returned object is for queries only. Do not call Odometry::Track() on an odometry obtained
+   * from Tracker; use Tracker::Track() so SLAM receives every successful odometry state.
+   *
+   * @return read-only odometry owned by this tracker
+   */
+  const Odometry& GetOdometry() const;
+
+  /**
+   * @brief Get the underlying SLAM
+   *
+   * Do not call Slam::Track() on a SLAM instance obtained from Tracker; use Tracker::Track() so
+   * odometry and SLAM remain synchronized.
+   *
+   * @return SLAM owned by this tracker
+   * @throws std::logic_error if SLAM is disabled
+   */
+  Slam& GetSlam();
+
+  /// @copydoc Tracker::GetSlam()
+  const Slam& GetSlam() const;
+
+private:
+  Odometry odometry_;
+  std::unique_ptr<Slam> slam_;  ///< null when SLAM is disabled
 };
 
 }  // namespace cuvslam

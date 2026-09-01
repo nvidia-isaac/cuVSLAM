@@ -3,7 +3,20 @@ API Reference
 
 .. module:: cuvslam
 
-This module provides Python bindings for the cuVSLAM library.
+Tracker coordinates frame and IMU processing across Odometry and optional Slam. Odometry estimates
+rig motion from sensor input; Slam builds and optimizes a reusable map from odometry results.
+
+Main classes
+------------
+
+.. autoclass:: Tracker
+   :members:
+
+.. autoclass:: Odometry
+   :members:
+
+.. autoclass:: Slam
+   :members:
 
 Data Structures
 ---------------
@@ -23,6 +36,12 @@ Data Structures
 .. autoclass:: Rig
    :members:
 
+.. autoclass:: PoseStamped
+   :members:
+
+.. autoclass:: PoseWithCovariance
+   :members:
+
 .. autoclass:: PoseEstimate
    :members:
 
@@ -34,38 +53,6 @@ Data Structures
 
 .. autoclass:: Observation
    :members:
-
-.. autoclass:: cuvslam.core.Odometry.MulticameraMode
-   :members:
-
-.. autoclass:: cuvslam.core.Odometry.OdometryMode
-   :members:
-
-.. autoclass:: cuvslam.core.Odometry.Config
-   :members:
-
-.. autoclass:: cuvslam.core.Odometry.RGBDSettings
-   :members:
-
-.. autoclass:: cuvslam.core.Odometry.MultisensorSettings
-   :members:
-
-.. autoclass:: cuvslam.core.Slam.Config
-   :members:
-
-.. autoclass:: cuvslam.core.Slam.Metrics
-   :members:
-
-.. autoclass:: cuvslam.core.Slam.LocalizationSettings
-   :members:
-
-Tracker class
--------------
-
-.. autoclass:: Tracker
-   :members:
-   :undoc-members:
-   :exclude-members: OdometryMode, MulticameraMode
 
 Functions
 ---------

@@ -19,7 +19,6 @@
 
 #include <sstream>
 
-#include "Eigen/Geometry"
 #include "common/include_gtest.h"
 #include "gflags/gflags.h"
 
@@ -132,109 +131,5 @@ INSTANTIATE_TEST_SUITE_P(CppApiConfigs, VioApi2Test,
                            return ss.str();
                          });
 
-TEST(QuaternionTest, MemoryLayout) {
-  // Create our quaternion in (x,y,z,w) order as we store it in Pose
-  cuvslam::Array<4> quat_xyzw = {0.1f, 0.2f, 0.3f, 0.4f};  // Not normalized for clear testing
-
-  // IMPORTANT: Eigen's Quaternion constructors have different parameter orders!
-  // 1. The scalar constructor takes (w,x,y,z) order: Quaternion(w,x,y,z)
-  // 2. The raw pointer constructor and Eigen::Map interpret memory as (x,y,z,w)
-
-  // 1. Test direct use of the raw pointer constructor
-  Eigen::Quaternionf quat_direct(quat_xyzw.data());
-
-  EXPECT_FLOAT_EQ(quat_direct.x(), quat_xyzw[0]);
-  EXPECT_FLOAT_EQ(quat_direct.y(), quat_xyzw[1]);
-  EXPECT_FLOAT_EQ(quat_direct.z(), quat_xyzw[2]);
-  EXPECT_FLOAT_EQ(quat_direct.w(), quat_xyzw[3]);
-
-  // 2. Test explicit constructor approach
-  // Eigen's scalar constructor takes (w,x,y,z) order, so we need to rearrange
-  Eigen::Quaternionf quat_explicit(quat_xyzw[3], quat_xyzw[0], quat_xyzw[1], quat_xyzw[2]);
-
-  EXPECT_FLOAT_EQ(quat_explicit.x(), quat_xyzw[0]);
-  EXPECT_FLOAT_EQ(quat_explicit.y(), quat_xyzw[1]);
-  EXPECT_FLOAT_EQ(quat_explicit.z(), quat_xyzw[2]);
-  EXPECT_FLOAT_EQ(quat_explicit.w(), quat_xyzw[3]);
-
-  // 3. Test using Eigen::Map
-  Eigen::Map<Eigen::Quaternionf> quat_map(quat_xyzw.data());
-
-  EXPECT_FLOAT_EQ(quat_map.x(), quat_xyzw[0]);
-  EXPECT_FLOAT_EQ(quat_map.y(), quat_xyzw[1]);
-  EXPECT_FLOAT_EQ(quat_map.z(), quat_xyzw[2]);
-  EXPECT_FLOAT_EQ(quat_map.w(), quat_xyzw[3]);
-}
-
-class TestImageFormat : public testing::Test {
-protected:
-  void SetUp() override {
-    // Create a simple camera rig for testing
-    cuvslam::Camera camera;
-    camera.size = {640, 480};
-    camera.focal = {320.0f, 320.0f};
-    camera.principal = {320.0f, 240.0f};
-    rig.cameras.push_back(camera);
-    cfg = cuvslam::Odometry::Config{};
-    tracker = std::make_unique<cuvslam::Odometry>(rig, cfg);
-    timestamp = 1000;
-  }
-
-  cuvslam::Rig rig;
-  cuvslam::Odometry::Config cfg;
-  std::unique_ptr<cuvslam::Odometry> tracker;
-  int64_t timestamp;
-};
-
-TEST_F(TestImageFormat, ValidMonoImage) {
-  // Valid mono image
-  std::vector<uint8_t> valid_mono(480 * 640, 0);
-  cuvslam::Image img;
-  img.timestamp_ns = timestamp;
-  img.camera_index = 0;
-  img.width = 640;
-  img.height = 480;
-  img.pixels = valid_mono.data();
-  img.encoding = cuvslam::Image::Encoding::MONO;
-  img.data_type = cuvslam::Image::DataType::UINT8;
-  img.is_gpu_mem = false;
-  img.pitch = 640;
-
-  auto result = tracker->Track({img});
-  EXPECT_TRUE(result.world_from_rig.has_value());
-}
-
-TEST_F(TestImageFormat, ValidRGBImage) {
-  // Valid RGB image
-  std::vector<uint8_t> valid_rgb(480 * 640 * 3, 0);
-  cuvslam::Image img;
-  img.timestamp_ns = timestamp;
-  img.camera_index = 0;
-  img.width = 640;
-  img.height = 480;
-  img.pixels = valid_rgb.data();
-  img.encoding = cuvslam::Image::Encoding::RGB;
-  img.data_type = cuvslam::Image::DataType::UINT8;
-  img.is_gpu_mem = false;
-  img.pitch = 640 * 3;
-
-  auto result = tracker->Track({img});
-  EXPECT_TRUE(result.world_from_rig.has_value());
-}
-
-TEST_F(TestImageFormat, InvalidDtype) {
-  // Test invalid data type (float32 instead of uint8)
-  std::vector<float> invalid_dtype(480 * 640, 0.0f);
-  cuvslam::Image img;
-  img.timestamp_ns = timestamp;
-  img.camera_index = 0;
-  img.width = 640;
-  img.height = 480;
-  img.pixels = invalid_dtype.data();
-  img.encoding = cuvslam::Image::Encoding::MONO;
-  img.data_type = cuvslam::Image::DataType::FLOAT32;
-  img.is_gpu_mem = false;
-  img.pitch = 640 * sizeof(float);
-
-  EXPECT_THROW(tracker->Track({img}), std::invalid_argument);
-}
+// Tests that need no dataset live in libs/cuvslam/test, where ctest runs them. This file keeps only
+// the edex replay suite, which requires --data_folder.

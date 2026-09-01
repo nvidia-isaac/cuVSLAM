@@ -50,9 +50,27 @@ public:
   void reset() final;
 
 private:
-  std::unordered_map<CameraId,                                            // primary cam id
-                     std::unordered_map<CameraId,                         // secondary cam id
-                                        std::unique_ptr<IFeatureTracker>  // tracker primary -> secondary
+  // Per-observation winner slot — mirrors GPU's `winner_scratch[i]` (a `TrackData`) so both
+  // implementations use one scratch vector per observation instead of parallel arrays.
+  // `tracked` is `uint8_t` to avoid the bit-packed `std::vector<bool>` specialization.
+  struct CPUWinner {
+    Vector2T uvR;
+    Matrix2T info;
+    uint8_t tracked = 0;
+  };
+
+  struct PrimaryToSecondaryCPUTracker {
+    std::unique_ptr<IFeatureTracker> tracker;
+    // Per-frame / per-observation scratch. Kept as members (rather than locals) so allocations
+    // and inner-vector capacities persist across Launch calls.
+    std::vector<Vector2T> uvL;
+    std::vector<std::vector<Vector2T>> cands;
+    std::vector<CPUWinner> winners;
+  };
+
+  std::unordered_map<CameraId,                                        // primary cam id
+                     std::unordered_map<CameraId,                     // secondary cam id
+                                        PrimaryToSecondaryCPUTracker  // tracker primary -> secondary
                                         >>
       secondary_from_primary_sof_;
 

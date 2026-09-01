@@ -66,20 +66,20 @@ Below is an example demonstrating loop closure detection. When the vehicle revis
 
 ![Loop Closure Demonstration](../assets/tutorial_kitti_lc.gif)
 
-To enable SLAM in PyCuVSLAM, you must provide a SLAM configuration when initializing the tracker:
+To enable SLAM in PyCuVSLAM, pick a SLAM tracker mode — the mode is what turns SLAM on, not the configuration. `slam_config` is optional and only overrides the SLAM defaults, which already suit `Mode.OdometryWithSlamRealtime`; the example below passes one to show the fields discussed further down:
 
 ```python
-odom_cfg = cuvslam.Tracker.OdometryConfig(...)
-slam_cfg = cuvslam.Tracker.SlamConfig(sync_mode=...)
-tracker = cuvslam.Tracker(cuvslam.Rig(...), odom_cfg, slam_cfg)
+odom_cfg = cuvslam.Odometry.Config(async_sba=True)
+slam_cfg = cuvslam.Slam.Config(sync_mode=False)
+tracker = cuvslam.Tracker(cuvslam.Rig(...), cuvslam.Tracker.Mode.OdometryWithSlamRealtime, odom_cfg, slam_cfg)
 ```
 
-SLAM can operate in two modes:
+SLAM can operate in two modes, selected by the tracker mode. The mode has to agree with the two configuration fields, and the tracker reports an error if it does not: a realtime mode needs `async_sba=True` and `sync_mode=False`, an offline mode needs the opposite.
 
-- **Asynchronous (`sync_mode=False`, recommended for real-time applications):**
+- **Asynchronous (`Mode.OdometryWithSlamRealtime`, `async_sba=True`, `sync_mode=False`, recommended for real-time applications):**
   SLAM processing runs in a separate, non-blocking thread, allowing visual odometry to continue uninterrupted.
 
-- **Synchronous (`sync_mode=True`):**
+- **Synchronous (`Mode.OdometryWithSlamOffline`, `async_sba=False`, `sync_mode=True`):**
   SLAM processing runs in the same thread as odometry, causing visual tracking to pause at each keyframe until all SLAM-related processing completes. This can cause noticeable delays (seconds-long pauses), making it unsuitable for real-time camera-based applications.
 
 Now, each call to `tracker.track` will return both an odometry and SLAM poses:
@@ -102,7 +102,7 @@ At the end of the mapping process, the trajectory and map will be saved as `traj
 
 After the mapping stage, you can reuse the previously stored map and trajectory to perform localization from an arbitrary starting point. For example, you may start from frame index `IDX = 700`. PyCuVSLAM will use the corresponding stereo pair and pose from the saved trajectory as an initial guess for localization.
 
-To use SLAM localization, first configure localization parameters using `cuvslam.Tracker.SlamLocalizationSettings`. Then, pass these settings to the method `tracker.localize_in_map`. After initiating localization, PyCuVSLAM will search for matching visual features in the loaded map near the provided initial pose guess. If localization succeeds, you will see a confirmation message on the terminal, and the new initial coordinates will be updated accordingly.
+To use SLAM localization, first configure localization parameters using `cuvslam.Slam.LocalizationSettings`. Then, pass these settings to `tracker.slam.localize_in_map`. After initiating localization, PyCuVSLAM will search for matching visual features in the loaded map near the provided initial pose guess. If localization succeeds, you will see a confirmation message on the terminal, and the new initial coordinates will be updated accordingly.
 
 As a result, the initial pose displayed will reflect the localized position (no longer zero translation or unit rotation). Additionally, loop closure detection events will trigger immediately, as the complete map from the mapping stage is already loaded:
 
@@ -112,7 +112,7 @@ As a result, the initial pose displayed will reflect the localized position (no 
 
 - **Keep cameras stationary while localizing.** Ideally, an agent should be continuously exploring the area near the initial pose hint while localizing. However, in the current implementation, there is a delay before the localization result is applied to the SLAM pose, which causes unexpected jumps if the agent moves during this delay. For reliable localization, either move at a very slow speed or stop the agent for a couple of seconds while localization takes place.
 - **Continue calling `track()` after `localize_in_map()`.** You should continue supplying images to the library during localization. The asynchronous SLAM thread needs ongoing `track()` calls to process the localization request. Keep calling `track()` until the SLAM pose it returns reflects the localized position. If you test localization on recordings with moving cameras, call `track()` after `localize_in_map()` with the same image frame but with incrementing timestamps.
-- **If you experience trouble localizing or see pose jumps after localization, try synchronous SLAM mode** (`sync_mode=True`). In sync mode, localization completes within the `localize_in_map()` call. However, all SLAM operations also block the `track()` calls, resulting in a substantial slowdown.
+- **If you experience trouble localizing or see pose jumps after localization, try synchronous SLAM mode** (`Mode.OdometryWithSlamOffline` with `async_sba=False` and `sync_mode=True`). In sync mode, localization completes within the `localize_in_map()` call. However, all SLAM operations also block the `track()` calls, resulting in a substantial slowdown.
 - A redesign of the asynchronous SLAM pipeline is underway to remove these workarounds.
 
 ## Running PyCuVSLAM with input masks
@@ -187,4 +187,4 @@ Run the example script to visualize the estimated trajectory, left stereo images
 python3 track_kitti_masks.py
 ```
 
-**Performance Tip:** To reduce computational overhead, run PyCuVSLAM in `Tracker.MulticameraMode.Performance` mode and provide masks only for the left-camera images. In this mode, PyCuVSLAM selects visual features exclusively from the left-camera images for pose estimation from provided stereo-pair
+**Performance Tip:** To reduce computational overhead, run PyCuVSLAM in `Odometry.MulticameraMode.Performance` mode and provide masks only for the left-camera images. In this mode, PyCuVSLAM selects visual features exclusively from the left-camera images for pose estimation from the provided stereo pair.

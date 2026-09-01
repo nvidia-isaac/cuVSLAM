@@ -67,7 +67,7 @@ The tracker looks for the EDEX at `CUVSLAM_DATASETS/<edex>/<edex_filename>` and 
 
 | Flag | Default | Description |
 |---|---|---|
-| `-async_sba` | `false` | `false` = blocking SBA (deterministic). Keep `false` for debugging. |
+| `-async_sba` | `false` | `false` = blocking SBA (deterministic), and selects an offline `Tracker.Mode`. Keep `false` for debugging, with `-sync_slam=true`. |
 | `-slam_reproduce_mode` | `false` | Sync + non-random SLAM for exact reproducibility |
 
 ### SLAM

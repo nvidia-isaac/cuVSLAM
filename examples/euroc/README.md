@@ -4,7 +4,7 @@ This tutorial demonstrates how to run PyCuVSLAM Stereo-Inertial Visual Odometry 
 
 ## Visual Tracking Modes
 
-PyCuVSLAM supports multiple visual tracking modes. You can specify the desired tracking mode through the `cuvslam.Tracker.OdometryConfig` object when initializing visual tracking. Tracking modes can be set either by using enumeration values or directly using their respective names:
+PyCuVSLAM supports multiple visual tracking modes. You can specify the desired tracking mode through the `cuvslam.Odometry.Config` object when initializing visual tracking. Tracking modes can be set either by using enumeration values or directly using their respective names:
 
 * **Stereo**: Visual tracking using stereo cameras. This mode can be extended to multiple stereo cameras (*PyCuVSLAM default mode*, set as `OdometryMode(0)` or `OdometryMode.Multicamera`)
 
@@ -19,7 +19,7 @@ PyCuVSLAM supports multiple visual tracking modes. You can specify the desired t
 PyCuVSLAM exercises three modes on the EuRoC MAV dataset — Stereo (`Multicamera`), Stereo-Inertial (`Inertial`), and Monocular (`Mono`) — because *Mono-Depth* has no aligned depth stream (see the [TUM-RGBD dataset example](../tum/README.md)) and *Multisensor* has its own [example](../multisensor/README.md). You can try different tracking modes by modifying the following line in `track_euroc.py`:
 
 ```python
-euroc_tracking_mode = cuvslam.Tracker.OdometryMode(1)
+euroc_tracking_mode = cuvslam.Odometry.OdometryMode(1)
 ```
 
 ## Distortion Models

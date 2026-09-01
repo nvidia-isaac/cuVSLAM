@@ -21,6 +21,7 @@ set(HEADERS
     fundamental_ransac.h
     homography.h
     homography_ransac.h
+    near_plane.h
     optscalar_triangle_ransac.h
     point_reconstruction.h
     points_normalization.h

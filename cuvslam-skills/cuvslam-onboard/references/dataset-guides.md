@@ -48,7 +48,7 @@ python3 track_kitti_masks.py
 ```
 Uses NVIDIA Segformer to segment cars in real-time and exclude them from feature detection.
 
-**Performance tip:** Use `Tracker.MulticameraMode.Performance` and provide masks only for left-camera images to reduce compute overhead.
+**Performance tip:** Use `Odometry.MulticameraMode.Performance` and provide masks only for left-camera images to reduce compute overhead.
 
 ---
 

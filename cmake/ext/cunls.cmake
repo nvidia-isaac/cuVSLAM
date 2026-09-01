@@ -25,6 +25,11 @@ if(NOT USE_CUDA)
     message(FATAL_ERROR "USE_CUNLS requires USE_CUDA")
 endif()
 
+if(CUDAToolkit_VERSION VERSION_LESS "12.6")
+    message(FATAL_ERROR "USE_CUNLS requires CUDA >= 12.6 (found ${CUDAToolkit_VERSION}). "
+                        "Either install CUDA 12.6+ or set -DUSE_CUNLS=OFF.")
+endif()
+
 set(CUNLS_VERSION "Release_07_13_2026")
 
 # Keep cuNLS's own tests and Python bindings out of this build.

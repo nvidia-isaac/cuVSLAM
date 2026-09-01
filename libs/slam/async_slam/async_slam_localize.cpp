@@ -137,15 +137,20 @@ void AsyncSlam::LocalizeInMapCmd::Execute(AsyncSlam& async_slam, FrameId, const 
   CALLBACK_AND_RETURN_IF(!result.slam_from->SelectHeadKeyframe(result.from_keyframe_id, timestamp_ns_), finish_cb_,
                          Pose, "Internal error during set head keyframe.");
 
-  const PoseGraphOptimizerOptions pgo_opt = async_slam.slam_->GetPoseGraphOptimizerOptions();
+  PoseGraphOptimizerOptions pgo_opt;
+  std::optional<std::vector<CameraId>> maybe_active_cameras;
+  {
+    std::lock_guard slam_guard(async_slam.slam_mutex_);
+    pgo_opt = async_slam.slam_->GetPoseGraphOptimizerOptions();
+    result.slam_from->SetReproduceMode(async_slam.slam_->GetReproduceMode());
+    result.slam_from->SetLandmarksSpatialIndex(async_slam.slam_->GetLandmarksSpatialIndexOptions());
+    result.slam_from->SetKeyframesLimit(async_slam.slam_->GetKeyframesLimit());
+    result.slam_from->SetKeepTrackPoses(async_slam.slam_->GetKeepTrackPoses());
+    maybe_active_cameras = async_slam.slam_->GetActiveCameras();
+  }
   CALLBACK_AND_RETURN_IF(!result.slam_from->SetPoseGraphOptimizerOptions(pgo_opt), finish_cb_, Pose,
                          "Internal error during set PoseGraphOptimizerOptions.");
 
-  result.slam_from->SetReproduceMode(async_slam.slam_->GetReproduceMode());
-  result.slam_from->SetLandmarksSpatialIndex(async_slam.slam_->GetLandmarksSpatialIndexOptions());
-  result.slam_from->SetKeyframesLimit(async_slam.slam_->GetKeyframesLimit());
-  result.slam_from->SetKeepTrackPoses(async_slam.slam_->GetKeepTrackPoses());
-  const auto maybe_active_cameras = async_slam.slam_->GetActiveCameras();
   if (maybe_active_cameras) {
     result.slam_from->SetActiveCameras(maybe_active_cameras.value());
   }

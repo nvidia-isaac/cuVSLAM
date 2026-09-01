@@ -74,6 +74,19 @@ auto bind_array_accessors(nb::class_<T>& cls, const char* name, std::array<Eleme
       doc);
 }
 
+// PyCuVSLAM prioritises convenience over the C++ defaults: observation and landmark export are on
+// unless the caller turns them off. Both the Odometry.Config constructor and Tracker's default
+// odometry config use these, so the two cannot drift apart.
+constexpr bool kPyDefaultEnableObservationsExport = true;
+constexpr bool kPyDefaultEnableLandmarksExport = true;
+
+Odometry::Config PyDefaultOdometryConfig() {
+  Odometry::Config cfg;
+  cfg.enable_observations_export = kPyDefaultEnableObservationsExport;
+  cfg.enable_landmarks_export = kPyDefaultEnableLandmarksExport;
+  return cfg;
+}
+
 enum class ArrayType {
   Image,
   Mask,
@@ -146,6 +159,22 @@ cuvslam::Image ImageFromNDArray(const nb::ndarray<nb::ro>& tensor, int64_t times
   img.pixels = tensor.data();
 
   return img;
+}
+
+// Converts a per-camera list of arrays into an ImageSet. Cameras are identified by their position in
+// the list; empty entries are skipped, which is how callers signal "no data for this camera".
+Odometry::ImageSet ImageSetFromNDArrays(const std::vector<nb::ndarray<nb::ro>>& images, int64_t timestamp,
+                                        ArrayType array_type) {
+  Odometry::ImageSet images_set;
+  images_set.reserve(images.size());
+  uint32_t cam_id = 0;
+  for (auto& image : images) {
+    if (image.data() && image.size() != 0) {
+      images_set.push_back(ImageFromNDArray(image, timestamp, cam_id, array_type));
+    }
+    ++cam_id;
+  }
+  return images_set;
 }
 
 }  // namespace
@@ -266,8 +295,7 @@ NB_MODULE(pycuvslam, m) {
       .value("Brown", Distortion::Model::Brown, "Brown distortion model with 3 radial and 2 tangential coefficients")
       .value("Fisheye", Distortion::Model::Fisheye, "Fisheye distortion model (equidistant) with 4 coefficients")
       .value("Polynomial", Distortion::Model::Polynomial,
-             "Polynomial distortion model with 8 coefficients, order: (k1, k2, p1, p2, k3, k4, k5, k6)")
-      .export_values();
+             "Polynomial distortion model with 8 coefficients, order: (k1, k2, p1, p2, k3, k4, k5, k6)");
 
   auto cam_cls =
       nb::class_<Camera>(m, "Camera",
@@ -393,15 +421,17 @@ NB_MODULE(pycuvslam, m) {
   // Data structures from Odometry class
 
   // Odometry class must be defined before its nested enums/classes are bound to it.
-  auto odom_cls = nb::class_<Odometry>(m, "Odometry", "Visual Inertial Odometry (VIO) Tracker");
+  auto odom_cls = nb::class_<Odometry>(
+      m, "Odometry",
+      "Estimates the rig pose from synchronized camera images and optional depth/IMU data.\n\n"
+      "Use directly for odometry-only workflows, or access Tracker's instance through its `odometry` property.");
 
-  nb::enum_<Odometry::MulticameraMode>(odom_cls, "MulticameraMode")
+  nb::enum_<Odometry::MulticameraMode>(odom_cls, "MulticameraMode", "Multicamera tracking modes")
       .value("Performance", Odometry::MulticameraMode::Performance, "Optimized for speed")
       .value("Precision", Odometry::MulticameraMode::Precision, "Optimized for accuracy")
-      .value("Moderate", Odometry::MulticameraMode::Moderate, "Balance between speed and accuracy")
-      .export_values();
+      .value("Moderate", Odometry::MulticameraMode::Moderate, "Balance between speed and accuracy");
 
-  nb::enum_<Odometry::OdometryMode>(odom_cls, "OdometryMode")
+  nb::enum_<Odometry::OdometryMode>(odom_cls, "OdometryMode", "Sensor configurations supported by odometry")
       .value("Multicamera", Odometry::OdometryMode::Multicamera,
              "Uses multiple synchronized cameras, all cameras need to have frustum overlap with at least one another. "
              "Simplest case: stereo camera pair.")
@@ -422,8 +452,7 @@ NB_MODULE(pycuvslam, m) {
              " - The current solver supports pinhole cameras; other camera models are not supported.\n"
              " - Depth images passed to track() must be 2D uint16 ndarrays (cuVSLAM's C++ contract also accepts "
              "FLOAT32, but the current PyCuVSLAM binding only exposes uint16); each depth image's camera_index must "
-             "appear in MultisensorSettings.depth_camera_ids.")
-      .export_values();
+             "appear in MultisensorSettings.depth_camera_ids.");
 
   // Multisensor Settings class — describes available sensors at construction time for OdometryMode::Multisensor.
   nb::class_<Odometry::MultisensorSettings>(
@@ -468,25 +497,26 @@ NB_MODULE(pycuvslam, m) {
             .format(settings.depth_scale_factor, settings.depth_camera_id, settings.enable_depth_stereo_tracking);
       });
 
-  nb::class_<Odometry::Config>(odom_cls, "Config")
+  nb::class_<Odometry::Config>(odom_cls, "Config", "Odometry configuration parameters")
       // WARNING: the order of init arguments in this definition must coincide with the order in the structure
       .def(nb::init<Odometry::MulticameraMode, Odometry::OdometryMode, bool, bool, bool, bool, bool, bool, bool, bool,
-                    float, std::string_view, bool, const Odometry::RGBDSettings&,
-                    const Odometry::MultisensorSettings&>(),
+                    float, std::string_view, bool, const Odometry::RGBDSettings&, const Odometry::MultisensorSettings&,
+                    float, float>(),
            nb::kw_only(), nb::arg("multicam_mode") = Odometry::Config{}.multicam_mode,
            nb::arg("odometry_mode") = Odometry::Config{}.odometry_mode, nb::arg("use_gpu") = Odometry::Config{}.use_gpu,
            nb::arg("async_sba") = Odometry::Config{}.async_sba,
            nb::arg("use_motion_model") = Odometry::Config{}.use_motion_model,
            nb::arg("use_denoising") = Odometry::Config{}.use_denoising,
            nb::arg("rectified_stereo_camera") = Odometry::Config{}.rectified_stereo_camera,
-           nb::arg("enable_observations_export") = true,  // enable by default; in Python convenience is a priority
-           nb::arg("enable_landmarks_export") = true,
+           nb::arg("enable_observations_export") = kPyDefaultEnableObservationsExport,
+           nb::arg("enable_landmarks_export") = kPyDefaultEnableLandmarksExport,
            nb::arg("enable_final_landmarks_export") = Odometry::Config{}.enable_final_landmarks_export,
            nb::arg("max_frame_delta_s") = Odometry::Config{}.max_frame_delta_s,
            nb::arg("debug_dump_directory") = Odometry::Config{}.debug_dump_directory,
            nb::arg("debug_imu_mode") = Odometry::Config{}.debug_imu_mode,
            nb::arg("rgbd_settings") = Odometry::Config{}.rgbd_settings,
-           nb::arg("multisensor_settings") = Odometry::Config{}.multisensor_settings)
+           nb::arg("multisensor_settings") = Odometry::Config{}.multisensor_settings,
+           nb::arg("min_depth") = Odometry::Config{}.min_depth, nb::arg("max_depth") = Odometry::Config{}.max_depth)
       .def_rw("multicam_mode", &Odometry::Config::multicam_mode, "See :class:`Odometry.MulticameraMode`")
       .def_rw("odometry_mode", &Odometry::Config::odometry_mode, "See :class:`Odometry.OdometryMode`")
       .def_rw("use_gpu", &Odometry::Config::use_gpu, "Enable to use GPU acceleration")
@@ -509,7 +539,14 @@ NB_MODULE(pycuvslam, m) {
       .def_rw("rgbd_settings", &Odometry::Config::rgbd_settings,
               "Settings for RGB-D odometry mode. See :class:`Odometry.RGBDSettings`")
       .def_rw("multisensor_settings", &Odometry::Config::multisensor_settings,
-              "Settings for Multisensor odometry mode. See :class:`Odometry.MultisensorSettings`");
+              "Settings for Multisensor odometry mode. See :class:`Odometry.MultisensorSettings`")
+      .def_rw("min_depth", &Odometry::Config::min_depth,
+              "Minimum scene depth (meters) sampled along the epipolar curve for L2R tracking. "
+              "Used in every odometry mode that tracks between overlapping camera pairs (Multicamera, Inertial, "
+              "RGBD, Multisensor); ignored in Mono. Any negative value (e.g. -1) auto-detects from baseline.")
+      .def_rw("max_depth", &Odometry::Config::max_depth,
+              "Maximum scene depth (meters) sampled along the epipolar curve for L2R tracking. "
+              "Used in the same modes as min_depth. Any negative value (e.g. -1) auto-detects from baseline.");
 
   // Odometry::State binding
   nb::class_<Odometry::State>(odom_cls, "State",
@@ -640,19 +677,6 @@ NB_MODULE(pycuvslam, m) {
                                        ", images size: " + std::to_string(images.size()));
             }
 
-            auto ImageSetFromNDArrays = [](const std::vector<nb::ndarray<nb::ro>>& images, int64_t timestamp,
-                                           ArrayType array_type) -> Odometry::ImageSet {
-              Odometry::ImageSet images_set;
-              images_set.reserve(images.size());
-              uint32_t cam_id = 0;
-              for (auto& image : images) {
-                if (image.data() && image.size() != 0) {
-                  images_set.push_back(ImageFromNDArray(image, timestamp, cam_id, array_type));
-                }
-                ++cam_id;
-              }
-              return images_set;
-            };
             auto image_set = ImageSetFromNDArrays(images, timestamp, ArrayType::Image);
             auto mask_set = masks.has_value() ? ImageSetFromNDArrays(masks.value(), timestamp, ArrayType::Mask)
                                               : Odometry::ImageSet();
@@ -786,21 +810,24 @@ NB_MODULE(pycuvslam, m) {
           "    parameters (dict[str, str]): Map of key/value string pairs to apply.");
 
   // Slam class must be defined before its nested enums/classes are bound to it.
-  auto slam_cls = nb::class_<Slam>(m, "Slam", "Simultaneous Localization and Mapping (SLAM)");
+  auto slam_cls = nb::class_<Slam>(
+      m, "Slam",
+      "Builds and optimizes a reusable map from odometry results, including loop closure, map persistence, and "
+      "relocalization.\n\n"
+      "Use directly for manual orchestration, or access Tracker's instance through its `slam` property.");
 
   nb::enum_<Slam::DataLayer>(slam_cls, "DataLayer", "Data layer for SLAM")
       .value("Landmarks", Slam::DataLayer::Landmarks, "Landmarks that are visible in the current frame")
       .value("Map", Slam::DataLayer::Map, "Landmarks of the map")
       .value("LoopClosure", Slam::DataLayer::LoopClosure,
-             "Map's landmarks that are visible in the last loop closure event")
-      // currently we don't expose EnableReadingData()/DisableReadingData() to python,
-      // so we only need layer names for ReadLandmarks() binding
-      // .value("PoseGraph", Slam::DataLayer::PoseGraph, "Pose Graph")
-      .export_values();
+             "Map's landmarks that are visible in the last loop closure event");
+  // currently we don't expose EnableReadingData()/DisableReadingData() to python,
+  // so we only need layer names for ReadLandmarks() binding
+  // .value("PoseGraph", Slam::DataLayer::PoseGraph, "Pose Graph");
 
   nb::class_<Slam::Config>(slam_cls, "Config", "SLAM configuration parameters")
-      .def(nb::init<>())
-      .def(nb::init<std::string_view, bool, bool, bool, bool, bool, float, float, uint32_t, uint32_t, uint32_t>(),
+      .def(nb::init<std::string_view, bool, bool, bool, bool, bool, float, float, uint32_t, uint32_t, uint32_t,
+                    uint32_t>(),
            nb::kw_only(), nb::arg("map_cache_path") = Slam::Config{}.map_cache_path,
            nb::arg("use_gpu") = Slam::Config{}.use_gpu, nb::arg("sync_mode") = Slam::Config{}.sync_mode,
            nb::arg("enable_reading_internals") = true,  // enable by default; in Python convenience is a priority
@@ -810,7 +837,8 @@ NB_MODULE(pycuvslam, m) {
            nb::arg("max_landmarks_distance") = Slam::Config{}.max_landmarks_distance,
            nb::arg("max_map_size") = Slam::Config{}.max_map_size,
            nb::arg("throttling_time_ms") = Slam::Config{}.throttling_time_ms,
-           nb::arg("retention_time_ms") = Slam::Config{}.retention_time_ms)
+           nb::arg("retention_time_ms") = Slam::Config{}.retention_time_ms,
+           nb::arg("delay_warning_queue_size") = Slam::Config{}.delay_warning_queue_size)
       .def_rw("map_cache_path", &Slam::Config::map_cache_path,
               "If empty, map is kept in memory only. Else, map is synced to disk (LMDB) at this path, allowing "
               "large-scale maps; if the path already exists it will be overwritten. To load an existing map, use "
@@ -834,14 +862,18 @@ NB_MODULE(pycuvslam, m) {
       .def_rw("retention_time_ms", &Slam::Config::retention_time_ms,
               "How long the past is preserved. Maximum time to keep odometries delta history to be able "
               "to process LocalizeInMap within timestamps from past.")
+      .def_rw("delay_warning_queue_size", &Slam::Config::delay_warning_queue_size,
+              "Length of the SLAM input queue at which cuVSLAM warns that SLAM is falling behind odometry. "
+              "Diagnostic only: exceeding it does not change tracking behavior, it only prints a warning (requires "
+              "verbosity Warning or higher, see set_verbosity). Default: 10 queued commands.")
       .def("__repr__", [](const Slam::Config& cfg) {
         return nb::str(
                    "cuvslam.Slam.Config(map_cache_path={}, use_gpu={}, sync_mode={}, enable_reading_internals={}, "
                    "planar_constraints={}, gt_align_mode={}, map_cell_size={}, max_landmarks_distance={}, "
-                   "max_map_size={}, throttling_time_ms={}, retention_time_ms={})")
+                   "max_map_size={}, throttling_time_ms={}, retention_time_ms={}, delay_warning_queue_size={})")
             .format(cfg.map_cache_path, cfg.use_gpu, cfg.sync_mode, cfg.enable_reading_internals,
                     cfg.planar_constraints, cfg.gt_align_mode, cfg.map_cell_size, cfg.max_landmarks_distance,
-                    cfg.max_map_size, cfg.throttling_time_ms, cfg.retention_time_ms);
+                    cfg.max_map_size, cfg.throttling_time_ms, cfg.retention_time_ms, cfg.delay_warning_queue_size);
       });
 
   nb::class_<Slam::LocalizationSettings>(slam_cls, "LocalizationSettings", "Localization settings")
@@ -1002,19 +1034,7 @@ NB_MODULE(pycuvslam, m) {
           [](Slam& self, const std::string_view& folder_name, int64_t timestamp_ns, const Pose& guess_pose,
              const std::vector<nb::ndarray<nb::ro>>& images, const Slam::LocalizationSettings& settings,
              nb::callable start_cb, nb::callable finish_cb) {
-            auto ImageSetFromNDArrays = [](const std::vector<nb::ndarray<nb::ro>>& images, int64_t timestamp) {
-              Slam::ImageSet images_set;
-              images_set.reserve(images.size());
-              uint32_t cam_id = 0;
-              for (auto& image : images) {
-                if (image.data() && image.size() != 0) {
-                  images_set.push_back(ImageFromNDArray(image, timestamp, cam_id, ArrayType::Image));
-                }
-                ++cam_id;
-              }
-              return images_set;
-            };
-            auto image_set = ImageSetFromNDArrays(images, timestamp_ns);
+            auto image_set = ImageSetFromNDArrays(images, timestamp_ns, ArrayType::Image);
             self.LocalizeInMap(
                 folder_name, timestamp_ns, guess_pose, image_set, settings,
                 [start_cb] {
@@ -1085,6 +1105,142 @@ NB_MODULE(pycuvslam, m) {
           "Get list of last 10 loop closure poses with timestamps.\n\n"
           "Returns:\n"
           "    List of poses with timestamps");
+
+  auto tracker_cls = nb::class_<Tracker>(m, "Tracker",
+                                         "Coordinates cuVSLAM Odometry and optional SLAM.\n\n"
+                                         "Submit frames and IMU measurements through this class. Use the `odometry` "
+                                         "and `slam` properties for module-specific queries and operations.");
+
+  nb::enum_<Tracker::Mode>(tracker_cls, "Mode", "What the tracker runs, and in which thread")
+      .value("OdometryOnlyRealtime", Tracker::Mode::OdometryOnlyRealtime,
+             "Odometry only, bundle adjustment on a background thread.")
+      .value("OdometryOnlyOffline", Tracker::Mode::OdometryOnlyOffline,
+             "Odometry only, bundle adjustment in the calling thread, so every `track()` result is final.")
+      .value("OdometryWithSlamRealtime", Tracker::Mode::OdometryWithSlamRealtime,
+             "Odometry in the calling thread, bundle adjustment and SLAM on background threads.")
+      .value("OdometryWithSlamOffline", Tracker::Mode::OdometryWithSlamOffline,
+             "Odometry and SLAM, both in the calling thread, which makes a run reproducible.");
+
+  tracker_cls
+      .def(
+          "__init__",
+          [](Tracker* self, const Rig& rig, Tracker::Mode mode, const std::optional<Odometry::Config>& odom_config,
+             const std::optional<Slam::Config>& slam_config) {
+            // An omitted config means the Python default, which is not the C++ default.
+            const Odometry::Config odometry_config = odom_config.value_or(PyDefaultOdometryConfig());
+            new (self) Tracker(rig, mode, odometry_config, slam_config.has_value() ? &*slam_config : nullptr);
+          },
+          nb::arg("rig"), nb::arg("mode"), nb::arg("odom_config") = nb::none(), nb::arg("slam_config") = nb::none(),
+          "Initialize the cuVSLAM system. Each `Odometry.OdometryMode` has specific `rig` requirements.\n\n"
+          "`mode` picks whether SLAM runs and whether the bundle adjuster and SLAM get threads of their own. It has "
+          "to agree with the configurations: a realtime mode needs `odom_config.async_sba == True` and "
+          "`slam_config.sync_mode == False`, an offline mode needs the opposite. The tracker checks these rather than "
+          "changing them, so what you configure is what runs. Both fields default to the realtime values, so the "
+          "offline modes need configurations that say so.\n\n"
+          "Parameters:\n"
+          "    rig: Camera rig configuration\n"
+          "    mode: What to run, and whether to run it in the background, see :class:`cuvslam.Tracker.Mode`\n"
+          "    odom_config: Optional odometry configuration (uses defaults if omitted)\n"
+          "    slam_config: SLAM configuration, used only in the SLAM modes; None uses the SLAM defaults, which suit "
+          "`Mode.OdometryWithSlamRealtime`. Must be None in the odometry-only modes. `gt_align_mode` requires "
+          "standalone Odometry and Slam instances.\n\n"
+          "Raises:\n"
+          "    ValueError: If the rig is invalid, if a configuration disagrees with `mode`, or if `slam_config` is "
+          "given in an odometry-only mode.")
+      .def(
+          "track",
+          [](Tracker& self, int64_t timestamp, const std::vector<nb::ndarray<nb::ro>>& images,
+             const std::optional<std::vector<nb::ndarray<nb::ro>>>& masks,
+             const std::optional<std::vector<nb::ndarray<nb::ro>>>& depths)
+              -> std::tuple<PoseEstimate, std::optional<Pose>> {
+            if (masks.has_value()) {
+              THROW_INVALID_ARG_IF(masks->size() != images.size() && !masks->empty(),
+                                   "If the masks vector is not empty, its size must match the images vector size. "
+                                   "Got masks size: " +
+                                       std::to_string(masks->size()) +
+                                       ", images size: " + std::to_string(images.size()));
+            }
+
+            const auto image_set = ImageSetFromNDArrays(images, timestamp, ArrayType::Image);
+            const auto mask_set =
+                masks.has_value() ? ImageSetFromNDArrays(*masks, timestamp, ArrayType::Mask) : Odometry::ImageSet();
+            const auto depth_set =
+                depths.has_value() ? ImageSetFromNDArrays(*depths, timestamp, ArrayType::Depth) : Odometry::ImageSet();
+            auto result = self.Track(image_set, mask_set, depth_set);
+            return {result.odometry, result.slam};
+          },
+          nb::arg("timestamp"), nb::arg("images"), nb::arg("masks") = nb::none(), nb::arg("depths") = nb::none(),
+          "Track a rig pose using current image frame.\n\n"
+          "This method combines odometry and SLAM processing in a single call.\n\n"
+          "In inertial mode, if visual odometry tracker fails to compute a pose, the function returns the position "
+          "calculated from a user-provided IMU data.\n"
+          "If after several calls of Track() visual odometry is not able to recover, then invalid pose will be "
+          "returned.\n"
+          "Odometry will output poses in the same coordinate frame until a loss of tracking.\n\n"
+          "To get SLAM poses, the tracker must be constructed with one of the `Mode.OdometryWithSlam*` modes.\n"
+          "SLAM poses may have loop closure (LC) jumps when LC is detected and pose graph is optimized.\n"
+          "SLAM poses cannot be adjusted retroactively, so use `slam.get_all_slam_poses()` to get a smooth "
+          "trajectory up to the latest frame.\n"
+          "Also, in a realtime mode, LC is done in a separate work thread to keep `track` call fast, so SLAM poses "
+          "are not updated immediately.\n\n"
+          "All cameras must be synchronized. If a camera rig provides 'almost synchronized' frames, the timestamps "
+          "should be within 1 millisecond.\n\n"
+          "Images (masks, depth images, etc.) can be numpy arrays or tensors, both GPU (CUDA) and CPU.\n"
+          "All data must be of the same type (either GPU or CPU).\n"
+          "This is not the same as `odom_config.use_gpu` - if odometry uses GPU for computations,\n"
+          "images etc. can still be either CPU or GPU arrays/tensors.\n\n"
+          "The images etc. must be in the same order as cameras in the rig.\n"
+          "If data for a camera is not available, pass empty array or tensor for that camera image.\n\n"
+          "Parameters:\n"
+          "    timestamp: Images timestamp in nanoseconds\n"
+          "    images: List of numpy arrays or tensors containing the camera images\n"
+          "    masks: Optional list of numpy arrays or tensors containing masks for the images\n"
+          "    depths: Optional list of numpy arrays or tensors containing depth images\n\n"
+          "Returns:\n"
+          "    PoseEstimate: The computed pose estimate from Odometry. On failure `world_from_rig` will be `None`.\n"
+          "    Pose: If SLAM is enabled, the computed pose estimate from SLAM, otherwise `None`.\n\n"
+          "Raises:\n"
+          "    ValueError: If data checks fail (e.g. timestamps are out of order, images sizes are inconsistent, "
+          "etc.).")
+      .def(
+          "register_imu_measurement",
+          [](Tracker& self, uint32_t sensor_index, const ImuMeasurement& imu_measurement) {
+            self.RegisterImuMeasurement(sensor_index, imu_measurement);
+          },
+          nb::arg("sensor_index"), nb::arg("imu_measurement"),
+          "Register an IMU measurement with the tracker.\n\n"
+          "Requires Inertial odometry mode, or Multisensor odometry mode with an IMU configured in the rig.\n\n"
+          "If visual odometry loses camera position, it briefly continues execution using user-provided IMU "
+          "measurements while trying to recover the position. :meth:`register_imu_measurement` should be called in "
+          "between image acquisitions however many IMU measurements there are:\n\n"
+          "- tracker.track\n"
+          "- tracker.register_imu_measurement\n"
+          "- ...\n"
+          "- tracker.register_imu_measurement\n"
+          "- tracker.track\n\n"
+          "Higher frequency IMU measurements are recommended.\n\n"
+          "IMU sensors and cameras clocks must be synchronized. :meth:`track` and "
+          ":meth:`register_imu_measurement` must be called in non-decreasing timestamp order; camera frame "
+          "timestamps must be strictly increasing.\n\n"
+          "Parameters:\n"
+          "    sensor_index: Sensor index; must be 0, as only one sensor is supported now\n"
+          "    imu_measurement: IMU measurement to register\n\n"
+          "Raises:\n"
+          "    ValueError: If IMU fusion is disabled or if called out of the order of timestamps.")
+      .def("is_slam_enabled", &Tracker::IsSlamEnabled, "Return whether this tracker owns a SLAM instance.")
+      .def_prop_ro(
+          "odometry", [](const Tracker& self) -> const Odometry& { return self.GetOdometry(); },
+          nb::rv_policy::reference_internal,
+          "The underlying odometry instance, see :class:`cuvslam.Odometry`.\n\n"
+          "Do not call ``track()`` on an Odometry obtained from Tracker; use ``Tracker.track()`` so SLAM receives "
+          "every successful odometry state.")
+      .def_prop_ro(
+          "slam", [](Tracker& self) -> Slam& { return self.GetSlam(); }, nb::rv_policy::reference_internal,
+          "The underlying SLAM instance, see :class:`cuvslam.Slam`.\n\n"
+          "Do not call ``track()`` on a Slam obtained from Tracker; use ``Tracker.track()`` so odometry and SLAM "
+          "remain synchronized.\n\n"
+          "Raises:\n"
+          "    RuntimeError: If SLAM is not enabled.");
 }
 
 }  // namespace cuvslam

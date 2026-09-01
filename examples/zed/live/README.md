@@ -86,7 +86,7 @@ You should see a visualization showing the camera trajectory along with the inpu
 
 For stereo depth cameras without an IR emitter (which can interfere with stereo image capture), you can add the stereo
 camera input to the RGBD tracker. In this mode, cuVSLAM still utilizes a single visual tracker
-`cuvslam.Tracker.OdometryMode.RGBD`, predicting the camera pose based on both image-depth and stereo-image input data.
+`cuvslam.Odometry.OdometryMode.RGBD`, predicting the camera pose based on both image-depth and stereo-image input data.
 This approach combines the inputs at the solver level, rather than simply blending the results of two separate trackers
 at postprocessing stage.
 
@@ -105,7 +105,7 @@ When using the Mono-Depth + Stereo tracker, ensure that `depth_camera_id` corres
 with the depth image:
 
 ```python
-rgbd_settings = vslam.Tracker.OdometryRGBDSettings()
+rgbd_settings = vslam.Odometry.RGBDSettings()
 rgbd_settings.depth_scale_factor = 1000
 rgbd_settings.depth_camera_id = 0
 rgbd_settings.enable_depth_stereo_tracking = RUN_STEREO

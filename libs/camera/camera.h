@@ -59,12 +59,12 @@ public:
                float max_normalized_uv_radius = 10000.f, float max_xy_radius = 10000.f);
   virtual ~ICameraModel() = default;
 
-  bool normalizePoint(const Vector2T& uv, Vector2T& xy) const;
-  bool denormalizePoint(const Vector2T& xy, Vector2T& uv) const;
+  [[nodiscard]] bool normalizePoint(const Vector2T& uv, Vector2T& xy) const;
+  [[nodiscard]] bool denormalizePoint(const Vector2T& xy, Vector2T& uv) const;
 
-  const Vector2T& getPrincipal() const;
-  const Vector2T& getFocal() const;
-  const Vector2T& getResolution() const;
+  [[nodiscard]] const Vector2T& getPrincipal() const;
+  [[nodiscard]] const Vector2T& getFocal() const;
+  [[nodiscard]] const Vector2T& getResolution() const;
 
 protected:  // for debug purpose, more specific implementation may want to compare result with generic one
   virtual bool distort(const Vector2T& xy, Vector2T& normalized_uv) const = 0;

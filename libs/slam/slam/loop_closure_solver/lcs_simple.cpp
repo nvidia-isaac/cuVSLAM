@@ -20,6 +20,7 @@
 
 #include "camera/observation.h"
 #include "camera/rig.h"
+#include "epipolar/camera_selection.h"
 #include "epipolar/fundamental_ransac.h"
 
 #include "slam/slam/loop_closure_solver/iloop_closure_solver.h"
@@ -210,6 +211,11 @@ void LoopClosureSolverSimple::SelectLandmarksCandidates(const LoopClosureTask& t
     for (LandmarkId id : lsi_candidate_ids) {
       const Vector3T xyz = landmarks_spatial_index.GetLandmarkOrStagedCoords(id, *task.pose_graph_hypothesis);
       const Vector3T point_guess = camera_from_world_guess * xyz;
+      // same near plane the triangulator and the visibility test use — a landmark nearer than this
+      // was never triangulated, and a failed lookup comes back as the origin, at zero depth
+      if (!epipolar::IsDepthInFront(point_guess.z())) {
+        continue;
+      }
       const Vector2T uv_guess_norm = point_guess.topRows(2) / point_guess.z();
       Vector2T uv_guess;
       if (!intrinsics.denormalizePoint(uv_guess_norm, uv_guess)) {

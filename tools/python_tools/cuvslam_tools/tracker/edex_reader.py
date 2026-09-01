@@ -476,7 +476,7 @@ class EdexReader(DatasetReader):
             config_data: Configuration data loaded from stereo.edex
 
         Returns:
-            OdometryRGBDSettings object
+            Odometry.RGBDSettings object
 
         Raises:
             ValueError: If config_data structure is invalid or required fields are missing
@@ -554,14 +554,10 @@ class EdexReader(DatasetReader):
             enable_depth_stereo_tracking = config_data[0].get('enable_depth_stereo_tracking', False)
 
             # Create RGBDSettings
-            rgbd_settings = vslam.Tracker.OdometryRGBDSettings()
+            rgbd_settings = vslam.Odometry.RGBDSettings()
             rgbd_settings.depth_camera_id = depth_camera_id
             rgbd_settings.depth_scale_factor = depth_scale_factor
             rgbd_settings.enable_depth_stereo_tracking = enable_depth_stereo_tracking
-
-            print(f"RGBD settings parsed: depth_camera_id={depth_camera_id}, "
-                  f"depth_scale_factor={depth_scale_factor}, "
-                  f"enable_depth_stereo_tracking={enable_depth_stereo_tracking}")
 
             return rgbd_settings
 

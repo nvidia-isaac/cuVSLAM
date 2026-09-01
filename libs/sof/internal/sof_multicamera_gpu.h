@@ -55,6 +55,12 @@ private:
     GPUArrayPinned<TrackData> tracks_data{1000};
     Stream stream;
     bool was_launched = false;
+    // Per-frame / per-observation scratch. Kept as members (rather than locals) so allocations
+    // and inner-vector capacities persist across Launch calls. `winners[i].track_status` doubles
+    // as the "already succeeded?" flag for point i during the multi-launch scan.
+    std::vector<Vector2T> uvL;
+    std::vector<std::vector<Vector2T>> cands;
+    std::vector<TrackData> winners;
   };
 
   std::unordered_map<CameraId,                                        // primary cam id
@@ -62,8 +68,6 @@ private:
                                         PrimaryToSecondaryGPUTracker  // tracker primary -> secondary
                                         >>
       secondary_from_primary_sof_;
-
-  Settings sof_settings_;
 
   void LaunchTrackingPrimaryToSecondary(CameraId primary_id, CameraId secondary_id, const Sources& curr_sources,
                                         Images& curr_images, const std::vector<camera::Observation>& primary_obs,

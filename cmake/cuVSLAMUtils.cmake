@@ -48,7 +48,6 @@ macro(setup_cuvslam_settings)
         $<$<BOOL:${USE_SLAM_OUTPUT}>:USE_SLAM_OUTPUT>
         $<$<BOOL:${USE_LMDB}>:USE_LMDB>
         $<$<BOOL:${SOF_USE_SMALLER_NCC}>:SOF_USE_SMALLER_NCC>
-        $<$<BOOL:${DECREASE_RANSAC_AREA}>:DECREASE_RANSAC_AREA>
         $<$<BOOL:${USE_NVTX}>:USE_NVTX>
         $<$<BOOL:${USE_CUDA}>:USE_CUDA>
         $<$<BOOL:${ENFORCE_GPU}>:ENFORCE_GPU>
