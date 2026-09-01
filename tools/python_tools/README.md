@@ -4,7 +4,7 @@
 
 It provides command-line tools for:
 
-- Preparing public datasets, including KITTI, EuRoC, TartanGround, and TUM RGB-D.
+- Preparing public datasets, including KITTI, EuRoC, TartanGround, TUM RGB-D, and CODa.
 - Converting ROS 2 bags to EDEX inputs.
 - Running one tracking sequence.
 - Running dataset reports.
@@ -75,6 +75,7 @@ Reinstall the binding after rebuilding `libcuvslam.so`.
 | `prepare_euroc` | Download and convert all 11 official EuRoC MAV sequences, or an explicit subset, to portable EDEX and reporter configs. |
 | `prepare_tartan` | Download TartanGround data and convert TartanGround stereo pairs or compatible TartanAir-layout sequences to EDEX. |
 | `prepare_tum` | Download and convert the 15 evaluated TUM RGB-D freiburg3 sequences, or an explicit subset, to portable EDEX and a reporter config. |
+| `prepare_coda` | Convert manually downloaded CODa sequence archives to portable EDEX and reporter configs. |
 | `cuvslam_tracker` | Run one EDEX sequence or supported video input through cuVSLAM. |
 | `cuvslam_reporter` | Run one dataset config and generate report outputs. |
 | `cuvslam_validator` | Run multiple reporter configs, combine results, and apply validation checks. |
@@ -91,6 +92,7 @@ prepare_kitti --help
 prepare_euroc --help
 prepare_tartan --help
 prepare_tum --help
+prepare_coda --help
 cuvslam_tracker --help
 cuvslam_reporter --help
 cuvslam_validator --help
@@ -221,6 +223,50 @@ cuvslam_reporter \
     --datasets_root /path/to/datasets/converted \
     --output_root /tmp/cuvslam-tum-reports \
     --odometry_mode rgbd \
+    --async_sba false \
+    --use_segments
+```
+
+`prepare_coda` runs `cuvslam_tools.dataset_preparation.coda.prepare`. CODa is license-gated, so nothing is
+downloaded: register and accept the dataset license at the
+[Texas Dataverse record](https://dataverse.tdl.org/dataset.xhtml?persistentId=doi:10.18738/T8/BBOQMV), download the
+per-sequence archives (`0.zip` … `22.zip`) you want, and place them in the raw directory. The command then converts
+every archive it finds there.
+
+```bash
+prepare_coda \
+    --raw-dir /path/to/datasets/coda/raw \
+    --output-dir /path/to/datasets/converted
+
+# One sequence, for a quick check
+prepare_coda \
+    --raw-dir /path/to/datasets/coda/raw \
+    --output-dir /path/to/datasets/converted \
+    --sequences 0
+```
+
+The prepared root is `/path/to/datasets/converted/coda`. It contains `dataset_metadata.json` and
+`coda-vio_slam.cfg`, plus `coda-vio_gt.cfg`, `coda-slam_gt.cfg`, and `coda-vio_slam_gt.cfg` covering the sequences
+that shipped poses. Every sequence contains `stereo.edex`, left images under `00/`, right images under `01/`, and
+`gt.txt` when the archive carried poses.
+
+Archives are read member by member instead of being extracted, because one sequence unpacks to tens of gigabytes and
+only the rectified stereo pair, the calibration, and the poses are used. Images come from `2d_rect/cam0` and
+`2d_rect/cam1`, so both cameras share the left camera's intrinsics and differ only by the baseline. The baseline is
+derived from cam0's `disparity_matrix`, which agrees with the cam0-to-cam1 extrinsic, rather than cam1's
+`projection_matrix`. Ground truth is taken from `poses/dense_global` where it exists and `poses/dense` otherwise
+(sequences 8, 14, and 15), moved from the LiDAR frame onto cam0, and written relative to the first frame. Frames past
+the end of the pose file are dropped from both the images and `gt.txt` so the two stay one-to-one.
+
+Run the combined stereo ODOM+SLAM report with:
+
+```bash
+cuvslam_reporter \
+    --test_config /path/to/datasets/converted/coda/coda-vio_slam_gt.cfg \
+    --datasets_root /path/to/datasets/converted \
+    --output_root /tmp/cuvslam-coda-reports \
+    --odometry_mode multicamera \
+    --rectified_stereo_camera true \
     --async_sba false \
     --use_segments
 ```

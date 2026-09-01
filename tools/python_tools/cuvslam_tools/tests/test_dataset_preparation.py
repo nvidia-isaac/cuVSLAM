@@ -65,7 +65,7 @@ class TestPreparationModuleContract(unittest.TestCase):
 
         self.assertEqual(
             shell_scripts,
-            ["download_euroc.sh", "download_kitti.sh", "download_tum.sh"],
+            ["download_coda.sh", "download_euroc.sh", "download_kitti.sh", "download_tum.sh"],
         )
 
     def test_no_dataset_keeps_a_cli_wrapper_module(self):

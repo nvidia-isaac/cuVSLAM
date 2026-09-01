@@ -105,7 +105,9 @@ class TestShippedRegistry(unittest.TestCase):
 
     def test_unknown_dataset_is_rejected_with_the_known_ids(self):
         # provision_dataset.sh relies on this to reject a stale workflow choice.
-        with self.assertRaisesRegex(RegistryError, r"unknown dataset 'nope' \(known: euroc, kitti, tartan, tum\)"):
+        with self.assertRaisesRegex(
+            RegistryError, r"unknown dataset 'nope' \(known: coda, euroc, kitti, tartan, tum\)"
+        ):
             dataset_registry.validate(["nope"])
 
     def test_preparation_modules_expose_a_callable_prepare(self):
@@ -221,7 +223,7 @@ class TestValidationFailures(unittest.TestCase):
         self.assertEqual(distinct.evals[1].kpi_prefix, "TARTAN_FLAKY")
 
     def test_unknown_dataset_lookup_lists_known_ids(self):
-        with self.assertRaisesRegex(RegistryError, "known: euroc, kitti, tartan, tum"):
+        with self.assertRaisesRegex(RegistryError, "known: coda, euroc, kitti, tartan, tum"):
             dataset_registry.dataset("m3ed_spot")
 
     def test_unknown_suite_filter_fails(self):
