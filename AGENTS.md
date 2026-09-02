@@ -152,8 +152,6 @@ When creating a git branch, use `<user-name>/<branch-name>`, with `<branch-name>
 - Running `pre-commit run --files <file>` on specific files
 
 **Ask the user before running:**
-- `cmake --build ... --parallel` full builds (can take 10+ minutes, high CPU/GPU load)
-- `pip install` or `pip install -e` (modifies the Python environment)
 - Any `git commit` or branch operations (never run `git push`)
 - Deleting or overwriting build artifacts or test data
 - Changing versions of FetchContent dependencies in `cmake/ext/`
