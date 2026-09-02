@@ -128,8 +128,14 @@ def required_archives(sequences: Optional[Sequence[str]] = None) -> List[str]:
 # read with targeted patterns instead of pulling in a YAML parser.
 # ---------------------------------------------------------------------------
 
-def _read_matrix(text: str, key: str) -> Optional[List[float]]:
-    """Return the float list under ``<key>: ... data: [...]``, spanning lines."""
+def _read_matrix(text: str, key: str, sequence: str) -> Optional[List[float]]:
+    """Return the float list under ``<key>: ... data: [...]``, spanning lines.
+
+    An absent key returns None, which the callers turn into their own message. A
+    key that is present but malformed is reported here instead, so a truncated or
+    corrupted calibration file fails as a ConversionError rather than escaping as
+    a bare ValueError.
+    """
     lines = text.splitlines()
     index = 0
     in_section = False
@@ -148,8 +154,13 @@ def _read_matrix(text: str, key: str) -> Optional[List[float]]:
                 while "]" not in buffered and index + 1 < len(lines):
                     index += 1
                     buffered += " " + lines[index].strip()
+                if "]" not in buffered:
+                    raise ConversionError(f"sequence {sequence}: {key} data list is never closed")
                 inner = buffered[: buffered.index("]")]
-                return [float(value.strip()) for value in inner.split(",") if value.strip()]
+                try:
+                    return [float(value.strip()) for value in inner.split(",") if value.strip()]
+                except ValueError as exc:
+                    raise ConversionError(f"sequence {sequence}: {key} holds a non-numeric entry ({exc})") from exc
         index += 1
     return None
 
@@ -416,7 +427,7 @@ def _read_calibration(archive: zipfile.ZipFile, sequence: str) -> Dict:
     """
     text = _read_member(archive, f"calibrations/{sequence}/calib_cam0_intrinsics.yaml", sequence)
 
-    projection = _read_matrix(text, "projection_matrix")
+    projection = _read_matrix(text, "projection_matrix", sequence)
     if projection is None or len(projection) < 8:
         raise ConversionError(f"sequence {sequence}: cannot parse cam0 projection_matrix")
     width = _read_int(text, "image_width")
@@ -424,7 +435,7 @@ def _read_calibration(archive: zipfile.ZipFile, sequence: str) -> Dict:
     if width is None or height is None:
         raise ConversionError(f"sequence {sequence}: cannot parse cam0 image dimensions")
 
-    disparity = _read_matrix(text, "disparity_matrix")
+    disparity = _read_matrix(text, "disparity_matrix", sequence)
     if disparity is None or len(disparity) < 15:
         raise ConversionError(f"sequence {sequence}: cannot parse cam0 disparity_matrix")
     if abs(disparity[14]) < 1e-9:
@@ -444,7 +455,7 @@ def _read_calibration(archive: zipfile.ZipFile, sequence: str) -> Dict:
 def _read_lidar_to_camera(archive: zipfile.ZipFile, sequence: str) -> Tuple[List[List[float]], List[float]]:
     """Return T_os1_from_cam0, the transform ground truth is re-grounded through."""
     text = _read_member(archive, f"calibrations/{sequence}/calib_os1_to_cam0.yaml", sequence)
-    extrinsic = _read_matrix(text, "extrinsic_matrix")
+    extrinsic = _read_matrix(text, "extrinsic_matrix", sequence)
     if extrinsic is None or len(extrinsic) != 16:
         raise ConversionError(f"sequence {sequence}: cannot parse os1_to_cam0 extrinsic_matrix")
     rotation = [extrinsic[row * 4: row * 4 + 3] for row in range(3)]

@@ -193,6 +193,25 @@ class TestCodaLayout(CodaConversionTestCase):
         with self.assertRaisesRegex(convert_coda.ConversionError, "cannot derive baseline"):
             _convert(self.raw_dir, self.output_dir)
 
+    def test_unterminated_data_list_is_reported(self):
+        # A truncated calibration file: the data list never reaches its "]".
+        truncated = _intrinsics_yaml().split("disparity_matrix")[0].rstrip("\n")[:-1]
+        _write_archive(self.raw_dir, poses=_default_poses(), intrinsics=truncated)
+
+        with self.assertRaisesRegex(
+            convert_coda.ConversionError, "projection_matrix data list is never closed"
+        ):
+            _convert(self.raw_dir, self.output_dir)
+
+    def test_non_numeric_calibration_entry_is_reported(self):
+        corrupted = _intrinsics_yaml().replace(repr(_PRINCIPAL[0]), "nul", 1)
+        _write_archive(self.raw_dir, poses=_default_poses(), intrinsics=corrupted)
+
+        with self.assertRaisesRegex(
+            convert_coda.ConversionError, "projection_matrix holds a non-numeric entry"
+        ):
+            _convert(self.raw_dir, self.output_dir)
+
     def test_missing_calibration_member_is_reported(self):
         _write_archive(self.raw_dir, poses=_default_poses(), omit_extrinsics=True)
 

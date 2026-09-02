@@ -77,7 +77,14 @@ check_archive() {
     local path="${out_dir}/${name}"
     local magic
 
-    magic="$(head -c 2 -- "${path}" | od -An -c | tr -d ' ')"
+    # -s above only says the entry is non-empty, so it still passes for an
+    # unreadable file or a directory that happens to be named <n>.zip. Capture
+    # the read failure here; set -e would otherwise abort the run with nothing
+    # but head's own message.
+    if ! magic="$(head -c 2 -- "${path}" | od -An -c | tr -d ' ')"; then
+        echo "error: cannot read ${path} to check that it is a zip archive" >&2
+        exit 1
+    fi
     if [[ "${magic}" != "PK" ]]; then
         echo "error: ${path} is not a zip archive; re-download it from the Texas Dataverse" >&2
         exit 1
