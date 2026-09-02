@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-PROTECTED_REGEX='^(\.github/rulesets/.*|\.github/CODEOWNERS|\.github/workflows/(pr-verify|nightly|provision-datasets)\.yml|scripts/Dockerfile\.(ci|dataset-provision)|\.pre-commit-config\.yaml|scripts/check-isolated-ruleset-change\.sh)$'
+PROTECTED_REGEX='^(\.github/CODEOWNERS|\.github/workflows/(pr-verify|nightly|provision-datasets)\.yml|scripts/Dockerfile\.(ci|dataset-provision)|\.pre-commit-config\.yaml|scripts/check-isolated-ruleset-change\.sh)$'
 
 # Base resolution order: explicit ISOLATION_BASE_REF, then CI's GITHUB_BASE_REF,
 # then the optional positional fallback base (passed by the local pre-push hook).
@@ -64,14 +64,14 @@ if [ -n "$protected" ] && [ -n "$other" ]; then
   echo "  1. Create a protection-only branch from the base and copy just the"
   echo "     protection files onto it, then commit and push for its own PR:"
   echo "       git switch -c protection-update ${base_ref}"
-  echo "       git checkout ${current_branch} -- .github/rulesets .github/CODEOWNERS .github/workflows/pr-verify.yml .github/workflows/nightly.yml .github/workflows/provision-datasets.yml scripts/Dockerfile.ci .pre-commit-config.yaml scripts/check-isolated-ruleset-change.sh"
+  echo "       git checkout ${current_branch} -- .github/CODEOWNERS .github/workflows/pr-verify.yml .github/workflows/nightly.yml .github/workflows/provision-datasets.yml scripts/Dockerfile.ci .pre-commit-config.yaml scripts/check-isolated-ruleset-change.sh"
   echo "       git commit -m 'Update branch protection'"
   echo "       git push -u origin protection-update"
   echo ""
   echo "  2. Back on '${current_branch}', restore the protection files to the base"
   echo "     so this PR no longer touches them, then recommit:"
   echo "       git switch ${current_branch}"
-  echo "       git checkout ${base_ref} -- .github/rulesets .github/CODEOWNERS .github/workflows/pr-verify.yml .github/workflows/nightly.yml .github/workflows/provision-datasets.yml scripts/Dockerfile.ci .pre-commit-config.yaml scripts/check-isolated-ruleset-change.sh"
+  echo "       git checkout ${base_ref} -- .github/CODEOWNERS .github/workflows/pr-verify.yml .github/workflows/nightly.yml .github/workflows/provision-datasets.yml scripts/Dockerfile.ci .pre-commit-config.yaml scripts/check-isolated-ruleset-change.sh"
   echo "       git commit -m 'Move branch-protection changes to their own PR'"
   echo ""
   echo "  3. Push '${current_branch}' and review the two PRs separately."
