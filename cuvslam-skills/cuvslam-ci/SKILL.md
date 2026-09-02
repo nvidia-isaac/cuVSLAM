@@ -18,7 +18,9 @@ Workflows (`.github/workflows/`):
 - `pr-verify.yml` - lint, then build + unit test on x86, Orin, and Thor; eval on the x86 job (fork-gated); posts a KPI table to the PR comment. Jetson benchmarks do not run on PRs.
 - `nightly.yml` - scheduled/manual build + test matrix; eval on the four x86 configs and CUDA micro-benchmarks on Orin and Thor; writes per-config reports and versioned Actions artifacts. Scheduled runs never create a Release. A manual dispatch from a matching `release/vX.Y.Z` branch promotes the same distributable bytes to a protected draft GitHub Release.
 - `provision-datasets.yml` - manual `workflow_dispatch` on the default branch; downloads, converts, and uploads a dataset tarball to S3. The only writer of dataset storage.
-- `sync-rulesets.yml` - applies `.github/rulesets/default-branch-ruleset.json` through the API.
+
+Branch protection is not in this repository. The default-branch ruleset is configured in the GitHub
+UI; read what is actually enforced with `gh api repos/<owner>/<repo>/rules/branches/main`.
 
 CI scripts (`scripts/`):
 
@@ -106,4 +108,4 @@ Detail in [reference.md](reference.md). The load-bearing ones:
 - KPI history directories and eval artifact names carry the `platform-cuda-ubuntu` slug so matrix configs never overwrite each other.
 - Jetson benchmark artifacts carry the same `platform-cuda-ubuntu` slug; Orin and Thor results are reported independently and are never averaged together.
 - Nightly distributables must report `VERSION+<short-checked-out-sha>` without `-modified`.
-- Ruleset, CODEOWNERS, and `.github/workflows/**` changes go in their own `[infra]` MR (enforced by the `isolated-ruleset-change` pre-commit hook).
+- CODEOWNERS and CI workflow changes go in their own `[infra]` MR (enforced by the `isolated-ruleset-change` pre-commit hook). The hook's protected list is the authority on which paths qualify.
