@@ -25,6 +25,51 @@
 
 namespace cuvslam::odom {
 
+namespace {
+
+bool IsAllZeroHostU8(const ImageSource& source, const ImageShape& shape) {
+  if (source.data == nullptr || source.memory_type != ImageSource::Host || source.type != ImageSource::U8) {
+    return false;
+  }
+
+  const size_t num_channels = source.image_encoding == ImageEncoding::RGB8 ? 3 : 1;
+  const auto* data = static_cast<const uint8_t*>(source.data);
+  const size_t num_values = static_cast<size_t>(shape.width) * static_cast<size_t>(shape.height) * num_channels;
+  return std::all_of(data, data + num_values, [](uint8_t value) { return value == 0; });
+}
+
+bool AreAllAvailableImagesBlack(const Sources& sources, const sof::Images& images) {
+  bool saw_image = false;
+  for (size_t cam_id = 0; cam_id < images.size(); ++cam_id) {
+    if (images[cam_id] == nullptr || cam_id >= sources.size() || sources[cam_id].data == nullptr) {
+      continue;
+    }
+    saw_image = true;
+    if (!IsAllZeroHostU8(sources[cam_id], images[cam_id]->get_image_meta().shape)) {
+      return false;
+    }
+  }
+  return saw_image;
+}
+
+void DropCurrentImages(sof::Images& images) {
+  for (auto& image : images) {
+    image = nullptr;
+  }
+}
+
+void ClearFrameStat(IVisualOdometry::VOFrameStat* stat) {
+  if (!stat) {
+    return;
+  }
+  stat->keyframe = false;
+  stat->heating = false;
+  stat->tracks2d.clear();
+  stat->tracks3d.clear();
+}
+
+}  // namespace
+
 MultiVisualOdometryBase::MultiVisualOdometryBase(const camera::Rig& rig, const camera::FrustumIntersectionGraph& fig,
                                                  const Settings& settings, bool use_gpu)
 
@@ -73,10 +118,36 @@ bool MultiVisualOdometryBase::track(const Sources& curr_sources, [[maybe_unused]
   TRACE_EVENT ev = profiler_domain_.trace_event("MultiVisualOdometryBase::track()", profiler_color_);
   const int64_t timestamp = (*first_image)->get_image_meta().timestamp;  // current frame timestamp
   Isometry3T predicted_world_from_rig = prev_world_from_rig_;
+  Isometry3T world_from_rig;
   pipelines::ISFMSolver& solver = get_solver();
 
   if (settings_.use_prediction) {
     do_predict(&prediction_model_, timestamp, predicted_world_from_rig);
+  }
+
+  if (can_track_visual_blackout() && AreAllAvailableImagesBlack(curr_sources, curr_images)) {
+    for (auto& cam_observations : observations_) {
+      cam_observations.clear();
+    }
+
+    const bool have_pose = solver.solveNextFrame(
+        timestamp, sof::FrameState::None, observations_, world_from_rig, static_info_exp,
+        {per_frame_setting.sba, per_frame_setting.sm, per_frame_setting.vo_pnp, per_frame_setting.inertial_stereo_pnp,
+         per_frame_setting.imu_pnp, per_frame_setting.icp});
+
+    DropCurrentImages(curr_images);
+    if (!have_pose) {
+      ClearFrameStat(last_frame_stat_.get());
+      delta = Isometry3T::Identity();
+      static_info_exp.setZero();
+      return false;
+    }
+
+    ClearFrameStat(last_frame_stat_.get());
+    prediction_model_.add_known_pose(world_from_rig, timestamp);
+    delta = prev_world_from_rig_.inverse() * world_from_rig;
+    prev_world_from_rig_ = world_from_rig;
+    return true;
   }
 
   sof::FrameState frame_type;
@@ -98,7 +169,6 @@ bool MultiVisualOdometryBase::track(const Sources& curr_sources, [[maybe_unused]
   IVisualOdometry::VOFrameStat* stat = last_frame_stat_.get();
   std::vector<Track2D>* tracks2d = stat ? &(stat->tracks2d) : nullptr;
   Tracks3DMap* tracks3d = stat ? &(stat->tracks3d) : nullptr;
-  Isometry3T world_from_rig;
 
   const bool have_pose =
       solver.solveNextFrame(timestamp, frame_type, observations_, world_from_rig, static_info_exp,
