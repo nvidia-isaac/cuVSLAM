@@ -610,6 +610,22 @@ class TestBindings(unittest.TestCase):
         ]
         self.assertEqual(len(values), len(set(values)))
 
+    def test_tracker_mode_enum(self):
+        # Verify all exposed enum values exist
+        self.assertIsNotNone(vslam.Tracker.Mode.OdometryOnlyRealtime)
+        self.assertIsNotNone(vslam.Tracker.Mode.OdometryOnlyOffline)
+        self.assertIsNotNone(vslam.Tracker.Mode.OdometryWithSlamRealtime)
+        self.assertIsNotNone(vslam.Tracker.Mode.OdometryWithSlamOffline)
+
+        # Values should be distinct
+        values = [
+            vslam.Tracker.Mode.OdometryOnlyRealtime,
+            vslam.Tracker.Mode.OdometryOnlyOffline,
+            vslam.Tracker.Mode.OdometryWithSlamRealtime,
+            vslam.Tracker.Mode.OdometryWithSlamOffline,
+        ]
+        self.assertEqual(len(values), len(set(values)))
+
 
 if __name__ == "__main__":
     unittest.main()

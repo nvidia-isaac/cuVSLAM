@@ -513,7 +513,7 @@ int main(int argc, char **argv) {
     slam_config.enable_reading_internals = true;
 
     std::cout << "Initializing tracker (odometry + SLAM)..." << std::endl;
-    cuvslam::Tracker tracker(rig, odometry_config, &slam_config);
+    cuvslam::Tracker tracker(rig, cuvslam::Tracker::Mode::OdometryWithSlamOffline, odometry_config, &slam_config);
 
     // Reading SLAM data layers is not mirrored on Tracker, so reach the SLAM instance directly.
     // It is non-null here because the config above enables SLAM.

@@ -30,7 +30,7 @@ for i in range(2):
 rig = vslam.Rig(cameras=cameras, imus=[])
 # Create a tracker with horizontal (rectified) stereo camera; SLAM is disabled.
 odom_cfg = vslam.Odometry.Config(rectified_stereo_camera=True)
-tracker = vslam.Tracker(rig, odom_cfg)
+tracker = vslam.Tracker(rig, vslam.Tracker.Mode.OdometryOnlyRealtime, odom_cfg)
 
 print("cuVSLAM version:", vslam.get_version())
 print("Odometry.Config:")

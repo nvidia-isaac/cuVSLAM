@@ -115,7 +115,7 @@ odom_cfg = vslam.Odometry.Config(
     async_sba=False,
 )
 
-tracker = vslam.Tracker(rig, odom_cfg)
+tracker = vslam.Tracker(rig, vslam.Tracker.Mode.OdometryOnlyOffline, odom_cfg)
 print(f"cuVSLAM Tracker initialized with odometry mode: {cfg.odometry_mode}"
       f"{' (IMU disabled)' if not use_imu else ''}")
 

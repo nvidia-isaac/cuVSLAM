@@ -88,7 +88,7 @@ odom_cfg = cuvslam.Odometry.Config(
     enable_final_landmarks_export=True,
     rectified_stereo_camera=True
 )
-tracker = cuvslam.Tracker(cuvslam.Rig(cameras), odom_cfg)
+tracker = cuvslam.Tracker(cuvslam.Rig(cameras), cuvslam.Tracker.Mode.OdometryOnlyOffline, odom_cfg)
 
 # Get timestamps from times.txt file
 timestamps = [
