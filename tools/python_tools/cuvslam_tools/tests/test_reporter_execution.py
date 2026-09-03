@@ -262,6 +262,10 @@ class TestReporterExecution(unittest.TestCase):
                 {"dataset_folder": "dataset", "sequence_cfgs": [{"enable": "false"}]},
                 r"Reporter config sequence_cfgs\[0\] key enable must be a boolean",
             ),
+            (
+                {"dataset_folder": "dataset", "sequence_cfgs": [{"enable": False, "gt_from_shuttle": "false"}]},
+                r"Reporter config sequence_cfgs\[0\] key gt_from_shuttle must be a boolean",
+            ),
         ]
 
         for reporter_config, error in cases:
@@ -273,6 +277,17 @@ class TestReporterExecution(unittest.TestCase):
                         "/datasets",
                         max_workers=1,
                     )
+
+    def test_run_parallel_tracking_skips_a_disabled_sequence_stub(self):
+        # A disabled sequence may still be a stub: only flags it does carry are checked.
+        stats = execution.run_parallel_tracking(
+            {"dataset_folder": "dataset", "sequence_cfgs": [{"enable": False, "use_slam": True}]},
+            argparse.Namespace(),
+            "/datasets",
+            max_workers=1,
+        )
+
+        self.assertEqual(stats, [])
 
     def test_run_parallel_tracking_raises_when_all_enabled_sequences_fail(self):
         reporter_config = {

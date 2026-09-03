@@ -124,13 +124,17 @@ def _load_track():
     return track
 
 
-def _validate_sequence_flags(index: int, sequence: dict, keys: tuple[str, ...]) -> None:
+# Checked only where present, so a disabled stub missing the required keys still passes.
+_SEQUENCE_FLAGS = ("enable", "use_slam", "gt_from_shuttle")
+
+
+def _validate_sequence_flags(index: int, sequence: dict) -> None:
     """Reject sequence flags that are not real booleans.
 
     bool("false") is True, so a quoted flag would switch on the very thing it
     says to switch off.
     """
-    for key in keys:
+    for key in _SEQUENCE_FLAGS:
         if key in sequence and not isinstance(sequence[key], bool):
             raise ValueError(f"Reporter config sequence_cfgs[{index}] key {key} must be a boolean")
 
@@ -155,7 +159,7 @@ def _validate_reporter_config(reporter_config: dict) -> tuple[str, list[dict]]:
     for index, sequence in enumerate(sequence_cfgs):
         if not isinstance(sequence, dict):
             raise ValueError(f"Reporter config sequence_cfgs[{index}] must be an object")
-        _validate_sequence_flags(index, sequence, ("enable",))
+        _validate_sequence_flags(index, sequence)
         if sequence.get("enable") is False:
             continue
         for key in ("sequence_title", "sequence_folder"):
@@ -165,7 +169,6 @@ def _validate_reporter_config(reporter_config: dict) -> tuple[str, list[dict]]:
                 )
             if not isinstance(sequence[key], str):
                 raise ValueError(f"Reporter config sequence_cfgs[{index}] key {key} must be a string")
-        _validate_sequence_flags(index, sequence, ("use_slam", "gt_from_shuttle"))
 
     return dataset_folder, sequence_cfgs
 
