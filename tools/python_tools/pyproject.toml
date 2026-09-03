@@ -58,3 +58,8 @@ prepare_icl_nuim = "cuvslam_tools.dataset_preparation.icl_nuim.prepare:main"
 cuvslam_tracker = "cuvslam_tools.tracker.cli:main"
 cuvslam_reporter = "cuvslam_tools.reporter.cli:main"
 cuvslam_validator = "cuvslam_tools.datasets_validator.cli:main"
+
+[tool.ruff.lint.per-file-ignores]
+# PT027 rewrites assertRaises into pytest.raises. These tests run under
+# python3 -m unittest and the package does not depend on pytest.
+"cuvslam_tools/tests/test_coda_conversion.py" = ["PT027"]
