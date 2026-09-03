@@ -43,7 +43,9 @@ class TestResolveGtFile(unittest.TestCase):
         video.write_bytes(b"")
         (self.dataset / "gt_rect.txt").write_text(IDENTITY_POSE, encoding="utf-8")
 
-        resolved = resolve_gt_file(str(video), "gt_rect.txt", False, "none", 0)
+        resolved = resolve_gt_file(
+            str(video), "gt_rect.txt", gt_from_shuttle=False, repeat_type="none", num_loops=0
+        )
 
         self.assertEqual(resolved, os.path.join(str(self.dataset), "gt_rect.txt"))
 
