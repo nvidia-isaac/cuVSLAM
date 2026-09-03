@@ -53,7 +53,9 @@ def resolve_gt_file(dataset_path: str,
     if not gt_path:
         return None
 
-    resolved = gt_path if os.path.isabs(gt_path) else os.path.join(dataset_path, gt_path)
+    # A video input names the file itself, so its poses sit beside it, the way stereo.edex does.
+    base = os.path.dirname(dataset_path) if os.path.isfile(dataset_path) else dataset_path
+    resolved = gt_path if os.path.isabs(gt_path) else os.path.join(base, gt_path)
     if not os.path.isfile(resolved):
         raise FileNotFoundError(
             f"Ground-truth file not found: {resolved}. Provide the file, drop the ground-truth path to "

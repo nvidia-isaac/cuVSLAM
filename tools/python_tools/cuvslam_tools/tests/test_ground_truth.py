@@ -37,6 +37,16 @@ class TestResolveGtFile(unittest.TestCase):
 
         self.assertEqual(resolved, os.path.join(str(self.dataset), "gt_rect.txt"))
 
+    def test_relative_path_resolves_beside_a_video_dataset(self):
+        # A video input names the file, not a directory, so its poses sit next to it.
+        video = self.dataset / "run.mp4"
+        video.write_bytes(b"")
+        (self.dataset / "gt_rect.txt").write_text(IDENTITY_POSE, encoding="utf-8")
+
+        resolved = resolve_gt_file(str(video), "gt_rect.txt", False, "none", 0)
+
+        self.assertEqual(resolved, os.path.join(str(self.dataset), "gt_rect.txt"))
+
     def test_absolute_path_is_used_as_is(self):
         gt_file = self.dataset / "poses.txt"
         gt_file.write_text(IDENTITY_POSE, encoding="utf-8")
