@@ -32,6 +32,7 @@ than downloaded; see ``download_coda.sh``.
 """
 
 import json
+import math
 import re
 import zipfile
 from pathlib import Path
@@ -158,9 +159,15 @@ def _read_matrix(text: str, key: str, sequence: str) -> Optional[List[float]]:
                     raise ConversionError(f"sequence {sequence}: {key} data list is never closed")
                 inner = buffered[: buffered.index("]")]
                 try:
-                    return [float(value.strip()) for value in inner.split(",") if value.strip()]
+                    values = [float(value.strip()) for value in inner.split(",") if value.strip()]
                 except ValueError as exc:
                     raise ConversionError(f"sequence {sequence}: {key} holds a non-numeric entry ({exc})") from exc
+                # float() takes "nan" and "inf" without complaint, and those would reach
+                # the EDEX as a rig nothing can use.
+                for value in values:
+                    if not math.isfinite(value):
+                        raise ConversionError(f"sequence {sequence}: {key} holds a non-finite entry ({value})")
+                return values
         index += 1
     return None
 

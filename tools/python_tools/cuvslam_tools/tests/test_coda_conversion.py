@@ -212,6 +212,18 @@ class TestCodaLayout(CodaConversionTestCase):
         ):
             _convert(self.raw_dir, self.output_dir)
 
+    def test_non_finite_calibration_entry_is_reported(self):
+        # float() parses these, so they need a guard of their own.
+        for literal in ("nan", "inf"):
+            with self.subTest(literal=literal):
+                corrupted = _intrinsics_yaml().replace(repr(_PRINCIPAL[0]), literal, 1)
+                _write_archive(self.raw_dir, poses=_default_poses(), intrinsics=corrupted)
+
+                with self.assertRaisesRegex(
+                    convert_coda.ConversionError, "projection_matrix holds a non-finite entry"
+                ):
+                    _convert(self.raw_dir, self.output_dir)
+
     def test_missing_calibration_member_is_reported(self):
         _write_archive(self.raw_dir, poses=_default_poses(), omit_extrinsics=True)
 
