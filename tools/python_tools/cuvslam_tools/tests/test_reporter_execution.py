@@ -242,6 +242,26 @@ class TestReporterExecution(unittest.TestCase):
                 {"dataset_folder": "dataset", "sequence_cfgs": [{"sequence_title": "seq-a", "sequence_folder": 1}]},
                 r"Reporter config sequence_cfgs\[0\] key sequence_folder must be a string",
             ),
+            (
+                {
+                    "dataset_folder": "dataset",
+                    "sequence_cfgs": [
+                        {"sequence_title": "seq-a", "sequence_folder": "seq-a", "gt_from_shuttle": "false"}
+                    ],
+                },
+                r"Reporter config sequence_cfgs\[0\] key gt_from_shuttle must be a boolean",
+            ),
+            (
+                {
+                    "dataset_folder": "dataset",
+                    "sequence_cfgs": [{"sequence_title": "seq-a", "sequence_folder": "seq-a", "use_slam": 1}],
+                },
+                r"Reporter config sequence_cfgs\[0\] key use_slam must be a boolean",
+            ),
+            (
+                {"dataset_folder": "dataset", "sequence_cfgs": [{"enable": "false"}]},
+                r"Reporter config sequence_cfgs\[0\] key enable must be a boolean",
+            ),
         ]
 
         for reporter_config, error in cases:
