@@ -85,10 +85,41 @@ class TestReporterExecution(unittest.TestCase):
         self.assertEqual(args_copy.dataset, expected_dataset)
         self.assertEqual(args_copy.config_path, os.path.join(expected_dataset, "custom.edex"))
         self.assertEqual(args_copy.gt_path, "poses/gt.txt")
+        self.assertFalse(args_copy.gt_from_shuttle)
         self.assertEqual(args_copy.camera_ids, [1, 0])
         self.assertTrue(args_copy.use_slam)
         self.assertEqual(args_copy.repeat_type, "repeat")
         self.assertEqual(args_copy.num_loops, 3)
+
+    def test_process_sequence_forwards_shuttle_ground_truth_opt_in(self):
+        captured_args = []
+        stat = object()
+
+        class _Result:
+            pass
+
+        def track(args):
+            captured_args.append(args)
+            result = _Result()
+            result.stat = stat
+            return result
+
+        args = argparse.Namespace(config_path="", repeat_type="none", num_loops=0)
+        sequence = {
+            "enable": True,
+            "sequence_title": "seq-a",
+            "sequence_folder": "seq-a-folder",
+            "gt_from_shuttle": True,
+            "repeat_type": "Shuttle",
+            "sequence_num_repeats": 1,
+        }
+
+        with mock.patch.object(execution, "_load_track", return_value=track):
+            execution.process_sequence(sequence, args, "/datasets", "dataset")
+
+        args_copy = captured_args[0]
+        self.assertTrue(args_copy.gt_from_shuttle)
+        self.assertIsNone(args_copy.gt_path)
 
     def test_process_sequence_defaults_edex_and_warns_on_empty_gt_path(self):
         captured_args = []

@@ -28,9 +28,11 @@ class VideoReader(DatasetReader):
     """Replay video frames with calibration loaded from a stereo.edex file."""
 
     def __init__(self, video_path: str, stereo_edex: Optional[str] = None, num_loops: int = 0,
-                 repeat_type: str = "none", gt_path: Optional[str] = None):
+                 repeat_type: str = "none", gt_path: Optional[str] = None,
+                 gt_from_shuttle: bool = False):
         """Load calibration and preload all video frames into memory."""
-        super().__init__(video_path, stereo_edex, num_loops, repeat_type, gt_path=gt_path)
+        super().__init__(video_path, stereo_edex, num_loops, repeat_type, gt_path=gt_path,
+                         gt_from_shuttle=gt_from_shuttle)
         self.replay_forward = True
         self.buffer = []  # Store frames in memory
 

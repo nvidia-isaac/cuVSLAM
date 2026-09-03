@@ -20,6 +20,7 @@ import numpy as np
 
 import cuvslam as vslam
 from cuvslam_tools.tracker import conversions as conv
+from cuvslam_tools.tracker.ground_truth import load_gt_transforms, resolve_gt_file
 
 
 class Processing(Protocol):
@@ -58,8 +59,8 @@ class DatasetReader:
 
     def __init__(self, dataset_path: str, stereo_edex: Optional[str] = None,
                  num_loops: int = 0, repeat_type: str = "none",
-                 gt_path: Optional[str] = None):
-        """Initialize replay state and optional ground-truth pose loading."""
+                 gt_path: Optional[str] = None, gt_from_shuttle: bool = False):
+        """Initialize replay state and the requested ground-truth source."""
         repeat_type = (repeat_type or "none").lower()
         if repeat_type not in ("none", "repeat", "shuttle"):
             raise ValueError(f"Invalid repeat_type {repeat_type!r}; expected none|repeat|shuttle")
@@ -76,25 +77,14 @@ class DatasetReader:
         self.frame_id_start = 0
         self.current_loop = 0
         self.replay_forward = True
-        self.gt_from_shuttle = False
+        # Set explicitly by the caller: the first forward pass becomes the reference the backward
+        # pass is scored against, and replay() fills gt_transforms as it goes.
+        self.gt_from_shuttle = gt_from_shuttle
         self.gt_transforms = []
 
-        if gt_path is None:
-            self.gt_path = os.path.join(dataset_path, 'gt.txt')
-        elif os.path.isabs(gt_path):
-            self.gt_path = gt_path
-        else:
-            self.gt_path = os.path.join(dataset_path, gt_path)
-        if os.path.exists(self.gt_path):
-            with open(self.gt_path, 'r') as f:
-                for line in f:
-                    transform_12 = [float(value) for value in line.split()]
-                    assert len(transform_12) == 12, "Each line should have 12 float values"
-                    transform = np.vstack((np.array(transform_12).reshape(3, 4), np.array([0, 0, 0, 1])))
-                    self.gt_transforms.append(transform)
-        elif self.repeat_type == "shuttle" and self.num_loops > 0:
-            # consider first forward run in shuttle mode as ground truth
-            self.gt_from_shuttle = True
+        self.gt_path = resolve_gt_file(dataset_path, gt_path, gt_from_shuttle, repeat_type, num_loops)
+        if self.gt_path is not None:
+            self.gt_transforms = load_gt_transforms(self.gt_path)
 
     @staticmethod
     def get_camera(intrinsics: Dict, transform: List[List[float]]) -> vslam.Camera:

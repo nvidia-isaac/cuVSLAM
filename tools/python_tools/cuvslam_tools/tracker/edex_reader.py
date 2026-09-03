@@ -35,9 +35,10 @@ class EdexReader(DatasetReader):
     def __init__(self, edex_dir: str, stereo_edex: Optional[str] = None, num_loops: int = 0,
                  rgbd_mode: bool = False, repeat_type: str = "none",
                  cache_uncompressed: bool = False, gt_path: Optional[str] = None,
-                 camera_ids: Optional[List[int]] = None):
+                 camera_ids: Optional[List[int]] = None, gt_from_shuttle: bool = False):
         """Load EDEX configuration, rig calibration, frame metadata, and optional IMU data."""
-        super().__init__(edex_dir, stereo_edex, num_loops, repeat_type, gt_path=gt_path)
+        super().__init__(edex_dir, stereo_edex, num_loops, repeat_type, gt_path=gt_path,
+                         gt_from_shuttle=gt_from_shuttle)
         self.rgbd_mode = rgbd_mode
         self.cache_uncompressed = cache_uncompressed
         self.rgbd_settings = None

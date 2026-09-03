@@ -353,6 +353,16 @@ cuvslam_reporter \
 
 The reporter requires `--test_config` to point to one config file. Relative paths are resolved from the current working directory; `--datasets_root` is only used to locate dataset folders referenced by that config.
 
+### Ground truth
+
+Every sequence in a reporter config names its reference explicitly, and a sequence that names one it cannot read fails the run:
+
+- `"gt_file_path": "gt.txt"` — KITTI-format poses, absolute or relative to the sequence folder. A missing file is an error.
+- `"gt_from_shuttle": true` — the backward pass of a shuttle replay is scored against the forward pass. This measures repeatability, not accuracy: an error that repeats in both directions cancels out. Requires `"repeat_type": "Shuttle"` with `"sequence_num_repeats"` of at least 1, and cannot be combined with `gt_file_path`.
+- Neither — the sequence runs without accuracy metrics and its ATE/ARE columns stay blank.
+
+`cuvslam_tracker` takes the same two choices as `--gt_path` and `--gt_from_shuttle`.
+
 ## Validation
 
 Run a multi-dataset validation config:

@@ -168,6 +168,7 @@ def process_sequence(sequence: dict, args: argparse.Namespace, datasets_root: st
     args_copy.dataset = os.path.join(dataset_base, sequence["sequence_folder"])
     args_copy.config_path = os.path.join(args_copy.dataset, sequence.get("edex_file", "stereo.edex"))
     args_copy.gt_path = _resolve_sequence_gt_path(sequence)
+    args_copy.gt_from_shuttle = bool(sequence.get("gt_from_shuttle", False))
     args_copy.camera_ids = sequence.get("cameras")
     args_copy.use_slam = bool(sequence.get("use_slam", False))
     if "repeat_type" in sequence:

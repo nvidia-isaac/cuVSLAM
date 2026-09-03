@@ -100,6 +100,24 @@ def add_tracker_arguments(parser: argparse.ArgumentParser) -> None:
         default="none",
         help="Replay mode.",
     )
+    parser.add_argument(
+        "--gt_path",
+        type=str,
+        default="",
+        help=(
+            "KITTI-format ground-truth poses, absolute or relative to --dataset. "
+            "Tracking stops with an error when the file is missing."
+        ),
+    )
+    parser.add_argument(
+        "--gt_from_shuttle",
+        type=_str2bool,
+        default=False,
+        help=(
+            "Score the backward shuttle pass against the forward one instead of a ground-truth file. "
+            "Requires --repeat_type shuttle with --num_loops > 0, and rules out --gt_path."
+        ),
+    )
     parser.add_argument("--blackout_period", type=int, default=0, help="Blackout series period in frames.")
     parser.add_argument("--blackout_duration", type=int, default=10, help="Consecutive blacked-out frames per series.")
     parser.add_argument("--config_path", type=str, default="", help="Path to the stereo.edex file.")
@@ -271,7 +289,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     try:
         _normalize_tracker_binding_args(args)
         tracker_results = track(args)
-    except ValueError as exc:
+    except (FileNotFoundError, ValueError) as exc:
         parser.error(str(exc))
     if args.output_dir:
         save_tracker_stats(tracker_results.stat, args.output_dir)

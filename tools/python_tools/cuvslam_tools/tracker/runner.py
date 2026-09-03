@@ -477,7 +477,8 @@ def track(args: argparse.Namespace,
     if args.dataset.endswith('.mp4'):
         dataset = VideoReader(args.dataset, stereo_edex=args.config_path,
                               num_loops=args.num_loops, repeat_type=args.repeat_type,
-                              gt_path=getattr(args, 'gt_path', None))
+                              gt_path=getattr(args, 'gt_path', None),
+                              gt_from_shuttle=getattr(args, 'gt_from_shuttle', False))
     else:
         rgbd_mode = args.odometry_mode == vslam.Odometry.OdometryMode.RGBD
         dataset = EdexReader(args.dataset, stereo_edex=args.config_path,
@@ -485,7 +486,8 @@ def track(args: argparse.Namespace,
                              repeat_type=args.repeat_type,
                              cache_uncompressed=getattr(args, 'cache_uncompressed', False),
                              gt_path=getattr(args, 'gt_path', None),
-                             camera_ids=getattr(args, 'camera_ids', None))
+                             camera_ids=getattr(args, 'camera_ids', None),
+                             gt_from_shuttle=getattr(args, 'gt_from_shuttle', False))
 
     tracker_results = TrackerResults()
     if args.sequence_title:
