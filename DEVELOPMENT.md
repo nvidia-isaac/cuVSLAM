@@ -49,6 +49,20 @@ https://www.jetbrains.com/help/clion/clangformat-as-alternative-formatter.html
 Install `The C/C++ extension for Visual Studio Code`
 https://code.visualstudio.com/docs/cpp/cpp-ide#_code-formatting
 
+## Reserved branch namespaces
+
+Branches under `private/` and `internal/` cannot be created in this repository. A ruleset named "Block private branch
+namespaces" restricts creation of both, with no bypass actors, so the rejection comes from GitHub rather than from a
+local hook and applies to organization admins as well. Name topic branches `<user>/<topic>` as usual.
+
+If you maintain that ruleset, note that `**` in a ref pattern matches a single path segment rather than several:
+`private/**` covers `private/topic` but not `private/user/topic`, which is why the include list also carries
+`private/**/*`. No file here describes the ruleset, so check a name against the live rules instead of reading patterns:
+
+```bash
+gh api repos/nvidia-isaac/cuVSLAM/rules/branches/private%2Fuser%2Ftopic
+```
+
 ## Sandbox/offline external sources
 
 On a machine with internet access, run this from the repository root:
