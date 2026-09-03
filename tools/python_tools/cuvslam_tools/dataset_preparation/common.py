@@ -26,7 +26,8 @@ turns those into a nonzero exit code and a concise stderr message.
 import argparse
 import subprocess
 import sys
-from pathlib import Path
+import tarfile
+from pathlib import Path, PurePosixPath
 from typing import Callable, Optional, Sequence
 
 DEFAULT_RAW_DIR_TEMPLATE = "./datasets/{dataset}/raw"
@@ -99,6 +100,29 @@ def run_download_script(script: Path, arguments: Sequence[str] = ()) -> None:
     completed = subprocess.run(["bash", str(script), *arguments], check=False)
     if completed.returncode != 0:
         raise PreparationError(f"{script.name} failed with exit code {completed.returncode}")
+
+
+def _check_member_path(member_path: str, description: str) -> None:
+    """Reject an archive path that is absolute or escapes the extraction directory."""
+    path = PurePosixPath(member_path)
+    if path.is_absolute() or ".." in path.parts:
+        raise PreparationError(f"unsafe {description} in archive: {member_path}")
+
+
+def extract_tar_archive(archive: Path, destination: Path) -> None:
+    """Extract a gzip tar archive, rejecting any member that points outside destination."""
+    # tarfile's own 'data' filter only exists on newer interpreters, so validate the
+    # member paths here as well.
+    extract_options = {"filter": "data"} if hasattr(tarfile, "data_filter") else {}
+    try:
+        with tarfile.open(archive, "r:gz") as tar:
+            for member in tar.getmembers():
+                _check_member_path(member.name, "member path")
+                if member.islnk() or member.issym():
+                    _check_member_path(member.linkname, "link target")
+            tar.extractall(destination, **extract_options)
+    except tarfile.TarError as exc:
+        raise PreparationError(f"failed to extract {archive}: {exc}") from exc
 
 
 def require_nonempty_files(root: Path, relative_paths: Sequence[str], producer: str) -> None:

@@ -12,7 +12,7 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
-"""Download the TUM RGB-D freiburg3 sequences and convert them to cuVSLAM data."""
+"""Download the ICL-NUIM TUM-compatible sequences and convert them to cuVSLAM data."""
 
 import argparse
 from pathlib import Path
@@ -22,22 +22,22 @@ from cuvslam_tools.dataset_preparation.common import (
     PreparationError,
     add_common_arguments,
     dataset_file,
+    extract_tar_archive,
     require_nonempty_files,
     resolve_output_dir,
     resolve_raw_dir,
     run_download_script,
     run_preparation,
 )
-from cuvslam_tools.dataset_preparation.common import extract_tar_archive as extract_archive
 
-from . import convert_tum
+from . import convert_icl_nuim
 
-DATASET_NAME = convert_tum.DATASET_ID
-DOWNLOAD_SCRIPT = "download_tum.sh"
+DATASET_NAME = convert_icl_nuim.DATASET_ID
+DOWNLOAD_SCRIPT = "download_icl_nuim.sh"
 
 DATASET_ARTIFACTS = (
     "dataset_metadata.json",
-    "tum-rgbd_slam.cfg",
+    "icl_nuim-rgbd_slam.cfg",
 )
 SEQUENCE_ARTIFACTS = (
     "stereo.edex",
@@ -49,18 +49,26 @@ SEQUENCE_ARTIFACTS = (
 
 
 def extract_sequence(archive: Path, destination: Path) -> Path:
-    """Extract one sequence archive and return the directory holding its files."""
-    extract_archive(archive, destination)
-    # Each TUM archive holds exactly one top-level directory named after the
-    # sequence, but locate it rather than assume, so a renamed archive fails here
-    # instead of midway through conversion.
-    candidates = [entry for entry in destination.iterdir() if entry.is_dir()]
-    if len(candidates) != 1:
-        names = ", ".join(sorted(entry.name for entry in candidates)) or "none"
+    """Extract one sequence archive and return the directory holding rgb/ and depth/.
+
+    ICL-NUIM archives hold ``rgb/`` and ``depth/`` at the archive root with no
+    enclosing directory, unlike TUM. Locate the pair rather than assume either
+    layout, so a repackaged archive fails here instead of midway through
+    conversion.
+    """
+    extract_tar_archive(archive, destination)
+    candidates = [destination] + [entry for entry in destination.iterdir() if entry.is_dir()]
+    roots = [
+        candidate
+        for candidate in candidates
+        if (candidate / "rgb").is_dir() and (candidate / "depth").is_dir()
+    ]
+    if len(roots) != 1:
+        found = ", ".join(sorted(entry.name for entry in destination.iterdir())) or "none"
         raise PreparationError(
-            f"{archive.name}: expected one top-level directory in the archive, found: {names}"
+            f"{archive.name}: expected one directory holding both rgb/ and depth/, found: {found}"
         )
-    return candidates[0]
+    return roots[0]
 
 
 def prepare(
@@ -70,15 +78,15 @@ def prepare(
     force_download: bool = False,
     download_only: bool = False,
 ) -> Path:
-    """Download the required TUM archives, convert them, and return the prepared root.
+    """Download the required ICL-NUIM sources, convert them, and return the prepared root.
 
-    Only the archives holding the selected sequences are downloaded.
-    ``sequences`` defaults to all 15 evaluated freiburg3 sequences. Returns the
-    raw directory when ``download_only`` is set, otherwise the converted root.
+    Only the archives and pose files for the selected sequences are downloaded.
+    ``sequences`` defaults to all eight published trajectories. Returns the raw
+    directory when ``download_only`` is set, otherwise the converted root.
     """
     raw_dir = resolve_raw_dir(raw_dir, DATASET_NAME)
     output_dir = resolve_output_dir(output_dir)
-    # Only an omitted selection means "all 15"; an explicitly empty one is an
+    # Only an omitted selection means "all eight"; an explicitly empty one is an
     # error the converter reports, not a request to convert everything.
     selected = list(sequences) if sequences is not None else None
 
@@ -87,15 +95,15 @@ def prepare(
     print()
 
     try:
-        archives = convert_tum.required_archives(selected)
-    except convert_tum.ConversionError as exc:
+        wanted = convert_icl_nuim.required_archives(selected)
+    except convert_icl_nuim.ConversionError as exc:
         raise PreparationError(str(exc)) from exc
 
     download_arguments = [str(raw_dir)]
     if force_download:
         download_arguments.append("--force")
     if selected is not None:
-        for archive in archives:
+        for archive in wanted:
             download_arguments.extend(["--archive", archive])
     run_download_script(dataset_file(__file__, DOWNLOAD_SCRIPT), download_arguments)
 
@@ -104,41 +112,45 @@ def prepare(
 
     dataset_dir = output_dir / DATASET_NAME
     print()
-    print(f"Converting TUM RGB-D data to {dataset_dir} …")
+    print(f"Converting ICL-NUIM data to {dataset_dir} …")
     try:
-        convert_tum.convert(
+        convert_icl_nuim.convert(
             raw_dir, dataset_dir, selected, extract_sequence=extract_sequence
         )
-    except convert_tum.ConversionError as exc:
+    except convert_icl_nuim.ConversionError as exc:
         raise PreparationError(str(exc)) from exc
 
     require_nonempty_files(dataset_dir, DATASET_ARTIFACTS, "converter")
-    for sequence in selected or convert_tum.ALL_SEQS:
+    for sequence in selected or convert_icl_nuim.SEQUENCE_NAMES:
         require_nonempty_files(dataset_dir / sequence, SEQUENCE_ARTIFACTS, "converter")
 
     print()
-    print(f"done — portable TUM RGB-D dataset ready at {dataset_dir}")
+    print(f"done — portable ICL-NUIM dataset ready at {dataset_dir}")
     return dataset_dir
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    """Parse command-line arguments and prepare the TUM RGB-D dataset."""
+    """Parse command-line arguments and prepare the ICL-NUIM dataset."""
     parser = argparse.ArgumentParser(
-        prog="prepare_tum",
+        prog="prepare_icl_nuim",
         description=(
-            "Download and convert the 15 evaluated TUM RGB-D freiburg3 sequences "
-            "to portable cuVSLAM EDEX data."
+            "Download and convert the eight ICL-NUIM living-room and office "
+            "trajectories to portable cuVSLAM EDEX data."
         ),
     )
-    add_common_arguments(parser, DATASET_NAME, label="TUM")
+    add_common_arguments(parser, DATASET_NAME, label="ICL-NUIM")
     parser.add_argument(
         "--sequences",
         nargs="+",
-        choices=convert_tum.ALL_SEQS,
+        choices=convert_icl_nuim.SEQUENCE_NAMES,
         metavar="SEQUENCE",
         help=(
-            "Convert an explicit sequence subset, such as "
-            "rgbd_dataset_freiburg3_long_office_household. The default is all 15 sequences."
+            "Convert an explicit sequence subset, such as traj2_frei_png. "
+            "The default is all eight trajectories. A subset run rewrites "
+            "dataset_metadata.json and the reporter config to describe only the "
+            "selected sequences, but leaves any previously converted sequence "
+            "directories in place, so an output directory reused this way holds "
+            "sequences the config no longer lists."
         ),
     )
     args = parser.parse_args(argv)
