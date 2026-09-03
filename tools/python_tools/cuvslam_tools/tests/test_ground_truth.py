@@ -111,7 +111,9 @@ class TestLoadGtTransforms(unittest.TestCase):
                 gt_file = self.dataset / "gt.txt"
                 gt_file.write_text(f"{IDENTITY_POSE}\n1 0 0 {literal} 0 1 0 0 0 0 1 0\n", encoding="utf-8")
 
-                with self.assertRaisesRegex(ValueError, r"gt\.txt:2 holds a non-finite value"):
+                with self.assertRaisesRegex(
+                    ValueError, rf"gt\.txt:2 holds a non-finite value \({literal}\)"
+                ):
                     load_gt_transforms(str(gt_file))
 
     def test_a_line_without_twelve_values_names_the_line(self):
