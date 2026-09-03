@@ -102,6 +102,16 @@ class TestLoadGtTransforms(unittest.TestCase):
         np.testing.assert_allclose(transforms[1][:3, 3], [2.0, 3.0, 4.0])
         np.testing.assert_allclose(transforms[1][3], [0.0, 0.0, 0.0, 1.0])
 
+    def test_a_line_with_a_non_finite_value_names_the_line(self):
+        # float() parses these, so they need a guard of their own.
+        for literal in ("nan", "inf"):
+            with self.subTest(literal=literal):
+                gt_file = self.dataset / "gt.txt"
+                gt_file.write_text(f"{IDENTITY_POSE}\n1 0 0 {literal} 0 1 0 0 0 0 1 0\n", encoding="utf-8")
+
+                with self.assertRaisesRegex(ValueError, r"gt\.txt:2 holds a non-finite value"):
+                    load_gt_transforms(str(gt_file))
+
     def test_a_line_without_twelve_values_names_the_line(self):
         gt_file = self.dataset / "gt.txt"
         gt_file.write_text(f"{IDENTITY_POSE}\n1 0 0 2\n", encoding="utf-8")

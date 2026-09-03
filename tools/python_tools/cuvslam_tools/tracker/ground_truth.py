@@ -18,6 +18,7 @@ A run has exactly one reference: a KITTI-format pose file, the forward pass of a
 nothing at all. Which one it is comes from the config, never from what happens to be on disk.
 """
 
+import math
 import os
 from typing import List, Optional
 
@@ -76,5 +77,10 @@ def load_gt_transforms(gt_file: str) -> List[np.ndarray]:
                 raise ValueError(
                     f"{gt_file}:{line_number} holds {len(values)} values; KITTI poses need 12 per line."
                 )
+            # float() takes "nan" and "inf", and either one only surfaces later as an SVD that
+            # will not converge inside the metrics.
+            for value in values:
+                if not math.isfinite(value):
+                    raise ValueError(f"{gt_file}:{line_number} holds a non-finite value ({value}).")
             transforms.append(np.vstack((np.array(values).reshape(3, 4), bottom_row)))
     return transforms
