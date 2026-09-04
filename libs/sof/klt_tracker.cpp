@@ -31,11 +31,7 @@ void KLTTracker::compute_residual(KLTTracker::FeaturePatch& residual, const KLTT
 }
 
 float KLTTracker::compute_ncc(const KLTTracker::FeaturePatch& patch1, const KLTTracker::FeaturePatch& patch2) {
-#ifdef SOF_USE_SMALLER_NCC
-  int NCC_DIM = 3;
-#else
   int NCC_DIM = 5;
-#endif
 
   assert(patch1.size() == patch2.size() && patch1.cols() == patch1.rows() && patch2.cols() == patch2.rows());
   assert(patch1.cols() >= NCC_DIM);

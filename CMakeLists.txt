@@ -68,7 +68,6 @@ option(USE_LMDB "Use lmdb library for the database of landmarks (map)" ON)
 option(USE_CUDA "Use CUDA Toolkit" ON)
 option(ENFORCE_GPU "Disable the usage of pure CPU version of cuVSLAM" ON)
 option(CUVSLAM_LOG_ENABLE "Enable root cuvslam::Log." OFF)
-option(SOF_USE_SMALLER_NCC "Use 3-pixel area for NCC. Possible it is useful for fisheye. By default, NCC uses 5 pixels." OFF)
 option(CUVSLAM_BUILD_SHARED_LIB "Build shared library version of cuVSLAM" TRUE)
 option(USE_RERUN "Use Rerun for visualization" OFF)
 

@@ -37,11 +37,7 @@ void LKFeatureTracker::computeTGradient(LKFeatureTracker::FeaturePatch& tPatch,
 
 float LKFeatureTracker::ncc(const LKFeatureTracker::FeaturePatch& patch1,
                             const LKFeatureTracker::FeaturePatch& patch2) {
-#ifdef SOF_USE_SMALLER_NCC
-  enum { NCC_DIM = 3 };
-#else
   enum { NCC_DIM = 5 };
-#endif
 
   assert(patch1.size() == patch2.size() && patch1.cols() == patch1.rows() && patch2.cols() == patch2.rows());
   assert(patch1.cols() >= NCC_DIM);
