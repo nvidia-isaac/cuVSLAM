@@ -172,6 +172,12 @@ DATASETS: dict[str, DatasetSpec] = {
         dataset_id="tartan",
         prepare_module="cuvslam_tools.dataset_preparation.tartan.prepare",
     ),
+    # CODa is license-gated: preparation converts archives the user downloaded by
+    # hand, so provisioning only runs against a pre-seeded raw directory.
+    "coda": DatasetSpec(
+        dataset_id="coda",
+        prepare_module="cuvslam_tools.dataset_preparation.coda.prepare",
+    ),
 }
 
 

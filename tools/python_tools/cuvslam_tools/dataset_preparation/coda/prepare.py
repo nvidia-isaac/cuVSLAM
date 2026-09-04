@@ -12,7 +12,12 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
-"""Download the TUM RGB-D freiburg3 sequences and convert them to cuVSLAM data."""
+"""Check for the CODa sequence archives and convert them to portable cuVSLAM data.
+
+CODa is not redistributable: the archives are downloaded by hand after accepting
+the dataset license, so the "download" step only verifies that they are in place
+and prints the registration walkthrough when they are not.
+"""
 
 import argparse
 from pathlib import Path
@@ -28,39 +33,24 @@ from cuvslam_tools.dataset_preparation.common import (
     run_download_script,
     run_preparation,
 )
-from cuvslam_tools.dataset_preparation.common import extract_tar_archive as extract_archive
 
-from . import convert_tum
+from . import convert_coda
 
-DATASET_NAME = convert_tum.DATASET_ID
-DOWNLOAD_SCRIPT = "download_tum.sh"
+DATASET_NAME = convert_coda.DATASET_ID
+DOWNLOAD_SCRIPT = "download_coda.sh"
 
 DATASET_ARTIFACTS = (
     "dataset_metadata.json",
-    "tum-rgbd_slam.cfg",
-)
-SEQUENCE_ARTIFACTS = (
-    "stereo.edex",
-    "frame_metadata.jsonl",
-    "gt.txt",
-    "00/000000.png",
-    "01/000000.png",
+    f"{DATASET_NAME}-vio_slam.cfg",
 )
 
 
-def extract_sequence(archive: Path, destination: Path) -> Path:
-    """Extract one sequence archive and return the directory holding its files."""
-    extract_archive(archive, destination)
-    # Each TUM archive holds exactly one top-level directory named after the
-    # sequence, but locate it rather than assume, so a renamed archive fails here
-    # instead of midway through conversion.
-    candidates = [entry for entry in destination.iterdir() if entry.is_dir()]
-    if len(candidates) != 1:
-        names = ", ".join(sorted(entry.name for entry in candidates)) or "none"
-        raise PreparationError(
-            f"{archive.name}: expected one top-level directory in the archive, found: {names}"
-        )
-    return candidates[0]
+def _sequence_artifacts(sequence: str) -> List[str]:
+    return [
+        "stereo.edex",
+        f"00/{sequence}.0.00001.png",
+        f"01/{sequence}.1.00001.png",
+    ]
 
 
 def prepare(
@@ -70,16 +60,16 @@ def prepare(
     force_download: bool = False,
     download_only: bool = False,
 ) -> Path:
-    """Download the required TUM archives, convert them, and return the prepared root.
+    """Check for the CODa archives, convert them, and return the prepared root.
 
-    Only the archives holding the selected sequences are downloaded.
-    ``sequences`` defaults to all 15 evaluated freiburg3 sequences. Returns the
-    raw directory when ``download_only`` is set, otherwise the converted root.
+    ``sequences`` defaults to every sequence whose archive is present in
+    ``raw_dir``, because CODa is fetched one sequence at a time by hand. Returns
+    the raw directory when ``download_only`` is set, otherwise the converted root.
     """
     raw_dir = resolve_raw_dir(raw_dir, DATASET_NAME)
     output_dir = resolve_output_dir(output_dir)
-    # Only an omitted selection means "all 15"; an explicitly empty one is an
-    # error the converter reports, not a request to convert everything.
+    # Only an omitted selection means "everything on disk"; an explicitly empty
+    # one is an error the converter reports.
     selected = list(sequences) if sequences is not None else None
 
     print(f"Raw dir    : {raw_dir}")
@@ -87,16 +77,15 @@ def prepare(
     print()
 
     try:
-        archives = convert_tum.required_archives(selected)
-    except convert_tum.ConversionError as exc:
+        archives = convert_coda.required_archives(selected)
+    except convert_coda.ConversionError as exc:
         raise PreparationError(str(exc)) from exc
 
     download_arguments = [str(raw_dir)]
     if force_download:
         download_arguments.append("--force")
-    if selected is not None:
-        for archive in archives:
-            download_arguments.extend(["--archive", archive])
+    for archive in archives:
+        download_arguments.extend(["--archive", archive])
     run_download_script(dataset_file(__file__, DOWNLOAD_SCRIPT), download_arguments)
 
     if download_only:
@@ -104,42 +93,43 @@ def prepare(
 
     dataset_dir = output_dir / DATASET_NAME
     print()
-    print(f"Converting TUM RGB-D data to {dataset_dir} …")
+    print(f"Converting CODa data to {dataset_dir} …")
     try:
-        convert_tum.convert(
-            raw_dir, dataset_dir, selected, extract_sequence=extract_sequence
-        )
-    except convert_tum.ConversionError as exc:
+        metadata = convert_coda.convert(raw_dir, dataset_dir, selected)
+    except convert_coda.ConversionError as exc:
         raise PreparationError(str(exc)) from exc
 
     require_nonempty_files(dataset_dir, DATASET_ARTIFACTS, "converter")
-    for sequence in selected or convert_tum.ALL_SEQS:
-        require_nonempty_files(dataset_dir / sequence, SEQUENCE_ARTIFACTS, "converter")
+    for entry in metadata["sequences"]:
+        sequence = str(entry["sequence"])
+        require_nonempty_files(dataset_dir / sequence, _sequence_artifacts(sequence), "converter")
 
     print()
-    print(f"done — portable TUM RGB-D dataset ready at {dataset_dir}")
+    print(f"done — portable CODa dataset ready at {dataset_dir}")
     return dataset_dir
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    """Parse command-line arguments and prepare the TUM RGB-D dataset."""
+    """Parse command-line arguments and prepare the CODa dataset."""
     parser = argparse.ArgumentParser(
-        prog="prepare_tum",
+        prog="prepare_coda",
         description=(
-            "Download and convert the 15 evaluated TUM RGB-D freiburg3 sequences "
-            "to portable cuVSLAM EDEX data."
+            "Convert manually downloaded CODa sequence archives to portable cuVSLAM EDEX data."
         ),
     )
-    add_common_arguments(parser, DATASET_NAME, label="TUM")
+    add_common_arguments(
+        parser,
+        DATASET_NAME,
+        label="CODa",
+        force_download_help="Accepted for parity with the other datasets; CODa archives are never downloaded.",
+        download_only_help="Check that the archives are in place but skip conversion.",
+    )
     parser.add_argument(
         "--sequences",
         nargs="+",
-        choices=convert_tum.ALL_SEQS,
+        choices=convert_coda.ALL_SEQS,
         metavar="SEQUENCE",
-        help=(
-            "Convert an explicit sequence subset, such as "
-            "rgbd_dataset_freiburg3_long_office_household. The default is all 15 sequences."
-        ),
+        help="Convert an explicit sequence subset, such as 0 1 2. The default is every archive present.",
     )
     args = parser.parse_args(argv)
 

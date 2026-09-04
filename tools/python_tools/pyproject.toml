@@ -34,10 +34,12 @@ where = ["."]
 [tool.setuptools.package-data]
 "cuvslam_tools.bag2edex" = ["configs/*.yaml"]
 "cuvslam_tools.undistort" = ["input.edex", "input.png"]
+"cuvslam_tools.dataset_preparation.coda" = ["download_*.sh"]
 "cuvslam_tools.dataset_preparation.kitti" = ["download_*.sh"]
 "cuvslam_tools.dataset_preparation.euroc" = ["download_*.sh"]
 "cuvslam_tools.dataset_preparation.tartan.dataset_converter" = ["cfg/*.json"]
 "cuvslam_tools.dataset_preparation.tum" = ["download_*.sh"]
+"cuvslam_tools.dataset_preparation.icl_nuim" = ["download_*.sh"]
 "cuvslam_tools.reporter" = ["report_templates/*.html"]
 "cuvslam_tools.datasets_validator" = ["configs/*.cfg"]
 
@@ -48,9 +50,16 @@ rosbag_extract_urdf = "cuvslam_tools.bag2edex.scripts.extract_urdf:main"
 rosbag_extract_videos = "cuvslam_tools.bag2edex.scripts.extract_videos:main"
 undistort_edex_images = "cuvslam_tools.undistort.undistort:main"
 prepare_kitti = "cuvslam_tools.dataset_preparation.kitti.prepare:main"
+prepare_coda = "cuvslam_tools.dataset_preparation.coda.prepare:main"
 prepare_euroc = "cuvslam_tools.dataset_preparation.euroc.prepare:main"
 prepare_tartan = "cuvslam_tools.dataset_preparation.tartan.prepare:main"
 prepare_tum = "cuvslam_tools.dataset_preparation.tum.prepare:main"
+prepare_icl_nuim = "cuvslam_tools.dataset_preparation.icl_nuim.prepare:main"
 cuvslam_tracker = "cuvslam_tools.tracker.cli:main"
 cuvslam_reporter = "cuvslam_tools.reporter.cli:main"
 cuvslam_validator = "cuvslam_tools.datasets_validator.cli:main"
+
+[tool.ruff.lint.per-file-ignores]
+# PT027 rewrites assertRaises into pytest.raises. These tests run under
+# python3 -m unittest and the package does not depend on pytest.
+"cuvslam_tools/tests/test_coda_conversion.py" = ["PT027"]
