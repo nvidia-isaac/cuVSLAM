@@ -26,9 +26,11 @@
 #include "pipelines/inertial_pnp.h"
 #include "pipelines/tracker_state_machine.h"
 #include "pnp/multicam_pnp.h"
-#include "pnp/visual_icp.h"
 #include "sba/sba_config.h"
 #include "sof/sof_multicamera_interface.h"
+#ifdef USE_CUDA
+#include "pnp/visual_icp.h"
+#endif
 
 namespace cuvslam::pipelines {
 
@@ -43,7 +45,9 @@ struct SolverPerFrameSettings {
   pnp::PNPSettings vo_pnp;
   pnp::PNPSettings inertial_stereo_pnp = pnp::PNPSettings::InertialSettings();
   InertialPnPSettings imu_pnp;
+#ifdef USE_CUDA
   pnp::ICPSettings icp;
+#endif
 };
 
 class ISFMSolver {

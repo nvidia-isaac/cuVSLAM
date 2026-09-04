@@ -71,7 +71,7 @@ constexpr std::underlying_type_t<T> ToUnderlying(T val) {
   return static_cast<std::underlying_type_t<T>>(val);
 }
 
-inline bool CheckCudaCompatibility(std::string& message) {
+inline bool CheckCudaCompatibility([[maybe_unused]] std::string& message) {
 #ifdef USE_CUDA
   return cuda::CheckCompatibility(message);
 #else

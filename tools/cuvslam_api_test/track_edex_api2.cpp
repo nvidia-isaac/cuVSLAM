@@ -31,7 +31,9 @@
 #include "common/log.h"
 #include "common/stream.h"
 #include "common/time.h"
+#ifdef USE_CUDA
 #include "cuda_modules/cuda_helper.h"
+#endif
 #include "cuvslam/cuvslam2.h"
 
 #define VERIFY_TRACE(condition, ...) \
@@ -98,6 +100,7 @@ Rig EdexRigToApiRig(const edex::EdexFile& edex_file, const camera_rig_edex::Came
   return rig;
 }
 
+#ifdef USE_CUDA
 std::vector<cuda::GPUOnlyArray<uint8_t>> CreateGpuImages(edex::EdexFile& edex_file, bool use_gpu_mem) {
   std::vector<cuda::GPUOnlyArray<uint8_t>> gpu_images;
   if (use_gpu_mem) {
@@ -109,6 +112,7 @@ std::vector<cuda::GPUOnlyArray<uint8_t>> CreateGpuImages(edex::EdexFile& edex_fi
   }
   return gpu_images;
 }
+#endif
 
 std::ostream& operator<<(std::ostream& stream, const Pose& pose) {
   Isometry3T iso_pose;
@@ -197,9 +201,13 @@ bool TrackEdexApi2(const TestingSettings& settings, const cuvslam::Odometry::Con
       edex_rig->setCurrentFrame(frame);
     }
 
+#ifdef USE_CUDA
     // alloc in advance to reuse on each frame
     std::vector<cuda::GPUOnlyArray<uint8_t>> gpu_images = CreateGpuImages(edex_file, settings.use_gpu_mem);
     std::vector<cuda::GPUOnlyArray<uint8_t>> gpu_masks = CreateGpuImages(edex_file, settings.use_gpu_mem);
+#else
+    VERIFY_TRACE(!settings.use_gpu_mem, "use_gpu_mem requires a build with CUDA support (USE_CUDA=ON)");
+#endif
     while (true) {
       ScopedThrottler throttle(settings.max_fps);
       Sources cur_sources;
@@ -237,6 +245,7 @@ bool TrackEdexApi2(const TestingSettings& settings, const cuvslam::Odometry::Con
         }
 
         if (settings.use_gpu_mem) {
+#ifdef USE_CUDA
           int bpp = src.image_encoding == ImageEncoding::RGB8 ? 3 : 1;
           CUDA_CHECK(cudaMemcpy(gpu_images[i].ptr(), src.data, meta.shape.height * meta.shape.width * bpp,
                                 cudaMemcpyHostToDevice));
@@ -251,6 +260,7 @@ bool TrackEdexApi2(const TestingSettings& settings, const cuvslam::Odometry::Con
             masks.back().pitch = meta.mask_shape.width;
             masks.back().is_gpu_mem = true;
           }
+#endif
         }
       }
 
