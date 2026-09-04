@@ -1,0 +1,34 @@
+diff --git a/isaac_ros_visual_slam/src/impl/visual_slam_impl.cpp b/isaac_ros_visual_slam/src/impl/visual_slam_impl.cpp
+--- a/isaac_ros_visual_slam/src/impl/visual_slam_impl.cpp
++++ b/isaac_ros_visual_slam/src/impl/visual_slam_impl.cpp
+@@ -99,8 +99,8 @@ VisualSlamNode::VisualSlamImpl::VisualSlamImpl(VisualSlamNode & vslam_node)
+ : node(vslam_node),
+   sync(node.num_cameras_, 1e6 * node.sync_matching_threshold_ms_, node.min_num_images_,
+     node.image_buffer_size_),
+-  sequencer(node.imu_buffer_size_, node.imu_jitter_threshold_ms_, node.image_buffer_size_,
+-    node.image_jitter_threshold_ms_),
++  sequencer(node.imu_buffer_size_, 1e6 * node.imu_jitter_threshold_ms_,
++    node.image_buffer_size_, 1e6 * node.image_jitter_threshold_ms_),
+   tf_buffer(std::make_unique<tf2_ros::Buffer>(node.get_clock())),
+   tf_listener(std::make_unique<tf2_ros::TransformListener>(*tf_buffer)),
+   tf_publisher(std::make_unique<tf2_ros::TransformBroadcaster>(&node)),
+@@ -315,7 +315,8 @@ void VisualSlamNode::VisualSlamImpl::Initialize()
+       node.vis_localizer_loop_closure_pub_, tracker, canonical_pose_cuvslam, node.map_frame_);
+   }
+   cuvslam_handle = tracker;
+-  RCLCPP_INFO(node.get_logger(), "cuVSLAM tracker was successfully initialized.");
++  RCLCPP_INFO(node.get_logger(),
++    "cuVSLAM tracker was successfully initialized. ISAAC_ROS_YOPO_IMU_TIMESTAMP_PATCH_V1");
+-
++
+   if (node.localize_on_startup_) {
+     // We don't care when this thread returns since we anyways can't do anything if the localization
+@@ -685,7 +686,7 @@ void VisualSlamNode::VisualSlamImpl::UpdatePose(
+     int64_t imu_ts = static_cast<int64_t>(timestamp.nanoseconds());
+     RCLCPP_DEBUG(node.get_logger(), "Using imu msg timestamp [%ld]", imu_ts);
+     const CUVSLAM_Status status = CUVSLAM_RegisterImuMeasurement(
+-      cuvslam_handle, latest_ts, &imu_measurement);
++      cuvslam_handle, imu_ts, &imu_measurement);
+     if (status != CUVSLAM_SUCCESS) {
+       RCLCPP_WARN(node.get_logger(), "CUVSLAM has failed to register an IMU measurement");
+     }
