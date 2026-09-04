@@ -168,6 +168,10 @@ DATASETS: dict[str, DatasetSpec] = {
         dataset_id="tum",
         prepare_module="cuvslam_tools.dataset_preparation.tum.prepare",
     ),
+    "icl_nuim": DatasetSpec(
+        dataset_id="icl_nuim",
+        prepare_module="cuvslam_tools.dataset_preparation.icl_nuim.prepare",
+    ),
     "tartan": DatasetSpec(
         dataset_id="tartan",
         prepare_module="cuvslam_tools.dataset_preparation.tartan.prepare",

@@ -13,6 +13,7 @@
 # of the software or derivative works thereof, you agree to be bound by this License.
 
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -105,8 +106,11 @@ class TestShippedRegistry(unittest.TestCase):
 
     def test_unknown_dataset_is_rejected_with_the_known_ids(self):
         # provision_dataset.sh relies on this to reject a stale workflow choice.
+        # The expected list is derived so that registering a dataset does not
+        # break an assertion that only cares about the message naming the IDs.
+        known = ", ".join(sorted(dataset_registry.DATASETS))
         with self.assertRaisesRegex(
-            RegistryError, r"unknown dataset 'nope' \(known: coda, euroc, kitti, tartan, tum\)"
+            RegistryError, rf"unknown dataset 'nope' \(known: {re.escape(known)}\)"
         ):
             dataset_registry.validate(["nope"])
 
@@ -223,7 +227,8 @@ class TestValidationFailures(unittest.TestCase):
         self.assertEqual(distinct.evals[1].kpi_prefix, "TARTAN_FLAKY")
 
     def test_unknown_dataset_lookup_lists_known_ids(self):
-        with self.assertRaisesRegex(RegistryError, "known: coda, euroc, kitti, tartan, tum"):
+        known = ", ".join(sorted(dataset_registry.DATASETS))
+        with self.assertRaisesRegex(RegistryError, f"known: {re.escape(known)}"):
             dataset_registry.dataset("m3ed_spot")
 
     def test_unknown_suite_filter_fails(self):
