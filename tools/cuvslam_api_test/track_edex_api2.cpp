@@ -168,6 +168,7 @@ bool TrackEdexApi2(const TestingSettings& settings, const cuvslam::Odometry::Con
     Odometry tracker{rig, cfg};
 
     Slam::Config slam_cfg;
+    slam_cfg.use_gpu = cfg.use_gpu;
     slam_cfg.sync_mode = !cfg.async_sba;
     // arbitraryly enable reading internals in some tests
     slam_cfg.enable_reading_internals = cfg.enable_final_landmarks_export;
