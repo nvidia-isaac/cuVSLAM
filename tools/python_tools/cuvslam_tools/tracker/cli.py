@@ -103,7 +103,7 @@ def add_tracker_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--gt_path",
         type=str,
-        default="",
+        default="gt.txt",
         help=(
             "KITTI-format ground-truth poses, absolute or relative to --dataset. "
             "Tracking stops with an error when the file is missing."
