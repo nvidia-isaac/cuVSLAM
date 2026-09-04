@@ -50,7 +50,6 @@ macro(setup_cuvslam_settings)
         $<$<BOOL:${SOF_USE_SMALLER_NCC}>:SOF_USE_SMALLER_NCC>
         $<$<BOOL:${USE_NVTX}>:USE_NVTX>
         $<$<BOOL:${USE_CUDA}>:USE_CUDA>
-        $<$<BOOL:${ENFORCE_GPU}>:ENFORCE_GPU>
         $<$<BOOL:${USE_RERUN}>:USE_RERUN>
         $<$<BOOL:${USE_CUNLS}>:USE_CUNLS>
     )

@@ -465,11 +465,7 @@ Odometry::~Odometry() = default;
 
 Odometry::Odometry(const Rig& rig, const Config& cfg) {
   std::string message;
-  TracePrintIf(!CheckCudaCompatibility(message), "[WARNING] %s\n", message.c_str());
-#ifdef ENFORCE_GPU
-  THROW_INVALID_ARG_IF(!cfg.use_gpu, "cfg.use_gpu must be enabled");
-#endif
-
+  TracePrintIf(cfg.use_gpu && !CheckCudaCompatibility(message), "[WARNING] %s\n", message.c_str());
   CheckCameras(rig);
 
   THROW_INVALID_ARG_IF(cfg.odometry_mode == OdometryMode::Inertial && rig.imus.empty(),
