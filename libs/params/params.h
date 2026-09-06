@@ -90,6 +90,11 @@ std::string FormatInt32List(const std::vector<int32_t>& value);
 inline std::optional<bool> ParseValue(std::string_view text, std::optional<bool>*) { return ParseOptionalBool(text); }
 inline std::vector<int32_t> ParseValue(std::string_view text, std::vector<int32_t>*) { return ParseInt32List(text); }
 
+// Stored as-is. Registry::Set only ever passes a view into storage it owns, so the field outlives
+// the caller's string -- which is what makes string parameters usable at all on a struct that
+// holds string_view rather than std::string.
+inline std::string_view ParseValue(std::string_view text, std::string_view*) { return text; }
+
 inline std::string FormatValue(bool value) { return value ? "true" : "false"; }
 inline std::string FormatValue(int32_t value) { return std::to_string(value); }
 inline std::string FormatValue(int64_t value) { return std::to_string(value); }
@@ -98,6 +103,7 @@ inline std::string FormatValue(uint64_t value) { return std::to_string(value); }
 inline std::string FormatValue(float value) { return FormatFloat(value); }
 inline std::string FormatValue(const std::optional<bool>& value) { return FormatOptionalBool(value); }
 inline std::string FormatValue(const std::vector<int32_t>& value) { return FormatInt32List(value); }
+inline std::string FormatValue(std::string_view value) { return std::string(value); }
 
 template <typename E>
 std::string EnumValueList() {
@@ -150,7 +156,10 @@ std::string TypeName() {
     return "float";
   } else if constexpr (std::is_same_v<T, std::optional<bool>>) {
     return "bool|null";
+  } else if constexpr (std::is_same_v<T, std::string_view>) {
+    return "string";
   } else {
+    static_assert(std::is_same_v<T, std::vector<int32_t>>, "unsupported parameter field type");
     return "int32[]";
   }
 }

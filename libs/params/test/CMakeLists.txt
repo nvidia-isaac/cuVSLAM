@@ -14,13 +14,19 @@
 
 # libs/params/test CMake file
 
+# config_params_test.cpp covers the descriptors for Odometry::Config and Slam::Config. Those live
+# in libs/cuvslam/cuvslam_params.h rather than next to the structs, because cuvslam2.h is the public
+# API boundary; the test lives here so every "what does the parameter surface cover" check stays in
+# one place.
 set(SOURCES
+    config_params_test.cpp
     params_test.cpp
     sof_params_test.cpp
     solver_params_test.cpp
     )
 
 set(LIBS
+    cuvslam
     odometry
     params
     sof

@@ -126,6 +126,16 @@ Tests
 -----
 
 `test/params_test.cpp` covers the mechanism against stand-in structs, so it does not need updating
-when a real struct changes. `test/sof_params_test.cpp` and `test/solver_params_test.cpp` check the
-real key layout, including that the surface covers everything the older `internal::Internals`
-struct and the `*_config_gflags.h` headers exposed.
+when a real struct changes. The rest check the real key layout: `test/sof_params_test.cpp`,
+`test/solver_params_test.cpp` and `test/config_params_test.cpp` assert that the surface covers
+everything the older `internal::Internals` struct, the `*_config_gflags.h` headers, and the YAML
+loaders exposed. Those coverage lists exist to make removing those interfaces safe, and go away
+with them.
+
+Where the descriptors live
+--------------------------
+
+Next to the struct they describe, with one exception. `Odometry::Config` and `Slam::Config` are
+defined in `libs/cuvslam/cuvslam2.h`, which is the public API boundary and one of the three headers
+shipped to C++ consumers, so it must not include anything internal. Their descriptors live in
+`libs/cuvslam/cuvslam_params.h`, which is compiled into libcuvslam but never shipped.

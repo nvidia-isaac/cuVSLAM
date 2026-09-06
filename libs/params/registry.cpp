@@ -134,6 +134,8 @@ std::string Registry::Resolve(std::string_view key) const {
   throw std::invalid_argument("parameter '" + std::string(key) + "' is ambiguous; candidates: " + candidates);
 }
 
+std::string_view Registry::Intern(std::string_view value) { return interned_.emplace_back(value); }
+
 void Registry::Set(std::string_view key, std::string_view value, Source source) {
   const std::string resolved = Resolve(key);
   const auto [group, field] = Find(resolved);
@@ -142,7 +144,7 @@ void Registry::Set(std::string_view key, std::string_view value, Source source) 
   // line in a parameter file cannot half-apply a configuration.
   const std::string previous = field->get(group->instance);
   try {
-    field->set(group->instance, value);
+    field->set(group->instance, Intern(value));
   } catch (const std::exception& e) {
     throw std::runtime_error("parameter '" + resolved + "': " + e.what());
   }
@@ -150,7 +152,7 @@ void Registry::Set(std::string_view key, std::string_view value, Source source) 
   if (field->bounds.active && field->as_double != nullptr) {
     const double numeric = field->as_double(group->instance);
     if (numeric < field->bounds.min || numeric > field->bounds.max) {
-      field->set(group->instance, previous);
+      field->set(group->instance, Intern(previous));
       throw std::runtime_error("parameter '" + resolved + "': " + std::string(value) + " " +
                                DescribeBounds(field->bounds));
     }

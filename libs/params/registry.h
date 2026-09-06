@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cstdint>
+#include <deque>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -126,8 +127,17 @@ private:
 
   Source SourceOf(const std::string& key) const;
 
+  /// Copies @p value into storage owned by the registry and returns a view of it.
+  ///
+  /// String parameters land in `std::string_view` fields, which cannot own their text. Assigning
+  /// a view of the caller's argument would dangle the moment it returns, so the registry keeps the
+  /// text alive for as long as the settings it wrote to. A deque never relocates what it already
+  /// holds, so previously handed-out views stay valid.
+  std::string_view Intern(std::string_view value);
+
   std::vector<Group> groups_;
   std::vector<std::pair<std::string, Source>> sources_;
+  std::deque<std::string> interned_;
 };
 
 }  // namespace cuvslam::params
