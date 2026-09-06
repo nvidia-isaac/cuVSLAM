@@ -115,13 +115,17 @@ stage_one() {
   report_staging_profile "$name" "$remote_bytes" "$stream_seconds" "$file_count"
 }
 
-# Fails in seconds on a registry fault, rather than after a download.
-dataset_registry validate
+# Fails in seconds on a registry fault or an unknown suite, rather than after a
+# download.
+resolve_eval_suite_args
+dataset_registry validate "${EVAL_SUITE_ARGS[@]}"
+
+echo "Staging for suite: ${EVAL_SUITE:-<unset, every record>}"
 
 # Captured rather than piped into the loop, so an empty listing is an error
 # instead of a staging run that silently does nothing.
-if ! eval_datasets="$(dataset_registry list --eval)" || [ -z "$eval_datasets" ]; then
-  echo "Error: the dataset registry lists no evaluation datasets." >&2
+if ! eval_datasets="$(dataset_registry list --eval "${EVAL_SUITE_ARGS[@]}")" || [ -z "$eval_datasets" ]; then
+  echo "Error: the dataset registry lists no evaluation datasets for this suite." >&2
   exit 1
 fi
 
