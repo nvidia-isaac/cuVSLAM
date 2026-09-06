@@ -710,6 +710,70 @@ public:
   const std::vector<uint8_t>& GetPrimaryCameras() const;
 
   /**
+   * @brief Description and current state of one internal parameter.
+   *
+   * @warning Every view points into storage owned by the Odometry instance. They stay valid until
+   * the next GetParameters() call on the same instance, and until the instance is destroyed. Copy
+   * anything you need to keep.
+   */
+  struct ParameterInfo {
+    std::string_view key;            ///< Dotted name, for example `sof.num_desired_tracks`
+    std::string_view doc;            ///< One-line description
+    std::string_view type;           ///< `int32`, `float`, `bool`, `string`, `enum{a|b}`, ...
+    std::string_view value;          ///< Current value
+    std::string_view default_value;  ///< Built-in default
+    std::string_view source;         ///< `default`, `file`, `command-line` or `api`
+  };
+
+  /**
+   * @brief Set an internal parameter by name.
+   *
+   * For internal use only. These parameters expose low-level solver behaviour, are not covered by
+   * API stability guarantees, and may change or disappear in any release. Adjusting them may
+   * degrade tracking or make it unstable.
+   *
+   * The new value takes effect on the next Track() call. SBA parameters are read when SBA next
+   * triggers on a keyframe, so only the latest value before that point has any effect.
+   *
+   * Use GetParameters() for the list of names, types and defaults.
+   *
+   * @param[in] key   parameter name; any unambiguous suffix of a full name is accepted, so
+   * `num_desired_tracks` resolves to `sof.num_desired_tracks`
+   * @param[in] value value in its string form, as GetParameters() reports it
+   * @throws std::invalid_argument if the name is unknown, ambiguous, or not applicable to the
+   * current odometry mode
+   * @throws std::runtime_error if the value does not parse as the parameter's type or falls
+   * outside its valid range; the parameter keeps its previous value
+   */
+  void SetParameter(std::string_view key, std::string_view value);
+
+  /**
+   * @brief Set internal parameters from a file.
+   *
+   * For internal use only; see SetParameter() for the caveats.
+   *
+   * One `key: value` or `key = value` per line, with `#` starting a comment. Assignment stops at
+   * the first bad line, so a file is either applied up to that point or reported as an error --
+   * inspect GetParameters() if you need to know what was applied.
+   *
+   * @param[in] path path to the parameter file
+   * @return number of parameters assigned
+   * @throws std::runtime_error if the file cannot be read, or a line is malformed or names an
+   * unknown parameter; the message carries the file name and line number
+   */
+  uint32_t LoadParameters(std::string_view path);
+
+  /**
+   * @brief Get every internal parameter with its current value and where that value came from.
+   *
+   * Recording this alongside a run's results makes the run reproducible: it captures parameters
+   * set programmatically or from a file, not just what a configuration file happened to contain.
+   *
+   * @return one entry per parameter. Views are invalidated by the next call; see ParameterInfo.
+   */
+  std::vector<ParameterInfo> GetParameters() const;
+
+  /**
    * @brief Apply internal parameters by string key/value pairs.
    *
    * Allows setting internal runtime settings by name. Unknown keys log a warning and are ignored.
