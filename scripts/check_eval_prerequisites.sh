@@ -22,12 +22,14 @@ if [ "${GITHUB_ACTIONS:-}" = "true" ] && ! $have_aws; then
   exit 1
 fi
 
-dataset_registry validate
+resolve_eval_suite_args
+dataset_registry validate "${EVAL_SUITE_ARGS[@]}"
 
 # Captured rather than piped into the loop: a failing or empty listing would
-# otherwise skip the body and leave cache_ok true, reporting success.
-if ! eval_datasets="$(dataset_registry list --eval)" || [ -z "$eval_datasets" ]; then
-  echo "Error: the dataset registry lists no evaluation datasets." >&2
+# otherwise skip the body and leave cache_ok true, reporting success. The suite
+# must match staging, or this reports a warm cache for datasets the run skips.
+if ! eval_datasets="$(dataset_registry list --eval "${EVAL_SUITE_ARGS[@]}")" || [ -z "$eval_datasets" ]; then
+  echo "Error: the dataset registry lists no evaluation datasets for this suite." >&2
   exit 1
 fi
 

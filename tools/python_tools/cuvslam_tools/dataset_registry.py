@@ -47,6 +47,26 @@ from typing import Iterable, Sequence
 SUITES = ("smoke", "full")
 GATING_POLICIES = ("hard", "soft", "informational")
 
+# "full" is the superset every record must belong to, enforced in validation.
+# That makes an omitted --suite equivalent to full, so scripts and workflows that
+# do not select a suite keep evaluating everything.
+FULL_SUITE = "full"
+
+# Metrics cuvslam_kpi_report.py emits per record, and the dataset type it derives
+# from --odometry_mode. Both are mirrored here so the registry can name the KPI
+# keys a suite will produce without importing a script outside this package.
+# Keep them in step with REQUIRED_METRICS and odometry_mode_to_type in
+# scripts/cuvslam_kpi_report.py: a mismatch makes kpi-keys name keys no run
+# produces, which reads as a missing KPI rather than a registry fault.
+KPI_METRICS = ("ATE", "ARE", "Kabsch", "TrackingLosts", "FPS")
+KPI_MODES = ("ODOM", "SLAM")
+ODOMETRY_MODE_TYPES = {
+    "multicamera": "STEREO",
+    "mono": "MONO",
+    "inertial": "VIO",
+    "rgbd": "RGBD",
+}
+
 # Values cuvslam_app accepts for --odometry_mode. cuvslam_kpi_report.py maps each
 # to a distinct KPI type, and anything unrecognized there falls back to STEREO,
 # so an unknown mode here would silently mislabel a KPI key.
@@ -88,6 +108,25 @@ class EvalSpec:
         """
         modes = self.odometry_modes
         return modes[0] if len(modes) == 1 else ""
+
+    @property
+    def kpi_type(self) -> str:
+        """Dataset type the KPI collector will derive from the odometry mode."""
+        return ODOMETRY_MODE_TYPES.get(self.odometry_mode, "STEREO")
+
+    def kpi_keys(self) -> tuple[str, ...]:
+        """KPI keys this record can produce, as `<PREFIX>_<METRIC>_<TYPE>_<MODE>`.
+
+        Both ODOM and SLAM are listed for every record. Which of the two a run
+        actually emits depends on the ``sequence_title`` entries inside the
+        reporter config, which ships in the private tarball rather than living
+        here, so this is the set a suite *may* produce.
+        """
+        return tuple(
+            f"{self.kpi_prefix}_{metric}_{self.kpi_type}_{mode}"
+            for mode in KPI_MODES
+            for metric in KPI_METRICS
+        )
 
 
 @dataclass(frozen=True)
@@ -242,6 +281,12 @@ def _validate_eval(spec: DatasetSpec, record: EvalSpec) -> None:
     unknown = sorted(record.suites - set(SUITES))
     if unknown:
         raise RegistryError(f"{where}: unknown suite(s) {', '.join(unknown)}")
+    if FULL_SUITE not in record.suites:
+        raise RegistryError(
+            f"{where}: every record must belong to '{FULL_SUITE}'. Smaller suites are subsets of it, "
+            "so a record outside it would never run on a nightly, and an omitted --suite would "
+            "select more than the full suite does"
+        )
     if record.gating not in GATING_POLICIES:
         raise RegistryError(f"{where}: gating must be one of {', '.join(GATING_POLICIES)}")
 
@@ -265,11 +310,13 @@ def _validate_kpi_identities() -> None:
             seen[key] = origin
 
 
-def validate(dataset_ids: Iterable[str] | None = None) -> None:
+def validate(dataset_ids: Iterable[str] | None = None, suite: str | None = None) -> None:
     """Check the registry and raise on the first fault.
 
     ``dataset_ids`` narrows the per-dataset checks; KPI identities are compared
-    across every dataset regardless.
+    across every dataset regardless. ``suite``, when given, must be a known
+    suite that selects at least one record, so a workflow cannot ask for a
+    suite that would run nothing.
     """
     for key, spec in DATASETS.items():
         if key != spec.dataset_id:
@@ -291,6 +338,12 @@ def validate(dataset_ids: Iterable[str] | None = None) -> None:
             _validate_eval(spec, record)
 
     _validate_kpi_identities()
+
+    if suite is not None:
+        if suite not in SUITES:
+            raise RegistryError(f"unknown suite '{suite}' (known: {', '.join(SUITES)})")
+        if not eval_datasets(suite):
+            raise RegistryError(f"suite '{suite}' selects no evaluation records")
 
 
 def verify_staged(spec: DatasetSpec, root: Path) -> None:
@@ -321,6 +374,20 @@ def verify_staged(spec: DatasetSpec, root: Path) -> None:
             )
 
 
+def suite_kpi_keys(suite: str | None = None) -> list[str]:
+    """Every KPI key the given suite can produce, sorted and deduplicated.
+
+    Lets a consumer tell a key that is legitimately absent, because its dataset
+    is not in this suite, from one that went missing in a run that should have
+    produced it.
+    """
+    keys: set[str] = set()
+    for spec in eval_datasets(suite):
+        for record in eval_records(spec, suite):
+            keys.update(record.kpi_keys())
+    return sorted(keys)
+
+
 def _print_records(suite: str | None) -> None:
     for spec in eval_datasets(suite):
         for record in eval_records(spec, suite):
@@ -345,6 +412,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     validate_parser = subparsers.add_parser("validate", help="Check the registry contract.")
     validate_parser.add_argument("--dataset", action="append", default=None, help="Limit to one dataset; repeatable.")
+    validate_parser.add_argument(
+        "--suite",
+        default=None,
+        help="Also require this suite to be known and to select at least one record.",
+    )
 
     list_parser = subparsers.add_parser("list", help="Print dataset IDs, one per line.")
     list_parser.add_argument("--eval", action="store_true", help="Only datasets with reporter runs.")
@@ -354,6 +426,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         "eval-records", help="Print id, KPI prefix, config path, and flags as tab-separated fields."
     )
     records_parser.add_argument("--suite", default=None, choices=SUITES)
+
+    keys_parser = subparsers.add_parser(
+        "kpi-keys", help="Print the KPI keys a suite can produce, one per line."
+    )
+    keys_parser.add_argument("--suite", default=None, choices=SUITES)
 
     module_parser = subparsers.add_parser("prepare-module", help="Print a dataset's preparation module path.")
     module_parser.add_argument("dataset")
@@ -378,15 +455,19 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         if args.command == "validate":
-            validate(args.dataset)
+            validate(args.dataset, args.suite)
             scope = ", ".join(args.dataset) if args.dataset else f"{len(DATASETS)} datasets"
-            print(f"dataset registry OK ({scope})")
+            suffix = f", suite {args.suite}" if args.suite else ""
+            print(f"dataset registry OK ({scope}{suffix})")
         elif args.command == "list":
             specs = eval_datasets(args.suite) if (args.eval or args.suite) else provisionable_datasets()
             for spec in specs:
                 print(spec.dataset_id)
         elif args.command == "eval-records":
             _print_records(args.suite)
+        elif args.command == "kpi-keys":
+            for key in suite_kpi_keys(args.suite):
+                print(key)
         elif args.command == "prepare-module":
             print(dataset(args.dataset).prepare_module)
         elif args.command == "prepare":
