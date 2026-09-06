@@ -23,6 +23,7 @@
 
 #include "camera/rig.h"
 #include "common/camera_id.h"
+#include "params/params.h"
 
 namespace cuvslam::camera {
 
@@ -106,3 +107,11 @@ private:
 };
 
 }  // namespace cuvslam::camera
+
+// Spellings accepted for MulticameraMode in parameter files and on the command line. Manual is
+// omitted on purpose: it needs an accompanying camera setup that no scalar value can express.
+CUVSLAM_PARAM_ENUM_BEGIN(cuvslam::camera::MulticameraMode)
+CUVSLAM_PARAM_ENUM_VALUE("performance", Performance)
+CUVSLAM_PARAM_ENUM_VALUE("precision", Precision)
+CUVSLAM_PARAM_ENUM_VALUE("moderate", Moderate)
+CUVSLAM_PARAM_ENUM_END()

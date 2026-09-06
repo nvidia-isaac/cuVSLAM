@@ -43,6 +43,7 @@ set(LIBS
     cuvslam_math
     imu
     map
+    params
     pipelines
     profiler
     sof

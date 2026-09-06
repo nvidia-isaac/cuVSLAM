@@ -30,6 +30,7 @@ set(LIBS
     common
     cuvslam_math
     epipolar
+    params
     profiler
 )
 

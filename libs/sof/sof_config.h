@@ -66,6 +66,30 @@ void OverrideMulticameraSettings(Settings& settings, const std::optional<camera:
 
 }  // namespace cuvslam::sof
 
+// Tunable fields of sof::Settings, addressed as `sof.<name>`. multicam_setup is deliberately
+// absent: manual camera topology is structural, not a value a tuning run can sweep.
+CUVSLAM_PARAMS_BEGIN(cuvslam::sof::Settings)
+CUVSLAM_PARAM_BOUNDED(num_desired_tracks, "Number of feature tracks to maintain", NonNegative())
+CUVSLAM_PARAM_BOUNDED(border_top, "Top image border to ignore, pixels", NonNegative())
+CUVSLAM_PARAM_BOUNDED(border_bottom, "Bottom image border to ignore, pixels", NonNegative())
+CUVSLAM_PARAM_BOUNDED(border_left, "Left image border to ignore, pixels", NonNegative())
+CUVSLAM_PARAM_BOUNDED(border_right, "Right image border to ignore, pixels", NonNegative())
+CUVSLAM_PARAM(box3_prefilter, "Preprocess input images with a box filter")
+CUVSLAM_PARAM(ransac_filter, "Preprocess input images with a RANSAC filter")
+CUVSLAM_PARAM(tracker, "Feature tracker")
+CUVSLAM_PARAM(lr_tracker, "Left-to-right feature tracker, stereo only")
+CUVSLAM_PARAM(min_depth, "Nearest depth sampled along the epipolar curve for L2R guesses, meters; <0 auto-detects")
+CUVSLAM_PARAM(max_depth, "Farthest depth sampled along the epipolar curve for L2R guesses, meters; <0 auto-detects")
+CUVSLAM_PARAM(multicam_mode, "Multicamera primary/secondary topology")
+CUVSLAM_PARAMS_END()
+
+// Registered under its own prefix, giving `sof.feature_selection.survivor_from_last`.
+CUVSLAM_PARAMS_BEGIN(cuvslam::sof::SelectorStereoSettings)
+CUVSLAM_PARAM_BOUNDED(survivor_from_last,
+                      "Re-initialize primary-camera tracks when surviving tracks fall below this percentage",
+                      InRange(0.0, 100.0))
+CUVSLAM_PARAMS_END()
+
 // Included after Settings is fully defined to break the circular dependency
 // with sof_mono_interface.h (which uses Settings in its function signatures).
 #include "sof/sof_mono_interface.h"

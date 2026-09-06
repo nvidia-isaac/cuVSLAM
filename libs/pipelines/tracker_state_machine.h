@@ -21,6 +21,7 @@
 #include <list>
 
 #include "common/types.h"
+#include "params/params.h"
 
 namespace cuvslam::pipelines {
 
@@ -100,3 +101,16 @@ private:
 };
 
 }  // namespace cuvslam::pipelines
+
+// Tunable fields of StateMachineSettings, addressed as `sm.<name>`. Only meaningful in Inertial
+// mode, so the registry only exposes them when the tracker has a state machine.
+CUVSLAM_PARAMS_BEGIN(cuvslam::pipelines::StateMachineSettings)
+CUVSLAM_PARAM_BOUNDED(max_integration_time_ns, "Inter-frame gap above which IMU preintegration is reset, ns",
+                      NonNegative())
+CUVSLAM_PARAM(min_num_kf_for_gravity, "Keyframes required before gravity initialization is attempted")
+CUVSLAM_PARAM_BOUNDED(min_time_period_ns, "Keyframe history span required before gravity initialization, ns",
+                      NonNegative())
+CUVSLAM_PARAM_BOUNDED(max_time_period_ns, "Sliding-window size of the keyframe history, ns", NonNegative())
+CUVSLAM_PARAM_BOUNDED(gravity_update_period_ns, "Period between gravity re-estimations once initialized, ns",
+                      NonNegative())
+CUVSLAM_PARAMS_END()

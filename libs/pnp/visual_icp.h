@@ -30,6 +30,7 @@
 #include "cuda_modules/gradient_pyramid.h"
 #include "cuda_modules/icp_tools.h"
 #include "cuda_modules/image_pyramid.h"
+#include "params/params.h"
 #include "pipelines/track.h"
 #include "profiler/profiler.h"
 #include "profiler/profiler_enable.h"
@@ -110,3 +111,16 @@ private:
 };
 
 }  // namespace cuvslam::pnp
+
+// Tunable fields of ICPSettings, addressed as `icp.<name>`. Used in mono-depth (RGB-D) mode only.
+CUVSLAM_PARAMS_BEGIN(cuvslam::pnp::ICPSettings)
+CUVSLAM_PARAM_BOUNDED(lambda, "Levenberg-Marquardt damping factor", NonNegative())
+CUVSLAM_PARAM_BOUNDED(huber_vis, "Huber robustifier scale for visual reprojection residuals", NonNegative())
+CUVSLAM_PARAM_BOUNDED(huber_depth, "Huber robustifier scale for depth ICP residuals", NonNegative())
+CUVSLAM_PARAM_BOUNDED(max_iteration, "Maximum LM iterations when no depth pyramid is available", NonNegative())
+CUVSLAM_PARAM_BOUNDED(cost_thresh, "Convergence threshold", NonNegative())
+CUVSLAM_PARAM_BOUNDED(min_scale_level, "Finest pyramid level to process; 0 is full resolution", NonNegative())
+CUVSLAM_PARAM_BOUNDED(max_scale_level, "Coarsest pyramid level to start from", NonNegative())
+CUVSLAM_PARAM_BOUNDED(num_iters_per_scale, "LM iterations per pyramid level when depth is available", NonNegative())
+CUVSLAM_PARAM_BOUNDED(blending_alpha, "Weight of visual residuals against depth ICP residuals", InRange(0.0, 1.0))
+CUVSLAM_PARAMS_END()

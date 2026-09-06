@@ -12,40 +12,30 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
-set(MODULE_NAME "sba")
+# libs/params CMake file
+
+set(MODULE_NAME "params")
 
 set(HEADERS
-    bundle_adjustment_problem.h
-    mono_sba_solver.h
-    sba_config.h
-    sba_config_gflags.h
-    schur_complement_bundler_cpu.h
+    params.h
+    registry.h
     )
 
 set(SOURCES
-    mono_sba_solver.cpp
-    schur_complement_bundler_cpu.cpp
+    params.cpp
+    registry.cpp
     )
 
-
 set(LIBS
-    camera
     common
-    cuvslam_math
-    epipolar
-    params
-    profiler
-)
-
-if(USE_CUDA)
-    set(HEADERS ${HEADERS} schur_complement_bundler_gpu.h)
-    set(SOURCES ${SOURCES} schur_complement_bundler_gpu.cpp)
-    set(LIBS ${LIBS} cuda_modules)
-endif()
+    jsoncpp::jsoncpp
+    )
 
 setup_staticlib_project(
-        MODULE_NAME "${MODULE_NAME}"
-        HEADERS ${HEADERS}
-        SOURCES ${SOURCES}
-        LIBRARIES ${LIBS}
-)
+    MODULE_NAME "${MODULE_NAME}"
+    HEADERS ${HEADERS}
+    SOURCES ${SOURCES}
+    LIBRARIES ${LIBS}
+    )
+
+add_subdirectory(test)

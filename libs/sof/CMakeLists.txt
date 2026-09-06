@@ -83,6 +83,7 @@ set(LIBS
     camera
     common
     epipolar
+    params
     profiler
 )
 

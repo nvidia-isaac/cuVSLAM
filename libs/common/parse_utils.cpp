@@ -82,4 +82,8 @@ int32_t ParseInt32(std::string_view v) { return Parse<int32_t>(v, "int32"); }
 
 int64_t ParseInt64(std::string_view v) { return Parse<int64_t>(v, "int64"); }
 
+uint32_t ParseUInt32(std::string_view v) { return Parse<uint32_t>(v, "uint32"); }
+
+uint64_t ParseUInt64(std::string_view v) { return Parse<uint64_t>(v, "uint64"); }
+
 }  // namespace cuvslam::common

@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "common/imu_calibration.h"
+#include "params/params.h"
 #include "pipelines/inertial_pnp.h"
 #include "pipelines/tracker_state_machine.h"
 #include "pnp/multicam_pnp.h"
@@ -43,6 +44,8 @@ struct KeyFrameSettings {
   int64_t max_timedelta_between_kfs_s = 60;
 
   // Explicit per-frame keyframe decision. std::nullopt uses automatic keyframe checks.
+  // Set from the caller's per-frame hint rather than from configuration: it is the one value that
+  // legitimately differs frame to frame, so it is not a registered parameter.
   std::optional<bool> override_frame_selection;
 };
 
@@ -125,3 +128,11 @@ inline TrackPerFrameSettings MakeTrackPerFrameSettings(const Settings& settings)
 }
 
 }  // namespace cuvslam::odom
+
+// Tunable fields of KeyFrameSettings, addressed as `kf.<name>`. override_frame_selection is absent
+// on purpose: it varies per frame, so it arrives as a per-frame hint instead of a parameter.
+CUVSLAM_PARAMS_BEGIN(cuvslam::odom::KeyFrameSettings)
+CUVSLAM_PARAM_BOUNDED(survivor_from_last, "Make a keyframe when surviving tracks fall below this percentage",
+                      InRange(0.0, 100.0))
+CUVSLAM_PARAM_BOUNDED(max_timedelta_between_kfs_s, "Maximum time between consecutive keyframes, seconds", NonNegative())
+CUVSLAM_PARAMS_END()

@@ -20,6 +20,8 @@
 #include <cstdint>
 #include <string>
 
+#include "params/params.h"
+
 namespace cuvslam::sba {
 
 enum Mode { Disabled, OriginalCPU, OriginalGPU, InertialCPU, InertialGPU };
@@ -50,3 +52,24 @@ struct Settings {
 };
 
 }  // namespace cuvslam::sba
+
+CUVSLAM_PARAM_ENUM_BEGIN(cuvslam::sba::Mode)
+CUVSLAM_PARAM_ENUM_VALUE("none", Disabled)
+CUVSLAM_PARAM_ENUM_VALUE("cpu", OriginalCPU)
+CUVSLAM_PARAM_ENUM_VALUE("gpu", OriginalGPU)
+CUVSLAM_PARAM_ENUM_VALUE("imu", InertialCPU)
+CUVSLAM_PARAM_ENUM_VALUE("imugpu", InertialGPU)
+CUVSLAM_PARAM_ENUM_END()
+
+// Tunable fields of sba::Settings, addressed as `sba.<name>`. `mode` stays out: it follows from
+// the odometry mode and the SBA backend at construction, rather than being tuned per run.
+CUVSLAM_PARAMS_BEGIN(cuvslam::sba::Settings)
+CUVSLAM_PARAM(async, "Run SBA asynchronously")
+CUVSLAM_PARAM_BOUNDED(num_sba_frames, "Keyframes in the SBA window", NonNegative())
+CUVSLAM_PARAM_BOUNDED(num_inertial_sba_frames, "Keyframes in the inertial SBA window", NonNegative())
+CUVSLAM_PARAM_BOUNDED(num_fixed_sba_frames, "Keyframes held fixed in SBA", NonNegative())
+CUVSLAM_PARAM_BOUNDED(num_inertial_fixed_sba_frames, "Keyframes held fixed in inertial SBA", NonNegative())
+CUVSLAM_PARAM_BOUNDED(num_sba_iterations, "Maximum solver iterations per SBA run", NonNegative())
+CUVSLAM_PARAM_BOUNDED(robustifier_scale, "Huber loss threshold", NonNegative())
+CUVSLAM_PARAM(use_sba_winsorizer, "Winsorize residuals in SBA")
+CUVSLAM_PARAMS_END()
