@@ -69,11 +69,12 @@ int32_t RequireNonNegative(int32_t value, std::string_view expression) {
 
 #define REQUIRE_NON_NEGATIVE(x) RequireNonNegative((x), #x)
 
-// Builds a TrackPerFrameSettings from per-frame options. Internals always carries concrete
-// values; pass Internals{} to use all defaults. Add new per-frame categories to
-// TrackPerFrameSettings rather than adding parameters here or to track().
-odom::TrackPerFrameSettings BuildTrackFrameSettings(const cuvslam::internal::Internals& internals) {
-  odom::TrackPerFrameSettings result;
+// Overrides per-frame settings from Internals. Internals carries concrete values with no way to
+// mark a field as unset, so every field it covers is overwritten -- including any value the
+// tracker was constructed with. Callers that only want the configured behaviour pass no Internals
+// at all. Add new per-frame categories to TrackPerFrameSettings rather than adding parameters
+// here or to track().
+void ApplyInternals(const cuvslam::internal::Internals& internals, odom::TrackPerFrameSettings& result) {
   result.sof.num_desired_tracks = internals.num_desired_tracks;
   result.sof.border_top = internals.border_top;
   result.sof.border_bottom = internals.border_bottom;
@@ -117,7 +118,6 @@ odom::TrackPerFrameSettings BuildTrackFrameSettings(const cuvslam::internal::Int
   result.icp.num_iters_per_scale = REQUIRE_NON_NEGATIVE(internals.icp_num_iters_per_scale);
   result.icp.blending_alpha = internals.icp_blending_alpha;
 #endif
-  return result;
 }
 
 #undef REQUIRE_NON_NEGATIVE
@@ -678,10 +678,10 @@ void Odometry::RegisterImuMeasurement(uint32_t sensor_index, const ImuMeasuremen
 
 PoseEstimate Odometry::Track(const ImageSet& images, const ImageSet& masks, const ImageSet& depths,
                              const cuvslam::internal::Internals* internals) {
-  odom::TrackPerFrameSettings per_frame_setting =
-      BuildTrackFrameSettings(internals ? *internals : cuvslam::internal::Internals{});
-  per_frame_setting.sba = impl->svo_settings.sba_settings;
-  per_frame_setting.sm = impl->svo_settings.sm_settings;
+  odom::TrackPerFrameSettings per_frame_setting = odom::MakeTrackPerFrameSettings(impl->svo_settings);
+  if (internals != nullptr) {
+    ApplyInternals(*internals, per_frame_setting);
+  }
 
   CheckImages(images, impl->frame_sync_threshold_ns, impl->cameras_models);
   if (impl->odometry_mode == OdometryMode::RGBD) {

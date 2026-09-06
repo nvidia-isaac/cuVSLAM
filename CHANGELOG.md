@@ -18,6 +18,10 @@
 
 ### Fixed
 
+- `Odometry::Config::use_denoising` and `Rig::Camera::border_top`/`border_bottom`/`border_left`/`border_right` had no
+  effect. Both are applied at construction, but `Track()` rebuilt the per-frame settings from type defaults, and
+  feature tracking re-reads denoising and border values from those per-frame settings on every frame. Setting either
+  now changes tracking as documented; runs that relied on them being ignored will see different results
 - Unsynchronized reads of the SLAM engine during map localization (`LocalizeInMapCmd::Execute`)
 - Unnecessary mutex contention in `AsyncSlam::GetSlamPose()`
 

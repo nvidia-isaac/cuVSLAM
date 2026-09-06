@@ -103,4 +103,25 @@ struct Settings {
   bool use_prediction = true;
 };
 
+/**
+ * @brief Seeds the per-frame settings from the settings the tracker was constructed with.
+ *
+ * Every sub-struct that exists in both places is copied across. This is the only correct starting
+ * point for a frame: some values are re-read from the per-frame struct on every frame
+ * (sof::Settings::box3_prefilter and the border fields are consumed in MonoSOF), so building the
+ * per-frame struct from type defaults instead silently discards whatever the caller configured at
+ * construction.
+ *
+ * Solver sub-structs with no counterpart in Settings (vo_pnp, inertial_stereo_pnp, imu_pnp, icp)
+ * keep their own defaults.
+ */
+inline TrackPerFrameSettings MakeTrackPerFrameSettings(const Settings& settings) {
+  TrackPerFrameSettings result;
+  result.sof = settings.sof_settings;
+  result.kf = settings.kf_settings;
+  result.sba = settings.sba_settings;
+  result.sm = settings.sm_settings;
+  return result;
+}
+
 }  // namespace cuvslam::odom

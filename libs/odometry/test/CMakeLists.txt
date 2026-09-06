@@ -13,5 +13,5 @@
 # of the software or derivative works thereof, you agree to be bound by this License.
 
 setup_test_project(MODULE_NAME ${MODULE_NAME}
-                   SOURCES ground_integrator_test.cpp
+                   SOURCES ground_integrator_test.cpp svo_config_test.cpp
                    LIBRARIES odometry)
