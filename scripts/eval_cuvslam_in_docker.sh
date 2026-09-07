@@ -10,6 +10,7 @@ if [ "$#" -ne 1 ]; then
   echo "  RUNNER_LOCAL_DATASETS_ROOT  Local extract root (default \$HOME/.cache/cuvslam)"
   echo "  AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY  From AWS_S3_* repository secrets in CI"
   echo "  KPI_HISTORY_DIR  Override KPI path (default \$RUNNER_STORAGE_ROOT/cuvslam-ci/kpi-history)"
+  echo "  EVAL_SUITE       smoke or full; unset evaluates every record"
   echo "  RUN_ID, MAX_WORKERS, EVAL_WRITE_HISTORY"
   exit 1
 fi
@@ -67,6 +68,13 @@ fi
 TTY_FLAG=""
 [ -t 0 ] && TTY_FLAG="-it"
 
+# Forwarded only when set, so the container sees the same unset-means-everything
+# behavior the host scripts use rather than an empty value it must reject.
+SUITE_ENV=()
+if [ -n "${EVAL_SUITE+set}" ]; then
+  SUITE_ENV=(-e EVAL_SUITE="$EVAL_SUITE")
+fi
+
 docker run --runtime=nvidia --gpus all --rm $TTY_FLAG \
   -v "$(pwd):/cuvslam:ro" \
   -v "$OUTPUT_DIR:/output" \
@@ -76,6 +84,7 @@ docker run --runtime=nvidia --gpus all --rm $TTY_FLAG \
   -e DATASETS_ROOT=/datasets \
   -e KPI_HISTORY=/kpi-history \
   -e EVAL_WRITE_HISTORY="$WRITE_HISTORY" \
+  "${SUITE_ENV[@]}" \
   -e RUN_ID="$RUN_ID" \
   -e MAX_WORKERS="$MAX_WORKERS" \
   -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \

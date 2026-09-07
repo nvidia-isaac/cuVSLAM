@@ -18,7 +18,6 @@ The converter copies image bytes without decoding them, so the synthetic
 sequences below use placeholder file contents.
 """
 
-import inspect
 import json
 import shutil
 import tempfile
@@ -374,33 +373,6 @@ class TestReporterConfig(unittest.TestCase):
         titles = [entry["sequence_title"] for entry in config["sequence_cfgs"]]
         self.assertEqual(titles[:2], ["living-room-traj0-ODOM", "living-room-traj0-SLAM"])
         self.assertEqual(titles[-2:], ["office-traj3-ODOM", "office-traj3-SLAM"])
-
-
-class TestPreparationContract(unittest.TestCase):
-    """The shared contract test only covers registered datasets.
-
-    ICL-NUIM is not in the registry yet — registering provision targets is a
-    later change — so the same contract is asserted here rather than widened
-    there, where it would claim the dataset is provisionable.
-    """
-
-    def test_prepare_and_main_match_the_shared_contract(self):
-        self.assertTrue(callable(icl_prepare.prepare))
-        self.assertTrue(callable(icl_prepare.main))
-        parameters = inspect.signature(icl_prepare.prepare).parameters
-        self.assertLessEqual(
-            {"raw_dir", "output_dir", "force_download", "download_only"}, set(parameters)
-        )
-        for name, parameter in parameters.items():
-            self.assertIsNot(parameter.default, inspect.Parameter.empty, name)
-
-    def test_provisioning_arguments_are_accepted(self):
-        arguments = ["--raw-dir", "/raw", "--output-dir", "/converted", "--force-download"]
-        with unittest.mock.patch.object(icl_prepare, "prepare") as prepare:
-            self.assertEqual(icl_prepare.main(arguments), 0)
-        self.assertEqual(prepare.call_args.kwargs["raw_dir"], Path("/raw"))
-        self.assertEqual(prepare.call_args.kwargs["output_dir"], Path("/converted"))
-        self.assertTrue(prepare.call_args.kwargs["force_download"])
 
 
 class TestSequenceDiscovery(unittest.TestCase):

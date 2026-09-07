@@ -12,6 +12,26 @@ dataset_registry() {
     python3 -m cuvslam_tools.dataset_registry "$@"
 }
 
+# Sets EVAL_SUITE_ARGS to ("--suite" "<name>") when EVAL_SUITE is set, and to an
+# empty array when it is not. An unset variable therefore selects every record,
+# which the registry keeps equal to the full suite by requiring every record to
+# belong to it.
+#
+# A variable that is set but empty is a mistake worth failing on: it usually
+# means a workflow interpolated a missing input, and silently running the full
+# suite there would hide the error.
+resolve_eval_suite_args() {
+  EVAL_SUITE_ARGS=()
+  if [ -z "${EVAL_SUITE+set}" ]; then
+    return 0
+  fi
+  if [ -z "$EVAL_SUITE" ]; then
+    echo "Error: EVAL_SUITE is set but empty; unset it or name a suite." >&2
+    exit 1
+  fi
+  EVAL_SUITE_ARGS=(--suite "$EVAL_SUITE")
+}
+
 s3_dataset_bucket() {
   local _s3_path="${S3_DATASETS_BUCKET#s3://}"
   echo "${_s3_path%%/*}"
