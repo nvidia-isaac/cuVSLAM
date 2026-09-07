@@ -250,6 +250,14 @@ class HttpRangeFile(io.RawIOBase):
         length = headers.get("content-length")
         if length is None:
             raise HttpRangeError(f"{self.url}: server did not report Content-Length")
+        try:
+            size = int(length)
+        except ValueError:
+            raise HttpRangeError(f"{self.url}: Content-Length is not a number: {length!r}") from None
+        # A negative size would leave every read clamped to nothing, which
+        # surfaces as h5py failing to make sense of an empty file.
+        if size < 0:
+            raise HttpRangeError(f"{self.url}: Content-Length is negative: {size}")
         etag = (headers.get("etag") or "").strip()
         # A conversion reads one object over hours, and M3ED does republish
         # files. Without a strong validator to send back on every range read, a
@@ -261,7 +269,7 @@ class HttpRangeFile(io.RawIOBase):
                 f"{self.url}: no strong ETag (got {etag or 'none'}), so the object cannot be "
                 "pinned for the length of a conversion"
             )
-        return int(length), etag
+        return size, etag
 
     def _fetch(self, start: int, length: int) -> bytes:
         if length <= 0:

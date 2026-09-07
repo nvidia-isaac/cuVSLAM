@@ -560,21 +560,28 @@ def convert_sequence(
 def write_state(
     sequence_dir: Path, frame_limit: Optional[int], metadata: Optional[Dict[str, object]] = None
 ) -> None:
-    """Record what produced ``sequence_dir`` alongside the sequence itself."""
+    """Record what produced ``sequence_dir`` alongside the sequence itself.
+
+    ``metadata`` is absent until the conversion finishes, so its presence is
+    what marks the sequence complete. The file is replaced atomically: a write
+    cut short leaves the previous state rather than one that cannot be read,
+    which would be indistinguishable from an output that never had state.
+    """
     state: Dict[str, object] = {"frame_limit": frame_limit}
     if metadata is not None:
         state["metadata"] = metadata
-    (Path(sequence_dir) / _STATE_FILE).write_text(
-        json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    path = Path(sequence_dir) / _STATE_FILE
+    pending = path.with_suffix(".tmp")
+    pending.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    pending.replace(path)
 
 
 def read_state(sequence_dir: Path) -> Optional[Dict[str, object]]:
-    """Return the conversion state of ``sequence_dir``, or ``None`` if unusable.
+    """Return the conversion state of ``sequence_dir``.
 
-    A missing file means an output from before the converter recorded state; a
-    malformed one means a write that did not survive, and neither can say what
-    produced the sequence.
+    ``None`` covers both an output written before the converter kept state and
+    one whose state cannot be read; callers that care about the difference test
+    for the file itself, since only the first can be trusted.
     """
     path = Path(sequence_dir) / _STATE_FILE
     if not path.is_file():
@@ -599,8 +606,12 @@ def existing_frame_count(sequence_dir: Path, frame_limit: Optional[int] = None) 
     sequence_dir = Path(sequence_dir)
     state = read_state(sequence_dir)
     if state is None:
-        # An output that predates the state file can only be taken for a whole
-        # sequence, never for one converted under some other limit.
+        if (sequence_dir / _STATE_FILE).exists():
+            # Present but unreadable: it cannot say what produced this output,
+            # and a truncated prefix looks exactly like a whole sequence.
+            return None
+        # Genuinely absent, so an output that predates the state file. It can
+        # be taken for a whole sequence, never for one under some other limit.
         if frame_limit is not None:
             return None
     elif state.get("frame_limit") != frame_limit or "metadata" not in state:

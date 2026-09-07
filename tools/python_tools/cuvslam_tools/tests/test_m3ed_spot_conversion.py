@@ -29,7 +29,6 @@ import h5py
 import numpy as np
 from PIL import Image
 
-from cuvslam_tools.dataset_preparation import rgbd
 from cuvslam_tools.dataset_preparation.m3ed_spot import convert_m3ed_spot
 
 WIDTH = 8
@@ -329,13 +328,14 @@ class TestConvertSequence(unittest.TestCase):
         second = [float(value) for value in rows[1].split()]
         self.assertAlmostEqual(second[3], 0.04, places=6)
 
-    def test_extrinsic_does_not_cancel_under_rotation(self):
-        # A pose that rotates 90 degrees about z: the 70 mm offset between the
-        # event camera and the OVC left camera then moves the camera centre, so
-        # dropping the extrinsic changes the trajectory.
-        poses = np.stack([np.eye(4) for _ in range(4)])
-        for index in range(4):
-            angle = math.radians(30.0 * index)
+    def test_ground_truth_is_the_ovc_camera_pose_not_the_event_camera_pose(self):
+        # Yaw every frame, so the 70 mm offset between the two frames sweeps an
+        # arc and cannot cancel out. Pose samples land on the frame clock, which
+        # makes the expected values exact rather than interpolated.
+        count = 6
+        poses = np.stack([np.eye(4) for _ in range(count)])
+        for index in range(count):
+            angle = math.radians(25.0 * index)
             poses[index, :3, :3] = np.array(
                 [
                     [math.cos(angle), math.sin(angle), 0.0],
@@ -343,19 +343,34 @@ class TestConvertSequence(unittest.TestCase):
                     [0.0, 0.0, 1.0],
                 ]
             )
-        pose_path = write_pose_file(self.root / "rot.h5", poses=poses)
-        with h5py.File(pose_path, "r") as handle:
-            trajectory = convert_m3ed_spot.read_trajectory(handle)
-        timestamps = [0, 100_000_000, 200_000_000]
-        extrinsic = rgbd.invert_transform(
-            tuple(tuple(row[:3]) for row in LEFT_TO_PROPHESEE[:3]),
-            tuple(row[3] for row in LEFT_TO_PROPHESEE[:3]),
+            poses[index, 0, 3] = -0.3 * index
+        stamps = np.array([index * FRAME_INTERVAL_US for index in range(count)], dtype=np.int64)
+        data = write_data_file(self.root / "data.h5", frames=count)
+        pose = write_pose_file(self.root / "pose.h5", poses=poses, stamps=stamps)
+        with h5py.File(data, "r") as data_handle, h5py.File(pose, "r") as pose_handle:
+            convert_m3ed_spot.convert_sequence(
+                data_handle, pose_handle, self.sequence, self.output
+            )
+
+        # Cn_T_C0 inverts to the event camera's pose, and T_to_prophesee_left
+        # takes OVC left coordinates into the event camera frame, so the pose of
+        # the camera the suite actually evaluates is the product of the two.
+        def relative(chain):
+            return [np.linalg.inv(chain[0]) @ matrix for matrix in chain]
+
+        expected = relative([np.linalg.inv(pose) @ LEFT_TO_PROPHESEE for pose in poses])
+        rows = (self.output / self.sequence / "gt.txt").read_text().splitlines()
+        self.assertEqual(len(rows), count)
+        for index, row in enumerate(rows):
+            written = np.array([float(value) for value in row.split()]).reshape(3, 4)
+            np.testing.assert_allclose(written, expected[index][:3], atol=1e-6)
+
+        # Applying the extrinsic the other way round is the mistake this pins:
+        # it leaves poses that look plausible but are decimetres out here.
+        flipped = relative(
+            [np.linalg.inv(pose) @ np.linalg.inv(LEFT_TO_PROPHESEE) for pose in poses]
         )
-        with_extrinsic = rgbd.relative_ground_truth_lines(
-            trajectory, timestamps, body_from_camera=extrinsic
-        )
-        without = rgbd.relative_ground_truth_lines(trajectory, timestamps)
-        self.assertNotEqual(with_extrinsic[1], without[1])
+        self.assertGreater(np.abs(flipped[-1][:3] - expected[-1][:3]).max(), 0.01)
 
     def test_frames_outside_the_pose_span_are_dropped(self):
         # Poses cover 0..700 ms; frames every 40 ms starting at 800 ms would all
@@ -483,22 +498,41 @@ class TestSkipExisting(unittest.TestCase):
             self.assertEqual(entry[field], converted[field])
         self.assertEqual(entry["source_files"], converted["source_files"])
 
-    def test_an_output_without_readable_state_still_reuses(self):
+    def test_an_output_predating_the_state_file_still_reuses(self):
         # The 56 GB already on disk was converted before the state file existed,
-        # and re-reading it would cost hours of network for nothing. A write
-        # that did not survive reads the same way.
-        state = self.output / self.sequence / ".conversion_state.json"
-        for damage in (state.unlink, lambda: state.write_text("{oops", encoding="utf-8")):
-            with self.subTest(damage=damage):
-                self._convert()
-                damage()
-                metadata = self._convert(skip_existing=True)
-                self.assertEqual(self.opened, [])
-                entry = metadata["sequences"][0]
-                self.assertTrue(entry["reused_existing_output"])
-                self.assertEqual(entry["converted_counts"]["frames"], 6)
-                # Nothing recorded it, so the entry says only what is on disk.
-                self.assertNotIn("source_files", entry)
+        # and re-reading it would cost hours of network for nothing.
+        self._convert()
+        (self.output / self.sequence / ".conversion_state.json").unlink()
+        metadata = self._convert(skip_existing=True)
+        self.assertEqual(self.opened, [])
+        entry = metadata["sequences"][0]
+        self.assertTrue(entry["reused_existing_output"])
+        self.assertEqual(entry["converted_counts"]["frames"], 6)
+        # Nothing recorded it, so the entry says only what is on disk.
+        self.assertNotIn("source_files", entry)
+
+    def test_state_that_cannot_be_read_is_converted_again(self):
+        # Unlike an absent file, this one is evidence of a write that failed,
+        # and a truncated prefix would look exactly like a whole sequence.
+        self._convert()
+        (self.output / self.sequence / ".conversion_state.json").write_text("{oops")
+        self._convert(skip_existing=True)
+        self.assertEqual(len(self.opened), 2)
+
+    def test_a_sequence_missing_only_its_provenance_is_still_reused(self):
+        # Interrupted between the two metadata writes: every artifact is whole,
+        # so the sequence is reused rather than re-read over the network for the
+        # sake of one record, and the entry simply lacks it.
+        self._convert()
+        state_file = self.output / self.sequence / ".conversion_state.json"
+        state = json.loads(state_file.read_text())
+        state["metadata"].pop("source_files")
+        state_file.write_text(json.dumps(state))
+        metadata = self._convert(skip_existing=True)
+        self.assertEqual(self.opened, [])
+        entry = metadata["sequences"][0]
+        self.assertEqual(entry["baseline_m"], state["metadata"]["baseline_m"])
+        self.assertNotIn("source_files", entry)
 
     def test_an_interrupted_sequence_is_converted_again(self):
         self._convert()

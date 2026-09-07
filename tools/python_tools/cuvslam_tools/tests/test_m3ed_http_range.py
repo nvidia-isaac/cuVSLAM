@@ -299,6 +299,21 @@ class TestHttpRangeFile(unittest.TestCase):
         for sent in ranged:
             self.assertEqual(sent["If-Range"], '"abc"')
 
+    def test_an_unusable_content_length_is_rejected(self):
+        # A negative length would clamp every read to nothing, which surfaces
+        # much later as h5py failing on an apparently empty file.
+        for length, message in (("nope", "not a number"), ("-1", "negative")):
+            with self.subTest(length=length):
+                class BadLength(FakeConnection):
+                    def request(self, method, path, headers=None):
+                        super().request(method, path, headers)
+                        self._pending = FakeResponse(
+                            200, {"Content-Length": length, "ETag": '"abc"'}, b""
+                        )
+
+                with self.assertRaisesRegex(HttpRangeError, message):
+                    _open(BadLength())
+
     def test_a_source_without_a_strong_validator_is_rejected(self):
         # Absent, weak, and unquoted: none of these pin one representation.
         for etag in (None, 'W/"abc"', "abc"):
