@@ -285,3 +285,34 @@ TEST_F(TrackerTest, MoveKeepsComponentsUsable) {
 }
 
 }  // namespace
+
+#ifndef USE_CUDA
+TEST_F(TrackerTest, RgbdModeRequiresCudaBuild) {
+  // RGBDOdometry is only compiled under USE_CUDA, so the mode has to be reported as unavailable
+  // rather than silently constructing a tracker that cannot run it.
+  Odometry::Config cfg;
+  cfg.odometry_mode = Odometry::OdometryMode::RGBD;
+  try {
+    Tracker{rig, Mode::OdometryOnlyRealtime, cfg};
+    FAIL() << "RGBD mode was accepted by a build without CUDA";
+  } catch (const std::invalid_argument& e) {
+    EXPECT_NE(std::string_view{e.what()}.find("USE_CUDA"), std::string_view::npos) << e.what();
+  }
+}
+#endif
+
+#ifndef USE_CUNLS
+TEST_F(TrackerTest, MultisensorModeRequiresCunlsBuild) {
+  // MultisensorOdometry is only compiled under USE_CUNLS, so the mode has to name the build option
+  // it needs rather than failing somewhere deeper in setup.
+  Odometry::Config cfg;
+  cfg.odometry_mode = Odometry::OdometryMode::Multisensor;
+  cfg.multisensor_settings.depth_camera_ids = {0};
+  try {
+    Tracker{rig, Mode::OdometryOnlyRealtime, cfg};
+    FAIL() << "Multisensor mode was accepted by a build without cuNLS";
+  } catch (const std::invalid_argument& e) {
+    EXPECT_NE(std::string_view{e.what()}.find("USE_CUNLS"), std::string_view::npos) << e.what();
+  }
+}
+#endif

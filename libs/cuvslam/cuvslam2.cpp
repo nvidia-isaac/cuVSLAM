@@ -34,10 +34,12 @@
 #include "odometry/increment_pose.h"
 #include "odometry/mono_visual_odometry.h"
 #include "odometry/multi_visual_odometry.h"
-#include "odometry/rgbd_odometry.h"
 #include "odometry/stereo_inertial_odometry.h"
 #include "odometry/svo_config.h"
 #include "slam/async_slam/async_slam.h"
+#ifdef USE_CUDA
+#include "odometry/rgbd_odometry.h"
+#endif
 #ifdef USE_CUNLS
 #include "odometry/multisensor_odometry.h"
 #endif
@@ -104,6 +106,7 @@ odom::TrackPerFrameSettings BuildTrackFrameSettings(const cuvslam::internal::Int
   result.imu_pnp.robustifier_scale = internals.imu_pnp_robustifier_scale;
   result.imu_pnp.max_iteration = REQUIRE_NON_NEGATIVE(internals.imu_pnp_max_iteration);
   result.imu_pnp.min_observations = REQUIRE_NON_NEGATIVE(internals.imu_pnp_min_observations);
+#ifdef USE_CUDA
   result.icp.lambda = internals.icp_lambda;
   result.icp.huber_vis = internals.icp_huber_vis;
   result.icp.huber_depth = internals.icp_huber_depth;
@@ -113,6 +116,7 @@ odom::TrackPerFrameSettings BuildTrackFrameSettings(const cuvslam::internal::Int
   result.icp.max_scale_level = REQUIRE_NON_NEGATIVE(internals.icp_max_scale_level);
   result.icp.num_iters_per_scale = REQUIRE_NON_NEGATIVE(internals.icp_num_iters_per_scale);
   result.icp.blending_alpha = internals.icp_blending_alpha;
+#endif
   return result;
 }
 
@@ -264,6 +268,9 @@ void CheckImages(const Odometry::ImageSet& images, int64_t frame_sync_threshold_
 #ifdef USE_CUDA
     THROW_INVALID_ARG_IF(images[i].is_gpu_mem != cuda::IsGpuPointer(images[i].pixels),
                          "is_gpu_mem flag mismatch for image " + std::to_string(i));
+#else
+    THROW_INVALID_ARG_IF(images[i].is_gpu_mem,
+                         "GPU memory requires a build with CUDA support (USE_CUDA=ON) for image " + std::to_string(i));
 #endif
     THROW_INVALID_ARG_IF(images[i].data_type != Image::DataType::UINT8,
                          "Image data type must be UINT8 for image " + std::to_string(i));
@@ -321,6 +328,10 @@ void CheckDepths(const Odometry::ImageSet& depths,
 #ifdef USE_CUDA
     THROW_INVALID_ARG_IF(depths[i].is_gpu_mem != cuda::IsGpuPointer(depths[i].pixels),
                          "is_gpu_mem flag mismatch for depth image " + std::to_string(i));
+#else
+    THROW_INVALID_ARG_IF(
+        depths[i].is_gpu_mem,
+        "GPU memory requires a build with CUDA support (USE_CUDA=ON) for depth image " + std::to_string(i));
 #endif
     THROW_INVALID_ARG_IF(
         depths[i].data_type != Image::DataType::UINT16 && depths[i].data_type != Image::DataType::FLOAT32,
@@ -346,6 +357,10 @@ void CheckMultisensorDepths(const Odometry::ImageSet& depths, const std::vector<
 #ifdef USE_CUDA
     THROW_INVALID_ARG_IF(depths[i].is_gpu_mem != cuda::IsGpuPointer(depths[i].pixels),
                          "is_gpu_mem flag mismatch for multisensor depth image " + std::to_string(i));
+#else
+    THROW_INVALID_ARG_IF(
+        depths[i].is_gpu_mem,
+        "GPU memory requires a build with CUDA support (USE_CUDA=ON) for multisensor depth image " + std::to_string(i));
 #endif
     THROW_INVALID_ARG_IF(
         depths[i].data_type != Image::DataType::UINT16 && depths[i].data_type != Image::DataType::FLOAT32,
@@ -570,10 +585,14 @@ Odometry::Odometry(const Rig& rig, const Config& cfg) {
       break;
     }
     case OdometryMode::RGBD: {
+#ifdef USE_CUDA
       tracker->rgbd_settings = cfg.rgbd_settings;
       tracker->visual_odometry =
           std::make_unique<odom::RGBDOdometry>(tracker->rig, tracker->fig, svo_settings, cfg.use_gpu);
       break;
+#else
+      throw std::invalid_argument{"OdometryMode::RGBD requires a build with CUDA support (USE_CUDA=ON)"};
+#endif
     }
     case OdometryMode::Multisensor: {
 #ifdef USE_CUNLS

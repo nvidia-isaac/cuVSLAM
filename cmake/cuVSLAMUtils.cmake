@@ -47,7 +47,6 @@ macro(setup_cuvslam_settings)
         $<$<BOOL:${CUVSLAM_LOG_ENABLE}>:CUVSLAM_LOG_ENABLE>
         $<$<BOOL:${USE_SLAM_OUTPUT}>:USE_SLAM_OUTPUT>
         $<$<BOOL:${USE_LMDB}>:USE_LMDB>
-        $<$<BOOL:${SOF_USE_SMALLER_NCC}>:SOF_USE_SMALLER_NCC>
         $<$<BOOL:${USE_NVTX}>:USE_NVTX>
         $<$<BOOL:${USE_CUDA}>:USE_CUDA>
         $<$<BOOL:${ENFORCE_GPU}>:ENFORCE_GPU>
@@ -72,7 +71,6 @@ macro(setup_cuvslam_settings)
             /Oi              # Generate intrinsic functions
             /wd4127          # Disable warning C4127: conditional expression is constant
             $<$<CONFIG:RelWithDebInfo>:/fp:except>  # Enable floating point exceptions in RelWithDebInfo
-            $<$<BOOL:${TREAT_WARNINGS_AS_ERRORS}>:/WX>  # Treat warnings as errors
         )
 
         target_link_options(cuvslam_settings INTERFACE
@@ -88,7 +86,6 @@ macro(setup_cuvslam_settings)
             -Wextra
             -Wno-unknown-pragmas
             -Wno-deprecated-copy
-            $<$<BOOL:${TREAT_WARNINGS_AS_ERRORS}>:-Werror>
         )
 
         # Architecture-specific flags

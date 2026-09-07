@@ -152,11 +152,7 @@ const cuvslam::sof::KernelOperator<FeaturePatch> gaussian_weights(
         .eval());
 
 float compute_ncc(const FeaturePatch& patch1, const FeaturePatch& patch2) {
-#ifdef SOF_USE_SMALLER_NCC
-  constexpr int NCC_DIM = 3;
-#else
   constexpr int NCC_DIM = 5;
-#endif
 
   assert(patch1.size() == patch2.size() && patch1.cols() == patch1.rows() && patch2.cols() == patch2.rows());
   assert(patch1.cols() >= NCC_DIM);

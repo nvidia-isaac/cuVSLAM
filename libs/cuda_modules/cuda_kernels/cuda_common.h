@@ -26,11 +26,7 @@
 #define BLOCK_WIDTH 32
 #define BLOCK_HEIGHT 8
 
-#ifdef SOF_USE_SMALLER_NCC
-#define NCC_DIM 3
-#else
 #define NCC_DIM 5
-#endif
 
 namespace cuvslam::cuda {
 
