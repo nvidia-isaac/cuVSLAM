@@ -318,7 +318,7 @@ def convert_sequence(sequence_root: Path, spec: SequenceSpec, output_dir: Path) 
         encoding="utf-8",
     )
     (sequence_dir / rgbd.GROUND_TRUTH_FILE).write_text(
-        "\n".join(rgbd.relative_ground_truth_lines(trajectory, pairs)) + "\n",
+        "\n".join(rgbd.relative_ground_truth_lines(trajectory, [pair[0] for pair in pairs])) + "\n",
         encoding="utf-8",
     )
     (sequence_dir / rgbd.EDEX_FILE).write_text(

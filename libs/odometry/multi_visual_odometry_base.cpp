@@ -100,11 +100,14 @@ bool MultiVisualOdometryBase::track(const Sources& curr_sources, [[maybe_unused]
   Tracks3DMap* tracks3d = stat ? &(stat->tracks3d) : nullptr;
   Isometry3T world_from_rig;
 
-  const bool have_pose =
-      solver.solveNextFrame(timestamp, frame_type, observations_, world_from_rig, static_info_exp,
-                            {per_frame_setting.sba, per_frame_setting.sm, per_frame_setting.vo_pnp,
-                             per_frame_setting.inertial_stereo_pnp, per_frame_setting.imu_pnp, per_frame_setting.icp},
-                            tracks2d, tracks3d);
+  const bool have_pose = solver.solveNextFrame(timestamp, frame_type, observations_, world_from_rig, static_info_exp,
+                                               {per_frame_setting.sba, per_frame_setting.sm, per_frame_setting.vo_pnp,
+                                                per_frame_setting.inertial_stereo_pnp, per_frame_setting.imu_pnp,
+#ifdef USE_CUDA
+                                                per_frame_setting.icp
+#endif
+                                               },
+                                               tracks2d, tracks3d);
 
   if (stat) {
     stat->keyframe = frame_type == sof::FrameState::Key;

@@ -10,6 +10,7 @@ on:
           - kitti
           - euroc
           - tum
+          - icl_nuim
           - tartan
         default: kitti
       force_download:

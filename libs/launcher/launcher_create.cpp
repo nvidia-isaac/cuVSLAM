@@ -23,8 +23,10 @@
 
 #include "launcher/monocular_launcher.h"
 #include "launcher/multi_camera_launcher.h"
-#include "launcher/rgbd_camera_launcher.h"
 #include "launcher/visual_inertial_launcher.h"
+#ifdef USE_CUDA
+#include "launcher/rgbd_camera_launcher.h"
+#endif
 #ifdef USE_CUNLS
 #include "launcher/multisensor_camera_launcher.h"
 #endif

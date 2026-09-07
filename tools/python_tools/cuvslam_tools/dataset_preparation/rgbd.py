@@ -222,6 +222,13 @@ def associate(
     return matched
 
 
+def trajectory_span(trajectory: Sequence[TrajectoryRow]) -> Tuple[int, int]:
+    """Return the first and last timestamp the trajectory covers."""
+    if not trajectory:
+        raise RgbdConversionError("trajectory is empty")
+    return trajectory[0][0], trajectory[-1][0]
+
+
 def restrict_to_trajectory(pairs: Sequence[FramePair], trajectory: Sequence[TrajectoryRow]) -> List[FramePair]:
     """Drop frames outside the ground-truth time span so every frame has a pose."""
     first = trajectory[0][0]
@@ -240,6 +247,49 @@ def quaternion_to_matrix(quaternion: Sequence[float]) -> List[List[float]]:
         [2.0 * (x * y + z * w), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - x * w)],
         [2.0 * (x * z - y * w), 2.0 * (y * z + x * w), 1.0 - 2.0 * (x * x + y * y)],
     ]
+
+
+def matrix_to_quaternion(rotation: Sequence[Sequence[float]]) -> List[float]:
+    """Convert a row-major 3x3 rotation matrix to an xyzw quaternion.
+
+    Datasets that publish poses as matrices still need quaternions here, because
+    interpolation slerps between samples. The largest-component branch below is
+    Shepperd's method: taking the trace alone loses all precision as the rotation
+    approaches 180 degrees, where ``1 + trace`` cancels.
+
+    The input is assumed to be a rotation. This does not verify orthonormality,
+    which is the caller's job where source data could be corrupt; a matrix that
+    is not a rotation yields a quaternion that is merely meaningless.
+    """
+    trace = rotation[0][0] + rotation[1][1] + rotation[2][2]
+    if trace > 0.0:
+        scale = math.sqrt(trace + 1.0) * 2.0
+        w = 0.25 * scale
+        x = (rotation[2][1] - rotation[1][2]) / scale
+        y = (rotation[0][2] - rotation[2][0]) / scale
+        z = (rotation[1][0] - rotation[0][1]) / scale
+    elif rotation[0][0] > rotation[1][1] and rotation[0][0] > rotation[2][2]:
+        scale = math.sqrt(1.0 + rotation[0][0] - rotation[1][1] - rotation[2][2]) * 2.0
+        w = (rotation[2][1] - rotation[1][2]) / scale
+        x = 0.25 * scale
+        y = (rotation[0][1] + rotation[1][0]) / scale
+        z = (rotation[0][2] + rotation[2][0]) / scale
+    elif rotation[1][1] > rotation[2][2]:
+        scale = math.sqrt(1.0 + rotation[1][1] - rotation[0][0] - rotation[2][2]) * 2.0
+        w = (rotation[0][2] - rotation[2][0]) / scale
+        x = (rotation[0][1] + rotation[1][0]) / scale
+        y = 0.25 * scale
+        z = (rotation[1][2] + rotation[2][1]) / scale
+    else:
+        scale = math.sqrt(1.0 + rotation[2][2] - rotation[0][0] - rotation[1][1]) * 2.0
+        w = (rotation[1][0] - rotation[0][1]) / scale
+        x = (rotation[0][2] + rotation[2][0]) / scale
+        y = (rotation[1][2] + rotation[2][1]) / scale
+        z = 0.25 * scale
+    norm = math.hypot(x, y, z, w)
+    if norm <= 0.0 or not math.isfinite(norm):
+        raise RgbdConversionError("rotation matrix does not yield a unit quaternion")
+    return [x / norm, y / norm, z / norm, w / norm]
 
 
 def _slerp(first: Sequence[float], second: Sequence[float], weight: float) -> List[float]:
@@ -323,24 +373,45 @@ def compose_transforms(
 
 
 def relative_ground_truth_lines(
-    trajectory: Sequence[TrajectoryRow], pairs: Sequence[FramePair]
+    trajectory: Sequence[TrajectoryRow],
+    frame_timestamps: Sequence[int],
+    body_from_camera: Optional[Tuple[Sequence[Sequence[float]], Sequence[float]]] = None,
 ) -> List[str]:
     """Render ``gt.txt``: one row-major 3x4 pose per frame, relative to frame 0.
 
     The reporter compares odometry against a trajectory that starts at the
     origin, so the first row is exactly the identity and later rows are
     ``pose(frame 0)^-1 * pose(frame i)``.
+
+    Some datasets publish the trajectory of a body frame that is not the camera,
+    such as an IMU or a reference camera on the same rig. ``body_from_camera``
+    is the constant transform taking camera coordinates into that body frame; it
+    is applied on the right of every sample before the poses are made relative.
+    It does not cancel out, because the relative poses become a conjugation by
+    that transform rather than the body-relative trajectory.
+
+    ``frame_timestamps`` is one nanosecond timestamp per output frame, so stereo
+    and RGB-D callers share this without sharing a frame type.
     """
+    if not frame_timestamps:
+        raise RgbdConversionError("cannot render ground truth for an empty sequence")
     timestamps = [row[0] for row in trajectory]
-    first_rotation, first_translation = interpolate_pose(trajectory, timestamps, pairs[0][0])
+
+    def pose_at(timestamp: int) -> Tuple[List[List[float]], List[float]]:
+        rotation, translation = interpolate_pose(trajectory, timestamps, timestamp)
+        if body_from_camera is None:
+            return rotation, translation
+        return compose_transforms(rotation, translation, body_from_camera[0], body_from_camera[1])
+
+    first_rotation, first_translation = pose_at(frame_timestamps[0])
     inverse_rotation, inverse_translation = invert_transform(first_rotation, first_translation)
     lines = [
         "1.000000e+00 0.000000e+00 0.000000e+00 0.000000e+00 "
         "0.000000e+00 1.000000e+00 0.000000e+00 0.000000e+00 "
         "0.000000e+00 0.000000e+00 1.000000e+00 0.000000e+00"
     ]
-    for pair in pairs[1:]:
-        rotation, translation = interpolate_pose(trajectory, timestamps, pair[0])
+    for timestamp in frame_timestamps[1:]:
+        rotation, translation = pose_at(timestamp)
         relative_rotation, relative_translation = compose_transforms(
             inverse_rotation, inverse_translation, rotation, translation
         )

@@ -59,7 +59,6 @@ set(CUVSLAM_OUTPUT ${CMAKE_BINARY_DIR}/output CACHE PATH "Path to output folder"
 set(CUDAToolkit_ROOT /usr/local/cuda CACHE PATH "Path to installed CUDA toolkit")
 set(CMAKE_CUDA_COMPILER ${CUDAToolkit_ROOT}/bin/nvcc CACHE PATH "Path to installed CUDA compiler")
 
-option(TREAT_WARNINGS_AS_ERRORS "Treat warnings as error" OFF)
 option(USE_CUNLS "Build with cunls support." ON)
 option(USE_CERES "Build with ceres support." OFF)
 option(USE_NVTX "Build with nvtx tracing support." OFF)
@@ -67,7 +66,6 @@ option(USE_SLAM_OUTPUT "Build with option to enable debug output of SLAM" OFF)
 option(USE_LMDB "Use lmdb library for the database of landmarks (map)" ON)
 option(USE_CUDA "Use CUDA Toolkit" ON)
 option(CUVSLAM_LOG_ENABLE "Enable root cuvslam::Log." OFF)
-option(SOF_USE_SMALLER_NCC "Use 3-pixel area for NCC. Possible it is useful for fisheye. By default, NCC uses 5 pixels." OFF)
 option(CUVSLAM_BUILD_SHARED_LIB "Build shared library version of cuVSLAM" TRUE)
 option(USE_RERUN "Use Rerun for visualization" OFF)
 

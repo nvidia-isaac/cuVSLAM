@@ -88,13 +88,13 @@ private:
   ImageMatrixT cast_rgb2gs_cpu(void* data, const ImageShape& image_shape);
   ImageMatrix<uint8_t> resize_mask_cpu(void* data);
 
+  const bool support_depth_;
+
 #ifdef USE_CUDA
   cuda::GPUImageT gpu_image_;
   cuda::ImageCast gpu_image_cast_;
   cuda::GaussianGPUImagePyramid gpu_image_pyramid_;
   cuda::GPUGradientPyramid gpu_gradient_pyramid_;
-
-  const bool support_depth_;
 
   // despite these fields are present, no GPU allocations occur until .init method is called.
   cuda::GPUImageT gpu_depth_;

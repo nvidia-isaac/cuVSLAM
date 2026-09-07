@@ -13,6 +13,7 @@
 # of the software or derivative works thereof, you agree to be bound by this License.
 
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -105,8 +106,11 @@ class TestShippedRegistry(unittest.TestCase):
 
     def test_unknown_dataset_is_rejected_with_the_known_ids(self):
         # provision_dataset.sh relies on this to reject a stale workflow choice.
+        # The expected list is derived so that registering a dataset does not
+        # break an assertion that only cares about the message naming the IDs.
+        known = ", ".join(sorted(dataset_registry.DATASETS))
         with self.assertRaisesRegex(
-            RegistryError, r"unknown dataset 'nope' \(known: coda, euroc, kitti, tartan, tum\)"
+            RegistryError, rf"unknown dataset 'nope' \(known: {re.escape(known)}\)"
         ):
             dataset_registry.validate(["nope"])
 
@@ -223,7 +227,8 @@ class TestValidationFailures(unittest.TestCase):
         self.assertEqual(distinct.evals[1].kpi_prefix, "TARTAN_FLAKY")
 
     def test_unknown_dataset_lookup_lists_known_ids(self):
-        with self.assertRaisesRegex(RegistryError, "known: coda, euroc, kitti, tartan, tum"):
+        known = ", ".join(sorted(dataset_registry.DATASETS))
+        with self.assertRaisesRegex(RegistryError, f"known: {re.escape(known)}"):
             dataset_registry.dataset("m3ed_spot")
 
     def test_unknown_suite_filter_fails(self):
@@ -267,6 +272,75 @@ class TestVerifyStaged(unittest.TestCase):
             (Path(root) / "kitti-vio_slam_gt.cfg").write_text("[]", encoding="utf-8")
             with self.assertRaisesRegex(RegistryError, "must hold a JSON object, got list"):
                 dataset_registry.verify_staged(spec, Path(root))
+
+
+class TestSuiteSelection(unittest.TestCase):
+    def test_every_shipped_record_belongs_to_full(self):
+        # Keeps "full" the superset, which is what makes an omitted --suite
+        # equivalent to it in the shell wrappers.
+        for spec in dataset_registry.provisionable_datasets():
+            for record in spec.evals:
+                self.assertIn(dataset_registry.FULL_SUITE, record.suites, record.config)
+
+    def test_record_outside_full_is_rejected(self):
+        spec = DatasetSpec("kitti", KITTI_PREPARE, (stereo_eval(suites=frozenset({"smoke"})),))
+        original = dataset_registry.DATASETS
+        dataset_registry.DATASETS = {"kitti": spec}
+        try:
+            with self.assertRaisesRegex(RegistryError, "must belong to 'full'"):
+                dataset_registry.validate()
+        finally:
+            dataset_registry.DATASETS = original
+
+    def test_both_suites_select_kitti_and_euroc_today(self):
+        for suite in dataset_registry.SUITES:
+            selected = [spec.dataset_id for spec in dataset_registry.eval_datasets(suite)]
+            self.assertEqual(selected, ["kitti", "euroc"], suite)
+
+    def test_omitted_suite_matches_full(self):
+        self.assertEqual(
+            [spec.dataset_id for spec in dataset_registry.eval_datasets()],
+            [spec.dataset_id for spec in dataset_registry.eval_datasets("full")],
+        )
+
+    def test_validate_rejects_an_unknown_suite(self):
+        with self.assertRaisesRegex(RegistryError, "unknown suite 'nope'"):
+            dataset_registry.validate(suite="nope")
+
+    def test_validate_rejects_a_suite_that_selects_nothing(self):
+        spec = DatasetSpec("kitti", KITTI_PREPARE, (stereo_eval(suites=frozenset({"full"})),))
+        original = dataset_registry.DATASETS
+        dataset_registry.DATASETS = {"kitti": spec}
+        try:
+            with self.assertRaisesRegex(RegistryError, "suite 'smoke' selects no evaluation records"):
+                dataset_registry.validate(suite="smoke")
+        finally:
+            dataset_registry.DATASETS = original
+
+
+class TestKpiKeys(unittest.TestCase):
+    def test_keys_cover_every_metric_and_mode(self):
+        record = dataset_registry.dataset("euroc").evals[0]
+        self.assertEqual(record.kpi_type, "VIO")
+        self.assertEqual(
+            set(record.kpi_keys()),
+            {
+                f"EUROC_{metric}_VIO_{mode}"
+                for metric in dataset_registry.KPI_METRICS
+                for mode in dataset_registry.KPI_MODES
+            },
+        )
+
+    def test_kpi_keys_are_runnable_as_a_module(self):
+        completed = subprocess.run(
+            [sys.executable, "-m", "cuvslam_tools.dataset_registry", "kpi-keys", "--suite", "smoke"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        self.assertEqual(
+            completed.stdout.strip().splitlines(), dataset_registry.suite_kpi_keys("smoke")
+        )
 
 
 if __name__ == "__main__":
