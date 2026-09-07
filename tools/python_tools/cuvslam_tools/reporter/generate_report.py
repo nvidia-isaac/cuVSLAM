@@ -286,10 +286,7 @@ def generate_report(test_folder, comments, stats, generate_pdf=False, config_nam
             'gt_av_rotation_error': s.gt_av_rotation_error,
             'gt_simple_error': s.gt_simple_error,
             'bird_view_with_errors_path': s.bird_view_with_errors_path,
-            'bird_view_image_path': image_relative_path,  # Relative path for HTML
-            # Sorted so the same tuning renders identically between runs, making two reports
-            # directly comparable.
-            'tuned_parameters': sorted(s.tuned_parameters.items())
+            'bird_view_image_path': image_relative_path  # Relative path for HTML
         }
         stats_for_html.append(stat_dict)
 
@@ -306,6 +303,11 @@ def generate_report(test_folder, comments, stats, generate_pdf=False, config_nam
     # Generate HTML with image references
     template = env.get_template("report.html")
     total = calc_summary("total", stats)
+    # The reporter gives every sequence the same tracker settings -- execution.py only overrides
+    # dataset paths, cameras, ground truth and use_slam per sequence, and refuses per-sequence
+    # tuning outright -- so this belongs to the run, once, rather than repeated under each
+    # sequence. Sorted so two reports of the same tuning diff cleanly.
+    tuned_parameters = sorted(stats[0].tuned_parameters.items()) if stats else []
     # TODO: provide correct units of measurements for use_segments=false, %, deg
     html = template.render(
         date=date_time,
@@ -314,6 +316,7 @@ def generate_report(test_folder, comments, stats, generate_pdf=False, config_nam
         commit_ts=commit_ts,
         provenance_warning=provenance_warning,
         comments=comments,
+        tuned_parameters=tuned_parameters,
         stats=stats_for_html,
         total=total,
         avg_tl_path=avg_tl_rel,
@@ -355,6 +358,7 @@ def generate_report(test_folder, comments, stats, generate_pdf=False, config_nam
                 commit_ts=commit_ts,
                 provenance_warning=provenance_warning,
                 comments=comments,
+        tuned_parameters=tuned_parameters,
                 stats=stats_for_pdf,
                 total=total,
                 avg_tl_base64=image_to_base64(avg_tl_abs) if avg_tl_abs else "",

@@ -159,6 +159,17 @@ TEST_F(ParametersTest, SetsEnumParametersByName) {
   EXPECT_THROW(odometry_.SetParameter("sof.tracker", "sideways"), std::runtime_error);
 }
 
+TEST_F(ParametersTest, ADefaultConfigLeavesEveryParameterAtItsDefault) {
+  // A pristine Config must not make any parameter differ from its own default. Otherwise every
+  // report lists that parameter as tuning on every run, and the entry says more about two structs
+  // disagreeing on a default than about the run. Guards Odometry::Config and the settings structs
+  // it feeds from drifting apart -- multicam_mode did exactly that.
+  Odometry defaults(MakeStereoRig(), Odometry::Config{});
+  for (const Odometry::ParameterInfo& p : defaults.GetParameters()) {
+    EXPECT_EQ(p.value, p.default_value) << p.key << " differs from its default under a default Config";
+  }
+}
+
 TEST_F(ParametersTest, ReportsTheSettingsTheTrackerWasConstructedWith) {
   Odometry::Config config = MakeConfig();
   config.use_denoising = true;

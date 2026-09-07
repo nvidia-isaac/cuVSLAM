@@ -38,6 +38,9 @@
 
 ### Changed
 
+- `sof::Settings::multicam_mode` now defaults to `Precision`, matching `Odometry::Config::multicam_mode`. The two
+  disagreed, so every report listed `sof.multicam_mode` as non-default even for an untouched configuration. Internal
+  tools that construct `sof::Settings` directly and do not set the mode now get `Precision` instead of `Moderate`
 - Setting an unknown internal parameter, or a value that does not parse or falls outside its range, is now an error
   instead of a logged warning, and leaves the parameter at its previous value. Parameters a mode never reads are not
   exposed at all, so naming one is an error rather than being silently ignored

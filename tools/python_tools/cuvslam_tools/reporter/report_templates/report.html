@@ -74,6 +74,19 @@
         <td>Comments</td>
         <td>{{comments}}</td>
     </tr>
+    {# Resolved parameters, so this covers values derived from the config as well as ones asked
+       for on the command line. Only those differing from their default are listed; nothing here
+       means the run used defaults throughout. #}
+    <tr class="summary">
+        <td>Non-default parameters</td>
+        <td>
+            {% if tuned_parameters %}
+            {% for name, value in tuned_parameters %}{{ name }} = {{ value }}{% if not loop.last %}<br>{% endif %}{% endfor %}
+            {% else %}
+            (none)
+            {% endif %}
+        </td>
+    </tr>
 </table>
 <br>
 <table>
@@ -119,16 +132,6 @@
             <img src="{{ s.bird_view_image_path }}">
             {% endif %}
         </div>
-        {# Only parameters that differ from their default, so what made this run distinctive is
-           visible without listing the whole surface. Absent means everything was default. #}
-        {% if s.tuned_parameters %}
-        <table>
-            <tr><th colspan="2">Non-default parameters</th></tr>
-            {% for name, value in s.tuned_parameters %}
-            <tr><td>{{ name }}</td><td>{{ value }}</td></tr>
-            {% endfor %}
-        </table>
-        {% endif %}
     </div>
 {% endfor %}
 </body>

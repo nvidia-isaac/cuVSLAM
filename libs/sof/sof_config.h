@@ -56,7 +56,11 @@ struct Settings {
 
   SelectorStereoSettings feature_selection_settings;
 
-  camera::MulticameraMode multicam_mode = camera::MulticameraMode::Moderate;
+  // Matches Odometry::Config::multicam_mode. The public default is the one users see, so this
+  // follows it rather than the reverse: cuvslam2.h is the API boundary and cannot reference this
+  // header to derive its value. ParametersTest.ADefaultConfigLeavesEveryParameterAtItsDefault
+  // fails if the two drift apart.
+  camera::MulticameraMode multicam_mode = camera::MulticameraMode::Precision;
   camera::MulticamManualSetup multicam_setup;
 };
 
