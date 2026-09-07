@@ -48,7 +48,10 @@ def save_stats_to_json(stats, output_dir):
             'gt_n_error_segments': stat.gt_n_error_segments,
             'gt_simple_error': stat.gt_simple_error,
             'num_tracking_losts': stat.num_tracking_losts,
-            'odometry_mode': stat.odometry_mode
+            'odometry_mode': stat.odometry_mode,
+            # Only parameters that differ from their default, so the run's distinctive tuning is
+            # recorded without burying it in the full list.
+            'tuned_parameters': stat.tuned_parameters
         }
         stats_list.append(stat_dict)
 
@@ -283,7 +286,10 @@ def generate_report(test_folder, comments, stats, generate_pdf=False, config_nam
             'gt_av_rotation_error': s.gt_av_rotation_error,
             'gt_simple_error': s.gt_simple_error,
             'bird_view_with_errors_path': s.bird_view_with_errors_path,
-            'bird_view_image_path': image_relative_path  # Relative path for HTML
+            'bird_view_image_path': image_relative_path,  # Relative path for HTML
+            # Sorted so the same tuning renders identically between runs, making two reports
+            # directly comparable.
+            'tuned_parameters': sorted(s.tuned_parameters.items())
         }
         stats_for_html.append(stat_dict)
 

@@ -119,6 +119,16 @@
             <img src="{{ s.bird_view_image_path }}">
             {% endif %}
         </div>
+        {# Only parameters that differ from their default, so what made this run distinctive is
+           visible without listing the whole surface. Absent means everything was default. #}
+        {% if s.tuned_parameters %}
+        <table>
+            <tr><th colspan="2">Non-default parameters</th></tr>
+            {% for name, value in s.tuned_parameters %}
+            <tr><td>{{ name }}</td><td>{{ value }}</td></tr>
+            {% endfor %}
+        </table>
+        {% endif %}
     </div>
 {% endfor %}
 </body>
