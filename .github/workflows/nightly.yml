@@ -23,6 +23,9 @@ env:
   EVAL_REPORT_ARTIFACT: eval-reports-staging
   AWS_DEFAULT_REGION: ${{ vars.AWS_DEFAULT_REGION }}
   S3_DATASETS_BUCKET: ${{ vars.S3_DATASETS_BUCKET }}
+  # Nightlies carry every evaluation record. The Jetson configurations inherit
+  # this but never read it: their eval steps are gated on matrix.eval.
+  EVAL_SUITE: full
 
 jobs:
   check-changes:
@@ -197,7 +200,7 @@ jobs:
         run: |
           docker run --rm --network host \
             -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_DEFAULT_REGION -e S3_DATASETS_BUCKET \
-            -e RUNNER_STORAGE_ROOT -e RUNNER_LOCAL_DATASETS_ROOT \
+            -e RUNNER_STORAGE_ROOT -e RUNNER_LOCAL_DATASETS_ROOT -e EVAL_SUITE \
             -v "$(pwd):/cuvslam:ro" \
             -v "$RUNNER_LOCAL_DATASETS_ROOT:$RUNNER_LOCAL_DATASETS_ROOT" \
             -w /cuvslam \
@@ -212,7 +215,7 @@ jobs:
           mkdir -p "$RUNNER_LOCAL_DATASETS_ROOT"
           docker run --rm --network host \
             -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_DEFAULT_REGION -e S3_DATASETS_BUCKET \
-            -e RUNNER_LOCAL_DATASETS_ROOT \
+            -e RUNNER_LOCAL_DATASETS_ROOT -e EVAL_SUITE \
             -v "$(pwd):/cuvslam:ro" \
             -v "$RUNNER_LOCAL_DATASETS_ROOT:$RUNNER_LOCAL_DATASETS_ROOT" \
             -w /cuvslam \
