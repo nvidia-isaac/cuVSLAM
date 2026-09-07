@@ -92,3 +92,23 @@ TEST_F(TestImageFormat, InvalidDtype) {
 
   EXPECT_THROW(odometry->Track({img}), std::invalid_argument);
 }
+
+#ifndef USE_CUDA
+TEST_F(TestImageFormat, RejectsGpuMemoryWithoutCuda) {
+  // A CPU-only build cannot read device memory, so the flag has to be refused up front instead of
+  // the pointer being dereferenced as if it were host memory.
+  std::vector<uint8_t> pixels(480 * 640, 0);
+  cuvslam::Image img;
+  img.timestamp_ns = timestamp;
+  img.camera_index = 0;
+  img.width = 640;
+  img.height = 480;
+  img.pixels = pixels.data();
+  img.encoding = cuvslam::Image::Encoding::MONO;
+  img.data_type = cuvslam::Image::DataType::UINT8;
+  img.is_gpu_mem = true;
+  img.pitch = 640;
+
+  EXPECT_THROW(odometry->Track({img}), std::invalid_argument);
+}
+#endif
