@@ -70,7 +70,7 @@ Do not reintroduce gzip: provisioning uses uncompressed `.tar` to cap memory on 
 - Nightly configs: `nightly.yml` `strategy.matrix.include`. Eval runs on entries flagged `eval: true` (currently the four x86 configs). Every eval-enabled config needs the `RUNNER_STORAGE_ROOT` mount and configured repo secrets/variables; the `cuvslam-ci:local` image supplies the AWS CLI.
 - Jetson CUDA micro-benchmarks run only on nightly entries flagged `benchmark: true` (currently Orin and Thor). The normal C++ test invocation continues to exclude `*SpeedUp*` and `*Speedup*`; the dedicated benchmark wrapper runs the positive filter and excludes `DISABLED_` tests.
 - PR config: `pr-verify.yml` runs eval only on `build-test-x86` (fork-gated). `EVAL_CONFIG` is the static slug label for the PR table.
-- Active dataset set: `run_eval.sh` reads every record from `dataset_registry eval-records`, so PR and nightly run the same set. There is no per-pipeline selection today. To differ, filter the records by suite in the registry and have each workflow pass the selector; `EvalSpec.suites` already carries the membership.
+- Active dataset set: `EVAL_SUITE=smoke|full` selects records. `stage_eval_datasets.sh`, `check_eval_prerequisites.sh`, and `run_eval.sh` pass it to the registry; `eval_cuvslam_in_docker.sh` forwards it into the container. Leaving it unset selects every record, which equals `full` because validation requires every `EvalSpec` to belong to `full`. Set but empty is an error, since that usually means a workflow interpolated a missing input. No workflow sets it yet, so PR and nightly still run the same set; wiring that up is a protected change.
 
 ## Task: preserve nightly version provenance
 
