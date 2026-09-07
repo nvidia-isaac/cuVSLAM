@@ -60,21 +60,27 @@ class FakeConnection:
     def __init__(
         self,
         payload=PAYLOAD,
-        etag="abc",
+        etag='"abc"',
         redirects=(),
         fail_times=0,
         short_by=0,
         lowercase_headers=False,
         ignore_range=False,
+        change_after=None,
     ):
         self.payload = payload
+        # The raw ETag header value, or None to omit it.
         self.etag = etag
         self.redirects = list(redirects)
         self.fail_times = fail_times
         self.short_by = short_by
         self.lowercase_headers = lowercase_headers
         self.ignore_range = ignore_range
+        # Ranged GETs served before the object is treated as republished.
+        self.change_after = change_after
+        self.range_gets = 0
         self.requests = []
+        self.sent_headers = []
         self.paths = []
         self.closed = 0
         self._pending = None
@@ -87,6 +93,7 @@ class FakeConnection:
     def request(self, method, path, headers=None):
         headers = headers or {}
         self.requests.append((method, headers.get("Range")))
+        self.sent_headers.append(dict(headers))
         self.paths.append(path)
         if self.fail_times > 0:
             self.fail_times -= 1
@@ -96,20 +103,20 @@ class FakeConnection:
             self._pending = FakeResponse(302, self._headers({"Location": location}), b"")
             return
         if method == "HEAD":
-            self._pending = FakeResponse(
-                200,
-                self._headers(
-                    {"Content-Length": str(len(self.payload)), "ETag": f'"{self.etag}"'}
-                ),
-                b"",
-            )
+            head = {"Content-Length": str(len(self.payload))}
+            if self.etag is not None:
+                head["ETag"] = self.etag
+            self._pending = FakeResponse(200, self._headers(head), b"")
             return
-        if self.ignore_range:
-            # What an origin without range support answers: the whole object.
+        changed = self.change_after is not None and self.range_gets >= self.change_after
+        if self.ignore_range or changed:
+            # What an origin answers when it has no range support, and what it
+            # answers to a stale If-Range: the whole object.
             self._pending = UnreadableResponse(
                 200, self._headers({"Content-Length": str(len(self.payload))}), self.payload
             )
             return
+        self.range_gets += 1
         span = headers["Range"].removeprefix("bytes=")
         start, end = (int(value) for value in span.split("-"))
         body = self.payload[start : end + 1]
@@ -231,6 +238,17 @@ class TestHttpRangeFile(unittest.TestCase):
         self.assertEqual(handle.size, len(PAYLOAD))
         self.assertEqual(connection.paths[-1], "/moved/object.h5")
 
+    def test_the_redirect_budget_is_five_hops_then_a_response(self):
+        hops = http_range.MAX_REDIRECTS
+        connection = FakeConnection(redirects=["/hop/object.h5"] * hops)
+        handle = _open(connection, block_size=4096)
+        self.assertEqual(handle.size, len(PAYLOAD))
+        self.assertEqual(len(connection.paths), hops + 1)
+
+        connection = FakeConnection(redirects=["/hop/object.h5"] * (hops + 1))
+        with self.assertRaisesRegex(HttpRangeError, "too many redirects"):
+            _open(connection, block_size=4096)
+
     def test_chained_relative_redirects_resolve_against_the_previous_target(self):
         connection = FakeConnection(redirects=["/first/object.h5", "second.h5"])
         handle = _open(connection, block_size=4096)
@@ -265,6 +283,41 @@ class TestHttpRangeFile(unittest.TestCase):
         with self.assertRaisesRegex(HttpRangeError, "expected 206"):
             handle.read(8)
         self.assertEqual(connection.closed, 1)
+
+    def test_every_range_read_pins_the_representation(self):
+        connection = FakeConnection()
+        handle = _open(connection, block_size=1024)
+        handle.read(8)
+        handle.seek(4096)
+        handle.read(8)
+        ranged = [
+            sent
+            for (method, _), sent in zip(connection.requests, connection.sent_headers)
+            if method == "GET"
+        ]
+        self.assertEqual(len(ranged), 2)
+        for sent in ranged:
+            self.assertEqual(sent["If-Range"], '"abc"')
+
+    def test_a_source_without_a_strong_validator_is_rejected(self):
+        # Absent, weak, and unquoted: none of these pin one representation.
+        for etag in (None, 'W/"abc"', "abc"):
+            with self.subTest(etag=etag):
+                with self.assertRaisesRegex(HttpRangeError, "strong ETag"):
+                    _open(FakeConnection(etag=etag))
+
+    def test_an_object_republished_between_reads_is_rejected(self):
+        connection = FakeConnection(change_after=1)
+        handle = _open(connection, block_size=1024)
+        self.assertEqual(handle.read(8), PAYLOAD[:8])
+
+        # The stale If-Range turns the second block into a full response, which
+        # must be refused before it is read or cached.
+        handle.seek(4096)
+        with self.assertRaisesRegex(HttpRangeError, "the object changed"):
+            handle.read(8)
+        self.assertEqual(handle.request_count, 1)
+        self.assertEqual(handle.bytes_read, 1024)
 
     def test_range_response_for_another_span_is_rejected(self):
         class Misaligned(FakeConnection):

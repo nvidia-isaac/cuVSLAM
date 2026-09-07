@@ -257,8 +257,11 @@ class TestConvertSequence(unittest.TestCase):
     def test_emits_the_expected_layout(self):
         metadata = self._convert()
         sequence_dir = self.output / self.sequence
+        # Dot-prefixed entries belong to the converter, not to the dataset.
         self.assertEqual(
-            sorted(entry.name for entry in sequence_dir.iterdir()),
+            sorted(
+                entry.name for entry in sequence_dir.iterdir() if not entry.name.startswith(".")
+            ),
             ["00", "01", "frame_metadata.jsonl", "gt.txt", "stereo.edex"],
         )
         self.assertEqual(metadata["converted_counts"]["frames"], 6)
@@ -420,6 +423,12 @@ class TestConvertSequence(unittest.TestCase):
         (sequence_dir / "frame_metadata.jsonl").write_text("", encoding="utf-8")
         self.assertIsNone(convert_m3ed_spot.existing_frame_count(sequence_dir))
 
+        # A state file written before the frames, with no metadata yet, is how
+        # a run killed mid-sequence leaves the directory.
+        self._convert()
+        convert_m3ed_spot.write_state(sequence_dir, None)
+        self.assertIsNone(convert_m3ed_spot.existing_frame_count(sequence_dir))
+
         self.assertIsNone(convert_m3ed_spot.existing_frame_count(self.output / "absent"))
 
     def test_rerunning_replaces_the_previous_output(self):
@@ -456,7 +465,7 @@ class TestSkipExisting(unittest.TestCase):
         )
 
     def test_a_complete_sequence_is_not_read_again(self):
-        self._convert()
+        first = self._convert()
         self.assertEqual(len(self.opened), 2)
 
         metadata = self._convert(skip_existing=True)
@@ -465,6 +474,31 @@ class TestSkipExisting(unittest.TestCase):
         entry = metadata["sequences"][0]
         self.assertTrue(entry["reused_existing_output"])
         self.assertEqual(entry["converted_counts"]["frames"], 6)
+
+        # A resumed run describes its output as fully as the run that made it,
+        # or the dataset would ship without the calibration and the source file
+        # behind whichever sequences were skipped.
+        converted = first["sequences"][0]
+        for field in ("baseline_m", "left_intrinsics", "dropped_outside_ground_truth"):
+            self.assertEqual(entry[field], converted[field])
+        self.assertEqual(entry["source_files"], converted["source_files"])
+
+    def test_an_output_without_readable_state_still_reuses(self):
+        # The 56 GB already on disk was converted before the state file existed,
+        # and re-reading it would cost hours of network for nothing. A write
+        # that did not survive reads the same way.
+        state = self.output / self.sequence / ".conversion_state.json"
+        for damage in (state.unlink, lambda: state.write_text("{oops", encoding="utf-8")):
+            with self.subTest(damage=damage):
+                self._convert()
+                damage()
+                metadata = self._convert(skip_existing=True)
+                self.assertEqual(self.opened, [])
+                entry = metadata["sequences"][0]
+                self.assertTrue(entry["reused_existing_output"])
+                self.assertEqual(entry["converted_counts"]["frames"], 6)
+                # Nothing recorded it, so the entry says only what is on disk.
+                self.assertNotIn("source_files", entry)
 
     def test_an_interrupted_sequence_is_converted_again(self):
         self._convert()

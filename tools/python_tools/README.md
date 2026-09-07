@@ -326,10 +326,19 @@ downloading 25-42 GB, and nothing is staged on disk. `--force-download` and `--d
 same reason. Pass `--raw-dir` to read already-downloaded files instead, laid out as
 `<raw-dir>/<published-sequence>/<published-sequence>_{data,pose_gt}.h5`.
 
+Reading one object takes tens of minutes and M3ED does republish files, so every range read sends the object's ETag as
+`If-Range`. A file replaced mid-conversion answers with the whole object instead of the range, which is refused before
+the body is read rather than spliced into the output. A source that serves no strong ETag is rejected outright, since
+nothing would detect the substitution.
+
 The prepared root is `/path/to/datasets/converted/m3ed_spot`. It contains `dataset_metadata.json` and, as for KITTI
 and EuRoC, three reporter configs: `m3ed_spot-vo.cfg`, `m3ed_spot-slam.cfg` and `m3ed_spot-vo_slam.cfg`. Every
 sequence contains `stereo.edex`, `frame_metadata.jsonl`, camera-aligned `gt.txt`, and
-mono8 PNGs under `00/` (OVC left) and `01/` (OVC right). Calibration is read per sequence from the source, and the
+mono8 PNGs under `00/` (OVC left) and `01/` (OVC right). Each sequence also holds a dot-prefixed
+`.conversion_state.json`, which is the converter's own record rather than dataset content: `--skip-existing` reads it
+to tell a finished sequence from one truncated by `--frame-limit` or cut short by an interrupted run, and a resumed run
+copies its metadata into `dataset_metadata.json` so skipped sequences are described as fully as converted ones.
+Calibration is read per sequence from the source, and the
 radtan coefficients map onto cuVSLAM's `polynomial` model, whose first four parameters are the same OpenCV values.
 
 Ground truth needs one correction that is easy to miss: the published poses describe the left *event* camera, not the

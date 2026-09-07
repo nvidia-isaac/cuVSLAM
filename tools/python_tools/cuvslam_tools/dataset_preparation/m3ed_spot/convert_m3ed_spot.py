@@ -139,10 +139,12 @@ _FRAME_BATCH = 16
 # Frames between progress lines. A multiple of the batch size.
 _PROGRESS_EVERY = 256
 
-# Records the frame limit a truncated sequence was written under. A full
-# conversion writes no such file, so an output made for local validation and a
-# finished sequence stay distinguishable once the run that made them is gone.
-_FRAME_LIMIT_FILE = ".frame_limit"
+# What produced a sequence directory: the frame limit it was written under and
+# its metadata. ``--skip-existing`` reads this back, so it cannot live in the
+# root dataset_metadata.json, which is only written when a whole run finishes —
+# exactly what a resumed run does not have. Dot-prefixed because it belongs to
+# the converter rather than to the data the suite reads.
+_STATE_FILE = ".conversion_state.json"
 
 _OVC_TIMESTAMP_UNIT_NS = 1_000  # /ovc/ts and pose ts are microseconds
 
@@ -479,10 +481,9 @@ def convert_sequence(
     right_output = sequence_dir / RIGHT_DIR
     left_output.mkdir(parents=True)
     right_output.mkdir()
-    if frame_limit is not None:
-        # Written before the frames, so a truncated run that is interrupted is
-        # no more reusable than one that finished.
-        (sequence_dir / _FRAME_LIMIT_FILE).write_text(f"{frame_limit}\n", encoding="utf-8")
+    # The limit is recorded before the frames, so a run interrupted between the
+    # last artifact and its metadata is not mistaken for a complete one.
+    write_state(sequence_dir, frame_limit)
 
     names: List[str] = []
     frame_timestamps: List[int] = []
@@ -530,7 +531,7 @@ def convert_sequence(
     )
 
     _, translation = left_from_right(left_calibration, right_calibration)
-    return {
+    metadata: Dict[str, object] = {
         "sequence": sequence,
         "source_sequence": source_name(sequence),
         "source_counts": {
@@ -552,26 +553,57 @@ def convert_sequence(
         },
         "frame_limit": frame_limit,
     }
+    write_state(sequence_dir, frame_limit, metadata)
+    return metadata
+
+
+def write_state(
+    sequence_dir: Path, frame_limit: Optional[int], metadata: Optional[Dict[str, object]] = None
+) -> None:
+    """Record what produced ``sequence_dir`` alongside the sequence itself."""
+    state: Dict[str, object] = {"frame_limit": frame_limit}
+    if metadata is not None:
+        state["metadata"] = metadata
+    (Path(sequence_dir) / _STATE_FILE).write_text(
+        json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+
+
+def read_state(sequence_dir: Path) -> Optional[Dict[str, object]]:
+    """Return the conversion state of ``sequence_dir``, or ``None`` if unusable.
+
+    A missing file means an output from before the converter recorded state; a
+    malformed one means a write that did not survive, and neither can say what
+    produced the sequence.
+    """
+    path = Path(sequence_dir) / _STATE_FILE
+    if not path.is_file():
+        return None
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return state if isinstance(state, dict) else None
 
 
 def existing_frame_count(sequence_dir: Path, frame_limit: Optional[int] = None) -> Optional[int]:
     """Return the frame count of a conversion in ``sequence_dir`` worth reusing.
 
     Returns ``None`` unless every artifact is present, both cameras hold one
-    image per frame, and the output was written under the same ``frame_limit``,
-    so neither a conversion interrupted partway through nor a prefix written for
-    local validation is mistaken for a finished sequence.
-    ``frame_metadata.jsonl`` is written after the images, but that alone would
-    not catch a truncated image directory.
+    image per frame, and the recorded state shows a finished conversion under
+    the same ``frame_limit``, so neither a conversion interrupted partway
+    through nor a prefix written for local validation is mistaken for a finished
+    sequence. ``frame_metadata.jsonl`` is written after the images, but that
+    alone would not catch a truncated image directory.
     """
     sequence_dir = Path(sequence_dir)
-    marker = sequence_dir / _FRAME_LIMIT_FILE
-    if marker.is_file():
-        # A marker that does not read back as the current limit, malformed
-        # included, is not evidence that this output is the one asked for.
-        if marker.read_text(encoding="utf-8").strip() != str(frame_limit):
+    state = read_state(sequence_dir)
+    if state is None:
+        # An output that predates the state file can only be taken for a whole
+        # sequence, never for one converted under some other limit.
+        if frame_limit is not None:
             return None
-    elif frame_limit is not None:
+    elif state.get("frame_limit") != frame_limit or "metadata" not in state:
         return None
     metadata = sequence_dir / rgbd.FRAME_METADATA_FILE
     required = (metadata, sequence_dir / rgbd.GROUND_TRUTH_FILE, sequence_dir / rgbd.EDEX_FILE)
@@ -690,7 +722,13 @@ def convert(
             frames = existing_frame_count(output_dir / sequence, frame_limit)
             if frames is not None:
                 print(f"Skipping {sequence}: already converted, {frames} frames")
-                sequence_metadata.append(
+                state = read_state(output_dir / sequence) or {}
+                # The recorded metadata carries the calibration, the baseline
+                # and which source file produced the sequence, so a resumed run
+                # describes its output as fully as an uninterrupted one. Only an
+                # output written before the state file falls back to counts.
+                reused = dict(state.get("metadata") or {})
+                reused.update(
                     {
                         "sequence": sequence,
                         "source_sequence": published,
@@ -699,6 +737,7 @@ def convert(
                         "reused_existing_output": True,
                     }
                 )
+                sequence_metadata.append(reused)
                 continue
         print(f"Converting {sequence} from {published} …")
         with open_sequence(published, "data") as (data_handle, data_provenance):
@@ -706,7 +745,10 @@ def convert(
                 metadata = convert_sequence(
                     data_handle, pose_handle, sequence, output_dir, frame_limit=frame_limit
                 )
+        # The transport provenance is only complete once the handles close, so
+        # the state written by convert_sequence is refreshed with it here.
         metadata["source_files"] = {"data": data_provenance, "pose_gt": pose_provenance}
+        write_state(output_dir / sequence, frame_limit, metadata)
         sequence_metadata.append(metadata)
 
     config_names = _write_configs(output_dir, selected)

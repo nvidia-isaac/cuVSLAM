@@ -109,7 +109,9 @@ class HttpRangeFile(io.RawIOBase):
         self.bytes_read = 0
         self.retry_count = 0
         self._host, self._path = self._split_url(url)
-        self.size, self.etag = self._head()
+        self.size, self._if_range = self._head()
+        # Provenance records the entity tag without the quoting the header needs.
+        self.etag = self._if_range.strip('"')
 
     @staticmethod
     def _split_url(url: str) -> Tuple[Tuple[str, str, Optional[int]], str]:
@@ -154,8 +156,12 @@ class HttpRangeFile(io.RawIOBase):
         start, end = span
         if status != 206:
             self._drop_connection()
+            # Every range read carries If-Range, so a full response means the
+            # object was republished mid-conversion or Range was ignored.
+            detail = " (the object changed, or Range was ignored)" if status == 200 else ""
             raise HttpRangeError(
-                f"{self.url}: range {start}-{end} answered with HTTP {status}, expected 206"
+                f"{self.url}: range {start}-{end} answered with HTTP {status}, "
+                f"expected 206{detail}"
             )
         content_range = headers.get("content-range")
         if content_range is None or not content_range.startswith(f"bytes {start}-{end}/"):
@@ -220,7 +226,8 @@ class HttpRangeFile(io.RawIOBase):
     def _request(
         self, method: str, headers: Dict[str, str], span: Optional[Tuple[int, int]] = None
     ) -> Tuple[Dict[str, str], bytes]:
-        for _ in range(MAX_REDIRECTS):
+        # One request per redirect, plus the one that answers.
+        for _ in range(MAX_REDIRECTS + 1):
             status, response_headers, payload = self._perform(method, headers, span)
             if status in _REDIRECT_STATUSES:
                 location = response_headers.get("location")
@@ -237,19 +244,34 @@ class HttpRangeFile(io.RawIOBase):
             return response_headers, payload
         raise HttpRangeError(f"{self.url}: too many redirects")
 
-    def _head(self) -> Tuple[int, Optional[str]]:
+    def _head(self) -> Tuple[int, str]:
+        """Return the object's length and the strong entity tag that pins it."""
         headers, _ = self._request("HEAD", {})
         length = headers.get("content-length")
         if length is None:
             raise HttpRangeError(f"{self.url}: server did not report Content-Length")
-        etag = headers.get("etag")
-        return int(length), etag.strip('"') if etag else None
+        etag = (headers.get("etag") or "").strip()
+        # A conversion reads one object over hours, and M3ED does republish
+        # files. Without a strong validator to send back on every range read, a
+        # file replaced mid-conversion would be spliced into the output
+        # unnoticed, so there is nothing safe to do but refuse. A weak validator
+        # can compare equal across representations and so cannot pin one.
+        if len(etag) < 3 or not etag.startswith('"') or not etag.endswith('"'):
+            raise HttpRangeError(
+                f"{self.url}: no strong ETag (got {etag or 'none'}), so the object cannot be "
+                "pinned for the length of a conversion"
+            )
+        return int(length), etag
 
     def _fetch(self, start: int, length: int) -> bytes:
         if length <= 0:
             return b""
         end = start + length - 1
-        _, payload = self._request("GET", {"Range": f"bytes={start}-{end}"}, (start, end))
+        _, payload = self._request(
+            "GET",
+            {"Range": f"bytes={start}-{end}", "If-Range": self._if_range},
+            (start, end),
+        )
         if len(payload) != length:
             raise HttpRangeError(
                 f"{self.url}: range {start}-{end} returned {len(payload)} bytes, expected {length}"
