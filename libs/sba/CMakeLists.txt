@@ -18,7 +18,6 @@ set(HEADERS
     bundle_adjustment_problem.h
     mono_sba_solver.h
     sba_config.h
-    sba_config_gflags.h
     schur_complement_bundler_cpu.h
     )
 

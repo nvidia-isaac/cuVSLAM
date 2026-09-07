@@ -24,7 +24,6 @@ set(HEADERS
     multi_visual_odometry.h
     multi_visual_odometry_base.h
     svo_config.h
-    svo_config_gflags.h
     )
 
 set(SOURCES

@@ -17,11 +17,13 @@
 set(MODULE_NAME "params")
 
 set(HEADERS
+    cli.h
     params.h
     registry.h
     )
 
 set(SOURCES
+    cli.cpp
     params.cpp
     registry.cpp
     )

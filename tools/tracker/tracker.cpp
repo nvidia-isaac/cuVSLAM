@@ -32,9 +32,7 @@
 #include "launcher/launcher_create.h"
 #include "log/log.h"
 #include "odometry/svo_config.h"
-#include "odometry/svo_config_gflags.h"
-#include "sba/sba_config_gflags.h"
-#include "sof/sof_config_gflags.h"
+#include "params/cli.h"
 #include "visualizer/visualizer.hpp"
 
 DEFINE_string(logger_filename, "", "Log filename");
@@ -57,11 +55,17 @@ using namespace cuvslam;
 using namespace Json;
 using namespace JsonUtils;
 
+DEFINE_string(sba_mode, "gpu",
+              "Bundle adjuster: none|cpu|gpu|imu|imugpu. Chosen when the tracker is built, so it is a\n"
+              "\tflag rather than a -P parameter");
+DEFINE_bool(list_params, false, "Print every tunable parameter with its type, default and description, then exit");
+
 int main(int argC, char** ppArgV) {
   std::cout << "Welcome to nVidia cuVSLAM tracker.\n\n";
   Trace::SetVerbosity(Trace::Verbosity::Debug);
+  const std::vector<std::string> param_overrides = cuvslam::params::ExtractOverrides(argC, ppArgV);
   std::vector<char*> all_args(ppArgV, ppArgV + argC);
-  const std::string usage{"Usage: -edex <edex_folder> -edex_filename <edex_file>\n"};
+  const std::string usage{"Usage: -edex <edex_folder> -edex_filename <edex_file> [-Pkey=value ...]\n"};
   gflags::SetUsageMessage(usage);
   gflags::ParseCommandLineFlags(&argC, &ppArgV, /*remove flags = */ true);
   if (argC != 1) {
@@ -71,12 +75,24 @@ int main(int argC, char** ppArgV) {
   }
 
   odom::Settings svo_settings;
-  odom::ParseSettings(svo_settings.kf_settings);
-  if (!sba::ParseSettings(svo_settings.sba_settings)) {
-    std::cout << "Wrong SBA settings" << std::endl;
-    return 0;
+  cuvslam::params::Registry params;
+  params.Add("sof", svo_settings.sof_settings);
+  params.Add("sof.feature_selection", svo_settings.sof_settings.feature_selection_settings);
+  params.Add("kf", svo_settings.kf_settings);
+  params.Add("sba", svo_settings.sba_settings);
+  params.Add("sm", svo_settings.sm_settings);
+
+  if (FLAGS_list_params) {
+    cuvslam::params::PrintReference(params, std::cout);
+    return EXIT_SUCCESS;
   }
-  sof::ParseSettings(svo_settings.sof_settings);
+  try {
+    svo_settings.sba_settings.mode = cuvslam::params::ParseEnum<sba::Mode>(FLAGS_sba_mode);
+    cuvslam::params::ApplyOverrides(params, param_overrides, cuvslam::params::Source::CommandLine);
+  } catch (const std::exception& e) {
+    std::cout << e.what() << std::endl;
+    return EXIT_FAILURE;
+  }
 
   // check environment
   std::string sequence_folder = Environment::GetVar(Environment::CUVSLAM_DATASETS);

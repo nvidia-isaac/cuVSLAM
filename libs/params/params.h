@@ -177,6 +177,21 @@ std::string TypeName() {
 
 }  // namespace detail
 
+/**
+ * @brief Parses an enum from the spellings declared with CUVSLAM_PARAM_ENUM_BEGIN/END.
+ *
+ * For values that are chosen once, before the object that reads them exists, so they are a
+ * command-line flag rather than a parameter -- but should still accept the same spellings.
+ *
+ * @throws std::runtime_error if @p text is not one of the declared spellings; the message lists
+ *         the valid ones.
+ */
+template <typename E>
+E ParseEnum(std::string_view text) {
+  static_assert(std::is_enum_v<E>, "ParseEnum is only for enums");
+  return detail::ParseValue<E>(text);
+}
+
 /// Inclusive numeric bounds a field's value must satisfy. Unset for non-numeric fields.
 struct Bounds {
   double min = 0.0;

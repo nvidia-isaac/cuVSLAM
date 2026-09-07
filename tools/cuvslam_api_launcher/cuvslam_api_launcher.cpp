@@ -44,6 +44,7 @@
 #include "cuvslam/cuvslam2.h"
 #include "cuvslam/cuvslam_params.h"
 #include "cuvslam/internal.h"
+#include "params/cli.h"
 #include "params/registry.h"
 #include "utils/image_loader.h"
 
@@ -727,32 +728,10 @@ void PrintParameterReference() {
             << "  run with --verbosity=2 and no --params to see the set a given mode exposes.\n";
 }
 
-/**
- * @brief Removes -Pkey=value arguments from argv and returns them in order.
- *
- * gflags has no clustered short options, so it would reject -P outright. Extracting these before
- * ParseCommandLineFlags() also fixes the precedence explicitly: the parameter file is read first
- * and these are applied on top, in the order given.
- */
-std::vector<std::string> ExtractParamOverrides(int& arg_c, char** arg_v) {
-  std::vector<std::string> overrides;
-  int kept = 0;
-  for (int i = 0; i < arg_c; ++i) {
-    const std::string_view arg = arg_v[i];
-    if (i > 0 && arg.size() > 2 && arg.substr(0, 2) == "-P") {
-      overrides.emplace_back(arg.substr(2));
-    } else {
-      arg_v[kept++] = arg_v[i];
-    }
-  }
-  arg_c = kept;
-  return overrides;
-}
-
 }  // end of anonymous namespace
 
 int main(int arg_c, char** arg_v) {
-  const std::vector<std::string> param_overrides = ExtractParamOverrides(arg_c, arg_v);
+  const std::vector<std::string> param_overrides = params::ExtractOverrides(arg_c, arg_v);
   gflags::ParseCommandLineFlags(&arg_c, &arg_v, /*remove flags = */ true);
   if (arg_c != 1) {
     std::cout << "This tools doesn't expect command line arguments, only flags listed with --help" << std::endl

@@ -51,16 +51,6 @@ TEST_F(SofParamsTest, DefaultsComeFromTheStructNotTheDescriptors) {
             registry.Get("sof.feature_selection.survivor_from_last"));
 }
 
-TEST_F(SofParamsTest, CoversEveryKnobTheGflagsHeaderExposed) {
-  // sof_config_gflags.h defined exactly these; the registry has to be a superset before that
-  // header can be deleted.
-  for (const std::string& key :
-       {"sof.num_desired_tracks", "sof.border_top", "sof.border_bottom", "sof.border_left", "sof.border_right",
-        "sof.box3_prefilter", "sof.ransac_filter", "sof.tracker", "sof.lr_tracker", "sof.multicam_mode"}) {
-    EXPECT_NO_THROW(registry.Resolve(key)) << key;
-  }
-}
-
 TEST_F(SofParamsTest, SetsScalarsThroughToTheSettings) {
   registry.Set("sof.num_desired_tracks", "300", Source::CommandLine);
   registry.Set("sof.border_top", "8", Source::CommandLine);

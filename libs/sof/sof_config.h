@@ -17,7 +17,6 @@
 
 #pragma once
 
-#include <optional>
 #include <vector>
 
 #include "camera/frustum_intersection_graph.h"
@@ -60,9 +59,6 @@ struct Settings {
   camera::MulticameraMode multicam_mode = camera::MulticameraMode::Moderate;
   camera::MulticamManualSetup multicam_setup;
 };
-
-void OverrideMulticameraSettings(Settings& settings, const std::optional<camera::MulticameraMode>& multicam_mode,
-                                 const camera::MulticamManualSetup& multicam_setup);
 
 }  // namespace cuvslam::sof
 

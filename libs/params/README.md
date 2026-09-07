@@ -12,7 +12,8 @@ The point is that the number of things to maintain is parameters + surfaces, not
 surfaces. Before this library, one new knob meant editing the struct, a flattened mirror of the
 struct, a `BuildTrackFrameSettings()` assignment, a YAML loader `if`, that loader's known-keys
 list, a gflags `DEFINE_*` plus its `ParseSettings()` line, a nanobind `def_rw`, and a Python
-`elif` — and the Python YAML loader had already silently fallen 11 parameters behind.
+`elif` — and the Python YAML loader had already silently fallen 11 parameters behind. All of those
+copies are gone.
 
 Declaring a parameter
 ---------------------
@@ -133,9 +134,6 @@ when a real struct changes. `test/completeness_test.cpp` guards against a field 
 described struct and not described. The rest check the real key layout and behaviour against the
 actual settings structs: `test/sof_params_test.cpp`, `test/solver_params_test.cpp` and
 `test/config_params_test.cpp`.
-
-`sof_params_test.cpp` still asserts that the surface covers everything `sof_config_gflags.h`
-exposes; that check goes away with the header.
 
 Where the descriptors live
 --------------------------
