@@ -255,9 +255,9 @@ cuvslam::Camera loadCameraFromYAML(const std::string &yaml_path) {
   if (distortion_model == "radial-tangential") {
     cam.distortion.model = cuvslam::Distortion::Model::Brown;
     cam.distortion.parameters.resize(5, 0.0f);
-    // only k1, k2, p1, p2 are provided in the default calibration
+    // The default calibration gives only k1, k2, p1, p2, and Brown wants (k1, k2, k3, p1, p2),
+    // so the tangential pair shifts one slot right past the k3 that stays zero.
     for (size_t i = 0; i < std::min(distortion_coeffs.size(), 4ul); i++) {
-      // so no need to set k3
       cam.distortion.parameters[i >= 2 ? i + 1 : i] = static_cast<float>(distortion_coeffs[i]);
     }
   } else if (distortion_model == "fisheye") {

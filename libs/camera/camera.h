@@ -124,6 +124,7 @@ private:
 
 // Brown(aka Brown - Conrady) distortion model with 5 coefficients:
 // 3 for radial distortion and 2 for tangential.
+// Distortion::parameters holds them as (k1, k2, k3, p1, p2), which is not the OpenCV order.
 // https://www.control.isy.liu.se/student/graduate/DynVis/Lectures/le2.pdf
 // http://robots.stanford.edu/cs223b04/JeanYvesCalib/htmls/parameters.html (Caltechs calibration toolbox)
 // This model is a special case of rational function that OpenCV uses.

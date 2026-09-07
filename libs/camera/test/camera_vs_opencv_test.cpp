@@ -79,6 +79,7 @@ void UndistortBrown5K(const cv::Mat& distorted, cv::Mat& undistort, const cv::Ma
   const cuvslam::Vector2T focal(camera_matrix.at<float>(0, 0), camera_matrix.at<float>(1, 1));
   const cuvslam::Vector2T principal(camera_matrix.at<float>(0, 2), camera_matrix.at<float>(1, 2));
   const cuvslam::camera::PinholeCameraModel pinhole(resolution, focal, principal);
+  // dist_coeffs is in OpenCV order (k1, k2, p1, p2, k3), our model takes the radial ones first.
   const float K1 = dist_coeffs.at<float>(0);
   const float K2 = dist_coeffs.at<float>(1);
   const float P1 = dist_coeffs.at<float>(2);
@@ -94,6 +95,7 @@ void UndistortPolynomial(const cv::Mat& distorted, cv::Mat& undistort, const cv:
   const cuvslam::Vector2T focal(camera_matrix.at<float>(0, 0), camera_matrix.at<float>(1, 1));
   const cuvslam::Vector2T principal(camera_matrix.at<float>(0, 2), camera_matrix.at<float>(1, 2));
   const cuvslam::camera::PinholeCameraModel pinhole(resolution, focal, principal);
+  // dist_coeffs is in OpenCV order (k1, k2, p1, p2, k3..k6), our model takes the radial ones first.
   const float K1 = dist_coeffs.at<float>(0);
   const float K2 = dist_coeffs.at<float>(1);
   const float P1 = dist_coeffs.at<float>(2);
@@ -142,7 +144,7 @@ TEST(TestCamera, OpenCVvsInternal) {
     const float p2 = random_a_b(-0.5, 0.5);
 
     if (std::rand() % 2) {
-      // brawn
+      // brown
       const cv::Mat distortion_coefficients = (cv::Mat_<float>(1, 5) << k1, k2, p1, p2, k3);
       cv::undistort(original_undistorted, cv_undistorted_mono, camera_matrix, distortion_coefficients);
       UndistortBrown5K(original_undistorted, cuvslam_undistorted_rgb, camera_matrix, distortion_coefficients);

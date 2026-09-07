@@ -43,9 +43,13 @@ from . import (
 DISTORTION_MODEL_ROS2EDEX = {
     "pinhole": edex.DistortionModel.PINHOLE,
     "equidistant": edex.DistortionModel.FISHEYE,
+    # plumb_bob is the odd one out: its coefficients need reordering, see get_distortion_model().
     "plumb_bob": edex.DistortionModel.BROWN5K,
     "rational_polynomial": edex.DistortionModel.POLYNOMIAL,
 }
+
+# ROS plumb_bob is [k1, k2, p1, p2, k3], edex brown5k is [k1, k2, k3, p1, p2].
+_PLUMB_BOB_TO_BROWN5K = [0, 1, 4, 2, 3]
 
 
 def progress_bar(
@@ -446,7 +450,15 @@ def get_distortion_model(
     if np.all(distortion_params == 0):
         logging.info("All distortion parameters are zero. Using pinhole model.")
         return edex.DistortionModel.PINHOLE, np.array([], dtype=np.float32)
-    return DISTORTION_MODEL_ROS2EDEX[distortion_model], distortion_params
+
+    edex_model = DISTORTION_MODEL_ROS2EDEX[distortion_model]
+    if edex_model == edex.DistortionModel.BROWN5K:
+        # equidistant and rational_polynomial already match the edex order, plumb_bob does not.
+        assert (
+            len(distortion_params) == 5
+        ), f"plumb_bob needs 5 coefficients, got {len(distortion_params)}"
+        distortion_params = np.asarray(distortion_params)[_PLUMB_BOB_TO_BROWN5K]
+    return edex_model, distortion_params
 
 
 def get_camera_intrinsics(

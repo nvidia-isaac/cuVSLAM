@@ -17,9 +17,10 @@ import os.path
 
 
 def fix_distortion(version, intrinsics):
+    # Always leaves an edex model name here, the ROS name is applied when the CameraInfo is built.
     if version == "0.8":
         num_params = len(intrinsics['distortion'])
-        intrinsics['distortion_model'] = 'fisheye' if num_params == 4 else 'plumb_bob'
+        intrinsics['distortion_model'] = 'fisheye' if num_params == 4 else 'brown5k'
         if num_params == 2:
             intrinsics['distortion_params'] = [0, 0, 0, 0, 0]
         else:

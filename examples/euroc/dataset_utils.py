@@ -122,8 +122,8 @@ def _create_camera_from_config(config: dict, is_default: bool) -> cuvslam.Camera
     cam.size = config['resolution']
 
     if is_default:
-        # Brown-Conrady distortion model requires only k1, k2, k3, p1, p2
-        # but only k1, k2, p1, p2 are provided in the default calibration
+        # Brown wants (k1, k2, k3, p1, p2) but the default calibration gives only k1, k2, p1, p2,
+        # so a zero k3 is spliced in between them.
         cam.distortion = cuvslam.Distortion(
             cuvslam.Distortion.Model.Brown,
             config['distortion_coefficients'][:2] + [0] + config['distortion_coefficients'][2:]
