@@ -139,6 +139,11 @@ _FRAME_BATCH = 16
 # Frames between progress lines. A multiple of the batch size.
 _PROGRESS_EVERY = 256
 
+# Records the frame limit a truncated sequence was written under. A full
+# conversion writes no such file, so an output made for local validation and a
+# finished sequence stay distinguishable once the run that made them is gone.
+_FRAME_LIMIT_FILE = ".frame_limit"
+
 _OVC_TIMESTAMP_UNIT_NS = 1_000  # /ovc/ts and pose ts are microseconds
 
 
@@ -461,6 +466,8 @@ def convert_sequence(
         raise ConversionError(f"{sequence}: no frame falls inside the ground-truth time span")
     dropped_outside_ground_truth = len(timestamps) - len(selected)
     if frame_limit is not None:
+        if frame_limit <= 0:
+            raise ConversionError(f"frame_limit must be positive, got {frame_limit}")
         selected = selected[:frame_limit]
 
     sequence_dir = output_dir / sequence
@@ -472,6 +479,10 @@ def convert_sequence(
     right_output = sequence_dir / RIGHT_DIR
     left_output.mkdir(parents=True)
     right_output.mkdir()
+    if frame_limit is not None:
+        # Written before the frames, so a truncated run that is interrupted is
+        # no more reusable than one that finished.
+        (sequence_dir / _FRAME_LIMIT_FILE).write_text(f"{frame_limit}\n", encoding="utf-8")
 
     names: List[str] = []
     frame_timestamps: List[int] = []
@@ -518,7 +529,7 @@ def convert_sequence(
         encoding="utf-8",
     )
 
-    rotation, translation = left_from_right(left_calibration, right_calibration)
+    _, translation = left_from_right(left_calibration, right_calibration)
     return {
         "sequence": sequence,
         "source_sequence": source_name(sequence),
@@ -528,7 +539,9 @@ def convert_sequence(
         },
         "converted_counts": {"frames": len(names), "ground_truth_poses": len(names)},
         "dropped_outside_ground_truth": dropped_outside_ground_truth,
-        "baseline_m": abs(translation[0]),
+        # The published extrinsics put the right camera a few millimetres off
+        # the left camera's x axis, so the whole offset is the baseline.
+        "baseline_m": float(np.linalg.norm(translation)),
         "left_intrinsics": {
             "focal": list(left_calibration.focal),
             "principal": list(left_calibration.principal),
@@ -541,15 +554,25 @@ def convert_sequence(
     }
 
 
-def existing_frame_count(sequence_dir: Path) -> Optional[int]:
-    """Return the frame count of a complete conversion in ``sequence_dir``.
+def existing_frame_count(sequence_dir: Path, frame_limit: Optional[int] = None) -> Optional[int]:
+    """Return the frame count of a conversion in ``sequence_dir`` worth reusing.
 
-    Returns ``None`` unless every artifact is present and both cameras hold one
-    image per frame, so a conversion interrupted partway through is not mistaken
-    for a finished one. ``frame_metadata.jsonl`` is written after the images, but
-    that alone would not catch a truncated image directory.
+    Returns ``None`` unless every artifact is present, both cameras hold one
+    image per frame, and the output was written under the same ``frame_limit``,
+    so neither a conversion interrupted partway through nor a prefix written for
+    local validation is mistaken for a finished sequence.
+    ``frame_metadata.jsonl`` is written after the images, but that alone would
+    not catch a truncated image directory.
     """
     sequence_dir = Path(sequence_dir)
+    marker = sequence_dir / _FRAME_LIMIT_FILE
+    if marker.is_file():
+        # A marker that does not read back as the current limit, malformed
+        # included, is not evidence that this output is the one asked for.
+        if marker.read_text(encoding="utf-8").strip() != str(frame_limit):
+            return None
+    elif frame_limit is not None:
+        return None
     metadata = sequence_dir / rgbd.FRAME_METADATA_FILE
     required = (metadata, sequence_dir / rgbd.GROUND_TRUTH_FILE, sequence_dir / rgbd.EDEX_FILE)
     if not all(path.is_file() and path.stat().st_size for path in required):
@@ -651,9 +674,10 @@ def convert(
     Injecting it keeps the transport, whether an HTTP range reader or a local
     file, out of the conversion logic.
 
-    ``skip_existing`` leaves sequences that already converted completely alone.
-    Converting all 19 reads tens of gigabytes over the network across several
-    hours, so an interrupted run can be resumed rather than restarted.
+    ``skip_existing`` leaves sequences that already converted completely under
+    the same ``frame_limit`` alone. Converting all 19 reads tens of gigabytes
+    over the network across several hours, so an interrupted run can be resumed
+    rather than restarted.
     """
     selected = _selected_sequences(sequences)
     output_dir = Path(output_dir)
@@ -663,7 +687,7 @@ def convert(
     for sequence in selected:
         published = source_name(sequence)
         if skip_existing:
-            frames = existing_frame_count(output_dir / sequence)
+            frames = existing_frame_count(output_dir / sequence, frame_limit)
             if frames is not None:
                 print(f"Skipping {sequence}: already converted, {frames} frames")
                 sequence_metadata.append(
@@ -671,6 +695,7 @@ def convert(
                         "sequence": sequence,
                         "source_sequence": published,
                         "converted_counts": {"frames": frames, "ground_truth_poses": frames},
+                        "frame_limit": frame_limit,
                         "reused_existing_output": True,
                     }
                 )

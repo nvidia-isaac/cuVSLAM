@@ -57,6 +57,21 @@ SEQUENCE_ARTIFACTS = (
 )
 
 
+def _positive_int(value: str) -> int:
+    """Parse a count that only means anything above zero.
+
+    Without this a negative ``--frame-limit`` would reach a list slice and drop
+    frames off the end of every sequence instead of failing.
+    """
+    try:
+        count = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected an integer, got '{value}'") from None
+    if count <= 0:
+        raise argparse.ArgumentTypeError(f"expected a positive integer, got {count}")
+    return count
+
+
 def object_url(published: str, kind: str) -> str:
     """Return the public URL of one source file."""
     return f"{BUCKET_URL}/{OBJECT_PREFIX}/{published}/{published}_{kind}.h5"
@@ -205,7 +220,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     parser.add_argument(
         "--frame-limit",
-        type=int,
+        type=_positive_int,
         default=None,
         help="Convert at most this many frames per sequence. For local validation only.",
     )

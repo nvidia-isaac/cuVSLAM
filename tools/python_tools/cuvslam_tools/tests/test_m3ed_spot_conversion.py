@@ -377,6 +377,24 @@ class TestConvertSequence(unittest.TestCase):
         rows = (self.output / self.sequence / "gt.txt").read_text().splitlines()
         self.assertEqual(len(rows), 2)
 
+    def test_a_frame_limit_of_zero_or_less_is_rejected(self):
+        # Slicing would otherwise read -1 as "all but the last frame" and 0 as
+        # an empty sequence that fails somewhere further down.
+        for limit in (0, -1):
+            with self.subTest(limit=limit):
+                with self.assertRaisesRegex(
+                    convert_m3ed_spot.ConversionError, "frame_limit must be positive"
+                ):
+                    self._convert(frame_limit=limit)
+
+    def test_baseline_covers_the_whole_stereo_offset(self):
+        offset = np.array(RIGHT_TO_PROPHESEE)
+        offset[1, 3] += 0.05
+        metadata = self._convert(right_transform=offset)
+        # 120 mm along x and 50 mm along y: the baseline is the length of that
+        # offset, not the x component on its own.
+        self.assertAlmostEqual(metadata["baseline_m"], 0.13)
+
     def test_camera_frame_count_mismatch_is_rejected(self):
         with self.assertRaisesRegex(convert_m3ed_spot.ConversionError, "left has 6 frames"):
             self._convert(frames=6, right_frames=5)
@@ -453,6 +471,25 @@ class TestSkipExisting(unittest.TestCase):
         (self.output / self.sequence / "frame_metadata.jsonl").unlink()
         self._convert(skip_existing=True)
         self.assertEqual(len(self.opened), 2)
+
+    def test_a_truncated_sequence_is_not_reused_by_an_unrestricted_run(self):
+        # A prefix written for local validation passes every artifact check, so
+        # only the recorded limit keeps it out of the full dataset.
+        self._convert(frame_limit=2)
+        metadata = self._convert(skip_existing=True)
+        self.assertEqual(len(self.opened), 2)
+        self.assertEqual(metadata["sequences"][0]["converted_counts"]["frames"], 6)
+
+    def test_a_complete_sequence_is_not_reused_by_a_truncated_run(self):
+        self._convert()
+        self._convert(frame_limit=2, skip_existing=True)
+        self.assertEqual(len(self.opened), 2)
+
+    def test_a_matching_frame_limit_is_reused(self):
+        self._convert(frame_limit=2)
+        metadata = self._convert(frame_limit=2, skip_existing=True)
+        self.assertEqual(self.opened, [])
+        self.assertEqual(metadata["sequences"][0]["frame_limit"], 2)
 
     def test_configs_cover_skipped_sequences(self):
         self._convert()

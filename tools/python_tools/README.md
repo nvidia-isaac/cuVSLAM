@@ -347,7 +347,7 @@ Run the combined stereo ODOM+SLAM report for M3ED with:
 
 ```bash
 cuvslam_reporter \
-    --test_config /path/to/datasets/converted/m3ed_spot/m3ed_spot-vo.cfg \
+    --test_config /path/to/datasets/converted/m3ed_spot/m3ed_spot-vo_slam.cfg \
     --datasets_root /path/to/datasets/converted \
     --output_root /tmp/cuvslam-m3ed-reports \
     --odometry_mode multicamera \

@@ -60,6 +60,8 @@ DEFAULT_TIMEOUT_SECONDS = 60
 
 MAX_REDIRECTS = 5
 
+_REDIRECT_STATUSES = (301, 302, 303, 307, 308)
+
 
 class HttpRangeError(RuntimeError):
     """Raised when a remote read cannot be completed."""
@@ -89,7 +91,10 @@ class HttpRangeFile(io.RawIOBase):
             raise ValueError("retries must be positive")
         if direct_read_threshold <= 0:
             raise ValueError("direct_read_threshold must be positive")
+        # ``url`` is what the caller asked for and is what errors and
+        # provenance report; redirects retarget ``_effective_url`` instead.
         self.url = url
+        self._effective_url = url
         self.block_size = block_size
         self.cache_blocks = cache_blocks
         self.direct_read_threshold = direct_read_threshold
@@ -137,8 +142,38 @@ class HttpRangeFile(io.RawIOBase):
                 pass
             self._connection = None
 
-    def _perform(self, method: str, headers: Dict[str, str]) -> Tuple[int, Dict[str, str], bytes]:
-        """Issue one request on the shared connection, retrying on transport errors."""
+    def _check_range_response(
+        self, status: int, headers: Dict[str, str], span: Tuple[int, int]
+    ) -> None:
+        """Reject a ranged GET that was not answered with the range asked for.
+
+        An origin that ignores ``Range`` answers 200 with the whole object,
+        which here is 25-42 GB. This runs before the body is read, so such a
+        reply costs one request instead of that transfer.
+        """
+        start, end = span
+        if status != 206:
+            self._drop_connection()
+            raise HttpRangeError(
+                f"{self.url}: range {start}-{end} answered with HTTP {status}, expected 206"
+            )
+        content_range = headers.get("content-range")
+        if content_range is None or not content_range.startswith(f"bytes {start}-{end}/"):
+            self._drop_connection()
+            raise HttpRangeError(
+                f"{self.url}: range {start}-{end} answered with Content-Range {content_range!r}"
+            )
+
+    def _perform(
+        self, method: str, headers: Dict[str, str], span: Optional[Tuple[int, int]] = None
+    ) -> Tuple[int, Dict[str, str], bytes]:
+        """Issue one request on the shared connection, retrying on transport errors.
+
+        ``span`` names the byte range a GET asked for. The response then has to
+        be a 206 covering exactly that range, and at most one byte past it is
+        read, so a server that answers with more than was asked for cannot pull
+        the whole object into memory.
+        """
         path = self._path
         last_error: Optional[BaseException] = None
         for attempt in range(self.retries):
@@ -146,12 +181,26 @@ class HttpRangeFile(io.RawIOBase):
                 connection = self._connect()
                 connection.request(method, path, headers=headers)
                 response = connection.getresponse()
+                status = response.status
+                # Field names are case-insensitive and getheaders() reports them
+                # as the server cased them.
+                response_headers = {name.lower(): value for name, value in response.getheaders()}
+                if span is not None and status not in _REDIRECT_STATUSES:
+                    self._check_range_response(status, response_headers, span)
                 # The body must be drained even for HEAD, or the connection
                 # cannot serve the next request.
-                payload = response.read()
+                if span is None:
+                    payload = response.read()
+                else:
+                    length = span[1] - span[0] + 1
+                    payload = response.read(length + 1)
+                    if len(payload) > length:
+                        # The rest of the body is still in flight, so the
+                        # connection cannot serve another request.
+                        self._drop_connection()
                 if response.will_close:
                     self._drop_connection()
-                return response.status, dict(response.getheaders()), payload
+                return status, response_headers, payload
             except (http.client.HTTPException, OSError) as exc:
                 last_error = exc
                 self._drop_connection()
@@ -168,17 +217,20 @@ class HttpRangeFile(io.RawIOBase):
                     time.sleep(min(2**attempt, 30))
         raise HttpRangeError(f"{self.url}: {self.retries} attempts failed: {last_error}")
 
-    def _request(self, method: str, headers: Dict[str, str]) -> Tuple[Dict[str, str], bytes]:
+    def _request(
+        self, method: str, headers: Dict[str, str], span: Optional[Tuple[int, int]] = None
+    ) -> Tuple[Dict[str, str], bytes]:
         for _ in range(MAX_REDIRECTS):
-            status, response_headers, payload = self._perform(method, headers)
-            if status in (301, 302, 303, 307, 308):
-                location = response_headers.get("Location")
+            status, response_headers, payload = self._perform(method, headers, span)
+            if status in _REDIRECT_STATUSES:
+                location = response_headers.get("location")
                 if not location:
                     raise HttpRangeError(f"{self.url}: redirect without a Location header")
                 self._drop_connection()
-                self._host, self._path = self._split_url(
-                    urllib.parse.urljoin(self.url, location)
-                )
+                # A relative Location resolves against the URL that served it,
+                # which after the first hop is no longer the URL passed in.
+                self._effective_url = urllib.parse.urljoin(self._effective_url, location)
+                self._host, self._path = self._split_url(self._effective_url)
                 continue
             if status not in (200, 206):
                 raise HttpRangeError(f"{self.url}: HTTP {status}")
@@ -187,17 +239,17 @@ class HttpRangeFile(io.RawIOBase):
 
     def _head(self) -> Tuple[int, Optional[str]]:
         headers, _ = self._request("HEAD", {})
-        length = headers.get("Content-Length")
+        length = headers.get("content-length")
         if length is None:
             raise HttpRangeError(f"{self.url}: server did not report Content-Length")
-        etag = headers.get("ETag")
+        etag = headers.get("etag")
         return int(length), etag.strip('"') if etag else None
 
     def _fetch(self, start: int, length: int) -> bytes:
         if length <= 0:
             return b""
         end = start + length - 1
-        _, payload = self._request("GET", {"Range": f"bytes={start}-{end}"})
+        _, payload = self._request("GET", {"Range": f"bytes={start}-{end}"}, (start, end))
         if len(payload) != length:
             raise HttpRangeError(
                 f"{self.url}: range {start}-{end} returned {len(payload)} bytes, expected {length}"

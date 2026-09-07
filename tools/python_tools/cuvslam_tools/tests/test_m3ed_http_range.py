@@ -39,22 +39,50 @@ class FakeResponse:
     def getheaders(self):
         return list(self._headers.items())
 
-    def read(self):
-        return self._body
+    def read(self, amount=None):
+        return self._body if amount is None else self._body[:amount]
+
+
+class UnreadableResponse(FakeResponse):
+    """A response whose body must never reach ``read``.
+
+    The M3ED objects are 25-42 GB, so reading the body of a reply that is not
+    the requested range is the failure being guarded against, not a detail.
+    """
+
+    def read(self, amount=None):
+        raise AssertionError("the body of a non-206 range response must not be read")
 
 
 class FakeConnection:
     """Serves ranges out of a bytes object and records what was asked for."""
 
-    def __init__(self, payload=PAYLOAD, etag="abc", redirect_to=None, fail_times=0):
+    def __init__(
+        self,
+        payload=PAYLOAD,
+        etag="abc",
+        redirects=(),
+        fail_times=0,
+        short_by=0,
+        lowercase_headers=False,
+        ignore_range=False,
+    ):
         self.payload = payload
         self.etag = etag
-        self.redirect_to = redirect_to
+        self.redirects = list(redirects)
         self.fail_times = fail_times
+        self.short_by = short_by
+        self.lowercase_headers = lowercase_headers
+        self.ignore_range = ignore_range
         self.requests = []
         self.paths = []
         self.closed = 0
         self._pending = None
+
+    def _headers(self, headers):
+        if not self.lowercase_headers:
+            return headers
+        return {name.lower(): value for name, value in headers.items()}
 
     def request(self, method, path, headers=None):
         headers = headers or {}
@@ -63,20 +91,33 @@ class FakeConnection:
         if self.fail_times > 0:
             self.fail_times -= 1
             raise http.client.HTTPException("boom")
-        if self.redirect_to is not None:
-            location, self.redirect_to = self.redirect_to, None
-            self._pending = FakeResponse(302, {"Location": location}, b"")
+        if self.redirects:
+            location = self.redirects.pop(0)
+            self._pending = FakeResponse(302, self._headers({"Location": location}), b"")
             return
         if method == "HEAD":
             self._pending = FakeResponse(
                 200,
-                {"Content-Length": str(len(self.payload)), "ETag": f'"{self.etag}"'},
+                self._headers(
+                    {"Content-Length": str(len(self.payload)), "ETag": f'"{self.etag}"'}
+                ),
                 b"",
+            )
+            return
+        if self.ignore_range:
+            # What an origin without range support answers: the whole object.
+            self._pending = UnreadableResponse(
+                200, self._headers({"Content-Length": str(len(self.payload))}), self.payload
             )
             return
         span = headers["Range"].removeprefix("bytes=")
         start, end = (int(value) for value in span.split("-"))
-        self._pending = FakeResponse(206, {}, self.payload[start : end + 1])
+        body = self.payload[start : end + 1]
+        self._pending = FakeResponse(
+            206,
+            self._headers({"Content-Range": f"bytes {start}-{end}/{len(self.payload)}"}),
+            body[: len(body) - self.short_by] if self.short_by else body,
+        )
 
     def getresponse(self):
         if self._pending is None:
@@ -185,22 +226,57 @@ class TestHttpRangeFile(unittest.TestCase):
             _open(connection, block_size=4096, retries=2)
 
     def test_redirects_are_followed(self):
-        connection = FakeConnection(redirect_to="https://example.invalid/moved/object.h5")
+        connection = FakeConnection(redirects=["https://example.invalid/moved/object.h5"])
         handle = _open(connection, block_size=4096)
         self.assertEqual(handle.size, len(PAYLOAD))
         self.assertEqual(connection.paths[-1], "/moved/object.h5")
 
-    def test_short_range_response_is_rejected(self):
-        class Truncating(FakeConnection):
-            def getresponse(self):
-                response = super().getresponse()
-                if response.status == 206:
-                    return FakeResponse(206, {}, response.read()[:-1])
-                return response
+    def test_chained_relative_redirects_resolve_against_the_previous_target(self):
+        connection = FakeConnection(redirects=["/first/object.h5", "second.h5"])
+        handle = _open(connection, block_size=4096)
+        # The second Location is relative to the first redirect target, not to
+        # the URL the read started from, which would give /second.h5.
+        self.assertEqual(connection.paths[-1], "/first/second.h5")
+        self.assertEqual(handle.size, len(PAYLOAD))
+        # The retargeting also holds for the reads that follow the HEAD.
+        self.assertEqual(handle.read(8), PAYLOAD[:8])
+        self.assertEqual(connection.paths[-1], "/first/second.h5")
 
-        handle = _open(Truncating(), block_size=4096)
+    def test_lowercase_response_headers_are_accepted(self):
+        # Field names are case-insensitive, and HTTP/2 origins send them lower.
+        connection = FakeConnection(lowercase_headers=True, redirects=["/moved/object.h5"])
+        handle = _open(connection, block_size=4096)
+        self.assertEqual(handle.size, len(PAYLOAD))
+        self.assertEqual(handle.etag, "abc")
+        self.assertEqual(connection.paths[-1], "/moved/object.h5")
+        self.assertEqual(handle.read(8), PAYLOAD[:8])
+
+    def test_short_range_response_is_rejected(self):
+        handle = _open(FakeConnection(short_by=1), block_size=4096)
         with self.assertRaisesRegex(HttpRangeError, "expected"):
             handle.read(8)
+
+    def test_an_origin_that_ignores_range_is_rejected_before_the_body(self):
+        connection = FakeConnection(ignore_range=True)
+        handle = _open(connection, block_size=4096)
+        # 200 to a ranged GET means the body is the whole object. Reading it to
+        # discover the length is wrong would transfer tens of gigabytes, so the
+        # fake response fails the test if its body is touched.
+        with self.assertRaisesRegex(HttpRangeError, "expected 206"):
+            handle.read(8)
+        self.assertEqual(connection.closed, 1)
+
+    def test_range_response_for_another_span_is_rejected(self):
+        class Misaligned(FakeConnection):
+            def request(self, method, path, headers=None):
+                super().request(method, path, headers)
+                if method == "GET":
+                    self._pending = UnreadableResponse(
+                        206, {"Content-Range": f"bytes 64-127/{len(self.payload)}"}, self.payload
+                    )
+
+        with self.assertRaisesRegex(HttpRangeError, "Content-Range"):
+            _open(Misaligned(), block_size=4096).read(8)
 
     def test_unexpected_status_is_rejected(self):
         class Forbidden(FakeConnection):
