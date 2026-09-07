@@ -38,10 +38,6 @@
 /// @endcond
 
 namespace cuvslam {
-namespace internal {
-struct Internals;
-struct InternalParameter;
-}  // namespace internal
 
 /**
  * @brief Get the version of the library.
@@ -538,6 +534,24 @@ public:
   static Config GetDefaultConfig() { return Config{}; }
 
   /**
+   * @brief Per-frame hints for a single Track() call.
+   *
+   * Hints describe one frame and are never stored, so a hint given for one frame has no effect on
+   * the next. Anything that should hold for a whole run is configuration instead: set it in Config
+   * before construction, or with SetParameter().
+   */
+  struct TrackHints {
+    /**
+     * @brief Decide this frame's keyframe status explicitly.
+     *
+     * Unset (the default) leaves the decision to the tracker. `true` makes this frame a keyframe,
+     * `false` prevents it from becoming one. Useful when the application knows something about the
+     * trajectory that the tracker cannot see.
+     */
+    std::optional<bool> override_keyframe;
+  };
+
+  /**
    * @brief State of the odometry tracker
    *
    * Only available if data export is enabled in Config.
@@ -604,16 +618,17 @@ public:
    * camera; each entry is matched to its rig camera by Image::camera_index and every camera_index
    * must appear in MultisensorSettings::depth_camera_ids. Other modes must pass an empty array.
    * Must use ImageData::Encoding::MONO and ImageData::DataType::UINT16 or ImageData::DataType::FLOAT32.
-   * @param[in]  internals (Optional) pointer to internal per-frame development parameters; pass nullptr (default) to
-   * use built-in defaults. Not intended for production use.
+   * @param[in]  hints  (Optional) hints about this frame; pass nullptr (default) to let the tracker
+   * decide everything. Applies to this call only.
    *
    * @return On success `PoseEstimate` contains estimated rig pose, on failure `PoseEstimate::world_from_rig` will be
    * `nullopt`.
    * @throws std::invalid_argument if image parameters are invalid
    * @throws std::runtime_error in case of unexpected errors
+   * @see TrackHints
    */
   PoseEstimate Track(const ImageSet& images, const ImageSet& masks = {}, const ImageSet& depths = {},
-                     const cuvslam::internal::Internals* internals = nullptr);
+                     const TrackHints* hints = nullptr);
 
   /**
    * @brief Register IMU measurement
@@ -772,33 +787,6 @@ public:
    * @return one entry per parameter. Views are invalidated by the next call; see ParameterInfo.
    */
   std::vector<ParameterInfo> GetParameters() const;
-
-  /**
-   * @brief Apply internal parameters by string key/value pairs.
-   *
-   * Allows setting internal runtime settings by name. Unknown keys log a warning and are ignored.
-   * Invalid values or keys not applicable to the current odometry mode throw std::invalid_argument.
-   *
-   * For internal use only.
-   *
-   * Supported keys (grouped by prefix):
-   *
-   * SBA (all modes):
-   *   `sba.num_sba_frames`, `sba.num_inertial_sba_frames`, `sba.num_fixed_sba_frames`,
-   *   `sba.num_sba_iterations`, `sba.robustifier_scale`, `sba.use_sba_winsorizer`
-   *
-   * Note: `sba.async` and `sba.mode` are construction-time settings that determine whether the
-   * SBA background thread is spawned and which bundler is used. They cannot be changed after the
-   * tracker is created. Set `Odometry::Config::async_sba` and `Odometry::Config::odometry_mode` before
-   * constructing the Odometry object instead.
-   *
-   * StateMachine / IMU gravity estimation (Inertial mode only):
-   *   `sm.gravity_update_period_ns`, `sm.max_integration_time_ns`, `sm.min_num_kf_for_gravity`,
-   *   `sm.min_time_period_ns`, `sm.max_time_period_ns`
-   *
-   * @param[in] parameters Key/value pairs to apply.
-   */
-  void ApplyPersistentInternalParameters(const std::vector<cuvslam::internal::InternalParameter>& parameters);
 
 private:
   class Impl;

@@ -16,7 +16,6 @@
  */
 
 #include "cuvslam/cuvslam2.h"
-#include "cuvslam/cuvslam2_internal.h"
 
 #include <algorithm>
 #include <atomic>
@@ -51,79 +50,6 @@
 namespace cuvslam {
 
 namespace {
-
-std::string_view TrackOptionName(std::string_view expression) {
-  constexpr std::string_view internals_prefix = "internals.";
-  if (expression.substr(0, internals_prefix.size()) == internals_prefix) {
-    return expression.substr(internals_prefix.size());
-  }
-  return expression;
-}
-
-int32_t RequireNonNegative(int32_t value, std::string_view expression) {
-  if (value < 0) {
-    const std::string_view name = TrackOptionName(expression);
-    throw std::invalid_argument("Internals::" + std::string(name) + " must be non-negative");
-  }
-  return value;
-}
-
-#define REQUIRE_NON_NEGATIVE(x) RequireNonNegative((x), #x)
-
-// (parameter registration lives on Odometry::Impl, which owns both the settings and the registry)
-
-// Overrides per-frame settings from Internals. Internals carries concrete values with no way to
-// mark a field as unset, so every field it covers is overwritten -- including any value the
-// tracker was constructed with. Callers that only want the configured behaviour pass no Internals
-// at all. Add new per-frame categories to TrackPerFrameSettings rather than adding parameters
-// here or to track().
-void ApplyInternals(const cuvslam::internal::Internals& internals, odom::TrackPerFrameSettings& result) {
-  result.sof.num_desired_tracks = internals.num_desired_tracks;
-  result.sof.border_top = internals.border_top;
-  result.sof.border_bottom = internals.border_bottom;
-  result.sof.border_left = internals.border_left;
-  result.sof.border_right = internals.border_right;
-  result.sof.box3_prefilter = internals.box3_prefilter;
-  result.sof.ransac_filter = internals.ransac_filter;
-  result.kf.survivor_from_last = internals.kf_survivor_from_last;
-  result.kf.max_timedelta_between_kfs_s = internals.kf_max_timedelta_between_kfs_s;
-  result.kf.override_frame_selection = internals.kf_override_frame_selection;
-  result.vo_pnp.lambda = internals.vo_pnp_lambda;
-  result.vo_pnp.huber = internals.vo_pnp_huber;
-  result.vo_pnp.max_iteration = REQUIRE_NON_NEGATIVE(internals.vo_pnp_max_iteration);
-  result.vo_pnp.recalculate_cov = internals.vo_pnp_recalculate_cov;
-  result.vo_pnp.filter_new_observations = internals.vo_pnp_filter_new_observations;
-  result.vo_pnp.max_obs_per_camera = REQUIRE_NON_NEGATIVE(internals.vo_pnp_max_obs_per_camera);
-  result.vo_pnp.point_z_thresh = internals.vo_pnp_point_z_thresh;
-  result.vo_pnp.min_observations = REQUIRE_NON_NEGATIVE(internals.vo_pnp_min_observations);
-  result.vo_pnp.cost_thresh = internals.vo_pnp_cost_thresh;
-  result.inertial_stereo_pnp.lambda = internals.inertial_stereo_pnp_lambda;
-  result.inertial_stereo_pnp.huber = internals.inertial_stereo_pnp_huber;
-  result.inertial_stereo_pnp.max_iteration = REQUIRE_NON_NEGATIVE(internals.inertial_stereo_pnp_max_iteration);
-  result.inertial_stereo_pnp.recalculate_cov = internals.inertial_stereo_pnp_recalculate_cov;
-  result.inertial_stereo_pnp.filter_new_observations = internals.inertial_stereo_pnp_filter_new_observations;
-  result.inertial_stereo_pnp.max_obs_per_camera =
-      REQUIRE_NON_NEGATIVE(internals.inertial_stereo_pnp_max_obs_per_camera);
-  result.inertial_stereo_pnp.point_z_thresh = internals.inertial_stereo_pnp_point_z_thresh;
-  result.inertial_stereo_pnp.min_observations = REQUIRE_NON_NEGATIVE(internals.inertial_stereo_pnp_min_observations);
-  result.inertial_stereo_pnp.cost_thresh = internals.inertial_stereo_pnp_cost_thresh;
-  result.imu_pnp.robustifier_scale = internals.imu_pnp_robustifier_scale;
-  result.imu_pnp.max_iteration = REQUIRE_NON_NEGATIVE(internals.imu_pnp_max_iteration);
-  result.imu_pnp.min_observations = REQUIRE_NON_NEGATIVE(internals.imu_pnp_min_observations);
-#ifdef USE_CUDA
-  result.icp.lambda = internals.icp_lambda;
-  result.icp.huber_vis = internals.icp_huber_vis;
-  result.icp.huber_depth = internals.icp_huber_depth;
-  result.icp.max_iteration = REQUIRE_NON_NEGATIVE(internals.icp_max_iteration);
-  result.icp.cost_thresh = internals.icp_cost_thresh;
-  result.icp.min_scale_level = REQUIRE_NON_NEGATIVE(internals.icp_min_scale_level);
-  result.icp.max_scale_level = REQUIRE_NON_NEGATIVE(internals.icp_max_scale_level);
-  result.icp.num_iters_per_scale = REQUIRE_NON_NEGATIVE(internals.icp_num_iters_per_scale);
-  result.icp.blending_alpha = internals.icp_blending_alpha;
-#endif
-}
-
-#undef REQUIRE_NON_NEGATIVE
 
 // TODO(vikuznetsov): Remove camera::MulticameraMode & reuse cuvslam enum? What about Manual mode hidden from
 // cuvslam API?
@@ -719,10 +645,10 @@ void Odometry::RegisterImuMeasurement(uint32_t sensor_index, const ImuMeasuremen
 }
 
 PoseEstimate Odometry::Track(const ImageSet& images, const ImageSet& masks, const ImageSet& depths,
-                             const cuvslam::internal::Internals* internals) {
+                             const TrackHints* hints) {
   odom::TrackPerFrameSettings per_frame_setting = impl->params;
-  if (internals != nullptr) {
-    ApplyInternals(*internals, per_frame_setting);
+  if (hints != nullptr) {
+    per_frame_setting.kf.override_frame_selection = hints->override_keyframe;
   }
 
   CheckImages(images, impl->frame_sync_threshold_ns, impl->cameras_models);
@@ -939,27 +865,6 @@ std::unordered_map<uint64_t, Vector3f> Odometry::GetFinalLandmarks() const {
 }
 
 const std::vector<uint8_t>& Odometry::GetPrimaryCameras() const { return impl->fig.primary_cameras(); }
-
-void Odometry::ApplyPersistentInternalParameters(const std::vector<cuvslam::internal::InternalParameter>& parameters) {
-  static std::once_flag warned;
-  std::call_once(warned, [] {
-    TraceWarning(
-        "ApplyPersistentInternalParameters: modifying internal parameters (InternalParameter) may cause instability or "
-        "degraded tracking performance. "
-        "SBA settings are applied on the next keyframe trigger; only the latest value takes effect \u2014 "
-        "any intermediate values set while SBA is running are overwritten.\n");
-  });
-
-  for (const cuvslam::internal::InternalParameter& parameter : parameters) {
-    // Deprecated in favour of SetParameter(), so it keeps its lenient contract: a bad key or value
-    // is reported and skipped rather than thrown, because existing callers pass whole batches.
-    try {
-      impl->params_registry.Set(parameter.key, parameter.value, params::Source::Api);
-    } catch (const std::exception& e) {
-      TraceWarning("ApplyPersistentInternalParameters: %s (ignored)\n", e.what());
-    }
-  }
-}
 
 void Odometry::SetParameter(std::string_view key, std::string_view value) {
   impl->params_registry.Set(key, value, params::Source::Api);

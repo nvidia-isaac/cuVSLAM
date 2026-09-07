@@ -41,46 +41,9 @@ protected:
   Registry registry;
 };
 
-TEST_F(ConfigParamsTest, CoversEveryKeyTheYamlLoaderAccepted) {
-  // LoadOdometryConfigFromFile and LoadSlamConfigFromFile accepted exactly these. The registry has
-  // to be a superset before those loaders can be deleted.
-  const std::vector<std::string> yaml_keys = {
-      "odometry.use_gpu",
-      "odometry.async_sba",
-      "odometry.use_motion_model",
-      "odometry.use_denoising",
-      "odometry.rectified_stereo_camera",
-      "odometry.enable_observations_export",
-      "odometry.enable_landmarks_export",
-      "odometry.enable_final_landmarks_export",
-      "odometry.max_frame_delta_s",
-      "odometry.debug_imu_mode",
-      "odometry.multicam_mode",
-      "odometry.odometry_mode",
-      "odometry.rgbd.depth_scale_factor",
-      "odometry.rgbd.depth_camera_id",
-      "odometry.rgbd.enable_depth_stereo_tracking",
-      "odometry.multisensor.depth_camera_ids",
-      "odometry.multisensor.depth_scale_factor",
-      "odometry.multisensor.enable_depth_stereo_tracking",
-      "slam.use_gpu",
-      "slam.sync_mode",
-      "slam.enable_reading_internals",
-      "slam.planar_constraints",
-      "slam.gt_align_mode",
-      "slam.map_cell_size",
-      "slam.max_landmarks_distance",
-      "slam.max_map_size",
-      "slam.throttling_time_ms",
-  };
-  for (const std::string& key : yaml_keys) {
-    EXPECT_NO_THROW(registry.Resolve(key)) << key;
-  }
-}
-
-TEST_F(ConfigParamsTest, ReachesTheStringFieldsTheYamlLoaderCouldNot) {
-  // The YAML loader warned and gave up on both of these because Config holds string_view and the
-  // loader had nowhere to keep the text. The registry owns the storage, so they work.
+TEST_F(ConfigParamsTest, ReachesStringFields) {
+  // The YAML loader this replaced warned and gave up on both of these: Config holds string_view
+  // and the loader had nowhere to keep the text. The registry owns that storage, so they work.
   registry.Set("odometry.debug_dump_directory", "/tmp/dump", Source::File);
   registry.Set("slam.map_cache_path", "/tmp/map.lmdb", Source::File);
 
@@ -102,7 +65,7 @@ TEST_F(ConfigParamsTest, StringFieldsOutliveTheCallersArgument) {
   EXPECT_EQ(slam_cfg.map_cache_path, "/tmp/path-255");
 }
 
-TEST_F(ConfigParamsTest, SetsPublicEnumsByTheSameNamesYamlUsed) {
+TEST_F(ConfigParamsTest, SetsPublicEnumsByName) {
   registry.Set("odometry.odometry_mode", "rgbd", Source::File);
   registry.Set("odometry.multicam_mode", "moderate", Source::File);
 

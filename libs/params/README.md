@@ -126,11 +126,13 @@ Tests
 -----
 
 `test/params_test.cpp` covers the mechanism against stand-in structs, so it does not need updating
-when a real struct changes. The rest check the real key layout: `test/sof_params_test.cpp`,
-`test/solver_params_test.cpp` and `test/config_params_test.cpp` assert that the surface covers
-everything the older `internal::Internals` struct, the `*_config_gflags.h` headers, and the YAML
-loaders exposed. Those coverage lists exist to make removing those interfaces safe, and go away
-with them.
+when a real struct changes. `test/completeness_test.cpp` guards against a field being added to a
+described struct and not described. The rest check the real key layout and behaviour against the
+actual settings structs: `test/sof_params_test.cpp`, `test/solver_params_test.cpp` and
+`test/config_params_test.cpp`.
+
+`sof_params_test.cpp` still asserts that the surface covers everything `sof_config_gflags.h`
+exposes; that check goes away with the header.
 
 Where the descriptors live
 --------------------------

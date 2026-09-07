@@ -115,6 +115,28 @@ public:
    */
   size_t SetFromFile(const std::string& path, Source source);
 
+  /// One entry of a parameter file, with the line it came from so errors can point at it.
+  struct FileEntry {
+    std::string key;
+    std::string value;
+    size_t line = 0;
+  };
+
+  /**
+   * @brief Reads a parameter file without applying anything.
+   *
+   * For callers that split one file across several registries -- a tool typically configures
+   * Odometry::Config before construction and the solver parameters after -- so the file format
+   * stays defined in one place.
+   *
+   * @return the entries in file order.
+   * @throws std::runtime_error if the file cannot be read or a line is malformed.
+   */
+  static std::vector<FileEntry> ReadFile(const std::string& path);
+
+  /// True if @p key names a parameter of this registry, exactly or by unambiguous suffix.
+  bool Knows(std::string_view key) const;
+
   /// Every registered parameter, in registration order. Feeds help output and reports.
   std::vector<ParamInfo> List() const;
 

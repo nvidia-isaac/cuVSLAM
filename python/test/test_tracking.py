@@ -244,19 +244,18 @@ class TestTracking(unittest.TestCase):
 
         keyframes = []
         for i, override in enumerate(overrides):
-            internals = None
+            hints = None
             if override is not None:
-                internals = vslam.Odometry.Internals()
-                internals.kf_override_frame_selection = override
-            # timestamps stay well under kf_max_timedelta_between_kfs_s (60 s) so the time-based
+                hints = vslam.Odometry.TrackHints(override_keyframe=override)
+            # timestamps stay well under kf.max_timedelta_between_kfs_s (60 s) so the time-based
             # keyframe rule never fires on its own.
-            odometry.track((i + 1) * 1_000_000, static_images, internals=internals)
+            odometry.track((i + 1) * 1_000_000, static_images, hints=hints)
             keyframes.append(odometry.get_state().keyframe)
         return keyframes
 
     def test_keyframe_override_forces_decision(self):
-        # Multicamera mode routes keyframe selection through KFSelector, which honors
-        # kf_override_frame_selection. Forcing the decision must override automatic selection.
+        # Multicamera mode routes keyframe selection through KFSelector, which honors the
+        # override_keyframe hint. Forcing the decision must override automatic selection.
         num_frames = 6
         mode = vslam.Odometry.OdometryMode.Multicamera
 
@@ -278,7 +277,7 @@ class TestTracking(unittest.TestCase):
         self.assertIn(False, automatic, "near-static scene should produce at least one automatic non-keyframe")
 
     def test_keyframe_override_forces_decision_in_mono(self):
-        # Mono mode uses SelectorMono internally, and kf_override_frame_selection must still force
+        # Mono mode uses SelectorMono internally, and the override_keyframe hint must still force
         # the reported keyframe decision.
         num_frames = 6
         mode = vslam.Odometry.OdometryMode.Mono

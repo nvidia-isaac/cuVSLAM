@@ -27,7 +27,6 @@
 #include "nanobind/stl/vector.h"
 
 #include "cuvslam/cuvslam2.h"
-#include "cuvslam/cuvslam2_internal.h"
 
 #define THROW_INVALID_ARG_IF(condition, message) \
   do {                                           \
@@ -570,95 +569,25 @@ NB_MODULE(pycuvslam, m) {
                     s.gravity.has_value() ? s.gravity.value() : Odometry::Gravity{});
       });
 
-  // Internals binding - per-frame parameter overrides (stateless)
-  nb::class_<cuvslam::internal::Internals>(
-      odom_cls, "Internals",
-      "Per-frame tracking options (stateless).\n\n"
-      "These options apply only to the current track() call and do not affect subsequent frames.\n"
-      "Instantiate with Internals() and override only the fields you need.")
+  // Per-frame hints. Only the keyframe decision genuinely varies frame to frame; everything else
+  // that used to live here is configuration, reachable by name through set_parameter().
+  nb::class_<Odometry::TrackHints>(odom_cls, "TrackHints",
+                                   "Hints about a single :meth:`track` call.\n\n"
+                                   "Hints are never stored, so a hint given for one frame does not affect the "
+                                   "next. Anything that should hold for a whole run belongs in "
+                                   ":class:`Odometry.Config` or :meth:`set_parameter` instead.")
       .def(nb::init<>())
-      // Feature Selection Settings
-      .def_rw("num_desired_tracks", &cuvslam::internal::Internals::num_desired_tracks,
-              "Number of desired feature tracks for this frame")
-      .def_rw("border_top", &cuvslam::internal::Internals::border_top, "Top border to ignore in pixels")
-      .def_rw("border_bottom", &cuvslam::internal::Internals::border_bottom, "Bottom border to ignore in pixels")
-      .def_rw("border_left", &cuvslam::internal::Internals::border_left, "Left border to ignore in pixels")
-      .def_rw("border_right", &cuvslam::internal::Internals::border_right, "Right border to ignore in pixels")
-      .def_rw("box3_prefilter", &cuvslam::internal::Internals::box3_prefilter, "Enable box filter preprocessing")
-      .def_rw("ransac_filter", &cuvslam::internal::Internals::ransac_filter, "Enable RANSAC filtering")
-      // Keyframe Settings
-      .def_rw("kf_survivor_from_last", &cuvslam::internal::Internals::kf_survivor_from_last,
-              "Keyframe selection threshold: survivor tracks percentage (0-100)")
-      .def_rw("kf_max_timedelta_between_kfs_s", &cuvslam::internal::Internals::kf_max_timedelta_between_kfs_s,
-              "Maximum time delta between consecutive keyframes (seconds)")
-      .def_rw("kf_override_frame_selection", &cuvslam::internal::Internals::kf_override_frame_selection,
-              "Optional per-frame keyframe decision. None uses automatic keyframe selection, True forces keyframe, "
-              "False forces non-keyframe.")
-      // PNP Settings
-      .def_rw("vo_pnp_lambda", &cuvslam::internal::Internals::vo_pnp_lambda,
-              "Visual PNP Levenberg-Marquardt damping factor")
-      .def_rw("vo_pnp_huber", &cuvslam::internal::Internals::vo_pnp_huber, "Visual PNP Huber robustifier scale")
-      .def_rw("vo_pnp_max_iteration", &cuvslam::internal::Internals::vo_pnp_max_iteration,
-              "Maximum visual PNP solver iterations")
-      .def_rw("vo_pnp_recalculate_cov", &cuvslam::internal::Internals::vo_pnp_recalculate_cov,
-              "Whether visual PNP recomputes covariance after a successful solve")
-      .def_rw("vo_pnp_filter_new_observations", &cuvslam::internal::Internals::vo_pnp_filter_new_observations,
-              "Whether visual PNP filters observations per camera")
-      .def_rw("vo_pnp_max_obs_per_camera", &cuvslam::internal::Internals::vo_pnp_max_obs_per_camera,
-              "Maximum visual PNP observations per camera")
-      .def_rw("vo_pnp_point_z_thresh", &cuvslam::internal::Internals::vo_pnp_point_z_thresh,
-              "Minimum visual PNP landmark z-depth")
-      .def_rw("vo_pnp_min_observations", &cuvslam::internal::Internals::vo_pnp_min_observations,
-              "Minimum observations required for visual PNP")
-      .def_rw("vo_pnp_cost_thresh", &cuvslam::internal::Internals::vo_pnp_cost_thresh,
-              "Visual PNP convergence threshold")
-      .def_rw("inertial_stereo_pnp_lambda", &cuvslam::internal::Internals::inertial_stereo_pnp_lambda,
-              "Inertial-mode stereo fallback PNP Levenberg-Marquardt damping factor")
-      .def_rw("inertial_stereo_pnp_huber", &cuvslam::internal::Internals::inertial_stereo_pnp_huber,
-              "Inertial-mode stereo fallback PNP Huber robustifier scale")
-      .def_rw("inertial_stereo_pnp_max_iteration", &cuvslam::internal::Internals::inertial_stereo_pnp_max_iteration,
-              "Maximum inertial-mode stereo fallback PNP solver iterations")
-      .def_rw("inertial_stereo_pnp_recalculate_cov", &cuvslam::internal::Internals::inertial_stereo_pnp_recalculate_cov,
-              "Whether inertial-mode stereo fallback PNP recomputes covariance after a successful solve")
-      .def_rw("inertial_stereo_pnp_filter_new_observations",
-              &cuvslam::internal::Internals::inertial_stereo_pnp_filter_new_observations,
-              "Whether inertial-mode stereo fallback PNP filters observations per camera")
-      .def_rw("inertial_stereo_pnp_max_obs_per_camera",
-              &cuvslam::internal::Internals::inertial_stereo_pnp_max_obs_per_camera,
-              "Maximum inertial-mode stereo fallback PNP observations per camera")
-      .def_rw("inertial_stereo_pnp_point_z_thresh", &cuvslam::internal::Internals::inertial_stereo_pnp_point_z_thresh,
-              "Minimum inertial-mode stereo fallback PNP landmark z-depth")
-      .def_rw("inertial_stereo_pnp_min_observations",
-              &cuvslam::internal::Internals::inertial_stereo_pnp_min_observations,
-              "Minimum observations required for inertial-mode stereo fallback PNP")
-      .def_rw("inertial_stereo_pnp_cost_thresh", &cuvslam::internal::Internals::inertial_stereo_pnp_cost_thresh,
-              "Inertial-mode stereo fallback PNP convergence threshold")
-      // Inertial PNP Settings
-      .def_rw("imu_pnp_robustifier_scale", &cuvslam::internal::Internals::imu_pnp_robustifier_scale,
-              "Inertial PNP robustifier scale")
-      .def_rw("imu_pnp_max_iteration", &cuvslam::internal::Internals::imu_pnp_max_iteration,
-              "Maximum inertial PNP solver iterations")
-      .def_rw("imu_pnp_min_observations", &cuvslam::internal::Internals::imu_pnp_min_observations,
-              "Minimum observations required for inertial PNP")
-      // ICP Settings
-      .def_rw("icp_lambda", &cuvslam::internal::Internals::icp_lambda, "ICP Levenberg-Marquardt damping factor")
-      .def_rw("icp_huber_vis", &cuvslam::internal::Internals::icp_huber_vis,
-              "ICP visual reprojection Huber robustifier scale")
-      .def_rw("icp_huber_depth", &cuvslam::internal::Internals::icp_huber_depth, "ICP depth Huber robustifier scale")
-      .def_rw("icp_max_iteration", &cuvslam::internal::Internals::icp_max_iteration,
-              "Maximum ICP solver iterations without depth pyramid")
-      .def_rw("icp_cost_thresh", &cuvslam::internal::Internals::icp_cost_thresh, "ICP convergence threshold")
-      .def_rw("icp_min_scale_level", &cuvslam::internal::Internals::icp_min_scale_level,
-              "Finest ICP pyramid level to process")
-      .def_rw("icp_max_scale_level", &cuvslam::internal::Internals::icp_max_scale_level,
-              "Coarsest ICP pyramid level to start from")
-      .def_rw("icp_num_iters_per_scale", &cuvslam::internal::Internals::icp_num_iters_per_scale,
-              "ICP iterations per pyramid level")
-      .def_rw("icp_blending_alpha", &cuvslam::internal::Internals::icp_blending_alpha,
-              "Blending weight between visual and depth ICP residuals")
-      .def("__repr__", [](const cuvslam::internal::Internals& o) {
-        return nb::str("Internals(num_desired_tracks={}, kf_survivor_from_last={}, ...)")
-            .format(o.num_desired_tracks, o.kf_survivor_from_last);
+      .def(
+          "__init__",
+          [](Odometry::TrackHints* self, std::optional<bool> override_keyframe) {
+            new (self) Odometry::TrackHints{override_keyframe};
+          },
+          nb::arg("override_keyframe") = nb::none())
+      .def_rw("override_keyframe", &Odometry::TrackHints::override_keyframe,
+              "Decide this frame's keyframe status: None leaves it to the tracker, True forces a "
+              "keyframe, False prevents one.")
+      .def("__repr__", [](const Odometry::TrackHints& h) {
+        return nb::str("cuvslam.Odometry.TrackHints(override_keyframe={})").format(h.override_keyframe);
       });
 
   // Odometry class methods
@@ -668,7 +597,7 @@ NB_MODULE(pycuvslam, m) {
           [](Odometry& self, int64_t timestamp, const std::vector<nb::ndarray<nb::ro>>& images,
              const std::optional<std::vector<nb::ndarray<nb::ro>>>& masks = std::nullopt,
              const std::optional<std::vector<nb::ndarray<nb::ro>>>& depths = std::nullopt,
-             const std::optional<cuvslam::internal::Internals>& internals = std::nullopt) -> PoseEstimate {
+             const std::optional<Odometry::TrackHints>& hints = std::nullopt) -> PoseEstimate {
             if (masks.has_value()) {
               THROW_INVALID_ARG_IF(masks->size() != images.size() && !masks->empty(),
                                    "If the masks vector is not empty, its size must match the images vector size. "
@@ -682,10 +611,10 @@ NB_MODULE(pycuvslam, m) {
                                               : Odometry::ImageSet();
             auto depth_set = depths.has_value() ? ImageSetFromNDArrays(depths.value(), timestamp, ArrayType::Depth)
                                                 : Odometry::ImageSet();
-            return self.Track(image_set, mask_set, depth_set, internals.has_value() ? &*internals : nullptr);
+            return self.Track(image_set, mask_set, depth_set, hints.has_value() ? &*hints : nullptr);
           },
           nb::arg("timestamp"), nb::arg("images"), nb::arg("masks") = nb::none(), nb::arg("depths") = nb::none(),
-          nb::arg("internals") = nb::none(),
+          nb::arg("hints") = nb::none(),
           "Track a rig pose using current image frame.\n\n"
           "Synchronously tracks current image frame and returns a PoseEstimate.\n\n"
           "By default, this function uses visual odometry to compute a pose.\n"
@@ -773,41 +702,79 @@ NB_MODULE(pycuvslam, m) {
           "Primary cameras are the ones where observations are always present.\n"
           "The list is required to initialize Slam.")
       .def(
-          "apply_expert_parameters",
+          "set_parameter",
+          [](Odometry& self, std::string_view key, std::string_view value) { self.SetParameter(key, value); },
+          nb::arg("key"), nb::arg("value"),
+          "Set an internal parameter by name.\n\n"
+          "For internal use only. These parameters expose low-level solver behaviour, are not\n"
+          "covered by API stability guarantees, and may change or disappear in any release.\n"
+          "Adjusting them may degrade tracking or make it unstable.\n\n"
+          "The new value applies from the next :meth:`track` call. Use :meth:`get_parameters`\n"
+          "for the available names, types and defaults.\n\n"
+          "Any unambiguous suffix of a name works, so ``'num_desired_tracks'`` reaches\n"
+          "``'sof.num_desired_tracks'``.\n\n"
+          "Example::\n\n"
+          "    odometry.set_parameter('sba.num_sba_iterations', '9')\n\n"
+          "Args:\n"
+          "    key (str): Parameter name.\n"
+          "    value (str): Value in its string form, as :meth:`get_parameters` reports it.\n\n"
+          "Raises:\n"
+          "    ValueError: If the name is unknown, ambiguous, or not applicable to this mode.\n"
+          "    RuntimeError: If the value does not parse as the parameter's type or is out of\n"
+          "        range; the parameter keeps its previous value.")
+      .def(
+          "set_parameters",
           [](Odometry& self, const nb::dict& parameters) {
-            std::vector<cuvslam::internal::InternalParameter> params;
-            params.reserve(parameters.size());
-            // Materialise strings so string_views remain valid for the duration of the call.
-            std::vector<std::string> keys, values;
-            keys.reserve(parameters.size());
-            values.reserve(parameters.size());
-            for (auto [k, v] : parameters) {
-              keys.push_back(nb::cast<std::string>(k));
-              values.push_back(nb::cast<std::string>(v));
-              params.push_back({keys.back(), values.back()});
+            for (auto [key, value] : parameters) {
+              self.SetParameter(nb::cast<std::string_view>(key), nb::cast<std::string_view>(value));
             }
-            self.ApplyPersistentInternalParameters(params);
           },
           nb::arg("parameters"),
-          "Apply expert parameters by string key/value pairs.\n\n"
-          "Allows tuning internal runtime settings after tracker creation. Unknown keys log a\n"
-          "warning and are ignored. Invalid values raise RuntimeError.\n\n"
-          "Supported keys:\n\n"
-          "  SBA (all modes):\n"
-          "    ``sba.num_sba_frames``, ``sba.num_inertial_sba_frames``, ``sba.num_fixed_sba_frames``,\n"
-          "    ``sba.num_sba_iterations``, ``sba.robustifier_scale``, ``sba.use_sba_winsorizer``\n\n"
-          "  StateMachine / IMU gravity (Inertial mode only):\n"
-          "    ``sm.gravity_update_period_ns``, ``sm.max_integration_time_ns``,\n"
-          "    ``sm.min_num_kf_for_gravity``, ``sm.min_time_period_ns``, ``sm.max_time_period_ns``\n\n"
-          "Note: ``sba.async`` and ``sba.mode`` are construction-time only; set them in\n"
-          ":class:`Odometry.Config` before creating the tracker.\n\n"
+          "Set several internal parameters at once; see :meth:`set_parameter`.\n\n"
+          "Applied in iteration order, and the first rejected entry raises, so earlier entries in\n"
+          "the dict may already have been applied.\n\n"
           "Example::\n\n"
-          "    odometry.apply_expert_parameters({\n"
+          "    odometry.set_parameters({\n"
           "        'sba.num_sba_frames': '5',\n"
           "        'sba.robustifier_scale': '0.3',\n"
           "    })\n\n"
           "Args:\n"
-          "    parameters (dict[str, str]): Map of key/value string pairs to apply.");
+          "    parameters (dict[str, str]): Names and values to apply.")
+      .def(
+          "load_parameters",
+          [](Odometry& self, std::string_view path) -> uint32_t { return self.LoadParameters(path); }, nb::arg("path"),
+          "Set internal parameters from a file; see :meth:`set_parameter`.\n\n"
+          "One ``key: value`` or ``key = value`` per line, with ``#`` starting a comment.\n\n"
+          "Args:\n"
+          "    path (str): Path to the parameter file.\n\n"
+          "Returns:\n"
+          "    int: Number of parameters assigned.\n\n"
+          "Raises:\n"
+          "    RuntimeError: If the file cannot be read, or a line is malformed or names an\n"
+          "        unknown parameter; the message carries the file name and line number.")
+      .def(
+          "get_parameters",
+          [](const Odometry& self) -> nb::dict {
+            nb::dict result;
+            for (const Odometry::ParameterInfo& info : self.GetParameters()) {
+              nb::dict entry;
+              entry["value"] = info.value;
+              entry["default"] = info.default_value;
+              entry["type"] = info.type;
+              entry["doc"] = info.doc;
+              entry["source"] = info.source;
+              result[nb::str(info.key.data(), info.key.size())] = entry;
+            }
+            return result;
+          },
+          "Every internal parameter with its current value and where that value came from.\n\n"
+          "Recording this alongside a run's results makes the run reproducible: it captures\n"
+          "parameters set programmatically or from a file, not just what a configuration file\n"
+          "happened to contain.\n\n"
+          "Returns:\n"
+          "    dict[str, dict]: Keyed by parameter name. Each value has ``value``, ``default``,\n"
+          "    ``type``, ``doc`` and ``source``, where ``source`` is one of ``default``,\n"
+          "    ``file``, ``command-line`` or ``api``.");
 
   // Slam class must be defined before its nested enums/classes are bound to it.
   auto slam_cls = nb::class_<Slam>(

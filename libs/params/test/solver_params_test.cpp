@@ -44,69 +44,6 @@ protected:
   Registry registry;
 };
 
-TEST_F(SolverParamsTest, CoversEveryFieldTheInternalsStructExposed) {
-  // cuvslam::internal::Internals carried these 38 knobs as flat prefixed fields, plus
-  // kf_override_frame_selection which is now a per-frame hint rather than a parameter. Every one
-  // has to be reachable here before that struct can be deleted.
-  const std::vector<std::string> internals_keys = {
-      "sof.num_desired_tracks",
-      "sof.border_top",
-      "sof.border_bottom",
-      "sof.border_left",
-      "sof.border_right",
-      "sof.box3_prefilter",
-      "sof.ransac_filter",
-      "kf.survivor_from_last",
-      "kf.max_timedelta_between_kfs_s",
-      "vo_pnp.lambda",
-      "vo_pnp.huber",
-      "vo_pnp.max_iteration",
-      "vo_pnp.recalculate_cov",
-      "vo_pnp.filter_new_observations",
-      "vo_pnp.max_obs_per_camera",
-      "vo_pnp.point_z_thresh",
-      "vo_pnp.min_observations",
-      "vo_pnp.cost_thresh",
-      "inertial_stereo_pnp.lambda",
-      "inertial_stereo_pnp.huber",
-      "inertial_stereo_pnp.max_iteration",
-      "inertial_stereo_pnp.recalculate_cov",
-      "inertial_stereo_pnp.filter_new_observations",
-      "inertial_stereo_pnp.max_obs_per_camera",
-      "inertial_stereo_pnp.point_z_thresh",
-      "inertial_stereo_pnp.min_observations",
-      "inertial_stereo_pnp.cost_thresh",
-      "imu_pnp.robustifier_scale",
-      "imu_pnp.max_iteration",
-      "imu_pnp.min_observations",
-      "icp.lambda",
-      "icp.huber_vis",
-      "icp.huber_depth",
-      "icp.max_iteration",
-      "icp.cost_thresh",
-      "icp.min_scale_level",
-      "icp.max_scale_level",
-      "icp.num_iters_per_scale",
-      "icp.blending_alpha",
-  };
-  for (const std::string& key : internals_keys) {
-    EXPECT_NO_THROW(registry.Resolve(key)) << key;
-  }
-}
-
-TEST_F(SolverParamsTest, CoversEveryPersistentInternalParameterKey) {
-  // ApplyPersistentInternalParameters accepted exactly these, already in dotted form.
-  const std::vector<std::string> persistent_keys = {
-      "sba.num_sba_frames",          "sba.num_inertial_sba_frames", "sba.num_fixed_sba_frames",
-      "sba.num_sba_iterations",      "sba.robustifier_scale",       "sba.use_sba_winsorizer",
-      "sm.gravity_update_period_ns", "sm.max_integration_time_ns",  "sm.min_num_kf_for_gravity",
-      "sm.min_time_period_ns",       "sm.max_time_period_ns",
-  };
-  for (const std::string& key : persistent_keys) {
-    EXPECT_NO_THROW(registry.Resolve(key)) << key;
-  }
-}
-
 TEST_F(SolverParamsTest, TheTwoPnpInstancesAreIndependent) {
   // Both share one descriptor list, so this guards against the list accidentally binding to a
   // single instance.

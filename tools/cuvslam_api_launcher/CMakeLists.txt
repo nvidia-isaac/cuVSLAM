@@ -18,6 +18,7 @@ set(LIBS
     cuvslam
     camera_rig_edex
     edex
+    params
     utils
     gflags::gflags
 )

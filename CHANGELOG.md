@@ -13,8 +13,34 @@
 
 ### Added
 
+- Internal parameters are now addressed by name. `Odometry::SetParameter()`, `LoadParameters()` and `GetParameters()`
+  in C++, and `set_parameter()`, `set_parameters()`, `load_parameters()` and `get_parameters()` in Python, cover every
+  solver setting that `Internals` and `ApplyPersistentInternalParameters()` reached, plus everything they did not.
+  `GetParameters()` reports each parameter's value, default, type, description and where the value came from, so a run's
+  configuration can be recorded with its results
+- `Odometry::TrackHints`, passed to `Track()`, for values that genuinely differ from frame to frame. It currently holds
+  only `override_keyframe`
+- `cuvslam_api_launcher`: `--params <file>` for a flat `key: value` parameter file, repeatable `-Pkey=value` overrides,
+  and `--list_params` to print every parameter with its type, default and description
 - `Slam::Config::delay_warning_queue_size`: warns in verbose mode when more than the configured number of commands
   are queued to the SLAM thread, meaning SLAM falls behind odometry
+
+### Removed
+
+- `cuvslam::internal::Internals`, `cuvslam::internal::InternalParameter`, `Odometry::ApplyPersistentInternalParameters()`
+  and the `cuvslam2_internal.h` header. Use `SetParameter()` for the settings they carried and `TrackHints` for the
+  keyframe override. Names gained a prefix matching the settings they address, so `num_desired_tracks` is
+  `sof.num_desired_tracks` and `kf_survivor_from_last` is `kf.survivor_from_last`; `sba.*` and `sm.*` keys are unchanged
+- Python: `Odometry.Internals` and `apply_expert_parameters()`, replaced as above, and the `cuvslam.utils` module,
+  whose configuration loaders are superseded by `load_parameters()`. This also drops the `pyyaml` dependency
+- `cuvslam_api_launcher`: `--config` and its YAML schema, replaced by `--params`; the `--expert_sba_*` flags, now
+  ordinary parameters reachable with `-P`; and `libs/utils/cuvslam_yaml_config.*`
+
+### Changed
+
+- Setting an unknown internal parameter, or a value that does not parse or falls outside its range, is now an error
+  instead of a logged warning, and leaves the parameter at its previous value. Parameters a mode never reads are not
+  exposed at all, so naming one is an error rather than being silently ignored
 
 ### Fixed
 

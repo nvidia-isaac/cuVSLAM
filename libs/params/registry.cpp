@@ -176,13 +176,13 @@ Source Registry::SourceOf(const std::string& key) const {
   return it != sources_.end() ? it->second : Source::Default;
 }
 
-size_t Registry::SetFromFile(const std::string& path, Source source) {
+std::vector<Registry::FileEntry> Registry::ReadFile(const std::string& path) {
   std::ifstream file(path);
   if (!file.is_open()) {
     throw std::runtime_error("cannot open parameter file '" + path + "'");
   }
 
-  size_t assigned = 0;
+  std::vector<FileEntry> entries;
   std::string line;
   for (size_t line_number = 1; std::getline(file, line); ++line_number) {
     std::string_view content = line;
@@ -200,16 +200,32 @@ size_t Registry::SetFromFile(const std::string& path, Source source) {
       throw std::runtime_error(path + ":" + std::to_string(line_number) + ": expected 'key: value', got '" +
                                std::string(content) + "'");
     }
-    const std::string_view key = Trim(content.substr(0, separator));
-    const std::string_view value = Trim(content.substr(separator + 1));
+    entries.push_back(FileEntry{std::string(Trim(content.substr(0, separator))),
+                                std::string(Trim(content.substr(separator + 1))), line_number});
+  }
+  return entries;
+}
+
+size_t Registry::SetFromFile(const std::string& path, Source source) {
+  size_t assigned = 0;
+  for (const FileEntry& entry : ReadFile(path)) {
     try {
-      Set(key, value, source);
+      Set(entry.key, entry.value, source);
     } catch (const std::exception& e) {
-      throw std::runtime_error(path + ":" + std::to_string(line_number) + ": " + e.what());
+      throw std::runtime_error(path + ":" + std::to_string(entry.line) + ": " + e.what());
     }
     ++assigned;
   }
   return assigned;
+}
+
+bool Registry::Knows(std::string_view key) const {
+  try {
+    Resolve(key);
+    return true;
+  } catch (const std::invalid_argument&) {
+    return false;
+  }
 }
 
 std::vector<ParamInfo> Registry::List() const {

@@ -5,61 +5,69 @@ Follow these when making code changes or designing new features.
 
 ---
 
-## 1. Per-frame internal overrides are stateless — no setters
+## 1. Per-frame values are hints; everything else is configuration
 
-**Rule:** A low-level parameter that must vary for a single frame is passed explicitly to
-`Odometry::Track()` through `cuvslam::internal::Internals`. Do not mutate a long-lived
-object through a setter to change one frame.
+**Rule:** A value that genuinely differs from one frame to the next is passed to
+`Odometry::Track()` as a `TrackHints` field and never stored. A value that holds for a run is
+configuration: `Odometry::Config` when it is needed at construction, otherwise a named parameter
+set through `SetParameter()`. Do not add a setter to change one frame's behaviour.
 
-`Internals` is an unstable expert/development interface declared in
-`libs/cuvslam/cuvslam2_internal.h`. It is not part of the stable user-facing API. Normal
-applications should omit it and use the built-in defaults.
+**Why:** A setter used for per-frame variation creates implicit shared state between frames. The
+change silently persists into the next frame, which makes behaviour hard to reason about, test and
+reproduce. The distinction is not "setters are bad" -- `SetParameter()` is a setter -- it is that
+the lifetime of a value must match the way it is supplied.
 
-**Why:** Setters create implicit shared state between frames. A parameter change made
-during one `Track()` call can silently bleed into the next frame if the setter mutates an
-object that is reused across calls. This makes behavior hard to reason about, test, and
-reproduce.
+In practice almost nothing is per-frame. When this was measured, exactly one value in the whole
+solver configuration was ever varied between frames by any caller in the repository: the keyframe
+decision. Everything else was set once and left alone, which is why `TrackHints` has one field and
+the rest is configuration.
 
 **How it works in cuVSLAM:**
 
-`Odometry::Track()` accepts an optional pointer to `Internals`. All fields have concrete
-defaults. `BuildTrackFrameSettings()` converts the selected values to
-`odom::TrackPerFrameSettings`, which is threaded down the call stack without modifying
-stored settings.
+`Odometry::Impl` holds one `odom::TrackPerFrameSettings`, seeded at construction from the settings
+the components were built with, and a `params::Registry` bound to it. `Track()` copies that struct
+per frame and applies any hints to the copy, so a parameter change takes effect on the next frame
+and nothing becomes shared mutable state mid-frame.
 
 ```cpp
-// Expert/development use: override feature count for one frame only.
-cuvslam::internal::Internals internals;
-internals.num_desired_tracks = 200;
-odometry.Track(images, {}, {}, &internals);
+// A value that holds for the run: set it once, by name.
+odometry.SetParameter("sof.num_desired_tracks", "200");
 
-// The next call uses built-in defaults.
+// A value that differs for this frame only.
+cuvslam::Odometry::TrackHints hints;
+hints.override_keyframe = true;
+odometry.Track(images, {}, {}, &hints);
+
+// The next call keeps the parameter and drops the hint.
 odometry.Track(images);
 ```
-
-Construction-time settings stored by `Odometry::Impl` are not changed by the per-frame
-override.
 
 **What to avoid:**
 
 ```cpp
-// BAD — setter mutates shared state and can bleed across frames.
+// BAD - a setter used to change a single frame; the change bleeds into the next one.
 odometry.SetNumDesiredTracks(200);
 odometry.Track(images);
+
+// BAD - a run-long value smuggled in as a per-frame hint, so every call has to repeat it.
+hints.num_desired_tracks = 200;
 ```
 
-**Where to add a new per-frame internal parameter:**
+**Where to add a new parameter:**
 
-1. Confirm that the parameter is for expert/development tuning rather than a normal user
-   feature. Stable user-facing behavior belongs in `Odometry::Config` or another public API.
-2. Add the field and its default to `cuvslam::internal::Internals` in
-   `libs/cuvslam/cuvslam2_internal.h`.
-3. Map it into `odom::TrackPerFrameSettings` in `BuildTrackFrameSettings()` in
-   `libs/cuvslam/cuvslam2.cpp`.
-4. Add it to the appropriate `TrackPerFrameSettings` sub-struct (`sof`, `kf`, `pnp`,
-   `icp`, and so on), then thread it through the call chain without storing it.
-5. Update the Python binding and YAML loader only when the parameter must be available to
-   the corresponding development tools.
+1. Confirm it is expert or development tuning rather than a normal user feature. Stable
+   user-facing behaviour belongs in `Odometry::Config` or another public API.
+2. Add the field, with its default, to the settings struct that consumes it (`sof::Settings`,
+   `pnp::PNPSettings`, and so on).
+3. Describe it next to that struct with `CUVSLAM_PARAM`; see `libs/params/README.md`. That one
+   line is the whole cost -- the file loader, `-P` override, report dump, help text and bounds
+   check all follow from it, and nothing else in the codebase has to learn the name.
+4. If the struct is new, register it under a key prefix in
+   `Odometry::Impl::RegisterSolverParameters()`, and only for the modes that read it.
+
+**Where to add a new per-frame hint:** add a field to `Odometry::TrackHints` and apply it to the
+per-frame copy in `Odometry::Track()`. Do this only when the value truly differs frame to frame; a
+value that holds for a run belongs in step 3 above.
 
 ---
 
@@ -76,20 +84,18 @@ was ever absent.
 
 **How it works in cuVSLAM:**
 
-`Odometry::Track()` accepts a nullable `Internals` pointer. A null pointer selects
-`Internals{}`. `BuildTrackFrameSettings()` converts the result to a concrete
-`TrackPerFrameSettings`; lower layers do not need to know whether the caller supplied an
-override.
+`Odometry::Track()` accepts a nullable `TrackHints` pointer. A null pointer means "no hints", and
+the per-frame copy of the stored settings is used unchanged; lower layers receive a concrete
+`TrackPerFrameSettings` and never learn whether the caller supplied anything.
 
-`Internals::kf_override_frame_selection` is an intentional tri-state exception: unset uses
-automatic keyframe selection, `true` forces a keyframe, and `false` forces a non-keyframe.
-Resolve such values at the first layer that has enough context, rather than propagating
-optionality farther down the call stack.
+`TrackHints::override_keyframe` is an intentional tri-state exception: unset leaves the decision to
+the tracker, `true` forces a keyframe, and `false` prevents one. Resolve such values at the first
+layer with enough context, rather than propagating optionality farther down the call stack.
 
 ```text
-Internals* (null or expert/development overrides)
-    └─► Internals{} when null
-        └─► BuildTrackFrameSettings() produces TrackPerFrameSettings
+TrackHints* (null, or hints for this frame)
+    └─► ignored when null
+        └─► a copy of the stored TrackPerFrameSettings, with any hints applied
             └─► IVisualOdometry::track(TrackPerFrameSettings&)   // no optional
                     └─► IMultiSOF::trackNextFrame(TrackPerFrameSettings&)  // no optional
                             └─► IMonoSOF::track(Settings&)  // no optional
@@ -159,13 +165,12 @@ Settings fall into three categories:
 | Category | Example | Where it lives | Stability |
 |---|---|---|---|
 | **Construction-time configuration** | GPU on/off, odometry mode, data export | `Odometry::Config`, passed to the constructor | Public API |
-| **Per-frame internal tuning** | Feature count, border sizes, keyframe threshold | `internal::Internals`, passed to `Track()`, never stored | Unstable expert/development API |
-| **Persistent internal tuning** | SBA window and solver parameters | `internal::InternalParameter`, passed to `ApplyPersistentInternalParameters()` | Internal use only |
+| **Internal tuning** | Feature count, border sizes, SBA window, solver thresholds | Named parameters, set with `SetParameter()` or `LoadParameters()` | Unstable, internal use only |
+| **Per-frame hints** | The keyframe decision for one frame | `TrackHints`, passed to `Track()`, never stored | Unstable, internal use only |
 
-If a normal user must choose a value at startup, it belongs in `Config`. If a low-level
-development tool must vary a solver value per frame, it may belong in `Internals`. Values
-that intentionally persist after tracker construction use
-`ApplyPersistentInternalParameters()`.
+If a normal user must choose a value at startup, it belongs in `Config`. If a value is tuning that
+holds for a run, it belongs in the parameter registry. Only a value that genuinely differs between
+frames belongs in `TrackHints`.
 
-Do not expose a user-facing feature through `Internals` merely because it is convenient.
+Do not expose a user-facing feature as an internal parameter merely because it is convenient.
 Design a stable public API for that feature instead.

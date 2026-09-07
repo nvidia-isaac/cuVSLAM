@@ -39,39 +39,44 @@ Hint file rows format: `timestamp x y z [optional quaternion]`
 Float timestamps in seconds and int timestamps in ns are supported. Hints must be sorted by timestamps.
 To localize, the util will use the latest hint not later than current frame.
 
-## Configuration via YAML File
+## Parameters
 
-You can specify optional per-frame `internals` and persistent expert parameters using a YAML config file with the
-`--config` flag:
+Configuration and solver parameters come from one flat file, passed with `--params`:
 
 ```bash
-./bin/cuvslam_api_launcher --config=api_config.yaml --edex=<edex file>
+./bin/cuvslam_api_launcher --params=api_params.txt --edex=<edex file>
 ```
 
-Command-line flags will override values from the config file. See `api_config.yaml` for an example configuration with
-all supported options.
+One `key: value` per line, `#` starts a comment, and every entry is optional. See
+`api_params.txt` for a commented example, and run `--list_params` to print every name with its
+type, default and description.
 
-**Note:** This launcher links the **`utils`** static library, which reads YAML and populates `Odometry::Config`,
-`Slam::Config`, and the unstable development-only `internal::Internals` struct. It applies `expert_params` once after
-tracker construction with `Odometry::ApplyPersistentInternalParameters()`. Normal applications should use the default
-internal parameters. Python development tools can load the same per-frame values with
-`cuvslam.utils.load_internals_from_file()`.
+Single values can be overridden with a repeatable `-Pkey=value`, which wins over the file:
 
-### Config File Structure
-
-```yaml
-# Development-only per-frame overrides passed to Odometry::Track(..., &internals).
-# Unset keys retain the built-in defaults.
-internals:
-  num_desired_tracks: 500
-  kf_survivor_from_last: 40.0
-  kf_max_timedelta_between_kfs_s: 20
-
-# Development-only persistent parameters applied once after tracker construction.
-expert_params:
-  sba.num_sba_frames: 7
-  sba.num_sba_iterations: 7
+```bash
+./bin/cuvslam_api_launcher --params=api_params.txt -Psba.num_sba_iterations=9 \
+    -Pnum_desired_tracks=300 --edex=<edex file>
 ```
+
+Any unambiguous suffix of a name works, which is why `-Pnum_desired_tracks` reaches
+`sof.num_desired_tracks`. An ambiguous abbreviation is rejected with the candidates listed, and an
+unknown name is an error rather than a warning, so a typo fails the run instead of silently doing
+nothing.
+
+Names fall into two groups, applied at different times:
+
+- `odometry.*` and `slam.*` configure `Odometry::Config` and `Slam::Config`, so they are applied
+  before the tracker is built.
+- `sof.*`, `kf.*`, `sba.*`, `vo_pnp.*`, `icp.*` and, with an IMU, `sm.*`, `imu_pnp.*` and
+  `inertial_stereo_pnp.*` are solver parameters, applied to the tracker once it exists. Which of
+  them exist depends on the odometry mode: a tracker with no IMU does not expose the inertial ones
+  at all, and naming one is an error.
+
+Solver parameters expose low-level behaviour, are not covered by API stability guarantees, and may
+change or disappear in any release. Normal applications should leave them alone. The same values
+are reachable from C++ with `Odometry::SetParameter()` and `Odometry::LoadParameters()`, and from
+Python with `set_parameter()`, `set_parameters()` and `load_parameters()`; `Odometry::GetParameters()`
+reports every parameter with its current value and where that value came from.
 
 # Run tracker on EuRoC MAV Dataset (OBSOLETE)
 

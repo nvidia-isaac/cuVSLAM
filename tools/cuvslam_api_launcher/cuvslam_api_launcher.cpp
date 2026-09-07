@@ -42,9 +42,9 @@
 #include "common/types.h"
 #include "common/utils.h"
 #include "cuvslam/cuvslam2.h"
-#include "cuvslam/cuvslam2_internal.h"
+#include "cuvslam/cuvslam_params.h"
 #include "cuvslam/internal.h"
-#include "utils/cuvslam_yaml_config.h"
+#include "params/registry.h"
 #include "utils/image_loader.h"
 
 using namespace cuvslam;
@@ -56,7 +56,12 @@ const Slam::Config kDefaultSlamCfg = Slam::GetDefaultConfig();
 }  // namespace
 
 DEFINE_int32(verbosity, 2, "Verbosity level");
-DEFINE_string(config, "", "Path to YAML config file (command-line flags override config file values)");
+DEFINE_string(params, "",
+              "Path to a parameter file: one 'key: value' or 'key = value' per line, # starts a comment. "
+              "Covers configuration (odometry.*, slam.*) and solver parameters (sof.*, sba.*, vo_pnp.*, ...). "
+              "Repeatable -Pkey=value overrides single entries and wins over the file; --list_params prints "
+              "every name with its type, default and description.");
+DEFINE_bool(list_params, false, "Print every parameter with its type, default and description, then exit");
 // replay settings
 DEFINE_string(edex, "", "Path to the .edex file to run on (required)");
 DEFINE_string(cameras, "", "Comma-separated list of cameras");
@@ -129,22 +134,6 @@ DEFINE_int32(cfg_depth_camera, 0, "Depth camera index");
 DEFINE_double(cfg_depth_scale_factor, kDefaultOdomCfg.rgbd_settings.depth_scale_factor, "Depth scale factor");
 DEFINE_bool(cfg_enable_depth_stereo_tracking, kDefaultOdomCfg.rgbd_settings.enable_depth_stereo_tracking,
             "Enable depth stereo tracking");
-// Expert SBA parameters — applied via ApplyPersistentInternalParameters() after tracker creation.
-// Only flags explicitly set on the command line are forwarded; unset flags keep the
-// library default.  mode and async are construction-time only and belong in cfg_* above.
-DEFINE_int32(expert_sba_num_frames, 7,
-             "sba.num_sba_frames: number of recent keyframes used in regular SBA (default: 7)");
-DEFINE_int32(expert_sba_num_inertial_frames, 10,
-             "sba.num_inertial_sba_frames: number of keyframes used in inertial SBA (default: 10)");
-DEFINE_int32(expert_sba_num_fixed_frames, 3,
-             "sba.num_fixed_sba_frames: number of fixed (anchor) keyframes in regular SBA (default: 3)");
-DEFINE_int32(expert_sba_num_iterations, 7,
-             "sba.num_sba_iterations: maximum solver iterations per SBA run (default: 7)");
-DEFINE_double(expert_sba_robustifier_scale, 0.5,
-              "sba.robustifier_scale: Huber robustifier scale for SBA reprojection residuals (default: 0.5)");
-DEFINE_bool(expert_sba_use_winsorizer, false,
-            "sba.use_sba_winsorizer: run a second SBA pass after winsorizing reprojection outliers (default: false)");
-
 #define VERIFY_TRACE(condition, ...) \
   if (!(condition)) {                \
     TraceError(__VA_ARGS__);         \
@@ -442,8 +431,7 @@ bool RunSlamLoadAndLocalizeOnMatchingFrame(Slam& slam, const Slam::ImageSet& ima
 }
 
 bool trackEdexDataSet(const std::string& edex_name, const Odometry::Config& odom_cfg, const Slam::Config& slam_cfg,
-                      const cuvslam::internal::Internals& internals,
-                      const std::map<std::string, std::string>& expert_params, const std::string& input_map_name,
+                      const std::vector<params::Registry::FileEntry>& solver_params, const std::string& input_map_name,
                       const std::string& output_map_name) {
   std::vector<CameraId> camera_ids{StringToIntVector<CameraId>(FLAGS_cameras, ',')};
   std::unique_ptr<camera_rig_edex::ICameraRigReplay> edex_rig;
@@ -464,13 +452,10 @@ bool trackEdexDataSet(const std::string& edex_name, const Odometry::Config& odom
   WarmUpGPU();
   Rig rig = createRig(edex_file, edex_rig.get());
   std::unique_ptr<Odometry> odom = std::make_unique<Odometry>(rig, odom_cfg);
-  if (!expert_params.empty()) {
-    std::vector<cuvslam::internal::InternalParameter> params;
-    params.reserve(expert_params.size());
-    for (const auto& [k, v] : expert_params) {
-      params.push_back({k, v});
-    }
-    odom->ApplyPersistentInternalParameters(params);
+  // Solver parameters are only reachable once the tracker exists, since which of them apply
+  // depends on the odometry mode it was built with.
+  for (const params::Registry::FileEntry& entry : solver_params) {
+    odom->SetParameter(entry.key, entry.value);
   }
   TraceMessage("Odometry tracker created");
 
@@ -578,7 +563,7 @@ bool trackEdexDataSet(const std::string& edex_name, const Odometry::Config& odom
     }
 
     const auto track_start = std::chrono::steady_clock::now();
-    PoseEstimate pose_estimate = odom->Track(images, masks, depths, &internals);
+    PoseEstimate pose_estimate = odom->Track(images, masks, depths);
     const double track_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - track_start).count();
     if (!pose_estimate.world_from_rig.has_value()) {
       TraceWarning("Track(): Tracking lost at frame %zu.", frame);
@@ -655,7 +640,7 @@ bool trackEdexDataSet(const std::string& edex_name, const Odometry::Config& odom
             for (auto&& im : dummy_images) {
               im.timestamp_ns += 1000;
             }
-            odom->Track(dummy_images, /*masks=*/{}, /*depths=*/{}, &internals);
+            odom->Track(dummy_images, /*masks=*/{}, /*depths=*/{});
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
           }
           next_loc_frame = frame + FLAGS_loc_skip_frames + 1;
@@ -709,14 +694,76 @@ bool trackEdexDataSet(const std::string& edex_name, const Odometry::Config& odom
   return true;
 }
 
+/**
+ * @brief Prints every parameter with its type, default and description.
+ *
+ * Built from the descriptors, so it cannot fall behind the parameters that actually exist. Mode
+ * matters: the solver groups listed here are the ones an inertial tracker exposes, which is the
+ * widest set.
+ */
+void PrintParameterReference() {
+  Odometry::Config odom_cfg = Odometry::GetDefaultConfig();
+  Slam::Config slam_cfg = Slam::GetDefaultConfig();
+  odom_cfg.odometry_mode = Odometry::OdometryMode::Inertial;
+
+  params::Registry registry;
+  registry.Add("odometry", odom_cfg);
+  registry.Add("odometry.rgbd", odom_cfg.rgbd_settings);
+  registry.Add("odometry.multisensor", odom_cfg.multisensor_settings);
+  registry.Add("slam", slam_cfg);
+
+  size_t width = 0;
+  std::vector<params::ParamInfo> infos = registry.List();
+  for (const params::ParamInfo& info : infos) {
+    width = std::max(width, info.key.size());
+  }
+  std::cout << "Configuration, applied before the tracker is built:\n";
+  for (const params::ParamInfo& info : infos) {
+    std::cout << "  " << std::left << std::setw(static_cast<int>(width)) << info.key << "  " << info.type << " = "
+              << info.default_value << "\n      " << info.doc << "\n";
+  }
+  std::cout << "\nSolver parameters, applied to the tracker once it exists. Availability depends on the\n"
+               "odometry mode; sm.*, imu_pnp.* and inertial_stereo_pnp.* need an IMU:\n"
+            << "  run with --verbosity=2 and no --params to see the set a given mode exposes.\n";
+}
+
+/**
+ * @brief Removes -Pkey=value arguments from argv and returns them in order.
+ *
+ * gflags has no clustered short options, so it would reject -P outright. Extracting these before
+ * ParseCommandLineFlags() also fixes the precedence explicitly: the parameter file is read first
+ * and these are applied on top, in the order given.
+ */
+std::vector<std::string> ExtractParamOverrides(int& arg_c, char** arg_v) {
+  std::vector<std::string> overrides;
+  int kept = 0;
+  for (int i = 0; i < arg_c; ++i) {
+    const std::string_view arg = arg_v[i];
+    if (i > 0 && arg.size() > 2 && arg.substr(0, 2) == "-P") {
+      overrides.emplace_back(arg.substr(2));
+    } else {
+      arg_v[kept++] = arg_v[i];
+    }
+  }
+  arg_c = kept;
+  return overrides;
+}
+
 }  // end of anonymous namespace
 
 int main(int arg_c, char** arg_v) {
+  const std::vector<std::string> param_overrides = ExtractParamOverrides(arg_c, arg_v);
   gflags::ParseCommandLineFlags(&arg_c, &arg_v, /*remove flags = */ true);
   if (arg_c != 1) {
     std::cout << "This tools doesn't expect command line arguments, only flags listed with --help" << std::endl
               << "If you see this message, please check your command line." << std::endl;
     return EXIT_FAILURE;
+  }
+
+  // Before the --edex check: listing the parameters does not need a dataset.
+  if (FLAGS_list_params) {
+    PrintParameterReference();
+    return EXIT_SUCCESS;
   }
 
   if (FLAGS_edex.empty()) {
@@ -730,28 +777,47 @@ int main(int arg_c, char** arg_v) {
   // Start with default configurations
   Odometry::Config odom_cfg = Odometry::GetDefaultConfig();
   Slam::Config slam_cfg = Slam::GetDefaultConfig();
-  cuvslam::internal::Internals internals;
 
-  // Load configs from YAML file if specified (command-line flags applied afterwards take precedence)
-  std::map<std::string, std::string> expert_params;
-  if (!FLAGS_config.empty()) {
-    std::cout << "Loading config from: " << FLAGS_config << std::endl;
+  // Parameters arrive from a file and from repeatable -P overrides, and split across two phases:
+  // Odometry::Config and Slam::Config must be final before the tracker is built, while the solver
+  // parameters only exist once it is. Each entry goes to whichever registry knows its name.
+  params::Registry config_registry;
+  config_registry.Add("odometry", odom_cfg);
+  config_registry.Add("odometry.rgbd", odom_cfg.rgbd_settings);
+  config_registry.Add("odometry.multisensor", odom_cfg.multisensor_settings);
+  config_registry.Add("slam", slam_cfg);
+
+  std::vector<params::Registry::FileEntry> entries;
+  try {
+    if (!FLAGS_params.empty()) {
+      entries = params::Registry::ReadFile(FLAGS_params);
+    }
+  } catch (const std::exception& e) {
+    TraceError("%s\n", e.what());
+    return EXIT_FAILURE;
+  }
+  // -P wins over the file, so it goes last.
+  for (const std::string& override_arg : param_overrides) {
+    const size_t eq = override_arg.find('=');
+    if (eq == std::string::npos) {
+      TraceError("-P expects key=value, got '%s'\n", override_arg.c_str());
+      return EXIT_FAILURE;
+    }
+    entries.push_back(params::Registry::FileEntry{override_arg.substr(0, eq), override_arg.substr(eq + 1), 0});
+  }
+
+  std::vector<params::Registry::FileEntry> solver_params;
+  for (const params::Registry::FileEntry& entry : entries) {
+    const std::string where = entry.line != 0 ? FLAGS_params + ":" + std::to_string(entry.line) : std::string("-P");
     try {
-      const char* config_path = FLAGS_config.c_str();
-      if (LoadOdometryConfigFromFile(config_path, odom_cfg)) {
-        std::cout << "Loaded odometry config from file." << std::endl;
-      }
-      if (LoadSlamConfigFromFile(config_path, slam_cfg)) {
-        std::cout << "Loaded SLAM config from file." << std::endl;
-      }
-      if (LoadInternalsFromFile(config_path, internals)) {
-        std::cout << "Loaded per-frame internals from file." << std::endl;
-      }
-      if (LoadExpertParamsFromFile(config_path, expert_params)) {
-        std::cout << "Loaded expert_params from file." << std::endl;
+      if (config_registry.Knows(entry.key)) {
+        config_registry.Set(entry.key, entry.value, params::Source::File);
+      } else {
+        // Deferred; an unknown name is reported once the tracker knows which parameters it has.
+        solver_params.push_back(entry);
       }
     } catch (const std::exception& e) {
-      TraceError("Failed to load config file: %s\n", e.what());
+      TraceError("%s: %s\n", where.c_str(), e.what());
       return EXIT_FAILURE;
     }
   }
@@ -823,22 +889,5 @@ int main(int arg_c, char** arg_v) {
   if (flag_is_set("slam_reproduce_mode")) slam_cfg.sync_mode = FLAGS_slam_reproduce_mode;
   if (flag_is_set("cfg_planar")) slam_cfg.planar_constraints = FLAGS_cfg_planar;
 
-  // Apply explicitly-set CLI flags into expert_params, overriding any YAML values.
-  if (flag_is_set("expert_sba_num_frames"))
-    expert_params["sba.num_sba_frames"] = std::to_string(FLAGS_expert_sba_num_frames);
-  if (flag_is_set("expert_sba_num_inertial_frames"))
-    expert_params["sba.num_inertial_sba_frames"] = std::to_string(FLAGS_expert_sba_num_inertial_frames);
-  if (flag_is_set("expert_sba_num_fixed_frames"))
-    expert_params["sba.num_fixed_sba_frames"] = std::to_string(FLAGS_expert_sba_num_fixed_frames);
-  if (flag_is_set("expert_sba_num_iterations"))
-    expert_params["sba.num_sba_iterations"] = std::to_string(FLAGS_expert_sba_num_iterations);
-  if (flag_is_set("expert_sba_robustifier_scale"))
-    expert_params["sba.robustifier_scale"] = std::to_string(FLAGS_expert_sba_robustifier_scale);
-  if (flag_is_set("expert_sba_use_winsorizer"))
-    expert_params["sba.use_sba_winsorizer"] = FLAGS_expert_sba_use_winsorizer ? "true" : "false";
-
-  return trackEdexDataSet(FLAGS_edex, odom_cfg, slam_cfg, internals, expert_params, FLAGS_loc_input_map,
-                          FLAGS_output_map)
-             ? 0
-             : 1;
+  return trackEdexDataSet(FLAGS_edex, odom_cfg, slam_cfg, solver_params, FLAGS_loc_input_map, FLAGS_output_map) ? 0 : 1;
 }
