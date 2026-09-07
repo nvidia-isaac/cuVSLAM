@@ -105,6 +105,9 @@ TEST_P(VioApi2Test, TrackEdex) {
   // TODO(vikuznetsov): implement some sanity check for tracking results
 }
 
+// The two suites below cover the use_gpu / use_gpu_mem pairs. GPU tracking reads images from host
+// or device memory, so both are exercised. CPU tracking only reads host memory: a device pointer is
+// rejected by the API, and that rejection is covered in libs/cuvslam/test/image_format_test.cpp.
 INSTANTIATE_TEST_SUITE_P(CppApiConfigsCPU, VioApi2Test,
                          testing::ConvertGenerator<VioApi2TestParams::Tuple>(testing::Combine(
                              testing::Values(Odometry::MulticameraMode::Performance,
@@ -126,8 +129,8 @@ INSTANTIATE_TEST_SUITE_P(CppApiConfigsGPU, VioApi2Test,
                                              Odometry::MulticameraMode::Precision, Odometry::MulticameraMode::Moderate),
                              testing::Values(Odometry::OdometryMode::Multicamera, Odometry::OdometryMode::Inertial,
                                              Odometry::OdometryMode::RGBD, Odometry::OdometryMode::Mono),
-                             testing::Values(true), testing::Values(true), testing::Bool(), testing::Bool(),
-                             testing::Bool(), testing::Bool(), testing::Bool(), testing::Bool(), testing::Bool())),
+                             testing::Values(true), testing::Bool(), testing::Bool(), testing::Bool(), testing::Bool(),
+                             testing::Bool(), testing::Bool(), testing::Bool(), testing::Bool())),
                          [](const testing::TestParamInfo<VioApi2TestParams>& info) -> std::string {
                            std::ostringstream ss;
                            ss << info.param;
