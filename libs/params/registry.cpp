@@ -91,26 +91,26 @@ std::string_view ToString(Source source) {
   return "unknown";
 }
 
-std::pair<const Registry::Group*, const FieldDesc*> Registry::Find(std::string_view key) const {
-  for (const Group& group : groups_) {
-    for (size_t i = 0; i < group.num_fields; ++i) {
-      if (KeyMatches(key, group.prefix, group.fields[i].name)) {
-        return {&group, &group.fields[i]};
+std::pair<Registry::Group*, size_t> Registry::Find(std::string_view key) const {
+  for (const std::unique_ptr<Group>& group : groups_) {
+    for (size_t i = 0; i < group->NumFields(); ++i) {
+      if (KeyMatches(key, group->prefix(), group->Describe(i).name)) {
+        return {group.get(), i};
       }
     }
   }
-  return {nullptr, nullptr};
+  return {nullptr, 0};
 }
 
 std::string Registry::Resolve(std::string_view key) const {
-  if (Find(key).second != nullptr) {
+  if (Find(key).first != nullptr) {
     return std::string(key);
   }
 
   std::vector<std::string> matches;
-  for (const Group& group : groups_) {
-    for (size_t i = 0; i < group.num_fields; ++i) {
-      std::string full = std::string(group.prefix) + '.' + std::string(group.fields[i].name);
+  for (const std::unique_ptr<Group>& group : groups_) {
+    for (size_t i = 0; i < group->NumFields(); ++i) {
+      std::string full = std::string(group->prefix()) + '.' + std::string(group->Describe(i).name);
       if (IsSuffixOf(full, key)) {
         matches.push_back(std::move(full));
       }
@@ -138,24 +138,21 @@ std::string_view Registry::Intern(std::string_view value) { return interned_.emp
 
 void Registry::Set(std::string_view key, std::string_view value, Source source) {
   const std::string resolved = Resolve(key);
-  const auto [group, field] = Find(resolved);
+  const auto [group, index] = Find(resolved);
 
   // Assignment is all-or-nothing: a rejected value leaves the field exactly as it was, so a bad
   // line in a parameter file cannot half-apply a configuration.
-  const std::string previous = field->get(group->instance);
+  const std::string previous = group->Get(index);
   try {
-    field->set(group->instance, Intern(value));
+    group->Set(index, Intern(value));
   } catch (const std::exception& e) {
     throw std::runtime_error("parameter '" + resolved + "': " + e.what());
   }
 
-  if (field->bounds.active && field->as_double != nullptr) {
-    const double numeric = field->as_double(group->instance);
-    if (numeric < field->bounds.min || numeric > field->bounds.max) {
-      field->set(group->instance, Intern(previous));
-      throw std::runtime_error("parameter '" + resolved + "': " + std::string(value) + " " +
-                               DescribeBounds(field->bounds));
-    }
+  if (!group->WithinBounds(index)) {
+    group->Set(index, Intern(previous));
+    throw std::runtime_error("parameter '" + resolved + "': " + std::string(value) + " " +
+                             DescribeBounds(group->Describe(index).bounds));
   }
 
   const auto it = std::find_if(sources_.begin(), sources_.end(),
@@ -169,8 +166,8 @@ void Registry::Set(std::string_view key, std::string_view value, Source source) 
 
 std::string Registry::Get(std::string_view key) const {
   const std::string resolved = Resolve(key);
-  const auto [group, field] = Find(resolved);
-  return field->get(group->instance);
+  const auto [group, index] = Find(resolved);
+  return group->Get(index);
 }
 
 Source Registry::SourceOf(const std::string& key) const {
@@ -217,15 +214,15 @@ size_t Registry::SetFromFile(const std::string& path, Source source) {
 
 std::vector<ParamInfo> Registry::List() const {
   std::vector<ParamInfo> result;
-  for (const Group& group : groups_) {
-    for (size_t i = 0; i < group.num_fields; ++i) {
-      const FieldDesc& field = group.fields[i];
+  for (const std::unique_ptr<Group>& group : groups_) {
+    for (size_t i = 0; i < group->NumFields(); ++i) {
+      const FieldView field = group->Describe(i);
       ParamInfo info;
-      info.key = std::string(group.prefix) + '.' + std::string(field.name);
+      info.key = std::string(group->prefix()) + '.' + std::string(field.name);
       info.doc = field.doc;
-      info.type = field.type_name();
-      info.value = field.get(group.instance);
-      info.default_value = field.get(group.defaults);
+      info.type = group->Type(i);
+      info.value = group->Get(i);
+      info.default_value = group->Default(i);
       info.source = SourceOf(info.key);
       result.push_back(std::move(info));
     }

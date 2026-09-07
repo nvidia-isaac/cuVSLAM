@@ -191,19 +191,22 @@ constexpr Bounds NonNegative() { return Bounds{0.0, std::numeric_limits<double>:
 constexpr Bounds InRange(double min, double max) { return Bounds{min, max, true}; }
 
 /**
- * @brief One tunable field, addressable by name.
+ * @brief One tunable field of @p Owner, addressable by name.
  *
- * Holds no data of its own: set/get take the address of the owning struct, so a single
- * constexpr descriptor list serves every instance of that struct.
+ * Holds no data of its own: set and get take the owning struct, so a single constexpr descriptor
+ * list serves every instance of that struct. Being templated on the owner keeps the accessors
+ * fully typed -- nothing here needs a cast, and a descriptor cannot be applied to the wrong
+ * struct.
  */
+template <typename Owner>
 struct FieldDesc {
   std::string_view name;
   std::string_view doc;
-  void (*set)(void* owner, std::string_view value);
-  std::string (*get)(const void* owner);
+  void (*set)(Owner* owner, std::string_view value);
+  std::string (*get)(const Owner* owner);
   std::string (*type_name)();
   /// Reads the field as a double for bounds checking. Null when the field is not numeric.
-  double (*as_double)(const void* owner);
+  double (*as_double)(const Owner* owner);
   Bounds bounds;
 };
 
@@ -213,27 +216,26 @@ template <typename Owner, auto Member>
 using MemberType = std::decay_t<decltype(std::declval<Owner&>().*Member)>;
 
 template <typename Owner, auto Member>
-void SetMember(void* owner, std::string_view value) {
-  using Value = MemberType<Owner, Member>;
-  static_cast<Owner*>(owner)->*Member = ParseValue<Value>(value);
+void SetMember(Owner* owner, std::string_view value) {
+  owner->*Member = ParseValue<MemberType<Owner, Member>>(value);
 }
 
 template <typename Owner, auto Member>
-std::string GetMember(const void* owner) {
-  return FormatValue(static_cast<const Owner*>(owner)->*Member);
+std::string GetMember(const Owner* owner) {
+  return FormatValue(owner->*Member);
 }
 
 template <typename T>
 constexpr bool kIsNumeric = std::is_arithmetic_v<T> && !std::is_same_v<T, bool>;
 
 template <typename Owner, auto Member>
-double MemberAsDouble(const void* owner) {
-  return static_cast<double>(static_cast<const Owner*>(owner)->*Member);
+double MemberAsDouble(const Owner* owner) {
+  return static_cast<double>(owner->*Member);
 }
 
 /// Numeric fields get a double reader so bounds can be checked generically; others get nullptr.
 template <typename Owner, auto Member>
-constexpr double (*AsDoubleOrNull())(const void*) {
+constexpr double (*AsDoubleOrNull())(const Owner*) {
   if constexpr (kIsNumeric<MemberType<Owner, Member>>) {
     return &MemberAsDouble<Owner, Member>;
   } else {
@@ -252,15 +254,15 @@ constexpr double (*AsDoubleOrNull())(const void*) {
  *                its previous value. Only meaningful for numeric fields.
  */
 template <typename Owner, auto Member>
-constexpr FieldDesc Field(std::string_view name, std::string_view doc, Bounds bounds = Bounds{}) {
+constexpr FieldDesc<Owner> Field(std::string_view name, std::string_view doc, Bounds bounds = Bounds{}) {
   static_assert(!std::is_same_v<decltype(Member), std::nullptr_t>, "Member must be a pointer to a data member");
-  return FieldDesc{name,
-                   doc,
-                   &detail::SetMember<Owner, Member>,
-                   &detail::GetMember<Owner, Member>,
-                   &detail::TypeName<detail::MemberType<Owner, Member>>,
-                   detail::AsDoubleOrNull<Owner, Member>(),
-                   bounds};
+  return FieldDesc<Owner>{name,
+                          doc,
+                          &detail::SetMember<Owner, Member>,
+                          &detail::GetMember<Owner, Member>,
+                          &detail::TypeName<detail::MemberType<Owner, Member>>,
+                          detail::AsDoubleOrNull<Owner, Member>(),
+                          bounds};
 }
 
 /**

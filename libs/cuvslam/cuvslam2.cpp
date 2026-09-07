@@ -70,29 +70,7 @@ int32_t RequireNonNegative(int32_t value, std::string_view expression) {
 
 #define REQUIRE_NON_NEGATIVE(x) RequireNonNegative((x), #x)
 
-// Binds every solver settings sub-struct to a key prefix. These prefixes are the parameter names
-// callers use, so they are chosen to match the sub-struct they address rather than the C++ field.
-//
-// Settings that the current mode never reads are left unregistered rather than registered and
-// then rejected: a name that does not resolve is reported by the registry with the same message
-// as a typo, and the rule lives here instead of being restated as a key-prefix test at each
-// entry point.
-void RegisterSolverParameters(params::Registry& registry, odom::TrackPerFrameSettings& settings,
-                              Odometry::OdometryMode mode) {
-  registry.Add("sof", settings.sof);
-  registry.Add("sof.feature_selection", settings.sof.feature_selection_settings);
-  registry.Add("kf", settings.kf);
-  registry.Add("sba", settings.sba);
-  registry.Add("vo_pnp", settings.vo_pnp);
-  registry.Add("icp", settings.icp);
-
-  // The IMU state machine and the inertial solvers only run with an IMU.
-  if (mode == Odometry::OdometryMode::Inertial) {
-    registry.Add("sm", settings.sm);
-    registry.Add("inertial_stereo_pnp", settings.inertial_stereo_pnp);
-    registry.Add("imu_pnp", settings.imu_pnp);
-  }
-}
+// (parameter registration lives on Odometry::Impl, which owns both the settings and the registry)
 
 // Overrides per-frame settings from Internals. Internals carries concrete values with no way to
 // mark a field as unset, so every field it covers is overwritten -- including any value the
@@ -474,6 +452,34 @@ public:
   bool enable_final_landmarks_export{false};
   std::unordered_map<uint64_t, Vector3f> final_landmarks;
 
+  /**
+   * @brief Binds each solver settings sub-struct to the key prefix callers address it by.
+   *
+   * A member rather than a free function because it needs the settings, the registry and the mode,
+   * all of which are this object's -- passing the mode in would make it a second copy of a fact
+   * this object already holds. Registration stores references into `params`, so it must run before
+   * any parameter is read or written, and `odometry_mode` must already be set.
+   *
+   * Settings the current mode never reads are left unregistered rather than registered and then
+   * rejected. An unreachable name is then reported exactly like a typo, and the rule lives here
+   * instead of being restated as a key-prefix test at every entry point.
+   */
+  void RegisterSolverParameters() {
+    params_registry.Add("sof", params.sof);
+    params_registry.Add("sof.feature_selection", params.sof.feature_selection_settings);
+    params_registry.Add("kf", params.kf);
+    params_registry.Add("sba", params.sba);
+    params_registry.Add("vo_pnp", params.vo_pnp);
+    params_registry.Add("icp", params.icp);
+
+    // The IMU state machine and the inertial solvers only run with an IMU.
+    if (odometry_mode == Odometry::OdometryMode::Inertial) {
+      params_registry.Add("sm", params.sm);
+      params_registry.Add("inertial_stereo_pnp", params.inertial_stereo_pnp);
+      params_registry.Add("imu_pnp", params.imu_pnp);
+    }
+  }
+
   // data helpers
 
   // if camera_index == std::numeric_limits<uint32_t>::max() will return observations for all cameras
@@ -662,11 +668,12 @@ Odometry::Odometry(const Rig& rig, const Config& cfg) {
 
   tracker->svo_settings = svo_settings;
   tracker->params = odom::MakeTrackPerFrameSettings(svo_settings);
-  RegisterSolverParameters(tracker->params_registry, tracker->params, cfg.odometry_mode);
   tracker->imu_fusion_enabled = cfg.odometry_mode == OdometryMode::Inertial || multisensor_with_imu;
   tracker->debug_dump_directory = cfg.debug_dump_directory;
   tracker->max_frame_delta_ns = static_cast<int64_t>(cfg.max_frame_delta_s * 1e9);
   tracker->odometry_mode = cfg.odometry_mode;
+  // After odometry_mode, which decides which parameters this tracker exposes.
+  tracker->RegisterSolverParameters();
 
   // Each depth-providing camera draws from the depth-capable pool, every other camera from the
   // no-depth pool. Both pools must hold cache_size contexts per camera so the pipeline can keep

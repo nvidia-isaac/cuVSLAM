@@ -18,6 +18,7 @@
 
 #include <cstdint>
 #include <deque>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -63,17 +64,24 @@ struct ParamInfo {
  */
 class Registry {
 public:
+  Registry() = default;
+  Registry(Registry&&) = default;
+  Registry& operator=(Registry&&) = default;
+  // Copying would give two registries write access to one set of settings. Spelled out rather
+  // than left to the move-only member, so the error names this instead of a container internal.
+  Registry(const Registry&) = delete;
+  Registry& operator=(const Registry&) = delete;
+
   /**
    * @brief Registers a settings struct under a key prefix.
    *
-   * @p instance must outlive the registry. Requires a params::Fields<T> specialization.
+   * @p instance must outlive the registry, and must not be relocated while it is registered: the
+   * registry holds a reference to it, not a copy, which is what lets the solvers keep reading
+   * plain typed fields. Requires a params::Fields<T> specialization.
    */
   template <typename T>
   void Add(std::string_view prefix, T& instance) {
-    // One default-constructed instance per settings type, and the only place defaults are read
-    // from, so a default is never written down a second time just to be reported.
-    static const T kDefaults{};
-    groups_.push_back(Group{prefix, &instance, &kDefaults, Fields<T>::kList.data(), Fields<T>::kList.size()});
+    groups_.push_back(std::make_unique<TypedGroup<T>>(prefix, instance));
   }
 
   /**
@@ -114,16 +122,83 @@ public:
   std::string ToJson() const;
 
 private:
-  struct Group {
-    std::string_view prefix;
-    void* instance;
-    const void* defaults;
-    const FieldDesc* fields;
-    size_t num_fields;
+  /// A field's name and constraint, without binding it to any instance.
+  struct FieldView {
+    std::string_view name;
+    std::string_view doc;
+    Bounds bounds;
   };
 
-  /// Locates the group and field a full key names, or nullptr for both when the key is absent.
-  std::pair<const Group*, const FieldDesc*> Find(std::string_view key) const;
+  /**
+   * @brief Type-erased access to one registered settings struct.
+   *
+   * The registry holds structs of many unrelated types in one container, so something has to be
+   * erased. Erasing here rather than in FieldDesc keeps the descriptors and their accessors fully
+   * typed, and lets the concrete group hold a `T&` -- so the requirement that a registered struct
+   * outlive the registry is expressed in the type system rather than in a comment.
+   */
+  class Group {
+  public:
+    explicit Group(std::string_view prefix) : prefix_(prefix) {}
+    virtual ~Group() = default;
+    Group(const Group&) = delete;
+    Group& operator=(const Group&) = delete;
+
+    std::string_view prefix() const { return prefix_; }
+
+    virtual size_t NumFields() const = 0;
+    virtual FieldView Describe(size_t index) const = 0;
+    virtual std::string Type(size_t index) const = 0;
+    virtual void Set(size_t index, std::string_view value) = 0;
+    virtual std::string Get(size_t index) const = 0;
+    virtual std::string Default(size_t index) const = 0;
+    /// True when the field's current value satisfies its declared bounds, or has none.
+    virtual bool WithinBounds(size_t index) const = 0;
+
+  private:
+    std::string_view prefix_;
+  };
+
+  template <typename T>
+  class TypedGroup final : public Group {
+  public:
+    TypedGroup(std::string_view prefix, T& instance) : Group(prefix), instance_(instance) {}
+
+    size_t NumFields() const override { return Fields<T>::kList.size(); }
+
+    FieldView Describe(size_t index) const override {
+      const FieldDesc<T>& field = Fields<T>::kList[index];
+      return FieldView{field.name, field.doc, field.bounds};
+    }
+
+    std::string Type(size_t index) const override { return Fields<T>::kList[index].type_name(); }
+
+    void Set(size_t index, std::string_view value) override { Fields<T>::kList[index].set(&instance_, value); }
+
+    std::string Get(size_t index) const override { return Fields<T>::kList[index].get(&instance_); }
+
+    std::string Default(size_t index) const override {
+      // One default-constructed instance per settings type, and the only place defaults are read
+      // from, so a default is never written down a second time just to be reported.
+      static const T kDefaults{};
+      return Fields<T>::kList[index].get(&kDefaults);
+    }
+
+    bool WithinBounds(size_t index) const override {
+      const FieldDesc<T>& field = Fields<T>::kList[index];
+      if (!field.bounds.active || field.as_double == nullptr) {
+        return true;
+      }
+      const double value = field.as_double(&instance_);
+      return value >= field.bounds.min && value <= field.bounds.max;
+    }
+
+  private:
+    T& instance_;
+  };
+
+  /// Locates the group and field index a full key names. The group is null when the key is absent.
+  std::pair<Group*, size_t> Find(std::string_view key) const;
 
   Source SourceOf(const std::string& key) const;
 
@@ -135,7 +210,9 @@ private:
   /// holds, so previously handed-out views stay valid.
   std::string_view Intern(std::string_view value);
 
-  std::vector<Group> groups_;
+  // Move-only, because the groups are. Copying a registry would give two of them write access to
+  // one set of settings, which is never what a caller means.
+  std::vector<std::unique_ptr<Group>> groups_;
   std::vector<std::pair<std::string, Source>> sources_;
   std::deque<std::string> interned_;
 };
