@@ -50,15 +50,29 @@ dataset_registry() {
     python3 -m cuvslam_tools.dataset_registry "$@"
 }
 
-dataset_registry validate
+# Mirrors resolve_eval_suite_args() in scripts/datasets_config.sh, which this
+# script cannot source: that file requires the S3 variables and this runs inside
+# the eval container. An unset EVAL_SUITE selects every record.
+EVAL_SUITE_ARGS=()
+if [ -n "${EVAL_SUITE+set}" ]; then
+  if [ -z "$EVAL_SUITE" ]; then
+    echo "Error: EVAL_SUITE is set but empty; unset it or name a suite." >&2
+    exit 1
+  fi
+  EVAL_SUITE_ARGS=(--suite "$EVAL_SUITE")
+fi
+
+dataset_registry validate "${EVAL_SUITE_ARGS[@]}"
+
+echo "=== Evaluation suite: ${EVAL_SUITE:-<unset, every record>} ==="
 
 DATASETS=()
 while IFS= read -r record; do
   DATASETS+=("$record")
-done < <(dataset_registry eval-records)
+done < <(dataset_registry eval-records "${EVAL_SUITE_ARGS[@]}")
 
 if [ "${#DATASETS[@]}" -eq 0 ]; then
-  echo "Error: the dataset registry lists no evaluation records." >&2
+  echo "Error: the dataset registry lists no evaluation records for this suite." >&2
   exit 1
 fi
 
