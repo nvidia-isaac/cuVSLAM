@@ -104,16 +104,19 @@ is why `tracker` resolves to `sof.tracker` without colliding with `sof.lr_tracke
 ambiguity throws and lists the candidates.
 
 **Every value carries its origin.** `Source` records whether a value is a default or came from a
-file, the command line, or an API call. `ToJson()` emits the resolved configuration with that
-provenance, which is what lets a run's full configuration be embedded in its report — including
-overrides that never appeared in any config file.
+file, the command line, or an API call, and `List()` reports it alongside the value, default, type
+and description. That is what lets a run's full configuration be recorded with its results,
+including overrides that never appeared in any file. Serialization is deliberately left to the
+caller: this library has one on-disk format, and a report that also carries a git SHA and dataset
+details should decide its own shape rather than have one imposed here.
 
 File format
 -----------
 
 Flat `key: value` or `key = value`, one per line, `#` starts a comment. The parameter surface is
-genuinely flat, so this needs no YAML or JSON parser. Values are strings in both directions, so a
-`ToJson()` dump reloads through `SetFromFile()` unchanged.
+genuinely flat, so this needs no YAML or JSON parser. It is the only format the library reads or
+writes, and the values `List()` reports are accepted back verbatim, so writing them out and
+reading them in replays a configuration exactly.
 
 ```text
 # tuning.txt

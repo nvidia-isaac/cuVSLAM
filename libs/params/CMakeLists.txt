@@ -28,7 +28,6 @@ set(SOURCES
 
 set(LIBS
     common
-    jsoncpp::jsoncpp
     )
 
 setup_staticlib_project(

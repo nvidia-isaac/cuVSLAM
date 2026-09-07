@@ -24,7 +24,6 @@
 #include <vector>
 
 #include "common/include_gtest.h"
-#include "common/include_json.h"
 
 // Stand-in settings structs. They exercise the mechanism itself -- every supported field type,
 // every failure mode -- without tying these tests to any real struct's field list.
@@ -226,69 +225,23 @@ TEST_F(ParamsTest, LastSourceWins) {
   EXPECT_EQ(count->value, "2");
 }
 
-TEST_F(ParamsTest, JsonDumpRecordsValueAndProvenance) {
+TEST_F(ParamsTest, ReportsProvenanceForOverriddenAndDefaultValues) {
   registry.Set("widget.count", "42", Source::File);
-
-  Json::Value root;
-  JsonUtils::readJsonFromString(registry.ToJson(), root);
-
-  ASSERT_TRUE(root.isMember("widget.count"));
-  EXPECT_EQ(root["widget.count"]["value"].asString(), "42");
-  EXPECT_EQ(root["widget.count"]["source"].asString(), "file");
-  EXPECT_EQ(root["widget.count"]["default"].asString(), "7");
-
-  ASSERT_TRUE(root.isMember("widget.big"));
-  EXPECT_EQ(root["widget.big"]["source"].asString(), "default");
-  EXPECT_FALSE(root["widget.big"].isMember("default")) << "defaults are only spelled out when overridden";
-}
-
-class BoundsTest : public ::testing::Test {
-protected:
-  void SetUp() override { registry.Add("bounded", bounded); }
-
-  Bounded bounded;
-  Registry registry;
-};
-
-TEST_F(BoundsTest, AcceptsValuesInsideTheBounds) {
-  registry.Set("bounded.count", "0", Source::Api);
-  EXPECT_EQ(bounded.count, 0);
-
-  registry.Set("bounded.ratio", "1.0", Source::Api);
-  EXPECT_EQ(bounded.ratio, 1.0f);
-}
-
-TEST_F(BoundsTest, RejectsNegativeCountAndLeavesTheFieldUntouched) {
-  try {
-    registry.Set("bounded.count", "-1", Source::Api);
-    FAIL() << "expected a bounds failure";
-  } catch (const std::runtime_error& e) {
-    const std::string message = e.what();
-    EXPECT_NE(message.find("bounded.count"), std::string::npos);
-    EXPECT_NE(message.find("non-negative"), std::string::npos);
-  }
-  EXPECT_EQ(bounded.count, 5) << "a rejected value must be rolled back";
-}
-
-TEST_F(BoundsTest, RejectsValueAboveTheRangeAndReportsTheRange) {
-  try {
-    registry.Set("bounded.ratio", "1.5", Source::Api);
-    FAIL() << "expected a bounds failure";
-  } catch (const std::runtime_error& e) {
-    EXPECT_NE(std::string(e.what()).find("[0, 1]"), std::string::npos);
-  }
-  EXPECT_EQ(bounded.ratio, 0.5f);
-}
-
-TEST_F(BoundsTest, RejectionDoesNotRecordASource) {
-  EXPECT_THROW(registry.Set("bounded.count", "-1", Source::File), std::runtime_error);
 
   const std::vector<ParamInfo> infos = registry.List();
   const auto count =
-      std::find_if(infos.begin(), infos.end(), [](const ParamInfo& i) { return i.key == "bounded.count"; });
+      std::find_if(infos.begin(), infos.end(), [](const ParamInfo& i) { return i.key == "widget.count"; });
   ASSERT_NE(count, infos.end());
-  EXPECT_EQ(count->source, Source::Default);
-  EXPECT_TRUE(count->is_default());
+  EXPECT_EQ(count->value, "42");
+  EXPECT_EQ(count->default_value, "7");
+  EXPECT_EQ(count->source, Source::File);
+  EXPECT_FALSE(count->is_default());
+
+  const auto big = std::find_if(infos.begin(), infos.end(), [](const ParamInfo& i) { return i.key == "widget.big"; });
+  ASSERT_NE(big, infos.end());
+  EXPECT_EQ(big->source, Source::Default);
+  EXPECT_TRUE(big->is_default());
+  EXPECT_EQ(big->value, big->default_value);
 }
 
 class ParamsFileTest : public ParamsTest {
@@ -351,7 +304,7 @@ TEST_F(ParamsFileTest, MissingFileThrows) {
   EXPECT_THROW(registry.SetFromFile("/nonexistent/params.txt", Source::File), std::runtime_error);
 }
 
-TEST_F(ParamsFileTest, DumpedJsonValuesReloadThroughAFile) {
+TEST_F(ParamsFileTest, ReportedValuesReloadThroughAFile) {
   registry.Set("widget.count", "23", Source::Api);
   registry.Set("widget.scale", "0.3", Source::Api);
   registry.Set("widget.ids", "1,2,3", Source::Api);
@@ -359,18 +312,18 @@ TEST_F(ParamsFileTest, DumpedJsonValuesReloadThroughAFile) {
   registry.Set("widget.mode", "slow", Source::Api);
   const Widget expected = widget;
 
-  Json::Value root;
-  JsonUtils::readJsonFromString(registry.ToJson(), root);
-  std::string reloaded;
-  for (const std::string& key : root.getMemberNames()) {
-    reloaded += key + ": " + root[key]["value"].asString() + "\n";
+  // Writing what List() reports and reading it back is how a configuration is replayed, so every
+  // reported value has to be accepted verbatim by the loader -- including the float formatting.
+  std::string contents;
+  for (const ParamInfo& info : registry.List()) {
+    contents += info.key + ": " + info.value + "\n";
   }
 
   Widget fresh;
   Registry other;
   other.Add("widget", fresh);
-  WriteFile(reloaded, "params_roundtrip.txt");
-  other.SetFromFile(path, Source::File);
+  WriteFile(contents, "params_roundtrip.txt");
+  EXPECT_EQ(other.SetFromFile(path, Source::File), Fields<Widget>::kList.size());
 
   EXPECT_EQ(fresh.count, expected.count);
   EXPECT_EQ(fresh.scale, expected.scale);

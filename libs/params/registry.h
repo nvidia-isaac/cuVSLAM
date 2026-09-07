@@ -140,9 +140,6 @@ public:
   /// Every registered parameter, in registration order. Feeds help output and reports.
   std::vector<ParamInfo> List() const;
 
-  /// JSON object of resolved values and their origins, for embedding in a run report.
-  std::string ToJson() const;
-
 private:
   /// A field's name and constraint, without binding it to any instance.
   struct FieldView {

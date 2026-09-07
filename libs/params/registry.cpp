@@ -23,8 +23,6 @@
 #include <sstream>
 #include <stdexcept>
 
-#include "common/include_json.h"
-
 namespace cuvslam::params {
 
 namespace {
@@ -244,24 +242,6 @@ std::vector<ParamInfo> Registry::List() const {
     }
   }
   return result;
-}
-
-std::string Registry::ToJson() const {
-  Json::Value root(Json::objectValue);
-  for (const ParamInfo& info : List()) {
-    // Values stay strings so the dump round-trips through SetFromFile without a type table.
-    Json::Value entry(Json::objectValue);
-    entry["value"] = info.value;
-    entry["type"] = info.type;
-    entry["source"] = std::string(ToString(info.source));
-    if (!info.is_default()) {
-      entry["default"] = info.default_value;
-    }
-    root[info.key] = entry;
-  }
-  Json::StreamWriterBuilder builder;
-  builder["indentation"] = "  ";
-  return Json::writeString(builder, root);
 }
 
 }  // namespace cuvslam::params
