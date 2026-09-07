@@ -73,27 +73,12 @@ namespace detail {
 
 // Value <-> string conversion for every supported field type. Parse throws on malformed input;
 // callers convert that into an error naming the offending key.
-inline bool ParseValue(std::string_view text, bool*) { return common::ParseBool(text); }
-inline int32_t ParseValue(std::string_view text, int32_t*) { return common::ParseInt32(text); }
-inline int64_t ParseValue(std::string_view text, int64_t*) { return common::ParseInt64(text); }
-inline uint32_t ParseValue(std::string_view text, uint32_t*) { return common::ParseUInt32(text); }
-inline uint64_t ParseValue(std::string_view text, uint64_t*) { return common::ParseUInt64(text); }
-inline float ParseValue(std::string_view text, float*) { return common::ParseFloat(text); }
-
 std::optional<bool> ParseOptionalBool(std::string_view text);
 std::vector<int32_t> ParseInt32List(std::string_view text);
 std::string FormatFloat(float value);
 std::string FormatOptionalBool(const std::optional<bool>& value);
 std::string FormatInt32List(const std::vector<int32_t>& value);
 [[noreturn]] void ThrowUnknownEnumValue(std::string_view text, const std::string& allowed);
-
-inline std::optional<bool> ParseValue(std::string_view text, std::optional<bool>*) { return ParseOptionalBool(text); }
-inline std::vector<int32_t> ParseValue(std::string_view text, std::vector<int32_t>*) { return ParseInt32List(text); }
-
-// Stored as-is. Registry::Set only ever passes a view into storage it owns, so the field outlives
-// the caller's string -- which is what makes string parameters usable at all on a struct that
-// holds string_view rather than std::string.
-inline std::string_view ParseValue(std::string_view text, std::string_view*) { return text; }
 
 inline std::string FormatValue(bool value) { return value ? "true" : "false"; }
 inline std::string FormatValue(int32_t value) { return std::to_string(value); }
@@ -117,14 +102,40 @@ std::string EnumValueList() {
   return result;
 }
 
-template <typename E, typename = std::enable_if_t<std::is_enum_v<E>>>
-E ParseValue(std::string_view text, E*) {
-  for (const EnumEntry<E>& entry : EnumNames<E>::kList) {
-    if (entry.name == text) {
-      return entry.value;
+// Parses the string form of a parameter into its field type. Selected on the field type alone,
+// so there is no dummy argument to carry the type: the caller writes ParseValue<T>(text).
+template <typename T>
+T ParseValue(std::string_view text) {
+  if constexpr (std::is_enum_v<T>) {
+    for (const EnumEntry<T>& entry : EnumNames<T>::kList) {
+      if (entry.name == text) {
+        return entry.value;
+      }
     }
+    ThrowUnknownEnumValue(text, EnumValueList<T>());
+  } else if constexpr (std::is_same_v<T, bool>) {
+    return common::ParseBool(text);
+  } else if constexpr (std::is_same_v<T, int32_t>) {
+    return common::ParseInt32(text);
+  } else if constexpr (std::is_same_v<T, int64_t>) {
+    return common::ParseInt64(text);
+  } else if constexpr (std::is_same_v<T, uint32_t>) {
+    return common::ParseUInt32(text);
+  } else if constexpr (std::is_same_v<T, uint64_t>) {
+    return common::ParseUInt64(text);
+  } else if constexpr (std::is_same_v<T, float>) {
+    return common::ParseFloat(text);
+  } else if constexpr (std::is_same_v<T, std::optional<bool>>) {
+    return ParseOptionalBool(text);
+  } else if constexpr (std::is_same_v<T, std::string_view>) {
+    // Kept as-is. Registry::Set only ever passes a view into storage it owns, so the field
+    // outlives the caller's string -- which is what lets a struct holding string_view rather than
+    // std::string have string parameters at all.
+    return text;
+  } else {
+    static_assert(std::is_same_v<T, std::vector<int32_t>>, "unsupported parameter field type");
+    return ParseInt32List(text);
   }
-  ThrowUnknownEnumValue(text, EnumValueList<E>());
 }
 
 template <typename E, typename = std::enable_if_t<std::is_enum_v<E>>>
@@ -204,7 +215,7 @@ using MemberType = std::decay_t<decltype(std::declval<Owner&>().*Member)>;
 template <typename Owner, auto Member>
 void SetMember(void* owner, std::string_view value) {
   using Value = MemberType<Owner, Member>;
-  static_cast<Owner*>(owner)->*Member = ParseValue(value, static_cast<Value*>(nullptr));
+  static_cast<Owner*>(owner)->*Member = ParseValue<Value>(value);
 }
 
 template <typename Owner, auto Member>

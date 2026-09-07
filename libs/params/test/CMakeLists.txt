@@ -19,6 +19,7 @@
 # API boundary; the test lives here so every "what does the parameter surface cover" check stays in
 # one place.
 set(SOURCES
+    completeness_test.cpp
     config_params_test.cpp
     params_test.cpp
     sof_params_test.cpp

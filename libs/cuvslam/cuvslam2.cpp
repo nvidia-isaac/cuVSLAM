@@ -72,16 +72,26 @@ int32_t RequireNonNegative(int32_t value, std::string_view expression) {
 
 // Binds every solver settings sub-struct to a key prefix. These prefixes are the parameter names
 // callers use, so they are chosen to match the sub-struct they address rather than the C++ field.
-void RegisterSolverParameters(params::Registry& registry, odom::TrackPerFrameSettings& settings) {
+//
+// Settings that the current mode never reads are left unregistered rather than registered and
+// then rejected: a name that does not resolve is reported by the registry with the same message
+// as a typo, and the rule lives here instead of being restated as a key-prefix test at each
+// entry point.
+void RegisterSolverParameters(params::Registry& registry, odom::TrackPerFrameSettings& settings,
+                              Odometry::OdometryMode mode) {
   registry.Add("sof", settings.sof);
   registry.Add("sof.feature_selection", settings.sof.feature_selection_settings);
   registry.Add("kf", settings.kf);
   registry.Add("sba", settings.sba);
-  registry.Add("sm", settings.sm);
   registry.Add("vo_pnp", settings.vo_pnp);
-  registry.Add("inertial_stereo_pnp", settings.inertial_stereo_pnp);
-  registry.Add("imu_pnp", settings.imu_pnp);
   registry.Add("icp", settings.icp);
+
+  // The IMU state machine and the inertial solvers only run with an IMU.
+  if (mode == Odometry::OdometryMode::Inertial) {
+    registry.Add("sm", settings.sm);
+    registry.Add("inertial_stereo_pnp", settings.inertial_stereo_pnp);
+    registry.Add("imu_pnp", settings.imu_pnp);
+  }
 }
 
 // Overrides per-frame settings from Internals. Internals carries concrete values with no way to
@@ -652,7 +662,7 @@ Odometry::Odometry(const Rig& rig, const Config& cfg) {
 
   tracker->svo_settings = svo_settings;
   tracker->params = odom::MakeTrackPerFrameSettings(svo_settings);
-  RegisterSolverParameters(tracker->params_registry, tracker->params);
+  RegisterSolverParameters(tracker->params_registry, tracker->params, cfg.odometry_mode);
   tracker->imu_fusion_enabled = cfg.odometry_mode == OdometryMode::Inertial || multisensor_with_imu;
   tracker->debug_dump_directory = cfg.debug_dump_directory;
   tracker->max_frame_delta_ns = static_cast<int64_t>(cfg.max_frame_delta_s * 1e9);
@@ -934,16 +944,10 @@ void Odometry::ApplyPersistentInternalParameters(const std::vector<cuvslam::inte
   });
 
   for (const cuvslam::internal::InternalParameter& parameter : parameters) {
-    const std::string_view key = parameter.key;
     // Deprecated in favour of SetParameter(), so it keeps its lenient contract: a bad key or value
     // is reported and skipped rather than thrown, because existing callers pass whole batches.
-    if (key.substr(0, 3) == "sm." && impl->odometry_mode != OdometryMode::Inertial) {
-      TraceWarning("ApplyPersistentInternalParameters: key \"%.*s\" requires Inertial mode (ignored)\n",
-                   static_cast<int>(key.size()), key.data());
-      continue;
-    }
     try {
-      impl->params_registry.Set(key, parameter.value, params::Source::Api);
+      impl->params_registry.Set(parameter.key, parameter.value, params::Source::Api);
     } catch (const std::exception& e) {
       TraceWarning("ApplyPersistentInternalParameters: %s (ignored)\n", e.what());
     }
@@ -951,8 +955,6 @@ void Odometry::ApplyPersistentInternalParameters(const std::vector<cuvslam::inte
 }
 
 void Odometry::SetParameter(std::string_view key, std::string_view value) {
-  THROW_INVALID_ARG_IF(key.substr(0, 3) == "sm." && impl->odometry_mode != OdometryMode::Inertial,
-                       "parameter '" + std::string(key) + "' requires OdometryMode::Inertial");
   impl->params_registry.Set(key, value, params::Source::Api);
 }
 

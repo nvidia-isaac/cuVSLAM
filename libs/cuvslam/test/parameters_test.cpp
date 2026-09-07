@@ -106,8 +106,20 @@ TEST_F(ParametersTest, AcceptsAnUnambiguousSuffixSoShortNamesWork) {
 }
 
 TEST_F(ParametersTest, RejectsAnAmbiguousSuffix) {
-  // Both vo_pnp and inertial_stereo_pnp have a huber parameter.
-  EXPECT_THROW(odometry_.SetParameter("huber", "0.1"), std::invalid_argument);
+  // Both vo_pnp and icp have lambda and max_iteration, and both run in this mode.
+  EXPECT_THROW(odometry_.SetParameter("lambda", "0.1"), std::invalid_argument);
+  EXPECT_THROW(odometry_.SetParameter("max_iteration", "5"), std::invalid_argument);
+}
+
+TEST_F(ParametersTest, WhatCountsAsAmbiguousDependsOnTheMode) {
+  // `huber` names both vo_pnp.huber and inertial_stereo_pnp.huber, but the inertial solvers are
+  // not registered without an IMU, so here it resolves to the only one this tracker reads. This is
+  // a consequence of not exposing settings the mode ignores, and is worth pinning: the same
+  // abbreviation is ambiguous on an inertial tracker.
+  // 0.25 is exactly representable, so it survives the round trip through the reported form
+  // unchanged; values like 0.03 come back as 0.0299999993 because the float formatting is exact.
+  EXPECT_NO_THROW(odometry_.SetParameter("huber", "0.25"));
+  EXPECT_EQ(ValueOf("vo_pnp.huber"), "0.25");
 }
 
 TEST_F(ParametersTest, RejectsAnUnknownName) {
@@ -128,10 +140,17 @@ TEST_F(ParametersTest, RejectsAnOutOfRangeValueAndKeepsThePreviousOne) {
   EXPECT_EQ(InfoOf("icp.blending_alpha").source, "default") << "a rejected value must not record a source";
 }
 
-TEST_F(ParametersTest, RejectsStateMachineParametersOutsideInertialMode) {
-  // They exist, but nothing reads them unless the tracker runs an IMU state machine, so setting
-  // them here would silently do nothing.
+TEST_F(ParametersTest, DoesNotExposeParametersTheCurrentModeNeverReads) {
+  // This tracker has no IMU, so the state machine and inertial solvers never run. Their settings
+  // are not registered at all rather than being settable and then ignored, so they are reported as
+  // unknown and never appear in the listing.
   EXPECT_THROW(odometry_.SetParameter("sm.min_num_kf_for_gravity", "30"), std::invalid_argument);
+  EXPECT_THROW(odometry_.SetParameter("imu_pnp.max_iteration", "10"), std::invalid_argument);
+
+  for (const Odometry::ParameterInfo& p : odometry_.GetParameters()) {
+    EXPECT_NE(p.key.substr(0, 3), "sm.") << p.key << " should not be listed without an IMU";
+    EXPECT_NE(p.key.substr(0, 8), "imu_pnp.") << p.key << " should not be listed without an IMU";
+  }
 }
 
 TEST_F(ParametersTest, SetsEnumParametersByName) {
@@ -166,11 +185,8 @@ TEST_F(ParametersTest, ReportedValuesRoundTripThroughSetParameter) {
     snapshot.emplace_back(std::string(p.key), std::string(p.value));
   }
   // Every reported value must be accepted back verbatim; otherwise a dumped configuration cannot
-  // be replayed.
+  // be replayed. Nothing needs skipping here: a parameter is only listed if this tracker reads it.
   for (const auto& [key, value] : snapshot) {
-    if (key.substr(0, 3) == "sm.") {
-      continue;  // needs Inertial mode
-    }
     EXPECT_NO_THROW(odometry_.SetParameter(key, value)) << key << " = " << value;
   }
 }

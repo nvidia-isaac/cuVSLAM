@@ -16,76 +16,139 @@
 
 #include "odometry/svo_config.h"
 
+#include <string>
+#include <vector>
+
 #include "common/include_gtest.h"
+#include "params/registry.h"
+
+/**
+ * @file svo_config_test.cpp
+ *
+ * MakeTrackPerFrameSettings() must not drop anything.
+ *
+ * Asserting field by field would only restate the assignments, so instead every parameter of the
+ * construction-time settings is changed away from its default, and the per-frame settings are then
+ * required to report the same value for every one of them. A sub-struct that stops being copied,
+ * or a newly described field that is never copied, shows up as a mismatch without this test
+ * needing to know the field names.
+ *
+ * A sub-struct added to both types but never copied is still only caught once it is registered
+ * below, which is the one case that needs a hand edit.
+ */
 
 namespace cuvslam::odom {
 namespace {
 
-/// Construction-time settings with every field that a frame re-reads set away from its default.
-Settings MakeConfiguredSettings() {
+using params::Registry;
+using params::Source;
+
+/// Registers the sub-structs that exist in both Settings and TrackPerFrameSettings, under the same
+/// names on both sides so their listings can be compared key by key.
+Registry RegisterStored(Settings& settings) {
+  Registry registry;
+  registry.Add("sof", settings.sof_settings);
+  registry.Add("sof.feature_selection", settings.sof_settings.feature_selection_settings);
+  registry.Add("kf", settings.kf_settings);
+  registry.Add("sba", settings.sba_settings);
+  registry.Add("sm", settings.sm_settings);
+  return registry;
+}
+
+Registry RegisterPerFrame(TrackPerFrameSettings& settings) {
+  Registry registry;
+  registry.Add("sof", settings.sof);
+  registry.Add("sof.feature_selection", settings.sof.feature_selection_settings);
+  registry.Add("kf", settings.kf);
+  registry.Add("sba", settings.sba);
+  registry.Add("sm", settings.sm);
+  return registry;
+}
+
+/// A valid value for @p info that differs from its current one, derived from the reported type so
+/// a newly described field needs no change here.
+std::string DifferentValue(const params::ParamInfo& info) {
+  if (info.type == "bool") {
+    return info.value == "true" ? "false" : "true";
+  }
+  if (info.type == "bool|null") {
+    return info.value == "null" ? "true" : "null";
+  }
+  if (info.type == "string") {
+    return info.value + "-changed";
+  }
+  if (info.type == "int32[]") {
+    return info.value == "7" ? "8" : "7";
+  }
+  if (info.type.rfind("enum{", 0) == 0) {
+    // "enum{a|b|c}" -> the first spelling that is not the current one.
+    const std::string names = info.type.substr(5, info.type.size() - 6);
+    size_t start = 0;
+    while (start <= names.size()) {
+      const size_t bar = names.find('|', start);
+      const std::string name = names.substr(start, bar == std::string::npos ? std::string::npos : bar - start);
+      if (name != info.value) {
+        return name;
+      }
+      if (bar == std::string::npos) {
+        break;
+      }
+      start = bar + 1;
+    }
+    return info.value;
+  }
+  // Numeric: nudge upward, staying inside the ranges these settings declare.
+  const double current = std::stod(info.value);
+  const double changed = current + 1.0;
+  if (info.type == "float") {
+    return std::to_string(changed);
+  }
+  return std::to_string(static_cast<int64_t>(changed));
+}
+
+TEST(MakeTrackPerFrameSettings, CarriesEveryParameterOfEverySharedSubStruct) {
+  Settings stored;
+  Registry stored_registry = RegisterStored(stored);
+
+  // Move every parameter off its default, so a value that fails to travel cannot coincidentally
+  // match the default on the other side.
+  std::vector<params::ParamInfo> expected;
+  for (const params::ParamInfo& info : stored_registry.List()) {
+    const std::string changed = DifferentValue(info);
+    ASSERT_NO_THROW(stored_registry.Set(info.key, changed, Source::Api)) << info.key << " = " << changed;
+  }
+  expected = stored_registry.List();
+  ASSERT_FALSE(expected.empty());
+
+  TrackPerFrameSettings per_frame = MakeTrackPerFrameSettings(stored);
+  Registry per_frame_registry = RegisterPerFrame(per_frame);
+
+  for (const params::ParamInfo& info : expected) {
+    EXPECT_EQ(per_frame_registry.Get(info.key), info.value) << info.key << " did not reach the per-frame settings";
+  }
+}
+
+TEST(MakeTrackPerFrameSettings, PerturbationActuallyChangedEveryParameter) {
+  // Guards the test above: if DifferentValue() ever returned the current value for some type, the
+  // comparison would pass without proving anything.
   Settings settings;
-  settings.sof_settings.box3_prefilter = true;
-  settings.sof_settings.border_top = 20;
-  settings.sof_settings.border_bottom = 21;
-  settings.sof_settings.border_left = 10;
-  settings.sof_settings.border_right = 11;
-  settings.sof_settings.num_desired_tracks = 321;
-  settings.kf_settings.survivor_from_last = 55.f;
-  settings.kf_settings.max_timedelta_between_kfs_s = 7;
-  settings.sba_settings.num_sba_iterations = 9;
-  settings.sm_settings.min_num_kf_for_gravity = 30;
-  return settings;
-}
-
-// box3_prefilter and the border fields are read from the per-frame struct on every frame
-// (MonoSOF builds the pyramid and masks features from them), so a per-frame struct built from type
-// defaults discards Odometry::Config::use_denoising and Rig::Camera::border_*.
-TEST(MakeTrackPerFrameSettings, CarriesTheDenoisingAndBorderSettingsAFrameRereads) {
-  const TrackPerFrameSettings per_frame = MakeTrackPerFrameSettings(MakeConfiguredSettings());
-
-  EXPECT_TRUE(per_frame.sof.box3_prefilter);
-  EXPECT_EQ(per_frame.sof.border_top, 20);
-  EXPECT_EQ(per_frame.sof.border_bottom, 21);
-  EXPECT_EQ(per_frame.sof.border_left, 10);
-  EXPECT_EQ(per_frame.sof.border_right, 11);
-}
-
-TEST(MakeTrackPerFrameSettings, CarriesEverySubStructThatExistsInBothPlaces) {
-  const TrackPerFrameSettings per_frame = MakeTrackPerFrameSettings(MakeConfiguredSettings());
-
-  EXPECT_EQ(per_frame.sof.num_desired_tracks, 321);
-  EXPECT_EQ(per_frame.kf.survivor_from_last, 55.f);
-  EXPECT_EQ(per_frame.kf.max_timedelta_between_kfs_s, 7);
-  EXPECT_EQ(per_frame.sba.num_sba_iterations, 9);
-  EXPECT_EQ(per_frame.sm.min_num_kf_for_gravity, 30u);
+  Registry registry = RegisterStored(settings);
+  for (const params::ParamInfo& info : registry.List()) {
+    EXPECT_NE(DifferentValue(info), info.value) << info.key << " (" << info.type << ") was not perturbed";
+  }
 }
 
 TEST(MakeTrackPerFrameSettings, LeavesSolverSettingsWithNoCounterpartAtTheirDefaults) {
-  const TrackPerFrameSettings per_frame = MakeTrackPerFrameSettings(MakeConfiguredSettings());
+  Settings stored;
+  stored.sof_settings.num_desired_tracks = 321;
 
+  const TrackPerFrameSettings per_frame = MakeTrackPerFrameSettings(stored);
+
+  // Settings holds no PnP or ICP configuration, so these keep the defaults TrackPerFrameSettings
+  // gives them -- including the inertial fallback's own InertialSettings() seed.
   EXPECT_EQ(per_frame.vo_pnp.huber, pnp::PNPSettings{}.huber);
-  EXPECT_EQ(per_frame.imu_pnp.max_iteration, pipelines::InertialPnPSettings{}.max_iteration);
-  // Seeded from InertialSettings() by TrackPerFrameSettings itself, not from Settings.
+  EXPECT_EQ(per_frame.icp.blending_alpha, pnp::ICPSettings{}.blending_alpha);
   EXPECT_EQ(per_frame.inertial_stereo_pnp.huber, pnp::PNPSettings::InertialSettings().huber);
-}
-
-TEST(MakeTrackPerFrameSettings, DefaultSettingsYieldDefaultPerFrameSettings) {
-  const TrackPerFrameSettings per_frame = MakeTrackPerFrameSettings(Settings{});
-
-  EXPECT_EQ(per_frame.sof.box3_prefilter, sof::Settings{}.box3_prefilter);
-  EXPECT_EQ(per_frame.sof.border_top, sof::Settings{}.border_top);
-  EXPECT_EQ(per_frame.sof.num_desired_tracks, sof::Settings{}.num_desired_tracks);
-  EXPECT_EQ(per_frame.kf.survivor_from_last, KeyFrameSettings{}.survivor_from_last);
-}
-
-TEST(MakeTrackPerFrameSettings, KeyframeOverrideStaysUnsetBecauseItIsAPerFrameDecision) {
-  Settings settings = MakeConfiguredSettings();
-  settings.kf_settings.override_frame_selection = true;
-
-  // The field exists on KeyFrameSettings, so it does travel; what matters is that nothing in
-  // construction sets it, leaving automatic keyframe selection in place by default.
-  EXPECT_FALSE(MakeTrackPerFrameSettings(Settings{}).kf.override_frame_selection.has_value());
-  EXPECT_TRUE(MakeTrackPerFrameSettings(settings).kf.override_frame_selection.value_or(false));
 }
 
 }  // namespace
