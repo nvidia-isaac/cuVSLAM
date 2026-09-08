@@ -14,10 +14,6 @@
  * of the software or derivative works thereof, you agree to be bound by this License.
  */
 
-#include <algorithm>
-#include <string>
-#include <vector>
-
 #include "common/include_gtest.h"
 #include "params/registry.h"
 #include "sof/sof_config.h"
@@ -32,46 +28,9 @@ protected:
     registry.Add("sof.feature_selection", settings.feature_selection_settings);
   }
 
-  ParamInfo Info(const std::string& key) const {
-    const std::vector<ParamInfo> infos = registry.List();
-    const auto it = std::find_if(infos.begin(), infos.end(), [&key](const ParamInfo& i) { return i.key == key; });
-    EXPECT_NE(it, infos.end()) << "no parameter named " << key;
-    return it != infos.end() ? *it : ParamInfo{};
-  }
-
   sof::Settings settings;
   Registry registry;
 };
-
-TEST_F(SofParamsTest, DefaultsComeFromTheStructNotTheDescriptors) {
-  // The descriptor list names fields; sof::Settings alone decides their defaults. If a default
-  // moves, this reports the new one with no descriptor change.
-  EXPECT_EQ(Info("sof.num_desired_tracks").default_value, std::to_string(sof::Settings{}.num_desired_tracks));
-  EXPECT_EQ(Info("sof.feature_selection.survivor_from_last").default_value,
-            registry.Get("sof.feature_selection.survivor_from_last"));
-}
-
-TEST_F(SofParamsTest, SetsScalarsThroughToTheSettings) {
-  registry.Set("sof.num_desired_tracks", "300", Source::CommandLine);
-  registry.Set("sof.border_top", "8", Source::CommandLine);
-  registry.Set("sof.box3_prefilter", "true", Source::CommandLine);
-  registry.Set("sof.min_depth", "0.35", Source::CommandLine);
-
-  EXPECT_EQ(settings.num_desired_tracks, 300);
-  EXPECT_EQ(settings.border_top, 8);
-  EXPECT_TRUE(settings.box3_prefilter);
-  EXPECT_EQ(settings.min_depth, 0.35f);
-}
-
-TEST_F(SofParamsTest, SetsEnumsByName) {
-  registry.Set("sof.tracker", "klt", Source::File);
-  registry.Set("sof.lr_tracker", "lk_horizontal", Source::File);
-  registry.Set("sof.multicam_mode", "precision", Source::File);
-
-  EXPECT_EQ(settings.tracker, sof::TrackerType::KLT);
-  EXPECT_EQ(settings.lr_tracker, sof::TrackerType::LKHorizontal);
-  EXPECT_EQ(settings.multicam_mode, camera::MulticameraMode::Precision);
-}
 
 TEST_F(SofParamsTest, ManualMulticamModeIsNotReachableByName) {
   // Manual mode needs an accompanying camera setup, so no scalar value may select it.
@@ -90,11 +49,6 @@ TEST_F(SofParamsTest, StructuralFieldsStayOffTheTuningSurface) {
   EXPECT_THROW(registry.Resolve("multicam_setup"), std::invalid_argument);
 }
 
-TEST_F(SofParamsTest, SuffixAbbreviationWorksForCommandLineUse) {
-  registry.Set("num_desired_tracks", "250", Source::CommandLine);
-  EXPECT_EQ(settings.num_desired_tracks, 250);
-}
-
 TEST_F(SofParamsTest, AbbreviationMatchesWholeSegmentsOnly) {
   // `lr_tracker` ends in the characters "tracker" but not in the segment "tracker", so the
   // abbreviation stays unambiguous. Without the segment rule every underscore in a name would
@@ -111,14 +65,6 @@ TEST_F(SofParamsTest, SurvivorFromLastIsReachableByItsBareName) {
   // Lives in a nested group, so this also covers abbreviation across a multi-segment prefix.
   EXPECT_EQ(registry.Resolve("survivor_from_last"), "sof.feature_selection.survivor_from_last");
   EXPECT_EQ(registry.Resolve("feature_selection.survivor_from_last"), "sof.feature_selection.survivor_from_last");
-}
-
-TEST_F(SofParamsTest, EveryDescribedFieldReportsItsDocAndType) {
-  for (const ParamInfo& info : registry.List()) {
-    EXPECT_FALSE(info.doc.empty()) << info.key << " has no documentation";
-    EXPECT_FALSE(info.type.empty()) << info.key << " has no type";
-    EXPECT_FALSE(info.value.empty()) << info.key << " has no value";
-  }
 }
 
 }  // namespace

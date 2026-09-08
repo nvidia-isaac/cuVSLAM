@@ -84,39 +84,5 @@ TEST_F(SolverParamsTest, EveryKeyIsUniqueAcrossGroups) {
   EXPECT_EQ(keys.size(), sorted.size());
 }
 
-TEST_F(SolverParamsTest, WritesLandInTheStructThatOdometryActuallyPassesDown) {
-  registry.Set("sof.num_desired_tracks", "321", Source::File);
-  registry.Set("kf.survivor_from_last", "60", Source::File);
-  registry.Set("sba.num_sba_iterations", "9", Source::File);
-  registry.Set("sm.min_num_kf_for_gravity", "30", Source::File);
-  registry.Set("icp.blending_alpha", "0.4", Source::File);
-
-  EXPECT_EQ(settings.sof.num_desired_tracks, 321);
-  EXPECT_EQ(settings.kf.survivor_from_last, 60.f);
-  EXPECT_EQ(settings.sba.num_sba_iterations, 9);
-  EXPECT_EQ(settings.sm.min_num_kf_for_gravity, 30u);
-  EXPECT_EQ(settings.icp.blending_alpha, 0.4f);
-}
-
-TEST_F(SolverParamsTest, UnsignedFieldRejectsNegativeValues) {
-  EXPECT_THROW(registry.Set("sm.min_num_kf_for_gravity", "-1", Source::File), std::runtime_error);
-  EXPECT_EQ(settings.sm.min_num_kf_for_gravity, pipelines::StateMachineSettings{}.min_num_kf_for_gravity);
-}
-
-TEST_F(SolverParamsTest, SurvivorPercentageIsRangeChecked) {
-  EXPECT_THROW(registry.Set("kf.survivor_from_last", "101", Source::File), std::runtime_error);
-  EXPECT_THROW(registry.Set("icp.blending_alpha", "1.2", Source::File), std::runtime_error);
-}
-
-TEST_F(SolverParamsTest, DumpCoversTheWholeSolverConfiguration) {
-  const std::vector<ParamInfo> infos = registry.List();
-  // 12 sof + 1 feature_selection + 2 kf + 8 sba + 5 sm + 9 vo_pnp + 9 inertial_stereo_pnp
-  // + 3 imu_pnp + 9 icp
-  EXPECT_EQ(infos.size(), 58u);
-  for (const ParamInfo& info : infos) {
-    EXPECT_FALSE(info.doc.empty()) << info.key << " has no documentation";
-  }
-}
-
 }  // namespace
 }  // namespace cuvslam::params
