@@ -58,6 +58,18 @@ class TestShippedRegistry(unittest.TestCase):
                 "--odometry_mode=inertial --rectified_stereo_camera=false "
                 "--async_sba=false --multicam_mode=moderate --use_segments",
             ),
+            (
+                "tum",
+                "TUM",
+                "tum/tum-rgbd_slam.cfg",
+                "--odometry_mode=rgbd --async_sba=false --use_segments",
+            ),
+            (
+                "icl_nuim",
+                "ICL_NUIM",
+                "icl_nuim/icl_nuim-rgbd_slam.cfg",
+                "--odometry_mode=rgbd --async_sba=false --use_segments",
+            ),
         ]
 
         actual = [
@@ -78,9 +90,9 @@ class TestShippedRegistry(unittest.TestCase):
             self.assertEqual(spec.archive_name, f"{spec.dataset_id}.tar")
             self.assertEqual(spec.mount_name, spec.dataset_id)
 
-    def test_only_kitti_and_euroc_are_eval_enabled(self):
+    def test_eval_enabled_datasets_are_exact(self):
         enabled = [spec.dataset_id for spec in dataset_registry.eval_datasets()]
-        self.assertEqual(enabled, ["kitti", "euroc"])
+        self.assertEqual(enabled, ["kitti", "euroc", "tum", "icl_nuim"])
 
     def test_listing_the_registry_imports_no_converter_dependencies(self):
         # In a subprocess, because sibling test modules import converters and
@@ -101,7 +113,7 @@ class TestShippedRegistry(unittest.TestCase):
             check=True,
         )
         rows = [line.split("\t") for line in completed.stdout.strip().splitlines()]
-        self.assertEqual([row[0] for row in rows], ["kitti", "euroc"])
+        self.assertEqual([row[0] for row in rows], ["kitti", "euroc", "tum", "icl_nuim"])
         self.assertTrue(all(len(row) == 4 for row in rows), rows)
 
     def test_unknown_dataset_is_rejected_with_the_known_ids(self):
@@ -294,10 +306,15 @@ class TestSuiteSelection(unittest.TestCase):
         finally:
             dataset_registry.DATASETS = original
 
-    def test_both_suites_select_kitti_and_euroc_today(self):
-        for suite in dataset_registry.SUITES:
-            selected = [spec.dataset_id for spec in dataset_registry.eval_datasets(suite)]
-            self.assertEqual(selected, ["kitti", "euroc"], suite)
+    def test_smoke_covers_every_modality(self):
+        # Pre-merge has to exercise stereo, stereo-inertial and RGB-D. Which
+        # datasets provide that is free to change; the coverage is not.
+        modes = {
+            record.kpi_type
+            for spec in dataset_registry.eval_datasets("smoke")
+            for record in dataset_registry.eval_records(spec, "smoke")
+        }
+        self.assertEqual(modes, {"STEREO", "VIO", "RGBD"})
 
     def test_omitted_suite_matches_full(self):
         self.assertEqual(
