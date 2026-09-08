@@ -16,6 +16,7 @@
 set(SOURCES
     image_transform_test.cpp
     depth_loader_test.cpp
+    param_file_test.cpp
 )
 
 # Linking all the required libraries

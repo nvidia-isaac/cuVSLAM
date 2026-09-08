@@ -76,8 +76,9 @@ Solver parameters expose low-level behaviour, are not covered by API stability g
 change or disappear in any release. Normal applications should leave them alone. The same values
 are reachable from C++ with `Odometry::SetParameter()` and from Python with `set_parameter()` and
 `set_parameters()`; `Odometry::GetParameters()` reports every parameter with its current value and
-where that value came from. The library itself reads no files -- the `--params` format is owned by
-this tool, and Python callers hand `set_parameters()` a dict, so they can use a real YAML parser.
+where that value came from. The library itself reads no files: the `--params` format lives in
+`libs/utils/param_file.h`, shared by the tools and not shipped, and Python callers hand
+`set_parameters()` a dict so they can use a real YAML parser.
 
 # Run tracker on EuRoC MAV Dataset (OBSOLETE)
 

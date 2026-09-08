@@ -116,8 +116,9 @@ values back; anything file-shaped is the caller's business.
 That is deliberate. A parameter file only ever had one consumer -- `cuvslam_api_launcher`, which
 must split its entries across two phases anyway -- and a report needs its own shape because it
 also carries a git SHA and dataset details. Defining a format here served one caller and invited
-every other one to work around it. `tools/cuvslam_api_launcher/ReadParamFile()` owns the format it
-uses, and Python callers pass a dict, which lets them use a real YAML parser rather than a subset:
+every other one to work around it. The `--params` format the tools share lives in
+`libs/utils/param_file.h`, which does not ship, and Python callers pass a dict so they can use a
+real YAML parser rather than a subset:
 
 ```python
 odometry.set_parameters({k: str(v) for k, v in yaml.safe_load(open(path)).items()})

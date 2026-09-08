@@ -18,11 +18,13 @@ set(HEADERS
     image_io.h
     image_loader.h
     image_transform.h
+    param_file.h
     )
 
 set(SOURCES
     image_io.cpp
     image_loader.cpp
+    param_file.cpp
     )
 
 setup_staticlib_project(
