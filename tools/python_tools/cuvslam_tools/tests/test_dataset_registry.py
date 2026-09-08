@@ -227,9 +227,11 @@ class TestValidationFailures(unittest.TestCase):
         self.assertEqual(distinct.evals[1].kpi_prefix, "TARTAN_FLAKY")
 
     def test_unknown_dataset_lookup_lists_known_ids(self):
+        # Must stay a name no dataset will ever claim, or this stops exercising
+        # the error path.
         known = ", ".join(sorted(dataset_registry.DATASETS))
         with self.assertRaisesRegex(RegistryError, f"known: {re.escape(known)}"):
-            dataset_registry.dataset("m3ed_spot")
+            dataset_registry.dataset("no_such_dataset")
 
     def test_unknown_suite_filter_fails(self):
         with self.assertRaisesRegex(RegistryError, "unknown suite"):
