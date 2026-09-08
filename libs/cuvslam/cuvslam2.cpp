@@ -396,7 +396,10 @@ public:
     params_registry.Add("kf", params.kf);
     params_registry.Add("sba", params.sba);
     params_registry.Add("vo_pnp", params.vo_pnp);
+#ifdef USE_CUDA
+    // RGB-D only, and the solver itself is a CUDA build.
     params_registry.Add("icp", params.icp);
+#endif
 
     // The IMU state machine and the inertial solvers only run with an IMU.
     if (odometry_mode == Odometry::OdometryMode::Inertial) {

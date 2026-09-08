@@ -83,11 +83,13 @@ TEST(ParameterCompleteness, PnpSettings) {
   EXPECT_EQ(DescribedCount<pnp::PNPSettings>(), 9u);
 }
 
+#ifdef USE_CUDA
 TEST(ParameterCompleteness, IcpSettings) {
   // Deliberately not a parameter: verbose is a debugging aid.
   EXPECT_EQ(sizeof(pnp::ICPSettings), 40u) << "ICPSettings changed shape";
   EXPECT_EQ(DescribedCount<pnp::ICPSettings>(), 9u);
 }
+#endif
 
 TEST(ParameterCompleteness, PublicConfigs) {
   // Deliberately not parameters: rgbd_settings and multisensor_settings are described separately
@@ -121,7 +123,9 @@ TEST(ParameterCompleteness, EveryDefaultRoundTrips) {
   ExpectRoundTrip<pipelines::StateMachineSettings>("sm");
   ExpectRoundTrip<pipelines::InertialPnPSettings>("imu_pnp");
   ExpectRoundTrip<pnp::PNPSettings>("vo_pnp");
+#ifdef USE_CUDA
   ExpectRoundTrip<pnp::ICPSettings>("icp");
+#endif
   ExpectRoundTrip<Odometry::Config>("odometry");
   ExpectRoundTrip<Odometry::RGBDSettings>("rgbd");
   ExpectRoundTrip<Odometry::MultisensorSettings>("multisensor");

@@ -147,7 +147,9 @@ TEST(MakeTrackPerFrameSettings, LeavesSolverSettingsWithNoCounterpartAtTheirDefa
   // Settings holds no PnP or ICP configuration, so these keep the defaults TrackPerFrameSettings
   // gives them -- including the inertial fallback's own InertialSettings() seed.
   EXPECT_EQ(per_frame.vo_pnp.huber, pnp::PNPSettings{}.huber);
+#ifdef USE_CUDA
   EXPECT_EQ(per_frame.icp.blending_alpha, pnp::ICPSettings{}.blending_alpha);
+#endif
   EXPECT_EQ(per_frame.inertial_stereo_pnp.huber, pnp::PNPSettings::InertialSettings().huber);
 }
 

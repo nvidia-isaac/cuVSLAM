@@ -103,11 +103,14 @@ TEST_F(ParametersTest, AcceptsAnUnambiguousSuffixSoShortNamesWork) {
   EXPECT_EQ(ValueOf("sof.num_desired_tracks"), "250");
 }
 
+#ifdef USE_CUDA
 TEST_F(ParametersTest, RejectsAnAmbiguousSuffix) {
-  // Both vo_pnp and icp have lambda and max_iteration, and both run in this mode.
+  // Both vo_pnp and icp have lambda and max_iteration, and both are registered in this mode. ICP
+  // is a CUDA-only solver, so without it these names are unambiguous and there is nothing to test.
   EXPECT_THROW(odometry_.SetParameter("lambda", "0.1"), std::invalid_argument);
   EXPECT_THROW(odometry_.SetParameter("max_iteration", "5"), std::invalid_argument);
 }
+#endif
 
 TEST_F(ParametersTest, WhatCountsAsAmbiguousDependsOnTheMode) {
   // `huber` names both vo_pnp.huber and inertial_stereo_pnp.huber, but the inertial solvers are
@@ -132,10 +135,11 @@ TEST_F(ParametersTest, RejectsAValueOfTheWrongTypeAndKeepsThePreviousOne) {
 }
 
 TEST_F(ParametersTest, RejectsAnOutOfRangeValueAndKeepsThePreviousOne) {
-  const std::string before = ValueOf("icp.blending_alpha");
-  EXPECT_THROW(odometry_.SetParameter("icp.blending_alpha", "2.5"), std::runtime_error);
-  EXPECT_EQ(ValueOf("icp.blending_alpha"), before);
-  EXPECT_EQ(InfoOf("icp.blending_alpha").source, "default") << "a rejected value must not record a source";
+  // kf.survivor_from_last is a percentage, and unlike the ICP settings it exists in every build.
+  const std::string before = ValueOf("kf.survivor_from_last");
+  EXPECT_THROW(odometry_.SetParameter("kf.survivor_from_last", "101"), std::runtime_error);
+  EXPECT_EQ(ValueOf("kf.survivor_from_last"), before);
+  EXPECT_EQ(InfoOf("kf.survivor_from_last").source, "default") << "a rejected value must not record a source";
 }
 
 TEST_F(ParametersTest, DoesNotExposeParametersTheCurrentModeNeverReads) {

@@ -37,7 +37,9 @@ protected:
     registry.Add("vo_pnp", settings.vo_pnp);
     registry.Add("inertial_stereo_pnp", settings.inertial_stereo_pnp);
     registry.Add("imu_pnp", settings.imu_pnp);
+#ifdef USE_CUDA
     registry.Add("icp", settings.icp);
+#endif
   }
 
   odom::TrackPerFrameSettings settings;
