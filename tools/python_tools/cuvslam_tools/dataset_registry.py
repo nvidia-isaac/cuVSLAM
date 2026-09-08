@@ -205,9 +205,8 @@ DATASETS: dict[str, DatasetSpec] = {
             ),
         ),
     ),
-    # Full-only. TUM is the larger RGB-D corpus at 15 sequences and a 9.1 GiB
-    # tarball, and ICL-NUIM already covers the modality pre-merge for less than
-    # half the staging cost.
+    # Kept out of smoke deliberately: ICL-NUIM already covers RGB-D pre-merge for
+    # a fraction of the staging cost.
     "tum": DatasetSpec(
         dataset_id="tum",
         prepare_module="cuvslam_tools.dataset_preparation.tum.prepare",
@@ -219,9 +218,8 @@ DATASETS: dict[str, DatasetSpec] = {
             ),
         ),
     ),
-    # In both suites, so pre-merge covers RGB-D alongside KITTI's stereo and
-    # EuRoC's stereo-inertial. One config in both keeps a single KPI prefix, so
-    # PR values stay comparable to the nightly history a PR diffs against.
+    # One config in both suites, not one per suite: a second would derive its own
+    # KPI prefix and make a PR's diff against the nightly history meaningless.
     "icl_nuim": DatasetSpec(
         dataset_id="icl_nuim",
         prepare_module="cuvslam_tools.dataset_preparation.icl_nuim.prepare",
