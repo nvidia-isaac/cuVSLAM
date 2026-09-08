@@ -17,8 +17,12 @@ To enable SLAM and save both odometry and SLAM poses:
 ```
 
 **Note:** SLAM requires both flags:
-- `--cfg_enable_slam` - enables SLAM tracking
-- `--cfg_enable_export` - enables observation/landmark export (required for SLAM to get odometry state)
+- `--cfg_enable_slam` - constructs the SLAM instance
+- `--cfg_enable_export` - enables observation/landmark export (required for SLAM to get odometry state);
+  shorthand for `-Podometry.enable_observations_export=true -Podometry.enable_landmarks_export=true`
+
+These two are the only flags left that touch the tracker: everything else in `Odometry::Config` and
+`Slam::Config` is a parameter, set through `--params` or `-P` as described below.
 
 ### Save Map
 

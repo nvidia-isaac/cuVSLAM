@@ -51,6 +51,11 @@ The tracker looks for the EDEX at `CUVSLAM_DATASETS/<edex>/<edex_filename>` and 
 
 ## Common flag reference
 
+Solver settings are not gflags. They are named parameters set with a repeatable `-Pkey=value`, where
+any unambiguous suffix of a name works (`-Pnum_desired_tracks` reaches `sof.num_desired_tracks`). Run
+`./build/bin/tracker --list_params` for the full set with types, defaults and descriptions. An unknown
+or ambiguous name fails the run rather than being ignored.
+
 ### Input / output
 
 | Flag | Default | Description |
@@ -67,8 +72,8 @@ The tracker looks for the EDEX at `CUVSLAM_DATASETS/<edex>/<edex_filename>` and 
 
 | Flag | Default | Description |
 |---|---|---|
-| `-async_sba` | `false` | `false` = blocking SBA (deterministic), and selects an offline `Tracker.Mode`. Keep `false` for debugging, with `-sync_slam=true`. |
-| `-slam_reproduce_mode` | `false` | Sync + non-random SLAM for exact reproducibility |
+| `-Psba.async` | `true` | `false` = blocking SBA (deterministic). Keep `false` for debugging, with `-slam_reproduce_mode`. |
+| `-slam_reproduce_mode` | `true` | Sync + non-random SLAM for exact reproducibility |
 
 ### SLAM
 
@@ -81,10 +86,10 @@ The tracker looks for the EDEX at `CUVSLAM_DATASETS/<edex>/<edex_filename>` and 
 
 | Flag | Default | Description |
 |---|---|---|
-| `-border_top` | `0` | Pixels to ignore at top of image |
-| `-border_bottom` | `0` | Pixels to ignore at bottom |
-| `-border_left` | `0` | Pixels to ignore at left |
-| `-border_right` | `0` | Pixels to ignore at right |
+| `-Psof.border_top` | `0` | Pixels to ignore at top of image |
+| `-Psof.border_bottom` | `0` | Pixels to ignore at bottom |
+| `-Psof.border_left` | `0` | Pixels to ignore at left |
+| `-Psof.border_right` | `0` | Pixels to ignore at right |
 
 ### IMU debug
 

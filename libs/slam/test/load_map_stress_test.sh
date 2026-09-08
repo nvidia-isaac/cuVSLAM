@@ -11,7 +11,8 @@ CUVSLAM_LAUNCHER=$CUVSLAM_BIN/bin/cuvslam_api_launcher
 KITTI_EDEX=$CUVSLAM_DATASETS/kitti/06/stereo.edex
 
 # save map
-$CUVSLAM_LAUNCHER -edex="$KITTI_EDEX" --cfg_enable_slam --cfg_enable_export --cfg_horizontal=true \
+$CUVSLAM_LAUNCHER -edex="$KITTI_EDEX" --cfg_enable_slam --cfg_enable_export \
+  -Podometry.rectified_stereo_camera=true \
   -output_map=$CUVSLAM_MAP
 
 for i in $(seq 1 100); do
@@ -22,13 +23,14 @@ for i in $(seq 1 100); do
 
   $CUVSLAM_LAUNCHER \
     -max_fps=100 \
-    --cfg_enable_slam --cfg_enable_export --cfg_horizontal=true \
+    --cfg_enable_slam --cfg_enable_export \
+    -Podometry.rectified_stereo_camera=true \
     -edex="$KITTI_EDEX" \
-    -slam_reproduce_mode=false \
+    -Pslam.sync_mode=false \
     -slam_input_database=$CUVSLAM_MAP \
     -slam_localize_image=$CUVSLAM_DATASETS/kitti/06/image_0/000270.png \
     -slam_load_and_localize_timestamp=27 -slam_localize_guess_translation="[0.41739893, -4.497604, 290.2034]" \
-    -max_pose_graph_nodes=10000 \
+    -Pslam.max_map_size=10000 \
     -slam_simulate_slow_map_load="${slow}" \
     -slam_load_and_localize_on_frame="${frame}"
 done

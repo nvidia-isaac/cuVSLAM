@@ -22,6 +22,7 @@ odometry.async_sba: false               # run the bundle adjuster on the calling
 odometry.rectified_stereo_camera: true
 odometry.use_denoising: false
 odometry.max_frame_delta_s: 1.0
+# odometry.debug_dump_directory: /tmp/dump  # dump the input in edex format; empty disables it
 
 # RGBD mode only.
 # odometry.rgbd.depth_camera_id: 0

@@ -36,6 +36,30 @@
   whose configuration loaders are superseded by `set_parameters()`. This also drops the `pyyaml` dependency
 - `cuvslam_api_launcher`: `--config` and its YAML schema, replaced by `--params`; the `--expert_sba_*` flags, now
   ordinary parameters reachable with `-P`; and `libs/utils/cuvslam_yaml_config.*`
+- `cuvslam_api_launcher`: every flag that merely restated a field of `Odometry::Config` or `Slam::Config`. Each is now
+  reachable by name, and `--list_params` prints the full set:
+
+  | removed flag | replacement |
+  | --- | --- |
+  | `-cfg_odom_mode=1` | `-Podometry.odometry_mode=inertial` |
+  | `-cfg_multicam_mode=1` | `-Podometry.multicam_mode=precision` |
+  | `-cfg_async_sba` | `-Podometry.async_sba=true` |
+  | `-cfg_denoising` | `-Podometry.use_denoising=…` |
+  | `-cfg_horizontal` | `-Podometry.rectified_stereo_camera=true` |
+  | `-cfg_max_frame_delta_s` | `-Podometry.max_frame_delta_s=…` |
+  | `-debug_dump` | `-Podometry.debug_dump_directory=…` |
+  | `-cfg_depth_camera` | `-Podometry.rgbd.depth_camera_id=…` |
+  | `-cfg_depth_scale_factor` | `-Podometry.rgbd.depth_scale_factor=…` |
+  | `-cfg_enable_depth_stereo_tracking` | `-Podometry.rgbd.enable_depth_stereo_tracking=…` |
+  | `-cfg_planar` | `-Pslam.planar_constraints=true` |
+  | `-cfg_sync_slam`, `-slam_reproduce_mode` | `-Pslam.sync_mode=…` |
+  | `-cfg_slam_max_map_size`, `-max_pose_graph_nodes` | `-Pslam.max_map_size=…` |
+
+  `-cfg_odom_mode` and `-cfg_multicam_mode` took integers; the parameters take the names above, and
+  `odometry.odometry_mode` also accepts `multisensor`, which the flag could not express. `-cfg_depth_camera`
+  defaulted to `0` while the library defaults to `-1`, so an RGBD run that relied on the flag default must now set
+  `odometry.rgbd.depth_camera_id=0` explicitly. `--cfg_enable_slam` and `--cfg_enable_export` remain: the first
+  decides whether a `Slam` instance is built at all, the second is shorthand for the two export parameters
 
 ### Changed
 
