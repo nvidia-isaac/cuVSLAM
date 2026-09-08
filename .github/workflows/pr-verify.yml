@@ -19,10 +19,6 @@ env:
   S3_DATASETS_BUCKET: ${{ vars.S3_DATASETS_BUCKET }}
   # PR eval runs on x86_64 with the build script's default CUDA/Ubuntu.
   EVAL_CONFIG: x86_64-cuda12.6.3-ubuntu24.04
-  # Pre-merge runs the cheap suite. It selects the same records as full until a
-  # full-only dataset is enabled, and its KPI values stay comparable to the
-  # nightly history this job diffs against because the shared datasets keep one
-  # reporter config, and therefore one KPI prefix, in both suites.
   EVAL_SUITE: smoke
 
 jobs:
