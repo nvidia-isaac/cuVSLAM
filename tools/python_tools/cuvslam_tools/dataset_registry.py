@@ -172,6 +172,10 @@ def _stereo_args(*extra: str) -> tuple[str, ...]:
     return ("--odometry_mode=multicamera", *extra, "--async_sba=false", "--multicam_mode=moderate", "--use_segments")
 
 
+def _rgbd_args() -> tuple[str, ...]:
+    return ("--odometry_mode=rgbd", "--async_sba=false", "--use_segments")
+
+
 DATASETS: dict[str, DatasetSpec] = {
     "kitti": DatasetSpec(
         dataset_id="kitti",
@@ -201,15 +205,33 @@ DATASETS: dict[str, DatasetSpec] = {
             ),
         ),
     ),
-    # Provisionable but not yet evaluated: no reporter configs are produced and no
-    # validated tarball exists. Adding an EvalSpec is what enables a dataset.
+    # Full-only. TUM is the larger RGB-D corpus at 15 sequences and a 9.1 GiB
+    # tarball, and ICL-NUIM already covers the modality pre-merge for less than
+    # half the staging cost.
     "tum": DatasetSpec(
         dataset_id="tum",
         prepare_module="cuvslam_tools.dataset_preparation.tum.prepare",
+        evals=(
+            EvalSpec(
+                config="tum-rgbd_slam.cfg",
+                args=_rgbd_args(),
+                suites=frozenset({FULL_SUITE}),
+            ),
+        ),
     ),
+    # In both suites, so pre-merge covers RGB-D alongside KITTI's stereo and
+    # EuRoC's stereo-inertial. One config in both keeps a single KPI prefix, so
+    # PR values stay comparable to the nightly history a PR diffs against.
     "icl_nuim": DatasetSpec(
         dataset_id="icl_nuim",
         prepare_module="cuvslam_tools.dataset_preparation.icl_nuim.prepare",
+        evals=(
+            EvalSpec(
+                config="icl_nuim-rgbd_slam.cfg",
+                args=_rgbd_args(),
+                suites=frozenset(SUITES),
+            ),
+        ),
     ),
     "tartan": DatasetSpec(
         dataset_id="tartan",

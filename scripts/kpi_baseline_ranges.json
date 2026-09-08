@@ -31,6 +31,26 @@
         "EUROC_ARE_VIO_SLAM": {"expected": null, "tol_pct": 10},
         "EUROC_Kabsch_VIO_SLAM": {"expected": null, "tol_pct": 10},
         "EUROC_TrackingLosts_VIO_SLAM": {"expected": null, "tol_abs": 1},
-        "EUROC_FPS_VIO_SLAM": {"expected": null, "tol_pct": 15}
+        "EUROC_FPS_VIO_SLAM": {"expected": null, "tol_pct": 15},
+        "TUM_ATE_RGBD_ODOM": {"expected": null, "tol_pct": 10},
+        "TUM_ARE_RGBD_ODOM": {"expected": null, "tol_pct": 10},
+        "TUM_Kabsch_RGBD_ODOM": {"expected": null, "tol_pct": 10},
+        "TUM_TrackingLosts_RGBD_ODOM": {"expected": null, "tol_abs": 1},
+        "TUM_FPS_RGBD_ODOM": {"expected": null, "tol_pct": 15},
+        "TUM_ATE_RGBD_SLAM": {"expected": null, "tol_pct": 10},
+        "TUM_ARE_RGBD_SLAM": {"expected": null, "tol_pct": 10},
+        "TUM_Kabsch_RGBD_SLAM": {"expected": null, "tol_pct": 10},
+        "TUM_TrackingLosts_RGBD_SLAM": {"expected": null, "tol_abs": 1},
+        "TUM_FPS_RGBD_SLAM": {"expected": null, "tol_pct": 15},
+        "ICL_NUIM_ATE_RGBD_ODOM": {"expected": null, "tol_pct": 10},
+        "ICL_NUIM_ARE_RGBD_ODOM": {"expected": null, "tol_pct": 10},
+        "ICL_NUIM_Kabsch_RGBD_ODOM": {"expected": null, "tol_pct": 10},
+        "ICL_NUIM_TrackingLosts_RGBD_ODOM": {"expected": null, "tol_abs": 1},
+        "ICL_NUIM_FPS_RGBD_ODOM": {"expected": null, "tol_pct": 15},
+        "ICL_NUIM_ATE_RGBD_SLAM": {"expected": null, "tol_pct": 10},
+        "ICL_NUIM_ARE_RGBD_SLAM": {"expected": null, "tol_pct": 10},
+        "ICL_NUIM_Kabsch_RGBD_SLAM": {"expected": null, "tol_pct": 10},
+        "ICL_NUIM_TrackingLosts_RGBD_SLAM": {"expected": null, "tol_abs": 1},
+        "ICL_NUIM_FPS_RGBD_SLAM": {"expected": null, "tol_pct": 15}
     }
 }
