@@ -25,6 +25,7 @@
 #include <optional>
 #include <random>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -135,6 +136,13 @@ DEFINE_int32(cfg_depth_camera, 0, "Depth camera index");
 DEFINE_double(cfg_depth_scale_factor, kDefaultOdomCfg.rgbd_settings.depth_scale_factor, "Depth scale factor");
 DEFINE_bool(cfg_enable_depth_stereo_tracking, kDefaultOdomCfg.rgbd_settings.enable_depth_stereo_tracking,
             "Enable depth stereo tracking");
+/// One entry of a parameter file, with the line it came from so errors can point at it.
+struct ParamEntry {
+  std::string key;
+  std::string value;
+  size_t line = 0;  ///< 0 for a -P override, which has no line
+};
+
 #define VERIFY_TRACE(condition, ...) \
   if (!(condition)) {                \
     TraceError(__VA_ARGS__);         \
@@ -432,7 +440,7 @@ bool RunSlamLoadAndLocalizeOnMatchingFrame(Slam& slam, const Slam::ImageSet& ima
 }
 
 bool trackEdexDataSet(const std::string& edex_name, const Odometry::Config& odom_cfg, const Slam::Config& slam_cfg,
-                      const std::vector<params::Registry::FileEntry>& solver_params, const std::string& input_map_name,
+                      const std::vector<ParamEntry>& solver_params, const std::string& input_map_name,
                       const std::string& output_map_name) {
   std::vector<CameraId> camera_ids{StringToIntVector<CameraId>(FLAGS_cameras, ',')};
   std::unique_ptr<camera_rig_edex::ICameraRigReplay> edex_rig;
@@ -455,7 +463,7 @@ bool trackEdexDataSet(const std::string& edex_name, const Odometry::Config& odom
   std::unique_ptr<Odometry> odom = std::make_unique<Odometry>(rig, odom_cfg);
   // Solver parameters are only reachable once the tracker exists, since which of them apply
   // depends on the odometry mode it was built with.
-  for (const params::Registry::FileEntry& entry : solver_params) {
+  for (const ParamEntry& entry : solver_params) {
     odom->SetParameter(entry.key, entry.value);
   }
   TraceMessage("Odometry tracker created");
@@ -696,6 +704,54 @@ bool trackEdexDataSet(const std::string& edex_name, const Odometry::Config& odom
 }
 
 /**
+ * @brief Reads a parameter file: `key: value` or `key = value` per line, `#` starts a comment.
+ *
+ * Entries are returned rather than applied, because they are split across two phases -- the
+ * configuration must be final before the tracker is built, the solver parameters only exist after.
+ *
+ * @throws std::runtime_error if the file cannot be read or a line has no separator.
+ */
+std::vector<ParamEntry> ReadParamFile(const std::string& path) {
+  std::ifstream file(path);
+  if (!file.is_open()) {
+    throw std::runtime_error("cannot open parameter file '" + path + "'");
+  }
+
+  const auto trim = [](std::string_view text) {
+    const auto is_space = [](char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
+    while (!text.empty() && is_space(text.front())) {
+      text.remove_prefix(1);
+    }
+    while (!text.empty() && is_space(text.back())) {
+      text.remove_suffix(1);
+    }
+    return text;
+  };
+
+  std::vector<ParamEntry> entries;
+  std::string line;
+  for (size_t line_number = 1; std::getline(file, line); ++line_number) {
+    std::string_view content = line;
+    const size_t comment = content.find('#');
+    if (comment != std::string_view::npos) {
+      content = content.substr(0, comment);
+    }
+    content = trim(content);
+    if (content.empty()) {
+      continue;
+    }
+    const size_t separator = content.find_first_of(":=");
+    if (separator == std::string_view::npos) {
+      throw std::runtime_error(path + ":" + std::to_string(line_number) + ": expected 'key: value', got '" +
+                               std::string(content) + "'");
+    }
+    entries.push_back(ParamEntry{std::string(trim(content.substr(0, separator))),
+                                 std::string(trim(content.substr(separator + 1))), line_number});
+  }
+  return entries;
+}
+
+/**
  * @brief Prints every parameter with its type, default and description.
  *
  * Built from the descriptors, so it cannot fall behind the parameters that actually exist. Mode
@@ -766,10 +822,10 @@ int main(int arg_c, char** arg_v) {
   config_registry.Add("odometry.multisensor", odom_cfg.multisensor_settings);
   config_registry.Add("slam", slam_cfg);
 
-  std::vector<params::Registry::FileEntry> entries;
+  std::vector<ParamEntry> entries;
   try {
     if (!FLAGS_params.empty()) {
-      entries = params::Registry::ReadFile(FLAGS_params);
+      entries = ReadParamFile(FLAGS_params);
     }
   } catch (const std::exception& e) {
     TraceError("%s\n", e.what());
@@ -782,11 +838,11 @@ int main(int arg_c, char** arg_v) {
       TraceError("-P expects key=value, got '%s'\n", override_arg.c_str());
       return EXIT_FAILURE;
     }
-    entries.push_back(params::Registry::FileEntry{override_arg.substr(0, eq), override_arg.substr(eq + 1), 0});
+    entries.push_back(ParamEntry{override_arg.substr(0, eq), override_arg.substr(eq + 1), 0});
   }
 
-  std::vector<params::Registry::FileEntry> solver_params;
-  for (const params::Registry::FileEntry& entry : entries) {
+  std::vector<ParamEntry> solver_params;
+  for (const ParamEntry& entry : entries) {
     const std::string where = entry.line != 0 ? FLAGS_params + ":" + std::to_string(entry.line) : std::string("-P");
     try {
       if (config_registry.Knows(entry.key)) {

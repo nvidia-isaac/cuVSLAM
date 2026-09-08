@@ -741,18 +741,6 @@ NB_MODULE(pycuvslam, m) {
           "Args:\n"
           "    parameters (dict[str, str]): Names and values to apply.")
       .def(
-          "load_parameters",
-          [](Odometry& self, std::string_view path) -> uint32_t { return self.LoadParameters(path); }, nb::arg("path"),
-          "Set internal parameters from a file; see :meth:`set_parameter`.\n\n"
-          "One ``key: value`` or ``key = value`` per line, with ``#`` starting a comment.\n\n"
-          "Args:\n"
-          "    path (str): Path to the parameter file.\n\n"
-          "Returns:\n"
-          "    int: Number of parameters assigned.\n\n"
-          "Raises:\n"
-          "    RuntimeError: If the file cannot be read, or a line is malformed or names an\n"
-          "        unknown parameter; the message carries the file name and line number.")
-      .def(
           "get_parameters",
           [](const Odometry& self) -> nb::dict {
             nb::dict result;

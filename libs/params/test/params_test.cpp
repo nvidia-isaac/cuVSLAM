@@ -17,8 +17,6 @@
 #include "params/registry.h"
 
 #include <algorithm>
-#include <cstdio>
-#include <fstream>
 #include <optional>
 #include <string>
 #include <vector>
@@ -244,67 +242,7 @@ TEST_F(ParamsTest, ReportsProvenanceForOverriddenAndDefaultValues) {
   EXPECT_EQ(big->value, big->default_value);
 }
 
-class ParamsFileTest : public ParamsTest {
-protected:
-  void TearDown() override {
-    if (!path.empty()) {
-      std::remove(path.c_str());
-    }
-  }
-
-  void WriteFile(const std::string& contents, const std::string& name) {
-    path = ::testing::TempDir() + "/" + name;
-    std::ofstream file(path);
-    file << contents;
-  }
-
-  std::string path;
-};
-
-TEST_F(ParamsFileTest, LoadsKeyValueLinesAndIgnoresCommentsAndBlanks) {
-  WriteFile(
-      "# a comment\n"
-      "\n"
-      "widget.count: 11\n"
-      "widget.scale = 1.5   # trailing comment\n"
-      "  widget.mode:slow\n",
-      "params_basic.txt");
-
-  EXPECT_EQ(registry.SetFromFile(path, Source::File), 3u);
-  EXPECT_EQ(widget.count, 11);
-  EXPECT_EQ(widget.scale, 1.5f);
-  EXPECT_EQ(widget.mode, Mode::Slow);
-}
-
-TEST_F(ParamsFileTest, MalformedLineThrowsWithFileAndLineNumber) {
-  WriteFile("widget.count: 1\nthis line has no separator\n", "params_malformed.txt");
-
-  try {
-    registry.SetFromFile(path, Source::File);
-    FAIL() << "expected a parse failure";
-  } catch (const std::runtime_error& e) {
-    EXPECT_NE(std::string(e.what()).find(":2:"), std::string::npos);
-  }
-}
-
-TEST_F(ParamsFileTest, UnknownKeyInFileThrowsWithLineNumber) {
-  WriteFile("widget.count: 1\nwidget.typo: 2\n", "params_unknown.txt");
-
-  try {
-    registry.SetFromFile(path, Source::File);
-    FAIL() << "expected an unknown-key failure";
-  } catch (const std::runtime_error& e) {
-    const std::string message = e.what();
-    EXPECT_NE(message.find(":2:"), std::string::npos);
-    EXPECT_NE(message.find("widget.typo"), std::string::npos);
-  }
-}
-
-TEST_F(ParamsFileTest, MissingFileThrows) {
-  EXPECT_THROW(registry.SetFromFile("/nonexistent/params.txt", Source::File), std::runtime_error);
-}
-
-TEST_F(ParamsFileTest, ReportedValuesReloadThroughAFile) {
+TEST_F(ParamsTest, ReportedValuesAreAcceptedBackVerbatim) {
   registry.Set("widget.count", "23", Source::Api);
   registry.Set("widget.scale", "0.3", Source::Api);
   registry.Set("widget.ids", "1,2,3", Source::Api);
@@ -312,18 +250,14 @@ TEST_F(ParamsFileTest, ReportedValuesReloadThroughAFile) {
   registry.Set("widget.mode", "slow", Source::Api);
   const Widget expected = widget;
 
-  // Writing what List() reports and reading it back is how a configuration is replayed, so every
-  // reported value has to be accepted verbatim by the loader -- including the float formatting.
-  std::string contents;
-  for (const ParamInfo& info : registry.List()) {
-    contents += info.key + ": " + info.value + "\n";
-  }
-
+  // Replaying a configuration means feeding reported values back in, so every one of them has to
+  // parse -- including the float formatting, which is why %.9g is used rather than a short form.
   Widget fresh;
   Registry other;
   other.Add("widget", fresh);
-  WriteFile(contents, "params_roundtrip.txt");
-  EXPECT_EQ(other.SetFromFile(path, Source::File), Fields<Widget>::kList.size());
+  for (const ParamInfo& info : registry.List()) {
+    ASSERT_NO_THROW(other.Set(info.key, info.value, Source::File)) << info.key << " = " << info.value;
+  }
 
   EXPECT_EQ(fresh.count, expected.count);
   EXPECT_EQ(fresh.scale, expected.scale);

@@ -82,7 +82,6 @@ registry.Add("sof", settings.sof);
 registry.Add("kf", settings.kf);
 registry.Add("vo_pnp", settings.vo_pnp);
 
-registry.SetFromFile("tuning.txt", params::Source::File);
 registry.Set("sof.num_desired_tracks", "300", params::Source::CommandLine);
 ```
 
@@ -93,8 +92,7 @@ Behaviour worth knowing
 -----------------------
 
 **Unknown keys and bad values throw.** A typo in a tuning experiment is the expensive kind of
-silent failure, so nothing is warn-and-ignore. Enum errors list the valid spellings; file errors
-name the file and line.
+silent failure, so nothing is warn-and-ignore. Enum errors list the valid spellings.
 
 **Assignment is all-or-nothing.** A value that fails to parse or falls outside its bounds leaves
 the field exactly as it was and records no source, so a bad line cannot half-apply a config.
@@ -107,24 +105,26 @@ ambiguity throws and lists the candidates.
 **Every value carries its origin.** `Source` records whether a value is a default or came from a
 file, the command line, or an API call, and `List()` reports it alongside the value, default, type
 and description. That is what lets a run's full configuration be recorded with its results,
-including overrides that never appeared in any file. Serialization is deliberately left to the
-caller: this library has one on-disk format, and a report that also carries a git SHA and dataset
-details should decide its own shape rather than have one imposed here.
+including overrides that never appeared in any file.
 
-File format
------------
+Files and serialization
+-----------------------
 
-Flat `key: value` or `key = value`, one per line, `#` starts a comment. The parameter surface is
-genuinely flat, so this needs no YAML or JSON parser. It is the only format the library reads or
-writes, and the values `List()` reports are accepted back verbatim, so writing them out and
-reading them in replays a configuration exactly.
+The library reads and writes nothing. `Set()` takes a name and a string, and `List()` reports the
+values back; anything file-shaped is the caller's business.
 
-```text
-# tuning.txt
-sof.num_desired_tracks: 300
-sof.tracker: klt
-sba.num_sba_iterations = 10
+That is deliberate. A parameter file only ever had one consumer -- `cuvslam_api_launcher`, which
+must split its entries across two phases anyway -- and a report needs its own shape because it
+also carries a git SHA and dataset details. Defining a format here served one caller and invited
+every other one to work around it. `tools/cuvslam_api_launcher/ReadParamFile()` owns the format it
+uses, and Python callers pass a dict, which lets them use a real YAML parser rather than a subset:
+
+```python
+odometry.set_parameters({k: str(v) for k, v in yaml.safe_load(open(path)).items()})
 ```
+
+The values `List()` reports are accepted back verbatim by `Set()`, so a configuration can be
+recorded and replayed whatever shape the caller stores it in.
 
 Tests
 -----

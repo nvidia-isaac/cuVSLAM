@@ -14,8 +14,6 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
-import os
-import tempfile
 import unittest
 
 import cuvslam as vslam
@@ -121,32 +119,6 @@ class TestParameters(unittest.TestCase):
         params = odometry.get_parameters()
         self.assertEqual(params['sof.box3_prefilter']['value'], 'true')
         self.assertEqual(params['sof.border_top']['value'], '20')
-
-    def test_load_parameters_from_a_file(self):
-        with tempfile.NamedTemporaryFile('w', suffix='.txt', delete=False) as handle:
-            handle.write('# tuning\nsof.num_desired_tracks: 275\nvo_pnp.huber = 0.25\n')
-            path = handle.name
-        try:
-            self.assertEqual(self.odometry.load_parameters(path), 2)
-            self.assertEqual(self._value('sof.num_desired_tracks'), '275')
-            self.assertEqual(self.odometry.get_parameters()['vo_pnp.huber']['source'], 'file')
-        finally:
-            os.unlink(path)
-
-    def test_load_parameters_reports_the_offending_line(self):
-        with tempfile.NamedTemporaryFile('w', suffix='.txt', delete=False) as handle:
-            handle.write('sof.num_desired_tracks: 275\nsof.nonsense: 3\n')
-            path = handle.name
-        try:
-            with self.assertRaises(RuntimeError) as raised:
-                self.odometry.load_parameters(path)
-            self.assertIn(':2:', str(raised.exception))
-        finally:
-            os.unlink(path)
-
-    def test_load_parameters_missing_file_raises(self):
-        with self.assertRaises(RuntimeError):
-            self.odometry.load_parameters('/nonexistent/params.txt')
 
 
 class TestTrackHints(unittest.TestCase):

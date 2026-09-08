@@ -106,34 +106,6 @@ public:
   /// Current value of a parameter in string form.
   std::string Get(std::string_view key) const;
 
-  /**
-   * @brief Applies a parameter file: `key: value` or `key = value` per line, `#` starts a comment.
-   *
-   * @return number of parameters assigned.
-   * @throws std::runtime_error if the file cannot be read or a line is malformed, naming the file
-   *         and the line number.
-   */
-  size_t SetFromFile(const std::string& path, Source source);
-
-  /// One entry of a parameter file, with the line it came from so errors can point at it.
-  struct FileEntry {
-    std::string key;
-    std::string value;
-    size_t line = 0;
-  };
-
-  /**
-   * @brief Reads a parameter file without applying anything.
-   *
-   * For callers that split one file across several registries -- a tool typically configures
-   * Odometry::Config before construction and the solver parameters after -- so the file format
-   * stays defined in one place.
-   *
-   * @return the entries in file order.
-   * @throws std::runtime_error if the file cannot be read or a line is malformed.
-   */
-  static std::vector<FileEntry> ReadFile(const std::string& path);
-
   /// True if @p key names a parameter of this registry, exactly or by unambiguous suffix.
   bool Knows(std::string_view key) const;
 

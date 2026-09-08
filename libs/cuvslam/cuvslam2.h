@@ -763,22 +763,6 @@ public:
   void SetParameter(std::string_view key, std::string_view value);
 
   /**
-   * @brief Set internal parameters from a file.
-   *
-   * For internal use only; see SetParameter() for the caveats.
-   *
-   * One `key: value` or `key = value` per line, with `#` starting a comment. Assignment stops at
-   * the first bad line, so a file is either applied up to that point or reported as an error --
-   * inspect GetParameters() if you need to know what was applied.
-   *
-   * @param[in] path path to the parameter file
-   * @return number of parameters assigned
-   * @throws std::runtime_error if the file cannot be read, or a line is malformed or names an
-   * unknown parameter; the message carries the file name and line number
-   */
-  uint32_t LoadParameters(std::string_view path);
-
-  /**
    * @brief Get every internal parameter with its current value and where that value came from.
    *
    * Recording this alongside a run's results makes the run reproducible: it captures parameters

@@ -870,11 +870,6 @@ void Odometry::SetParameter(std::string_view key, std::string_view value) {
   impl->params_registry.Set(key, value, params::Source::Api);
 }
 
-uint32_t Odometry::LoadParameters(std::string_view path) {
-  // string_view for ABI reasons, but the file API needs a terminated string.
-  return static_cast<uint32_t>(impl->params_registry.SetFromFile(std::string(path), params::Source::File));
-}
-
 std::vector<Odometry::ParameterInfo> Odometry::GetParameters() const {
   // The returned views point into reported_params, so each call replaces what the previous one
   // handed out. Documented on ParameterInfo.

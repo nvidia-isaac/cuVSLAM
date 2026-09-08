@@ -15,8 +15,6 @@
  */
 
 #include <algorithm>
-#include <cstdio>
-#include <fstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -200,50 +198,6 @@ TEST_F(ParametersTest, ReportedValuesRoundTripThroughSetParameter) {
   for (const auto& [key, value] : snapshot) {
     EXPECT_NO_THROW(odometry_.SetParameter(key, value)) << key << " = " << value;
   }
-}
-
-class ParametersFileTest : public ParametersTest {
-protected:
-  void TearDown() override {
-    if (!path_.empty()) {
-      std::remove(path_.c_str());
-    }
-  }
-
-  void WriteFile(const std::string& contents, const std::string& name) {
-    path_ = ::testing::TempDir() + "/" + name;
-    std::ofstream file(path_);
-    file << contents;
-  }
-
-  std::string path_;
-};
-
-TEST_F(ParametersFileTest, LoadsParametersAndRecordsTheFileAsTheirSource) {
-  WriteFile(
-      "# tuning\n"
-      "sof.num_desired_tracks: 275\n"
-      "vo_pnp.huber = 0.05\n",
-      "public_params.txt");
-
-  EXPECT_EQ(odometry_.LoadParameters(path_), 2u);
-  EXPECT_EQ(ValueOf("sof.num_desired_tracks"), "275");
-  EXPECT_EQ(InfoOf("vo_pnp.huber").source, "file");
-}
-
-TEST_F(ParametersFileTest, ReportsTheLineNumberOfABadEntry) {
-  WriteFile("sof.num_desired_tracks: 275\nsof.nonsense: 3\n", "public_params_bad.txt");
-
-  try {
-    odometry_.LoadParameters(path_);
-    FAIL() << "expected a failure";
-  } catch (const std::runtime_error& e) {
-    EXPECT_NE(std::string(e.what()).find(":2:"), std::string::npos) << e.what();
-  }
-}
-
-TEST_F(ParametersFileTest, MissingFileThrows) {
-  EXPECT_THROW(odometry_.LoadParameters("/nonexistent/params.txt"), std::runtime_error);
 }
 
 }  // namespace

@@ -13,15 +13,16 @@
 
 ### Added
 
-- Internal parameters are now addressed by name. `Odometry::SetParameter()`, `LoadParameters()` and `GetParameters()`
-  in C++, and `set_parameter()`, `set_parameters()`, `load_parameters()` and `get_parameters()` in Python, cover every
+- Internal parameters are now addressed by name. `Odometry::SetParameter()` and `GetParameters()` in C++, and
+  `set_parameter()`, `set_parameters()` and `get_parameters()` in Python, cover every
   solver setting that `Internals` and `ApplyPersistentInternalParameters()` reached, plus everything they did not.
   `GetParameters()` reports each parameter's value, default, type, description and where the value came from, so a run's
   configuration can be recorded with its results
 - `Odometry::TrackHints`, passed to `Track()`, for values that genuinely differ from frame to frame. It currently holds
   only `override_keyframe`
 - `cuvslam_api_launcher`: `--params <file>` for a flat `key: value` parameter file, repeatable `-Pkey=value` overrides,
-  and `--list_params` to print every parameter with its type, default and description
+  and `--list_params` to print every parameter with its type, default and description. The file format belongs to the
+  tool; the library reads no files, so Python callers can use any parser and pass the result to `set_parameters()`
 - `Slam::Config::delay_warning_queue_size`: warns in verbose mode when more than the configured number of commands
   are queued to the SLAM thread, meaning SLAM falls behind odometry
 
@@ -32,7 +33,7 @@
   keyframe override. Names gained a prefix matching the settings they address, so `num_desired_tracks` is
   `sof.num_desired_tracks` and `kf_survivor_from_last` is `kf.survivor_from_last`; `sba.*` and `sm.*` keys are unchanged
 - Python: `Odometry.Internals` and `apply_expert_parameters()`, replaced as above, and the `cuvslam.utils` module,
-  whose configuration loaders are superseded by `load_parameters()`. This also drops the `pyyaml` dependency
+  whose configuration loaders are superseded by `set_parameters()`. This also drops the `pyyaml` dependency
 - `cuvslam_api_launcher`: `--config` and its YAML schema, replaced by `--params`; the `--expert_sba_*` flags, now
   ordinary parameters reachable with `-P`; and `libs/utils/cuvslam_yaml_config.*`
 
