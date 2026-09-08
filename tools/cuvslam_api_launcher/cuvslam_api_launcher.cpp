@@ -90,7 +90,7 @@ DEFINE_int32(cfg_odom_mode, static_cast<int>(kDefaultOdomCfg.odometry_mode),
              "Odometry mode: Multicamera (0), Inertial (1), RGBD (2), Mono (3)");
 DEFINE_int32(cfg_multicam_mode, static_cast<int>(kDefaultOdomCfg.multicam_mode),
              "Multicamera mode: performance (0), precision (1), or moderate (2)");
-DEFINE_bool(cfg_async_sba, kDefaultOdomCfg.async_sba, "Enable asynchronous sparse bundle adjustment");
+DEFINE_bool(cfg_async_sba, false, "Enable asynchronous sparse bundle adjustment");
 DEFINE_bool(cfg_denoising, kDefaultOdomCfg.use_denoising, "Enable image denoising");
 DEFINE_bool(cfg_horizontal, kDefaultOdomCfg.rectified_stereo_camera,
             "Enable tracking for rectified cameras with principal points on the horizontal line");
