@@ -81,11 +81,12 @@ private:
   float total_cost_and_hessian(Matrix6T& H, Vector6T& rhs, const Isometry3T& cam_from_world, uint8_t pyramid_level,
                                const ICPSettings& settings, const IcpInfo* depth_info = nullptr) const;
 
-  float reprojection_cost_and_hessian(Matrix6T& H, Vector6T& rhs, const Isometry3T& cam_from_world,
-                                      const ICPSettings& settings) const;
+  // Both return false when the term had no residuals. Do not read the outputs in that case.
+  bool reprojection_cost_and_hessian(float& cost, Matrix6T& H, Vector6T& rhs, const Isometry3T& cam_from_world,
+                                     const ICPSettings& settings) const;
 
-  float icp_hessian_and_cost(Matrix6T& H, Vector6T& rhs, const Isometry3T& cam_from_world, uint8_t pyramid_level,
-                             const ICPSettings& settings, const IcpInfo& depth_info) const;
+  bool icp_hessian_and_cost(float& cost, Matrix6T& H, Vector6T& rhs, const Isometry3T& cam_from_world,
+                            uint8_t pyramid_level, const ICPSettings& settings, const IcpInfo& depth_info) const;
 
   bool solve_level(Isometry3T& rig_from_world, Matrix6T& static_info_exp, int level, const ICPSettings& settings,
                    const IcpInfo* depth_info, const Isometry3T& cam_from_rig) const;
