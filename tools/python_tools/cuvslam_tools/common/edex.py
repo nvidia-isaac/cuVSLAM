@@ -290,9 +290,11 @@ class EDEXMetadata:
             # Validate the header and body before writing
             new_header = EDEXHeader.model_validate(self.header.model_dump())
             new_body = EDEXBody.model_validate(self.body.model_dump())
+            # by_alias is what puts "size" in the file. Without it pydantic writes the field
+            # name "resolution", which neither the C++ nor the python reader accepts.
             data = [
-                new_header.model_dump(exclude_none=True),
-                new_body.model_dump(exclude_none=True),
+                new_header.model_dump(exclude_none=True, by_alias=True),
+                new_body.model_dump(exclude_none=True, by_alias=True),
             ]
             with open(filename, "w") as f:
                 json.dump(data, f, indent=2, cls=EDEXEncoder)
