@@ -78,8 +78,11 @@ public:
                         std::vector<cuvslam::pipelines::Landmark>& landmarks) const;
 
 private:
-  float total_cost_and_hessian(Matrix6T& H, Vector6T& rhs, const Isometry3T& cam_from_world, uint8_t pyramid_level,
-                               const ICPSettings& settings, const IcpInfo* depth_info = nullptr) const;
+  // Returns false when neither term had a residual, which leaves cost, H and rhs at the empty sum:
+  // zero.
+  bool total_cost_and_hessian(float& cost, Matrix6T& H, Vector6T& rhs, const Isometry3T& cam_from_world,
+                              uint8_t pyramid_level, const ICPSettings& settings,
+                              const IcpInfo* depth_info = nullptr) const;
 
   // Both return false when the term had no residuals. Do not read the outputs in that case.
   bool reprojection_cost_and_hessian(float& cost, Matrix6T& H, Vector6T& rhs, const Isometry3T& cam_from_world,

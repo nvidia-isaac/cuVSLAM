@@ -139,23 +139,23 @@ bool VisualICP::icp_hessian_and_cost(float& cost, Matrix6T& H, Vector6T& rhs, co
   return have_residuals;
 }
 
-float VisualICP::total_cost_and_hessian(Matrix6T& H, Vector6T& rhs, const Isometry3T& rig_from_world,
-                                        uint8_t pyramid_level, const ICPSettings& settings,
-                                        const IcpInfo* depth_info) const {
+bool VisualICP::total_cost_and_hessian(float& cost, Matrix6T& H, Vector6T& rhs, const Isometry3T& rig_from_world,
+                                       uint8_t pyramid_level, const ICPSettings& settings,
+                                       const IcpInfo* depth_info) const {
   TRACE_EVENT ev = profiler_domain_.trace_event("total_cost_and_hessian");
 
   H.setZero();
   rhs.setZero();
 
-  float cost = 0.f;
+  cost = 0.f;
   const bool have_reprojection = reprojection_cost_and_hessian(cost, H, rhs, rig_from_world, settings);
+  bool have_icp = false;
 
   if (depth_info) {
     float icp_cost = 0.f;
     Vector6T rhs_icp;
     Matrix6T H_icp;
-    const bool have_icp =
-        icp_hessian_and_cost(icp_cost, H_icp, rhs_icp, rig_from_world, pyramid_level, settings, *depth_info);
+    have_icp = icp_hessian_and_cost(icp_cost, H_icp, rhs_icp, rig_from_world, pyramid_level, settings, *depth_info);
 
     // icp_cost / H_icp / rhs_icp carry nothing when the ICP term reports no residuals, so do not
     // read them at all - not even against a zero weight, because 0 * NaN is NaN. H, rhs and cost
@@ -171,7 +171,7 @@ float VisualICP::total_cost_and_hessian(Matrix6T& H, Vector6T& rhs, const Isomet
     }
   }
 
-  return cost;
+  return have_reprojection || have_icp;
 }
 
 using obs_ref = std::reference_wrapper<const camera::Observation>;
@@ -189,7 +189,14 @@ bool VisualICP::solve_level(Isometry3T& rig_from_world, Matrix6T& static_info_ex
   // Compute cam_from_world from rig_from_world
   Isometry3T cam_from_world = cam_from_rig * param_r_from_world;
 
-  float initial_cost = total_cost_and_hessian(H, rhs, cam_from_world, level, settings, depth_info);
+  float initial_cost = 0.f;
+  if (!total_cost_and_hessian(initial_cost, H, rhs, cam_from_world, level, settings, depth_info)) {
+    // No term has a residual, so H and rhs are the empty sum. There is no step to solve for and no
+    // information to report. Note this is about having no data at all, not about a cost of zero -
+    // a set of residuals that happens to fit perfectly still goes through the loop below.
+    static_info_exp.setZero();
+    return false;
+  }
   // if (initial_cost < 5e-3f) {
   //     // Nothing to minimize. We have a "pendulum" effect on still frames otherwise.
   //     static_info_exp.setIdentity();
@@ -219,7 +226,13 @@ bool VisualICP::solve_level(Isometry3T& rig_from_world, Matrix6T& static_info_ex
 
     Matrix6T H_guess;
     Vector6T rhs_guess;
-    float cost_guess = total_cost_and_hessian(H_guess, rhs_guess, cam_guess, level, settings, depth_info);
+    float cost_guess = 0.f;
+    if (!total_cost_and_hessian(cost_guess, H_guess, rhs_guess, cam_guess, level, settings, depth_info)) {
+      // The step threw away every residual, so its zero cost is not comparable with current_cost
+      // and scoring it would read the guess as a perfect fit. Reject it and try a shorter one.
+      lambda *= 2.f;
+      continue;
+    }
 
     float prr = (step.dot(H * step) + 2.f * lambda * step.dot(scaling.asDiagonal() * step)) / current_cost;
 
