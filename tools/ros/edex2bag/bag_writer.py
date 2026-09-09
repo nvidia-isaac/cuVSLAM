@@ -49,7 +49,8 @@ def edex_distortion_to_ros(intrinsics):
     params = list(intrinsics['distortion_params'])
     if model == 'brown5k':
         # fisheye and polynomial already match the ROS order, brown5k does not.
-        assert len(params) == 5, 'brown5k needs 5 coefficients, got %d' % len(params)
+        if len(params) != 5:
+            raise ValueError('brown5k needs 5 coefficients, got %d' % len(params))
         params = [params[i] for i in _BROWN5K_TO_PLUMB_BOB]
     return DISTORTION_MODEL_EDEX2ROS[model], params
 

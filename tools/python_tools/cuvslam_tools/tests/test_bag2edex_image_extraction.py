@@ -31,7 +31,7 @@ class TestGetDistortionModel(unittest.TestCase):
         np.testing.assert_allclose(params, [0.1, 0.2, 0.5, 0.3, 0.4])
 
     def test_plumb_bob_rejects_wrong_coefficient_count(self):
-        with self.assertRaises(AssertionError):
+        with self.assertRaises(ValueError):
             get_distortion_model("plumb_bob", np.array([0.1, 0.2, 0.3, 0.4]))
 
     def test_rational_polynomial_keeps_ros_order(self):

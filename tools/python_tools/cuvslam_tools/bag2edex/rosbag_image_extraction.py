@@ -454,9 +454,10 @@ def get_distortion_model(
     edex_model = DISTORTION_MODEL_ROS2EDEX[distortion_model]
     if edex_model == edex.DistortionModel.BROWN5K:
         # equidistant and rational_polynomial already match the edex order, plumb_bob does not.
-        assert (
-            len(distortion_params) == 5
-        ), f"plumb_bob needs 5 coefficients, got {len(distortion_params)}"
+        if len(distortion_params) != 5:
+            raise ValueError(
+                f"plumb_bob needs 5 coefficients, got {len(distortion_params)}"
+            )
         distortion_params = np.asarray(distortion_params)[_PLUMB_BOB_TO_BROWN5K]
     return edex_model, distortion_params
 
