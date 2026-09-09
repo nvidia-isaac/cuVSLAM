@@ -1,6 +1,7 @@
-# cuVSLAM Skills
+# cuVSLAM Agent Skills
 
-Agent skills for NVIDIA cuVSLAM (CUDA-accelerated Visual SLAM) — for use with [Claude Code](https://claude.ai/code) and [OpenClaw](https://github.com/openclaw/openclaw).
+Repository skills for NVIDIA cuVSLAM (CUDA-accelerated Visual SLAM). Codex discovers them automatically from this
+`.agents/skills/` directory; the same skills can also be installed into Claude Code and OpenClaw.
 
 ## Skills
 
@@ -24,6 +25,15 @@ Diagnose and fix cuVSLAM tracking/pose accuracy issues. Covers:
 - Debug data dump for all APIs (C++, Python, ROS 2)
 - Calibration, synchronization, and image quality checks
 
+### cuvslam-trajectory
+
+Replay recorded datasets through cuVSLAM and export a validated trajectory. Covers:
+
+- Raw EuRoC/ASL and KITTI odometry replay
+- EDEX replay and ROS bag conversion through EDEX
+- TUM output by default, with dataset-local `trajectory.txt`
+- Runtime bootstrapping, camera timestamp pairing, and output validation
+
 ### cuvslam-ci
 
 Work on cuVSLAM CI/CD on GitHub Actions. Covers:
@@ -34,24 +44,32 @@ Work on cuVSLAM CI/CD on GitHub Actions. Covers:
 
 ## Install
 
+### Codex
+
+No installation is required. Launch Codex anywhere inside the repository and it scans `.agents/skills/`
+automatically. Invoke a skill explicitly with `$cuvslam-onboard`, `$cuvslam-troubleshoot`,
+`$cuvslam-trajectory`, or `$cuvslam-ci`; matching requests can also trigger skills automatically.
+
 ### Claude Code
 
 Skills are loaded by Claude Code from `~/.claude/skills/`. From the repo root, copy the skill folders there:
 
 ```bash
-cp -r cuvslam-skills/cuvslam-onboard ~/.claude/skills/
-cp -r cuvslam-skills/cuvslam-troubleshoot ~/.claude/skills/
-cp -r cuvslam-skills/cuvslam-ci ~/.claude/skills/
+cp -r .agents/skills/cuvslam-onboard ~/.claude/skills/
+cp -r .agents/skills/cuvslam-troubleshoot ~/.claude/skills/
+cp -r .agents/skills/cuvslam-trajectory ~/.claude/skills/
+cp -r .agents/skills/cuvslam-ci ~/.claude/skills/
 ```
 
 Or clone the repo and symlink:
 
 ```bash
 git clone https://github.com/nvidia-isaac/cuVSLAM.git
-cd cuVSLAM_staging
-ln -s $(pwd)/cuvslam-skills/cuvslam-onboard ~/.claude/skills/cuvslam-onboard
-ln -s $(pwd)/cuvslam-skills/cuvslam-troubleshoot ~/.claude/skills/cuvslam-troubleshoot
-ln -s $(pwd)/cuvslam-skills/cuvslam-ci ~/.claude/skills/cuvslam-ci
+cd cuVSLAM
+ln -s $(pwd)/.agents/skills/cuvslam-onboard ~/.claude/skills/cuvslam-onboard
+ln -s $(pwd)/.agents/skills/cuvslam-troubleshoot ~/.claude/skills/cuvslam-troubleshoot
+ln -s $(pwd)/.agents/skills/cuvslam-trajectory ~/.claude/skills/cuvslam-trajectory
+ln -s $(pwd)/.agents/skills/cuvslam-ci ~/.claude/skills/cuvslam-ci
 ```
 
 Once installed, invoke a skill in Claude Code by typing its name as a slash command:
@@ -59,6 +77,7 @@ Once installed, invoke a skill in Claude Code by typing its name as a slash comm
 ```bash
 /cuvslam-onboard
 /cuvslam-troubleshoot
+/cuvslam-trajectory
 /cuvslam-ci
 ```
 
@@ -69,9 +88,10 @@ Claude Code will also trigger the relevant skill automatically when you describe
 Copy skill folders to your OpenClaw workspace `skills/` directory, or use:
 
 ```bash
-openclaw skills install cuvslam-onboard/
-openclaw skills install cuvslam-troubleshoot/
-openclaw skills install cuvslam-ci/
+openclaw skills install .agents/skills/cuvslam-onboard/
+openclaw skills install .agents/skills/cuvslam-troubleshoot/
+openclaw skills install .agents/skills/cuvslam-trajectory/
+openclaw skills install .agents/skills/cuvslam-ci/
 ```
 
 ## Source
