@@ -210,6 +210,13 @@ bool VisualICP::solve_level(Isometry3T& rig_from_world, Matrix6T& static_info_ex
   const int num_iters = depth_info ? settings.num_iters_per_scale : settings.max_iteration;
   int num_iterations = 0;
   do {
+    // A cost of zero means every residual is zero, so rhs is zero and there is no step left to
+    // take. Stop before the gain ratio instead of dividing by it, which hands prr and rho a NaN.
+    // Huber losses never go negative, so this only catches the perfect fit.
+    if (current_cost <= 0.f) {
+      break;
+    }
+
     ++num_iterations;
     Matrix6T augmented_system = H + (lambda * scaling).asDiagonal().toDenseMatrix();
     auto decomposition = augmented_system.cast<double>().ldlt();

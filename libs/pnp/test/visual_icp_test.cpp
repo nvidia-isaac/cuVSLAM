@@ -111,7 +111,8 @@ TEST(VisualICP, SolveFailsWhenNoTermHasResiduals) {
 
 // The pose already fits the observations exactly, so the cost is zero while the residuals are
 // perfectly real. A cost of zero must not be read as an absent term: the solve still succeeds, and
-// it still reports the information those residuals carry.
+// it still reports the information those residuals carry. The level also has to reach that answer
+// without scoring a gain ratio against the zero cost, which is why nothing here comes back NaN.
 TEST(VisualICP, SolveAcceptsAPerfectFit) {
   auto cam = MakePinhole();
   const auto rig = MakeRig(cam);
@@ -128,6 +129,7 @@ TEST(VisualICP, SolveAcceptsAPerfectFit) {
   EXPECT_TRUE(solver.solve(rig_from_world, info, observations, landmarks, settings));
   EXPECT_TRUE(rig_from_world.isApprox(Isometry3T::Identity()));
   EXPECT_FALSE(info.isZero());
+  EXPECT_TRUE(info.allFinite()) << info;
 }
 
 // A healthy reprojection-only problem still converges - the empty-term shortcut must not fire on
