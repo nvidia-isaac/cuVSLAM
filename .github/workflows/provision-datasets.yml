@@ -11,6 +11,7 @@ on:
           - euroc
           - tum
           - icl_nuim
+          - m3ed_spot
           - tartan
         default: kitti
       force_download:

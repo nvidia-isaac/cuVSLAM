@@ -70,6 +70,16 @@ fi
 rm -rf "$raw_dir" "$converted_dir" "$tarball" "$root_file"
 mkdir -p "$raw_dir" "$converted_dir"
 
+# Converters, unlike the registry, need third-party packages; the tools package
+# declares them. The checkout is mounted read-only, so copy before pip runs.
+echo "=== Installing cuvslam tools for conversion ==="
+(
+  install_src="$(mktemp -d)"
+  trap 'rm -rf "$install_src"' EXIT
+  cp -a "$CUVSLAM_REPO_ROOT/tools/python_tools/." "$install_src/"
+  pip install --no-cache-dir "$install_src"
+)
+
 echo "=== Preparing $DATASET with $(dataset_registry prepare-module "$DATASET") ==="
 # prepare() returns the directory to archive, so the tar root is always the
 # dataset root and no per-dataset subdirectory mapping is needed here.

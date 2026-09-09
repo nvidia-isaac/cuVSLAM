@@ -172,6 +172,10 @@ def _stereo_args(*extra: str) -> tuple[str, ...]:
     return ("--odometry_mode=multicamera", *extra, "--async_sba=false", "--multicam_mode=moderate", "--use_segments")
 
 
+def _rgbd_args() -> tuple[str, ...]:
+    return ("--odometry_mode=rgbd", "--async_sba=false", "--use_segments")
+
+
 DATASETS: dict[str, DatasetSpec] = {
     "kitti": DatasetSpec(
         dataset_id="kitti",
@@ -201,15 +205,35 @@ DATASETS: dict[str, DatasetSpec] = {
             ),
         ),
     ),
-    # Provisionable but not yet evaluated: no reporter configs are produced and no
-    # validated tarball exists. Adding an EvalSpec is what enables a dataset.
+    # Kept out of smoke deliberately: ICL-NUIM already covers RGB-D pre-merge for
+    # a fraction of the staging cost.
     "tum": DatasetSpec(
         dataset_id="tum",
         prepare_module="cuvslam_tools.dataset_preparation.tum.prepare",
+        evals=(
+            EvalSpec(
+                config="tum-rgbd_slam.cfg",
+                args=_rgbd_args(),
+                suites=frozenset({FULL_SUITE}),
+            ),
+        ),
     ),
+    # One config in both suites, not one per suite: a second would derive its own
+    # KPI prefix and make a PR's diff against the nightly history meaningless.
     "icl_nuim": DatasetSpec(
         dataset_id="icl_nuim",
         prepare_module="cuvslam_tools.dataset_preparation.icl_nuim.prepare",
+        evals=(
+            EvalSpec(
+                config="icl_nuim-rgbd_slam.cfg",
+                args=_rgbd_args(),
+                suites=frozenset(SUITES),
+            ),
+        ),
+    ),
+    "m3ed_spot": DatasetSpec(
+        dataset_id="m3ed_spot",
+        prepare_module="cuvslam_tools.dataset_preparation.m3ed_spot.prepare",
     ),
     "tartan": DatasetSpec(
         dataset_id="tartan",
