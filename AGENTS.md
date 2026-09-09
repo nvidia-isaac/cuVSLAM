@@ -22,7 +22,7 @@ Before making code changes or designing new features, read **[DESIGN_CONCEPTS.md
 
 ## CI/CD pipelines
 
-The GitHub Actions CI/CD (build, test, lint, dataset evaluation, nightly release, and dataset provisioning) is documented in the `cuvslam-ci` skill at [cuvslam-skills/cuvslam-ci/SKILL.md](cuvslam-skills/cuvslam-ci/SKILL.md). Read it before changing any `.github/workflows/**`, CI script under `scripts/`, dataset preparation code under `tools/python_tools/cuvslam_tools/dataset_preparation/`, or the test matrix.
+The GitHub Actions CI/CD (build, test, lint, dataset evaluation, nightly release, and dataset provisioning) is documented in the `cuvslam-ci` skill at [.agents/skills/cuvslam-ci/SKILL.md](.agents/skills/cuvslam-ci/SKILL.md). Read it before changing any `.github/workflows/**`, CI script under `scripts/`, dataset preparation code under `tools/python_tools/cuvslam_tools/dataset_preparation/`, or the test matrix.
 
 Load-bearing rules:
 
@@ -89,9 +89,21 @@ When creating a git branch, use `<user-name>/<branch-name>`, with `<branch-name>
 - Deleting or overwriting build artifacts or test data
 - Changing versions of FetchContent dependencies in `cmake/ext/`
 
-## Claude Code Skills
+## Agent Skills
 
-Project-specific skills in `cuvslam-skills/` — see `cuvslam-skills/README.md` for descriptions and install steps.
+Project-specific skills live in `.agents/skills/` and are discovered automatically by Codex when it runs inside this
+repository. See [.agents/skills/README.md](.agents/skills/README.md) for descriptions and other agent installations.
+
+To install them into Claude Code:
+
+```bash
+cp -r .agents/skills/cuvslam-onboard ~/.claude/skills/
+cp -r .agents/skills/cuvslam-troubleshoot ~/.claude/skills/
+cp -r .agents/skills/cuvslam-trajectory ~/.claude/skills/
+cp -r .agents/skills/cuvslam-ci ~/.claude/skills/
+```
+
+`cuvslam-ci` covers the CI/CD pipelines (see the CI/CD pipelines section above).
 
 ## AGENTS.md Convention
 
