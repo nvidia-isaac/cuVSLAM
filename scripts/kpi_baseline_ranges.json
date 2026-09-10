@@ -51,6 +51,16 @@
         "ICL_NUIM_ARE_RGBD_SLAM": {"expected": null, "tol_pct": 10},
         "ICL_NUIM_Kabsch_RGBD_SLAM": {"expected": null, "tol_pct": 10},
         "ICL_NUIM_TrackingLosts_RGBD_SLAM": {"expected": null, "tol_abs": 1},
-        "ICL_NUIM_FPS_RGBD_SLAM": {"expected": null, "tol_pct": 15}
+        "ICL_NUIM_FPS_RGBD_SLAM": {"expected": null, "tol_pct": 15},
+        "M3ED_SPOT_ATE_STEREO_ODOM": {"expected": null, "tol_pct": 10},
+        "M3ED_SPOT_ARE_STEREO_ODOM": {"expected": null, "tol_pct": 10},
+        "M3ED_SPOT_Kabsch_STEREO_ODOM": {"expected": null, "tol_pct": 10},
+        "M3ED_SPOT_TrackingLosts_STEREO_ODOM": {"expected": null, "tol_abs": 1},
+        "M3ED_SPOT_FPS_STEREO_ODOM": {"expected": null, "tol_pct": 15},
+        "M3ED_SPOT_ATE_STEREO_SLAM": {"expected": null, "tol_pct": 10},
+        "M3ED_SPOT_ARE_STEREO_SLAM": {"expected": null, "tol_pct": 10},
+        "M3ED_SPOT_Kabsch_STEREO_SLAM": {"expected": null, "tol_pct": 10},
+        "M3ED_SPOT_TrackingLosts_STEREO_SLAM": {"expected": null, "tol_abs": 1},
+        "M3ED_SPOT_FPS_STEREO_SLAM": {"expected": null, "tol_pct": 15}
     }
 }
