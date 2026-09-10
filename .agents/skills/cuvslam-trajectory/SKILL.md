@@ -1,10 +1,16 @@
 ---
 name: cuvslam-trajectory
 description: >
-  Replay recorded datasets through NVIDIA cuVSLAM and export a verified pose trajectory.
-  Use for offline replay of EuRoC/ASL recordings, KITTI odometry sequences, EDEX datasets,
-  or ROS bags, especially when the requested deliverable is a TUM or KITTI trajectory file.
-  Do not use for live-camera tracking or for diagnosing accuracy regressions in an existing run.
+  Replay a recorded cuVSLAM dataset offline and export a validated pose trajectory file.
+  Use when asked to: run/replay a EuRoC/ASL, KITTI odometry, EDEX, or ROS bag dataset
+  through cuVSLAM and get the poses out; generate a trajectory.txt; produce a TUM or KITTI
+  trajectory/pose file; export the camera path or odometry output; or create a trajectory
+  to compare against ground truth. Triggers on: "run KITTI through cuvslam and give me the
+  poses", "generate trajectory.txt from this bag", "export a TUM trajectory", "replay EuRoC
+  dataset", "get the camera path/poses", "convert a ROS bag to a trajectory". The deliverable
+  is a trajectory FILE from a recorded dataset — for live-camera tracking or first-time
+  build/setup use cuvslam-onboard; for diagnosing drift or accuracy regressions in an existing
+  run use cuvslam-troubleshoot.
 ---
 
 # cuVSLAM trajectory replay
