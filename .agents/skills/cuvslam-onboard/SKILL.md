@@ -8,6 +8,7 @@ description: >
   install PyCuVSLAM, set up cuVSLAM environment, run cuVSLAM examples, prepare
   KITTI/EuRoC/TUM datasets, run visual odometry, set up live camera tracking
   (RealSense/ZED/OAK-D/Orbbec), run cuVSLAM in Docker, or use cuVSLAM C++ tools.
+  To replay a recorded dataset and export a pose/trajectory file, use cuvslam-trajectory instead.
 ---
 
 # cuVSLAM Onboarding
