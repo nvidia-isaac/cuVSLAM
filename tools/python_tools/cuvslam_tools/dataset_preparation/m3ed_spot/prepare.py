@@ -130,6 +130,35 @@ def _open_local_factory(raw_dir: Path):
     return open_local
 
 
+def _has_source_files(raw_dir: Path) -> bool:
+    """Report whether ``raw_dir`` holds any of the published source files."""
+    return any(
+        local_path(raw_dir, published, kind).is_file()
+        for _, published in convert_m3ed_spot.SEQUENCES
+        for kind in ("data", "pose_gt")
+    )
+
+
+def _select_source(raw_dir: Optional[Path]):
+    """Return the opener for the source and a line describing it.
+
+    Provisioning creates a download directory for every dataset and passes it
+    as ``--raw-dir``, but this one has nothing to download, so a directory
+    without source files in it means the bucket. A ``--raw-dir`` that is not a
+    directory at all is a mistake rather than that contract: streaming 46 GB
+    because of a mistyped path would take hours to notice.
+    """
+    remote = f"{BUCKET_URL}/{OBJECT_PREFIX}"
+    if raw_dir is None:
+        return _open_remote, remote
+    raw_dir = Path(raw_dir)
+    if not raw_dir.is_dir():
+        raise PreparationError(f"--raw-dir is not a directory: {raw_dir}")
+    if not _has_source_files(raw_dir):
+        return _open_remote, f"{remote} ({raw_dir} holds no source files)"
+    return _open_local_factory(raw_dir), str(raw_dir)
+
+
 def prepare(
     raw_dir: Optional[Path] = None,
     output_dir: Optional[Path] = None,
@@ -141,7 +170,7 @@ def prepare(
 ) -> Path:
     """Convert the selected sequences and return the prepared root.
 
-    Reads from S3 unless ``raw_dir`` names a directory of downloaded files.
+    Reads from S3 unless ``raw_dir`` holds already-downloaded source files.
     ``sequences`` defaults to all 19 published SPOT sequences.
     """
     output_dir = resolve_output_dir(output_dir)
@@ -157,12 +186,8 @@ def prepare(
         # cached between runs, so every conversion already re-reads the source.
         print("note: --force-download has no effect; the source is never cached locally")
 
-    if raw_dir is not None:
-        opener = _open_local_factory(Path(raw_dir))
-        print(f"Source     : {raw_dir}")
-    else:
-        opener = _open_remote
-        print(f"Source     : {BUCKET_URL}/{OBJECT_PREFIX}")
+    opener, source = _select_source(raw_dir)
+    print(f"Source     : {source}")
     print(f"Output dir : {output_dir}")
     print()
 

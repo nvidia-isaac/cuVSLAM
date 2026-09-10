@@ -55,10 +55,10 @@ VisualICP::VisualICP(const camera::Rig& rig) : rig_(rig) {
   obs_per_camera_.resize(rig_.num_cameras);
 }
 
-float VisualICP::reprojection_cost_and_hessian(Matrix6T& H, Vector6T& rhs, const Isometry3T& cam_from_world,
-                                               const ICPSettings& settings) const {
+bool VisualICP::reprojection_cost_and_hessian(float& cost, Matrix6T& H, Vector6T& rhs, const Isometry3T& cam_from_world,
+                                              const ICPSettings& settings) const {
   TRACE_EVENT ev = profiler_domain_.trace_event("reprojection_cost_and_hessian");
-  float cost = 0;
+  cost = 0;
 
   Vector3T point_cam;
 
@@ -87,16 +87,20 @@ float VisualICP::reprojection_cost_and_hessian(Matrix6T& H, Vector6T& rhs, const
     cost += math::ComputeHuberLoss(r_squared_norm, settings.huber_vis);
   }
 
+  // Nothing projected in front of the camera. H and rhs were zeroed by the caller and never added
+  // to, so they already carry the empty sum.
   if (count <= 0) {
-    count = 1;
+    return false;
   }
+
   H = H / count;
   rhs = rhs / count;
-  return cost / count;
+  cost = cost / count;
+  return true;
 }
 
-float VisualICP::icp_hessian_and_cost(Matrix6T& H, Vector6T& rhs, const Isometry3T& cam_from_world,
-                                      uint8_t pyramid_level, const ICPSettings& settings, const IcpInfo& inputs) const {
+bool VisualICP::icp_hessian_and_cost(float& cost, Matrix6T& H, Vector6T& rhs, const Isometry3T& cam_from_world,
+                                     uint8_t pyramid_level, const ICPSettings& settings, const IcpInfo& inputs) const {
   TRACE_EVENT ev = profiler_domain_.trace_event("icp_hessian_and_cost");
 
   const auto& intrinsics = *rig_.intrinsics[inputs.depth_id];
@@ -119,9 +123,8 @@ float VisualICP::icp_hessian_and_cost(Matrix6T& H, Vector6T& rhs, const Isometry
     gpu_tracks_.push_back({{obs.xy.x(), obs.xy.y()}, {lm.x(), lm.y(), lm.z()}});
   }
 
-  float cost;
-  icp_tools_.match_and_reduce(cost, rhs, H, focal, principal, inputs[pyramid_level], cam_from_world,
-                              settings.huber_depth, gpu_tracks_);
+  const bool have_residuals = icp_tools_.match_and_reduce(cost, rhs, H, focal, principal, inputs[pyramid_level],
+                                                          cam_from_world, settings.huber_depth, gpu_tracks_);
 
   // if (prev_delta_) {
   //   H += motion_prior_;
@@ -133,30 +136,42 @@ float VisualICP::icp_hessian_and_cost(Matrix6T& H, Vector6T& rhs, const Isometry
   //   math::Log(twist_curr, cam_from_world);
   //   rhs -= motion_prior_ * (twist_prev - twist_curr);
   // }
-  return cost;
+  return have_residuals;
 }
 
-float VisualICP::total_cost_and_hessian(Matrix6T& H, Vector6T& rhs, const Isometry3T& rig_from_world,
-                                        uint8_t pyramid_level, const ICPSettings& settings,
-                                        const IcpInfo* depth_info) const {
+bool VisualICP::total_cost_and_hessian(float& cost, Matrix6T& H, Vector6T& rhs, const Isometry3T& rig_from_world,
+                                       uint8_t pyramid_level, const ICPSettings& settings,
+                                       const IcpInfo* depth_info) const {
   TRACE_EVENT ev = profiler_domain_.trace_event("total_cost_and_hessian");
 
   H.setZero();
   rhs.setZero();
 
-  float cost = reprojection_cost_and_hessian(H, rhs, rig_from_world, settings);
+  cost = 0.f;
+  const bool have_reprojection = reprojection_cost_and_hessian(cost, H, rhs, rig_from_world, settings);
+  bool have_icp = false;
 
   if (depth_info) {
+    float icp_cost = 0.f;
     Vector6T rhs_icp;
     Matrix6T H_icp;
-    float icp_cost = icp_hessian_and_cost(H_icp, rhs_icp, rig_from_world, pyramid_level, settings, *depth_info);
+    have_icp = icp_hessian_and_cost(icp_cost, H_icp, rhs_icp, rig_from_world, pyramid_level, settings, *depth_info);
 
-    rhs = settings.blending_alpha * rhs + (1 - settings.blending_alpha) * rhs_icp;
-    H = settings.blending_alpha * H + (1 - settings.blending_alpha) * H_icp;
-    cost = settings.blending_alpha * cost + (1 - settings.blending_alpha) * icp_cost;
+    // icp_cost / H_icp / rhs_icp carry nothing when the ICP term reports no residuals, so do not
+    // read them at all - not even against a zero weight, because 0 * NaN is NaN. H, rhs and cost
+    // already hold the reprojection term at full weight, which is what an absent ICP term means.
+    if (have_icp) {
+      // A reprojection term with no residuals has no average to contribute, so the ICP term takes
+      // the whole weight rather than being averaged against a zero cost.
+      const float alpha = have_reprojection ? settings.blending_alpha : 0.f;
+
+      rhs = alpha * rhs + (1 - alpha) * rhs_icp;
+      H = alpha * H + (1 - alpha) * H_icp;
+      cost = alpha * cost + (1 - alpha) * icp_cost;
+    }
   }
 
-  return cost;
+  return have_reprojection || have_icp;
 }
 
 using obs_ref = std::reference_wrapper<const camera::Observation>;
@@ -174,7 +189,14 @@ bool VisualICP::solve_level(Isometry3T& rig_from_world, Matrix6T& static_info_ex
   // Compute cam_from_world from rig_from_world
   Isometry3T cam_from_world = cam_from_rig * param_r_from_world;
 
-  float initial_cost = total_cost_and_hessian(H, rhs, cam_from_world, level, settings, depth_info);
+  float initial_cost = 0.f;
+  if (!total_cost_and_hessian(initial_cost, H, rhs, cam_from_world, level, settings, depth_info)) {
+    // No term has a residual, so H and rhs are the empty sum. There is no step to solve for and no
+    // information to report. Note this is about having no data at all, not about a cost of zero -
+    // a set of residuals that happens to fit perfectly still goes through the loop below.
+    static_info_exp.setZero();
+    return false;
+  }
   // if (initial_cost < 5e-3f) {
   //     // Nothing to minimize. We have a "pendulum" effect on still frames otherwise.
   //     static_info_exp.setIdentity();
@@ -188,6 +210,13 @@ bool VisualICP::solve_level(Isometry3T& rig_from_world, Matrix6T& static_info_ex
   const int num_iters = depth_info ? settings.num_iters_per_scale : settings.max_iteration;
   int num_iterations = 0;
   do {
+    // A cost of zero means every residual is zero, so rhs is zero and there is no step left to
+    // take. Stop before the gain ratio instead of dividing by it, which hands prr and rho a NaN.
+    // Huber losses never go negative, so this only catches the perfect fit.
+    if (current_cost <= 0.f) {
+      break;
+    }
+
     ++num_iterations;
     Matrix6T augmented_system = H + (lambda * scaling).asDiagonal().toDenseMatrix();
     auto decomposition = augmented_system.cast<double>().ldlt();
@@ -204,7 +233,13 @@ bool VisualICP::solve_level(Isometry3T& rig_from_world, Matrix6T& static_info_ex
 
     Matrix6T H_guess;
     Vector6T rhs_guess;
-    float cost_guess = total_cost_and_hessian(H_guess, rhs_guess, cam_guess, level, settings, depth_info);
+    float cost_guess = 0.f;
+    if (!total_cost_and_hessian(cost_guess, H_guess, rhs_guess, cam_guess, level, settings, depth_info)) {
+      // The step threw away every residual, so its zero cost is not comparable with current_cost
+      // and scoring it would read the guess as a perfect fit. Reject it and try a shorter one.
+      lambda *= 2.f;
+      continue;
+    }
 
     float prr = (step.dot(H * step) + 2.f * lambda * step.dot(scaling.asDiagonal() * step)) / current_cost;
 

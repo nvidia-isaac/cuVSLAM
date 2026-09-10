@@ -22,6 +22,7 @@ set(SOURCES
         gftt_test.cpp
         st_tracker_test.cpp
         sba_test.cpp
+        icp_tools_test.cpp
         )
 
 # Linking all the required libraries

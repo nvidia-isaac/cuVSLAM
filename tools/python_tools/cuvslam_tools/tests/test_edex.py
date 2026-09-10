@@ -43,6 +43,21 @@ class TestEdex(unittest.TestCase):
         self.assertEqual(edex.header.cameras[0].intrinsics.resolution.shape, (2,))
         self.assertEqual(edex.header.cameras[0].transform.shape, (3, 4))
 
+    def test_write_edex_uses_size_key(self):
+        # Round tripping through EDEXMetadata accepts either spelling, so check the raw json:
+        # the C++ reader and dataset_reader.py only know "size".
+        edex = EDEXMetadata.read(DATA_DIR / "edex")
+        with tempfile.NamedTemporaryFile(
+            mode="w+", delete=True, encoding="utf-8"
+        ) as temp_file:
+            edex.write(Path(temp_file.name))
+            with open(temp_file.name) as f:
+                header = json.load(f)[0]
+
+        for camera in header["cameras"]:
+            self.assertIn("size", camera["intrinsics"])
+            self.assertNotIn("resolution", camera["intrinsics"])
+
     def test_read_edex_copy_transform(self):
         # Read the intrinsics-only EDEX file
         edex_intrinsics = EDEXMetadata.read(DATA_DIR / "edex_intrinsics")
