@@ -31,8 +31,18 @@ class TestGetDistortionModel(unittest.TestCase):
         np.testing.assert_allclose(params, [0.1, 0.2, 0.5, 0.3, 0.4])
 
     def test_plumb_bob_rejects_wrong_coefficient_count(self):
-        with self.assertRaises(ValueError):
-            get_distortion_model("plumb_bob", np.array([0.1, 0.2, 0.3, 0.4]))
+        # Cover short and long inputs, and check that the all-zero shortcut
+        # does not swallow the malformed length.
+        cases = {
+            "short": np.array([0.1, 0.2, 0.3, 0.4]),
+            "long": np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]),
+            "short_all_zero": np.zeros(4),
+            "long_all_zero": np.zeros(6),
+        }
+        for label, params in cases.items():
+            with self.subTest(case=label):
+                with self.assertRaises(ValueError):
+                    get_distortion_model("plumb_bob", params)
 
     def test_rational_polynomial_keeps_ros_order(self):
         coefficients = np.arange(1, 9, dtype=np.float64) / 10.0

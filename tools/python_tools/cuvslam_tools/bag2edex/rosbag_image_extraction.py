@@ -447,17 +447,18 @@ def get_distortion_model(
         distortion_model in DISTORTION_MODEL_ROS2EDEX
     ), f"Unrecognized distortion model: '{distortion_model}'"
 
+    edex_model = DISTORTION_MODEL_ROS2EDEX[distortion_model]
+    if edex_model == edex.DistortionModel.BROWN5K and len(distortion_params) != 5:
+        raise ValueError(
+            f"plumb_bob needs 5 coefficients, got {len(distortion_params)}"
+        )
+
     if np.all(distortion_params == 0):
         logging.info("All distortion parameters are zero. Using pinhole model.")
         return edex.DistortionModel.PINHOLE, np.array([], dtype=np.float32)
 
-    edex_model = DISTORTION_MODEL_ROS2EDEX[distortion_model]
     if edex_model == edex.DistortionModel.BROWN5K:
         # equidistant and rational_polynomial already match the edex order, plumb_bob does not.
-        if len(distortion_params) != 5:
-            raise ValueError(
-                f"plumb_bob needs 5 coefficients, got {len(distortion_params)}"
-            )
         distortion_params = np.asarray(distortion_params)[_PLUMB_BOB_TO_BROWN5K]
     return edex_model, distortion_params
 
