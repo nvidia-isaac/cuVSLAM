@@ -231,9 +231,19 @@ DATASETS: dict[str, DatasetSpec] = {
             ),
         ),
     ),
+    # Full only, and by a wide margin the most expensive record: 56 GiB to stage
+    # and 57k frames evaluated in both modes. KITTI already covers stereo
+    # pre-merge, so a PR gains nothing for that price.
     "m3ed_spot": DatasetSpec(
         dataset_id="m3ed_spot",
         prepare_module="cuvslam_tools.dataset_preparation.m3ed_spot.prepare",
+        evals=(
+            EvalSpec(
+                config="m3ed_spot-vo_slam.cfg",
+                args=_stereo_args("--rectified_stereo_camera=false"),
+                suites=frozenset({FULL_SUITE}),
+            ),
+        ),
     ),
     "tartan": DatasetSpec(
         dataset_id="tartan",
