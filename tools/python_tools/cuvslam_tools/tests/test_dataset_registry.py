@@ -70,6 +70,13 @@ class TestShippedRegistry(unittest.TestCase):
                 "icl_nuim/icl_nuim-rgbd_slam.cfg",
                 "--odometry_mode=rgbd --async_sba=false --use_segments",
             ),
+            (
+                "m3ed_spot",
+                "M3ED_SPOT",
+                "m3ed_spot/m3ed_spot-vo_slam.cfg",
+                "--odometry_mode=multicamera --rectified_stereo_camera=false "
+                "--async_sba=false --multicam_mode=moderate --use_segments",
+            ),
         ]
 
         actual = [
@@ -92,7 +99,7 @@ class TestShippedRegistry(unittest.TestCase):
 
     def test_eval_enabled_datasets_are_exact(self):
         enabled = [spec.dataset_id for spec in dataset_registry.eval_datasets()]
-        self.assertEqual(enabled, ["kitti", "euroc", "tum", "icl_nuim"])
+        self.assertEqual(enabled, ["kitti", "euroc", "tum", "icl_nuim", "m3ed_spot"])
 
     def test_listing_the_registry_imports_no_converter_dependencies(self):
         # In a subprocess, because sibling test modules import converters and
@@ -113,7 +120,9 @@ class TestShippedRegistry(unittest.TestCase):
             check=True,
         )
         rows = [line.split("\t") for line in completed.stdout.strip().splitlines()]
-        self.assertEqual([row[0] for row in rows], ["kitti", "euroc", "tum", "icl_nuim"])
+        self.assertEqual(
+            [row[0] for row in rows], ["kitti", "euroc", "tum", "icl_nuim", "m3ed_spot"]
+        )
         self.assertTrue(all(len(row) == 4 for row in rows), rows)
 
     def test_unknown_dataset_is_rejected_with_the_known_ids(self):

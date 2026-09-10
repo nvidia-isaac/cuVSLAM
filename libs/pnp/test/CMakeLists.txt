@@ -23,6 +23,11 @@ set(LIBS
     log
 )
 
+if(USE_CUDA)
+    list(APPEND SOURCES visual_icp_test.cpp)
+    list(APPEND LIBS cuda_modules)
+endif()
+
 if(USE_CUNLS)
     enable_language(CUDA)
     # Host-only tests; built by the host compiler (not LANGUAGE CUDA) — see libs/map/CMakeLists.txt.

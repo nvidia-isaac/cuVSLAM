@@ -324,7 +324,9 @@ Unlike the other converters this one has no download step. The stereo images exi
 6% of it. The source is therefore read over HTTP range requests, so a sequence transfers roughly 3 GB instead of
 downloading 25-42 GB, and nothing is staged on disk. `--force-download` and `--download-only` are rejected for the
 same reason. Pass `--raw-dir` to read already-downloaded files instead, laid out as
-`<raw-dir>/<published-sequence>/<published-sequence>_{data,pose_gt}.h5`.
+`<raw-dir>/<published-sequence>/<published-sequence>_{data,pose_gt}.h5`. A `--raw-dir` holding none of those files
+means the bucket, since provisioning passes every dataset a directory to download into and this one has nothing to
+download; a `--raw-dir` that is not a directory is rejected rather than quietly streaming the whole corpus.
 
 Reading one object takes tens of minutes and M3ED does republish files, so every range read sends the object's ETag as
 `If-Range`. A file replaced mid-conversion answers with the whole object instead of the range, which is refused before

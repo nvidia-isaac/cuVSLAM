@@ -42,7 +42,19 @@ public:
 
   using ObsLmPair = Track;
 
-  void match_and_reduce(float& cost, Vector6T& rhs, Matrix6T& hessian, const Vector2T& focal, const Vector2T& principal,
+  // Builds the Gauss-Newton system for one step of the depth-ICP pose refinement. Scores `tracks` -
+  // each a 2D observation paired with its world-frame landmark - against the depth map in `level` at
+  // the pose `cam_from_world`, and reduces them on the GPU into `cost`, `rhs` (J^T r) and `hessian`
+  // (J^T J) for the 6-DOF pose. `focal` and `principal` have to match `level`'s resolution, so a
+  // caller working on a pyramid level must scale them down to it.
+  //
+  // Two Huber-robustified terms contribute: a photometric one comparing each landmark's depth to the
+  // map, and a point-to-point one lifting each observation to 3D and measuring the 3D gap. Each is
+  // averaged over the tracks it accepted, then the two are blended.
+  //
+  // Returns false when neither term accepted a track. The outputs are unspecified in that case, so
+  // the caller must not read them.
+  bool match_and_reduce(float& cost, Vector6T& rhs, Matrix6T& hessian, const Vector2T& focal, const Vector2T& principal,
                         const Level& level, const Isometry3T& cam_from_world, const float& huber,
                         const std::vector<ObsLmPair>& tracks) const;
 

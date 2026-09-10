@@ -543,7 +543,11 @@ Odometry::Odometry(const Rig& rig, const Config& cfg) {
   std::vector<CameraId> depth_ids;
   bool enable_depth_stereo_tracking_fig = false;
   if (cfg.odometry_mode == OdometryMode::RGBD) {
-    depth_ids.push_back(static_cast<CameraId>(cfg.rgbd_settings.depth_camera_id));
+    const int32_t depth_camera_id = cfg.rgbd_settings.depth_camera_id;
+    THROW_INVALID_ARG_IF(
+        depth_camera_id < 0 || static_cast<size_t>(depth_camera_id) >= rig.cameras.size(),
+        "RGBDSettings::depth_camera_id (" + std::to_string(depth_camera_id) + ") is not a camera id of the rig");
+    depth_ids.push_back(static_cast<CameraId>(depth_camera_id));
     enable_depth_stereo_tracking_fig = cfg.rgbd_settings.enable_depth_stereo_tracking;
   } else if (cfg.odometry_mode == OdometryMode::Multisensor) {
     depth_ids.reserve(cfg.multisensor_settings.depth_camera_ids.size());
