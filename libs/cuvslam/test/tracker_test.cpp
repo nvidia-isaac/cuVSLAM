@@ -171,6 +171,17 @@ TEST_F(TrackerTest, RejectsSlamConfigInOdometryOnlyMode) {
   EXPECT_THROW(Tracker(rig, Mode::OdometryOnlyRealtime, realtime, &slam), std::invalid_argument);
 }
 
+TEST_F(TrackerTest, RgbdModeChecksDepthCameraId) {
+  // The depth camera id has to name a camera of the rig: the default -1 means "not set", and an id
+  // past the end of the rig would reach the frustum graph as a camera that does not exist.
+  Odometry::Config cfg;
+  cfg.odometry_mode = Odometry::OdometryMode::RGBD;
+  EXPECT_THROW(Tracker(rig, Mode::OdometryOnlyRealtime, cfg), std::invalid_argument);
+
+  cfg.rgbd_settings.depth_camera_id = static_cast<int32_t>(rig.cameras.size());
+  EXPECT_THROW(Tracker(rig, Mode::OdometryOnlyRealtime, cfg), std::invalid_argument);
+}
+
 TEST_F(TrackerTest, RejectsNonFiniteCalibration) {
   constexpr float kNan = std::numeric_limits<float>::quiet_NaN();
 
@@ -292,6 +303,7 @@ TEST_F(TrackerTest, RgbdModeRequiresCudaBuild) {
   // rather than silently constructing a tracker that cannot run it.
   Odometry::Config cfg;
   cfg.odometry_mode = Odometry::OdometryMode::RGBD;
+  cfg.rgbd_settings.depth_camera_id = 0;
   try {
     Tracker{rig, Mode::OdometryOnlyRealtime, cfg};
     FAIL() << "RGBD mode was accepted by a build without CUDA";

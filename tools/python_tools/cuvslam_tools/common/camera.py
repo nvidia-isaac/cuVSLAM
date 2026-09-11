@@ -427,6 +427,8 @@ class Brown5KCameraModel(CameraModelWithJacobianBasedUndistortion):
     Brown (aka Brown-Conrady) distortion model with 5 coefficients:
     3 for radial distortion (K1, K2, K3) and 2 for tangential (P1, P2).
 
+    edex stores them as (k1, k2, k3, p1, p2), which is not the OpenCV order.
+
     References:
     - https://www.control.isy.liu.se/student/graduate/DynVis/Lectures/le2.pdf
     - http://robots.stanford.edu/cs223b04/JeanYvesCalib/htmls/parameters.html (Caltech's calibration toolbox)
@@ -651,6 +653,7 @@ def create_camera_model(
     elif dm_name == "brown5k":
         if num_parameters != 5:
             return None
+        # Note: Parameter order is K1, K2, K3, P1, P2 - radial first, unlike polynomial above
         return Brown5KCameraModel(
             resolution,
             focal,

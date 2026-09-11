@@ -32,6 +32,29 @@ from rosbags.typesys.types import \
     builtin_interfaces__msg__Time as Time
 
 
+DISTORTION_MODEL_EDEX2ROS = {
+    'pinhole': 'plumb_bob',
+    'fisheye': 'equidistant',
+    'brown5k': 'plumb_bob',
+    'polynomial': 'rational_polynomial',
+}
+
+# edex brown5k is [k1, k2, k3, p1, p2], ROS plumb_bob is [k1, k2, p1, p2, k3].
+_BROWN5K_TO_PLUMB_BOB = [0, 1, 3, 4, 2]
+
+
+def edex_distortion_to_ros(intrinsics):
+    """Translate edex distortion naming and coefficient order to the ROS CameraInfo convention."""
+    model = intrinsics['distortion_model']
+    params = list(intrinsics['distortion_params'])
+    if model == 'brown5k':
+        # fisheye and polynomial already match the ROS order, brown5k does not.
+        if len(params) != 5:
+            raise ValueError('brown5k needs 5 coefficients, got %d' % len(params))
+        params = [params[i] for i in _BROWN5K_TO_PLUMB_BOB]
+    return DISTORTION_MODEL_EDEX2ROS[model], params
+
+
 def make_matrix_square(m3x4):
     m4x4 = m3x4.copy()
     m4x4.append([0.0, 0.0, 0.0, 1.0])
@@ -152,9 +175,10 @@ class BagWriter:
         cx = principal[0]
         cy = principal[1]
         size = intrinsics['size']
+        distortion_model, distortion_params = edex_distortion_to_ros(intrinsics)
         message = CameraInfo(header=header, height=size[1], width=size[0],
-                             distortion_model=intrinsics['distortion_model'],
-                             d=np.array(intrinsics['distortion_params'], dtype=np.float64),
+                             distortion_model=distortion_model,
+                             d=np.array(distortion_params, dtype=np.float64),
                              k=np.array([f, 0, cx,
                                          0, f, cy,
                                          0, 0, 1], dtype=np.float64),

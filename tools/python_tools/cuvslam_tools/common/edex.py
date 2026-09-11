@@ -65,9 +65,12 @@ class DistortionModel(str, Enum):
     Supported camera distortion models in EDEX format.
 
     - PINHOLE: No distortion (0 parameters)
-    - FISHEYE: Fisheye distortion model (4 parameters)
-    - BROWN5K: Brown-Conrady distortion with 5 parameters
-    - POLYNOMIAL: Rational polynomial distortion (8 parameters)
+    - FISHEYE: Fisheye distortion model (k1, k2, k3, k4)
+    - BROWN5K: Brown-Conrady distortion (k1, k2, k3, p1, p2)
+    - POLYNOMIAL: Rational polynomial distortion (k1, k2, p1, p2, k3, k4, k5, k6)
+
+    Only BROWN5K departs from the OpenCV coefficient order, so it is the one that needs
+    reordering when reading from or writing to OpenCV and ROS calibrations.
     """
 
     PINHOLE = "pinhole"
@@ -290,9 +293,11 @@ class EDEXMetadata:
             # Validate the header and body before writing
             new_header = EDEXHeader.model_validate(self.header.model_dump())
             new_body = EDEXBody.model_validate(self.body.model_dump())
+            # by_alias is what puts "size" in the file. Without it pydantic writes the field
+            # name "resolution", which neither the C++ nor the python reader accepts.
             data = [
-                new_header.model_dump(exclude_none=True),
-                new_body.model_dump(exclude_none=True),
+                new_header.model_dump(exclude_none=True, by_alias=True),
+                new_body.model_dump(exclude_none=True, by_alias=True),
             ]
             with open(filename, "w") as f:
                 json.dump(data, f, indent=2, cls=EDEXEncoder)

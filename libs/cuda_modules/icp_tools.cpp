@@ -22,7 +22,7 @@ const float alpha_v = 0.8f;
 namespace cuvslam::cuda {
 GPUICPTools::GPUICPTools() : pinned_photometric_(1 + 1 + 6 + 6 * 6), pinned_point_to_point_(1 + 1 + 6 + 6 * 6) {}
 
-void GPUICPTools::match_and_reduce(float& cost, Vector6T& rhs, Matrix6T& hessian, const Vector2T& focal,
+bool GPUICPTools::match_and_reduce(float& cost, Vector6T& rhs, Matrix6T& hessian, const Vector2T& focal,
                                    const Vector2T& principal, const Level& level, const Isometry3T& cam_from_world,
                                    const float& huber, const std::vector<ObsLmPair>& tracks) const {
   TRACE_EVENT ev = profiler_domain_.trace_event("match_and_reduce");
@@ -54,12 +54,9 @@ void GPUICPTools::match_and_reduce(float& cost, Vector6T& rhs, Matrix6T& hessian
   CUDA_CHECK(
       cudaMemsetAsync(pinned_point_to_point_.ptr(), 0, pinned_point_to_point_.size() * sizeof(float), s_.get_stream()));
 
-  size_t num_tracks = std::min(tracks.size(), pinned_tracks_.size());
+  const size_t num_tracks = std::min(tracks.size(), pinned_tracks_.size());
   if (num_tracks == 0) {
-    cost = 0.0f;
-    rhs = Vector6T::Zero();
-    hessian = Matrix6T::Zero();
-    return;  // TODO: return error code
+    return false;
   }
 
   for (size_t i = 0; i < num_tracks; i++) {
@@ -89,14 +86,29 @@ void GPUICPTools::match_and_reduce(float& cost, Vector6T& rhs, Matrix6T& hessian
   }
 
   pinned_photometric_.copy(ToCPU, s_.get_stream());
-  if (num_tracks != 0) {
-    pinned_point_to_point_.copy(ToCPU, s_.get_stream());
-  }
+  pinned_point_to_point_.copy(ToCPU, s_.get_stream());
   CUDA_CHECK(cudaStreamSynchronize(s_.get_stream()));
 
-  float count_photometric = pinned_photometric_[1];
+  const float count_photometric = pinned_photometric_[1];
+  const float count_p = pinned_point_to_point_[1];
+
+  // Whichever term has residuals takes the whole weight; alpha_v only splits them when both do.
+  // count_photometric flips between LM iterations - magic_depth gates on lm_cam - while count_p does
+  // not, so leaving point-to-point on its 1 - alpha_v fraction would make a guess that lost every
+  // photometric match come back ~5x cheaper than it is, and the accept test would take it.
+  float alpha = alpha_v;
+  if (count_photometric <= 0) {
+    alpha = 0.f;
+    // Nothing above wrote these, and the point-to-point block below accumulates with +=.
+    cost = 0.0f;
+    rhs = Vector6T::Zero();
+    hessian = Matrix6T::Zero();
+  } else if (count_p <= 0) {
+    alpha = 1.f;
+  }
+
   if (count_photometric > 0) {
-    float w = alpha_v / count_photometric;
+    float w = alpha / count_photometric;
     cost = pinned_photometric_[0] * w;
     for (int i = 0; i < 6; i++) {
       rhs(i) = pinned_photometric_[2 + i] * w;
@@ -110,9 +122,8 @@ void GPUICPTools::match_and_reduce(float& cost, Vector6T& rhs, Matrix6T& hessian
     }
   }
 
-  float count_p = pinned_point_to_point_[1];
   if (count_p > 0) {
-    float w = (1.f - alpha_v) / count_p;
+    float w = (1.f - alpha) / count_p;
 
     cost += pinned_point_to_point_[0] * w;
     for (int i = 0; i < 6; i++) {
@@ -126,6 +137,8 @@ void GPUICPTools::match_and_reduce(float& cost, Vector6T& rhs, Matrix6T& hessian
       }
     }
   }
+
+  return count_photometric > 0 || count_p > 0;
 }
 
 void GPUICPTools::lift_points(const cuda::GPUImageT& dst_depth, const Vector2T& focal, const Vector2T& principal,
