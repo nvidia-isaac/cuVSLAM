@@ -50,6 +50,8 @@ public:
   virtual pipelines::ISFMSolver& get_solver() = 0;
 
 protected:
+  virtual bool can_track_visual_blackout() const { return false; }
+
   void reset();
   camera::Rig rig_;
   camera::FrustumIntersectionGraph fig_;
