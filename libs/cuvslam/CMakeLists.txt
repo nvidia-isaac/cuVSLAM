@@ -69,6 +69,7 @@ set(SOURCES
     cuvslam2.h
     cuvslam_gpu.cpp
     cuvslam_gpu.h
+    cuvslam_params.h
     internal.h
     debug_dump.cpp
     debug_dump.h

@@ -1,0 +1,73 @@
+# Example parameter file for cuvslam_api_launcher.
+#
+#   ./bin/cuvslam_api_launcher --params=api_params.txt --edex=<edex file>
+#
+# One "key: value" per line; "key = value" also works, and # starts a comment. Every entry is
+# optional -- anything left out keeps its built-in default.
+#
+# Run with --list_params to print every name with its type, default and description. Repeatable
+# -Pkey=value overrides single entries and wins over this file, and any unambiguous suffix of a
+# name works, so -Pnum_desired_tracks=300 reaches sof.num_desired_tracks.
+#
+# An unknown name is an error rather than a warning, so a typo here fails the run instead of
+# silently doing nothing.
+
+# =============================================================================
+# Configuration (odometry.*, slam.*) -- applied before the tracker is built
+# =============================================================================
+
+odometry.odometry_mode: multicamera     # multicamera | inertial | rgbd | mono | multisensor
+odometry.multicam_mode: moderate        # performance | precision | moderate
+odometry.async_sba: false               # run the bundle adjuster on the calling thread
+odometry.rectified_stereo_camera: true
+odometry.use_denoising: false
+odometry.max_frame_delta_s: 1.0
+# odometry.debug_dump_directory: /tmp/dump  # dump the input in edex format; empty disables it
+
+# RGBD mode only.
+# odometry.rgbd.depth_camera_id: 0
+# odometry.rgbd.depth_scale_factor: 5000
+
+# Multisensor mode only.
+# odometry.multisensor.depth_camera_ids: 0,2
+# odometry.multisensor.depth_scale_factor: 1000
+
+slam.sync_mode: true                    # run SLAM on the calling thread, for reproducible runs
+slam.max_map_size: 300                  # poses in the pose graph; 0 is unlimited
+slam.throttling_time_ms: 0              # minimum interval between loop closures
+
+# =============================================================================
+# Solver parameters -- applied to the tracker once it exists
+# =============================================================================
+# These expose low-level solver behaviour. They are not covered by API stability guarantees and
+# adjusting them may degrade tracking. Which ones exist depends on the odometry mode: sm.*,
+# imu_pnp.* and inertial_stereo_pnp.* only appear when an IMU is configured.
+
+# Feature tracking.
+sof.num_desired_tracks: 450
+# sof.border_top: 0
+# sof.border_bottom: 0
+# sof.tracker: lk                       # lk | klt | lk_horizontal | klt_horizontal
+
+# Keyframe selection.
+kf.survivor_from_last: 41               # make a keyframe below this percentage of surviving tracks
+# kf.max_timedelta_between_kfs_s: 60
+
+# Bundle adjustment.
+sba.num_sba_frames: 7                   # recent keyframes in the SBA window
+sba.num_fixed_sba_frames: 3             # of those, how many are held fixed
+sba.num_sba_iterations: 7               # maximum solver iterations per run
+sba.robustifier_scale: 0.5              # Huber loss threshold
+# sba.use_sba_winsorizer: false
+
+# Visual PnP.
+# vo_pnp.huber: 0.02
+# vo_pnp.max_iteration: 13
+# vo_pnp.min_observations: 13
+
+# RGBD mode only.
+# icp.blending_alpha: 0.8                # visual against depth residual weight, 0..1
+
+# Inertial mode only.
+# sm.min_num_kf_for_gravity: 20
+# imu_pnp.max_iteration: 20

@@ -25,5 +25,7 @@ bool ParseBool(std::string_view v);
 float ParseFloat(std::string_view v);
 int32_t ParseInt32(std::string_view v);
 int64_t ParseInt64(std::string_view v);
+uint32_t ParseUInt32(std::string_view v);
+uint64_t ParseUInt64(std::string_view v);
 
 }  // namespace cuvslam::common

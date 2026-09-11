@@ -29,10 +29,9 @@
 #include "common/image_dropper.h"
 #include "edex/file_name_tools.h"
 #include "odometry/svo_config.h"
-#include "odometry/svo_config_gflags.h"
+#include "params/cli.h"
 #include "sof/image_context.h"
 #include "sof/image_manager.h"
-#include "sof/sof_config_gflags.h"
 #include "sof/sof_create.h"
 #include "utils/image_transform.h"
 
@@ -328,10 +327,20 @@ static void DoStereoTrack(const std::string& edexFile, std::string outputFolder,
 }
 
 int main(int argC, char** ppArgV) {
+  const std::vector<std::string> param_overrides = cuvslam::params::ExtractOverrides(argC, ppArgV);
   gflags::ParseCommandLineFlags(&argC, &ppArgV, /*remove flags = */ true);
+
   odom::Settings svo_settings;
-  odom::ParseSettings(svo_settings.kf_settings);
-  sof::ParseSettings(svo_settings.sof_settings);
+  cuvslam::params::Registry params;
+  params.Add("sof", svo_settings.sof_settings);
+  params.Add("sof.feature_selection", svo_settings.sof_settings.feature_selection_settings);
+  params.Add("kf", svo_settings.kf_settings);
+  try {
+    cuvslam::params::ApplyOverrides(params, param_overrides, cuvslam::params::Source::CommandLine);
+  } catch (const std::exception& e) {
+    std::cout << e.what() << std::endl;
+    return EXIT_FAILURE;
+  }
 
   try {
     // check environment

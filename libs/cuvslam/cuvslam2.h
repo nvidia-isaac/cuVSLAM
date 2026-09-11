@@ -38,10 +38,6 @@
 /// @endcond
 
 namespace cuvslam {
-namespace internal {
-struct Internals;
-struct InternalParameter;
-}  // namespace internal
 
 /**
  * @brief Get the version of the library.
@@ -538,6 +534,24 @@ public:
   static Config GetDefaultConfig() { return Config{}; }
 
   /**
+   * @brief Per-frame hints for a single Track() call.
+   *
+   * Hints describe one frame and are never stored, so a hint given for one frame has no effect on
+   * the next. Anything that should hold for a whole run is configuration instead: set it in Config
+   * before construction, or with SetParameter().
+   */
+  struct TrackHints {
+    /**
+     * @brief Decide this frame's keyframe status explicitly.
+     *
+     * Unset (the default) leaves the decision to the tracker. `true` makes this frame a keyframe,
+     * `false` prevents it from becoming one. Useful when the application knows something about the
+     * trajectory that the tracker cannot see.
+     */
+    std::optional<bool> override_keyframe;
+  };
+
+  /**
    * @brief State of the odometry tracker
    *
    * Only available if data export is enabled in Config.
@@ -604,16 +618,17 @@ public:
    * camera; each entry is matched to its rig camera by Image::camera_index and every camera_index
    * must appear in MultisensorSettings::depth_camera_ids. Other modes must pass an empty array.
    * Must use ImageData::Encoding::MONO and ImageData::DataType::UINT16 or ImageData::DataType::FLOAT32.
-   * @param[in]  internals (Optional) pointer to internal per-frame development parameters; pass nullptr (default) to
-   * use built-in defaults. Not intended for production use.
+   * @param[in]  hints  (Optional) hints about this frame; pass nullptr (default) to let the tracker
+   * decide everything. Applies to this call only.
    *
    * @return On success `PoseEstimate` contains estimated rig pose, on failure `PoseEstimate::world_from_rig` will be
    * `nullopt`.
    * @throws std::invalid_argument if image parameters are invalid
    * @throws std::runtime_error in case of unexpected errors
+   * @see TrackHints
    */
   PoseEstimate Track(const ImageSet& images, const ImageSet& masks = {}, const ImageSet& depths = {},
-                     const cuvslam::internal::Internals* internals = nullptr);
+                     const TrackHints* hints = nullptr);
 
   /**
    * @brief Register IMU measurement
@@ -710,31 +725,52 @@ public:
   const std::vector<uint8_t>& GetPrimaryCameras() const;
 
   /**
-   * @brief Apply internal parameters by string key/value pairs.
+   * @brief Description and current state of one internal parameter.
    *
-   * Allows setting internal runtime settings by name. Unknown keys log a warning and are ignored.
-   * Invalid values or keys not applicable to the current odometry mode throw std::invalid_argument.
-   *
-   * For internal use only.
-   *
-   * Supported keys (grouped by prefix):
-   *
-   * SBA (all modes):
-   *   `sba.num_sba_frames`, `sba.num_inertial_sba_frames`, `sba.num_fixed_sba_frames`,
-   *   `sba.num_sba_iterations`, `sba.robustifier_scale`, `sba.use_sba_winsorizer`
-   *
-   * Note: `sba.async` and `sba.mode` are construction-time settings that determine whether the
-   * SBA background thread is spawned and which bundler is used. They cannot be changed after the
-   * tracker is created. Set `Odometry::Config::async_sba` and `Odometry::Config::odometry_mode` before
-   * constructing the Odometry object instead.
-   *
-   * StateMachine / IMU gravity estimation (Inertial mode only):
-   *   `sm.gravity_update_period_ns`, `sm.max_integration_time_ns`, `sm.min_num_kf_for_gravity`,
-   *   `sm.min_time_period_ns`, `sm.max_time_period_ns`
-   *
-   * @param[in] parameters Key/value pairs to apply.
+   * @warning Every view points into storage owned by the Odometry instance. They stay valid until
+   * the next GetParameters() call on the same instance, and until the instance is destroyed. Copy
+   * anything you need to keep.
    */
-  void ApplyPersistentInternalParameters(const std::vector<cuvslam::internal::InternalParameter>& parameters);
+  struct ParameterInfo {
+    std::string_view key;            ///< Dotted name, for example `sof.num_desired_tracks`
+    std::string_view doc;            ///< One-line description
+    std::string_view type;           ///< `int32`, `float`, `bool`, `string`, `enum{a|b}`, ...
+    std::string_view value;          ///< Current value
+    std::string_view default_value;  ///< Built-in default
+    std::string_view source;         ///< `default`, `file`, `command-line` or `api`
+  };
+
+  /**
+   * @brief Set an internal parameter by name.
+   *
+   * For internal use only. These parameters expose low-level solver behaviour, are not covered by
+   * API stability guarantees, and may change or disappear in any release. Adjusting them may
+   * degrade tracking or make it unstable.
+   *
+   * The new value takes effect on the next Track() call. SBA parameters are read when SBA next
+   * triggers on a keyframe, so only the latest value before that point has any effect.
+   *
+   * Use GetParameters() for the list of names, types and defaults.
+   *
+   * @param[in] key   parameter name; any unambiguous suffix of a full name is accepted, so
+   * `num_desired_tracks` resolves to `sof.num_desired_tracks`
+   * @param[in] value value in its string form, as GetParameters() reports it
+   * @throws std::invalid_argument if the name is unknown, ambiguous, or not applicable to the
+   * current odometry mode
+   * @throws std::runtime_error if the value does not parse as the parameter's type or falls
+   * outside its valid range; the parameter keeps its previous value
+   */
+  void SetParameter(std::string_view key, std::string_view value);
+
+  /**
+   * @brief Get every internal parameter with its current value and where that value came from.
+   *
+   * Recording this alongside a run's results makes the run reproducible: it captures parameters
+   * set programmatically or from a file, not just what a configuration file happened to contain.
+   *
+   * @return one entry per parameter. Views are invalidated by the next call; see ParameterInfo.
+   */
+  std::vector<ParameterInfo> GetParameters() const;
 
 private:
   class Impl;

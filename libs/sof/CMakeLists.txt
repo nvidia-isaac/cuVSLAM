@@ -43,7 +43,6 @@ set(HEADERS
     selector_stereo.h
     sof.h
     sof_config.h
-    sof_config_gflags.h
     sof_create.h
     sof_mono_interface.h
     sof_multicamera_interface.h
@@ -69,7 +68,6 @@ set(SOURCES
     selector_mono.cpp
     selector_stereo.cpp
     sof.cpp
-    sof_config.cpp
     sof_create.cpp
     sof_mono_base.cpp
     sof_mono_cpu.cpp
@@ -83,6 +81,7 @@ set(LIBS
     camera
     common
     epipolar
+    params
     profiler
 )
 

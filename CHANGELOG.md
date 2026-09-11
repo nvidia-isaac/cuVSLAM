@@ -13,11 +13,69 @@
 
 ### Added
 
+- Internal parameters are now addressed by name. `Odometry::SetParameter()` and `GetParameters()` in C++, and
+  `set_parameter()`, `set_parameters()` and `get_parameters()` in Python, cover every
+  solver setting that `Internals` and `ApplyPersistentInternalParameters()` reached, plus everything they did not.
+  `GetParameters()` reports each parameter's value, default, type, description and where the value came from, so a run's
+  configuration can be recorded with its results
+- `Odometry::TrackHints`, passed to `Track()`, for values that genuinely differ from frame to frame. It currently holds
+  only `override_keyframe`
+- `cuvslam_api_launcher`: `--params <file>` for a flat `key: value` parameter file, repeatable `-Pkey=value` overrides,
+  and `--list_params` to print every parameter with its type, default and description. The file format belongs to the
+  tool; the library reads no files, so Python callers can use any parser and pass the result to `set_parameters()`
 - `Slam::Config::delay_warning_queue_size`: warns in verbose mode when more than the configured number of commands
   are queued to the SLAM thread, meaning SLAM falls behind odometry
 
+### Removed
+
+- `cuvslam::internal::Internals`, `cuvslam::internal::InternalParameter`, `Odometry::ApplyPersistentInternalParameters()`
+  and the `cuvslam2_internal.h` header. Use `SetParameter()` for the settings they carried and `TrackHints` for the
+  keyframe override. Names gained a prefix matching the settings they address, so `num_desired_tracks` is
+  `sof.num_desired_tracks` and `kf_survivor_from_last` is `kf.survivor_from_last`; `sba.*` and `sm.*` keys are unchanged
+- Python: `Odometry.Internals` and `apply_expert_parameters()`, replaced as above, and the `cuvslam.utils` module,
+  whose configuration loaders are superseded by `set_parameters()`. This also drops the `pyyaml` dependency
+- `cuvslam_api_launcher`: `--config` and its YAML schema, replaced by `--params`; the `--expert_sba_*` flags, now
+  ordinary parameters reachable with `-P`; and `libs/utils/cuvslam_yaml_config.*`
+- `cuvslam_api_launcher`: every flag that merely restated a field of `Odometry::Config` or `Slam::Config`. Each is now
+  reachable by name, and `--list_params` prints the full set:
+
+  | removed flag | replacement |
+  | --- | --- |
+  | `-cfg_odom_mode=1` | `-Podometry.odometry_mode=inertial` |
+  | `-cfg_multicam_mode=1` | `-Podometry.multicam_mode=precision` |
+  | `-cfg_async_sba` | `-Podometry.async_sba=true` |
+  | `-cfg_denoising` | `-Podometry.use_denoising=…` |
+  | `-cfg_horizontal` | `-Podometry.rectified_stereo_camera=true` |
+  | `-cfg_max_frame_delta_s` | `-Podometry.max_frame_delta_s=…` |
+  | `-debug_dump` | `-Podometry.debug_dump_directory=…` |
+  | `-cfg_depth_camera` | `-Podometry.rgbd.depth_camera_id=…` |
+  | `-cfg_depth_scale_factor` | `-Podometry.rgbd.depth_scale_factor=…` |
+  | `-cfg_enable_depth_stereo_tracking` | `-Podometry.rgbd.enable_depth_stereo_tracking=…` |
+  | `-cfg_planar` | `-Pslam.planar_constraints=true` |
+  | `-cfg_sync_slam`, `-slam_reproduce_mode` | `-Pslam.sync_mode=…` |
+  | `-cfg_slam_max_map_size`, `-max_pose_graph_nodes` | `-Pslam.max_map_size=…` |
+
+  `-cfg_odom_mode` and `-cfg_multicam_mode` took integers; the parameters take the names above, and
+  `odometry.odometry_mode` also accepts `multisensor`, which the flag could not express. `-cfg_depth_camera`
+  defaulted to `0` while the library defaults to `-1`, so an RGBD run that relied on the flag default must now set
+  `odometry.rgbd.depth_camera_id=0` explicitly. `--cfg_enable_slam` and `--cfg_enable_export` remain: the first
+  decides whether a `Slam` instance is built at all, the second is shorthand for the two export parameters
+
+### Changed
+
+- `sof::Settings::multicam_mode` now defaults to `Precision`, matching `Odometry::Config::multicam_mode`. The two
+  disagreed, so every report listed `sof.multicam_mode` as non-default even for an untouched configuration. Internal
+  tools that construct `sof::Settings` directly and do not set the mode now get `Precision` instead of `Moderate`
+- Setting an unknown internal parameter, or a value that does not parse or falls outside its range, is now an error
+  instead of a logged warning, and leaves the parameter at its previous value. Parameters a mode never reads are not
+  exposed at all, so naming one is an error rather than being silently ignored
+
 ### Fixed
 
+- `Odometry::Config::use_denoising` and `Rig::Camera::border_top`/`border_bottom`/`border_left`/`border_right` had no
+  effect. Both are applied at construction, but `Track()` rebuilt the per-frame settings from type defaults, and
+  feature tracking re-reads denoising and border values from those per-frame settings on every frame. Setting either
+  now changes tracking as documented; runs that relied on them being ignored will see different results
 - Unsynchronized reads of the SLAM engine during map localization (`LocalizeInMapCmd::Execute`)
 - Unnecessary mutex contention in `AsyncSlam::GetSlamPose()`
 

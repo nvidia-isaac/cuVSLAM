@@ -249,6 +249,9 @@ def stat_to_dict(stat: Any) -> dict:
         "gt_simple_error": stat.gt_simple_error,
         "num_tracking_losts": stat.num_tracking_losts,
         "odometry_mode": stat.odometry_mode,
+        # Only parameters that differ from their default, so a single run's stats record what it
+        # was tuned with.
+        "tuned_parameters": getattr(stat, "tuned_parameters", {}),
         "seg_err_points": getattr(stat, "seg_err_points", []),
     }
 

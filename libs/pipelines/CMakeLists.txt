@@ -45,6 +45,7 @@ set(LIBS
     epipolar
     imu
     map
+    params
     pnp
     profiler
     sba

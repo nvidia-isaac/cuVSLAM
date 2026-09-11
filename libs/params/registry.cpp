@@ -1,0 +1,204 @@
+/*
+ * Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
+ *
+ * NVIDIA software released under the NVIDIA Community License is intended to be used to enable
+ * the further development of AI and robotics technologies. Such software has been designed, tested,
+ * and optimized for use with NVIDIA hardware, and this License grants permission to use the software
+ * solely with such hardware.
+ * Subject to the terms of this License, NVIDIA confirms that you are free to commercially use,
+ * modify, and distribute the software with NVIDIA hardware. NVIDIA does not claim ownership of any
+ * outputs generated using the software or derivative works thereof. Any code contributions that you
+ * share with NVIDIA are licensed to NVIDIA as feedback under this License and may be incorporated
+ * in future releases without notice or attribution.
+ * By using, reproducing, modifying, distributing, performing, or displaying any portion or element
+ * of the software or derivative works thereof, you agree to be bound by this License.
+ */
+
+#include "params/registry.h"
+
+#include <algorithm>
+#include <cstdio>
+#include <fstream>
+#include <limits>
+#include <sstream>
+#include <stdexcept>
+
+namespace cuvslam::params {
+
+namespace {
+
+std::string_view Trim(std::string_view text) {
+  const auto is_space = [](char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
+  while (!text.empty() && is_space(text.front())) {
+    text.remove_prefix(1);
+  }
+  while (!text.empty() && is_space(text.back())) {
+    text.remove_suffix(1);
+  }
+  return text;
+}
+
+/// True if @p key names the field `<prefix>.<name>`.
+bool KeyMatches(std::string_view key, std::string_view prefix, std::string_view name) {
+  if (key.size() != prefix.size() + 1 + name.size()) {
+    return false;
+  }
+  return key.substr(0, prefix.size()) == prefix && key[prefix.size()] == '.' && key.substr(prefix.size() + 1) == name;
+}
+
+std::string FormatDouble(double value) {
+  char buffer[32];
+  std::snprintf(buffer, sizeof(buffer), "%.17g", value);
+  return std::string(buffer);
+}
+
+/// Human-readable form of a constraint, used in rejection messages and in help output.
+std::string DescribeBounds(const Bounds& bounds) {
+  const bool unbounded_above = bounds.max >= std::numeric_limits<double>::max();
+  if (bounds.min == 0.0 && unbounded_above) {
+    return "must be non-negative";
+  }
+  if (unbounded_above) {
+    return "must be >= " + FormatDouble(bounds.min);
+  }
+  return "must be in [" + FormatDouble(bounds.min) + ", " + FormatDouble(bounds.max) + "]";
+}
+
+/// True if @p key is `<suffix>` or ends in `.<suffix>`, the abbreviation accepted on command lines.
+bool IsSuffixOf(std::string_view key, std::string_view suffix) {
+  if (key == suffix) {
+    return true;
+  }
+  return key.size() > suffix.size() + 1 && key.substr(key.size() - suffix.size()) == suffix &&
+         key[key.size() - suffix.size() - 1] == '.';
+}
+
+}  // namespace
+
+std::string_view ToString(Source source) {
+  switch (source) {
+    case Source::Default:
+      return "default";
+    case Source::File:
+      return "file";
+    case Source::CommandLine:
+      return "command-line";
+    case Source::Api:
+      return "api";
+  }
+  return "unknown";
+}
+
+std::pair<Registry::Group*, size_t> Registry::Find(std::string_view key) const {
+  for (const std::unique_ptr<Group>& group : groups_) {
+    for (size_t i = 0; i < group->NumFields(); ++i) {
+      if (KeyMatches(key, group->prefix(), group->Describe(i).name)) {
+        return {group.get(), i};
+      }
+    }
+  }
+  return {nullptr, 0};
+}
+
+std::string Registry::Resolve(std::string_view key) const {
+  if (Find(key).first != nullptr) {
+    return std::string(key);
+  }
+
+  std::vector<std::string> matches;
+  for (const std::unique_ptr<Group>& group : groups_) {
+    for (size_t i = 0; i < group->NumFields(); ++i) {
+      std::string full = std::string(group->prefix()) + '.' + std::string(group->Describe(i).name);
+      if (IsSuffixOf(full, key)) {
+        matches.push_back(std::move(full));
+      }
+    }
+  }
+
+  if (matches.size() == 1) {
+    return matches.front();
+  }
+  if (matches.empty()) {
+    throw std::invalid_argument("unknown parameter '" + std::string(key) + "'");
+  }
+
+  std::string candidates;
+  for (const std::string& match : matches) {
+    if (!candidates.empty()) {
+      candidates += ", ";
+    }
+    candidates += match;
+  }
+  throw std::invalid_argument("parameter '" + std::string(key) + "' is ambiguous; candidates: " + candidates);
+}
+
+std::string_view Registry::Intern(std::string_view value) { return interned_.emplace_back(value); }
+
+void Registry::Set(std::string_view key, std::string_view value, Source source) {
+  const std::string resolved = Resolve(key);
+  const auto [group, index] = Find(resolved);
+
+  // Assignment is all-or-nothing: a rejected value leaves the field exactly as it was, so a bad
+  // line in a parameter file cannot half-apply a configuration.
+  const std::string previous = group->Get(index);
+  try {
+    group->Set(index, Intern(value));
+  } catch (const std::exception& e) {
+    throw std::runtime_error("parameter '" + resolved + "': " + e.what());
+  }
+
+  if (!group->WithinBounds(index)) {
+    group->Set(index, Intern(previous));
+    throw std::runtime_error("parameter '" + resolved + "': " + std::string(value) + " " +
+                             DescribeBounds(group->Describe(index).bounds));
+  }
+
+  const auto it = std::find_if(sources_.begin(), sources_.end(),
+                               [&resolved](const auto& entry) { return entry.first == resolved; });
+  if (it != sources_.end()) {
+    it->second = source;
+  } else {
+    sources_.emplace_back(resolved, source);
+  }
+}
+
+std::string Registry::Get(std::string_view key) const {
+  const std::string resolved = Resolve(key);
+  const auto [group, index] = Find(resolved);
+  return group->Get(index);
+}
+
+Source Registry::SourceOf(const std::string& key) const {
+  const auto it =
+      std::find_if(sources_.begin(), sources_.end(), [&key](const auto& entry) { return entry.first == key; });
+  return it != sources_.end() ? it->second : Source::Default;
+}
+
+bool Registry::Knows(std::string_view key) const {
+  try {
+    Resolve(key);
+    return true;
+  } catch (const std::invalid_argument&) {
+    return false;
+  }
+}
+
+std::vector<ParamInfo> Registry::List() const {
+  std::vector<ParamInfo> result;
+  for (const std::unique_ptr<Group>& group : groups_) {
+    for (size_t i = 0; i < group->NumFields(); ++i) {
+      const FieldView field = group->Describe(i);
+      ParamInfo info;
+      info.key = std::string(group->prefix()) + '.' + std::string(field.name);
+      info.doc = field.doc;
+      info.type = group->Type(i);
+      info.value = group->Get(i);
+      info.default_value = group->Default(i);
+      info.source = SourceOf(info.key);
+      result.push_back(std::move(info));
+    }
+  }
+  return result;
+}
+
+}  // namespace cuvslam::params

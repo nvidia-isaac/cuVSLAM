@@ -26,6 +26,7 @@
 #include "common/isometry.h"
 #include "common/types.h"
 #include "common/vector_3t.h"
+#include "params/params.h"
 #include "profiler/profiler.h"
 #include "profiler/profiler_enable.h"
 
@@ -87,3 +88,20 @@ private:
 };
 
 }  // namespace cuvslam::pnp
+
+// Tunable fields of PNPSettings. Registered once per solver instance, so the same list serves both
+// `vo_pnp.*` and the inertial-mode stereo fallback `inertial_stereo_pnp.*`. `verbose` stays out: it
+// is a debugging aid, not a tuning knob.
+CUVSLAM_PARAMS_BEGIN(cuvslam::pnp::PNPSettings)
+CUVSLAM_PARAM_BOUNDED(lambda, "Levenberg-Marquardt damping factor", NonNegative())
+CUVSLAM_PARAM_BOUNDED(huber, "Huber robustifier scale for reprojection residuals", NonNegative())
+CUVSLAM_PARAM_BOUNDED(max_iteration, "Maximum LM solver iterations", NonNegative())
+CUVSLAM_PARAM(recalculate_cov, "Recompute the covariance matrix after a successful solve")
+CUVSLAM_PARAM(filter_new_observations, "Keep the oldest max_obs_per_camera tracks instead of all of them")
+CUVSLAM_PARAM_BOUNDED(max_obs_per_camera, "Maximum observations fed to the solver per camera", NonNegative())
+CUVSLAM_PARAM_BOUNDED(point_z_thresh, "Minimum landmark depth in the camera frame, meters", NonNegative())
+CUVSLAM_PARAM_BOUNDED(min_observations, "Observations required to attempt a solve", NonNegative())
+CUVSLAM_PARAM_BOUNDED(cost_thresh,
+                      "Absolute convergence threshold; a net improvement over the initial cost also passes",
+                      NonNegative())
+CUVSLAM_PARAMS_END()

@@ -27,7 +27,6 @@
 #include "imu/imu_sba_problem.h"
 #include "imu/inertial_optimization.h"
 #include "odometry/svo_config.h"
-#include "odometry/svo_config_gflags.h"
 
 
 DEFINE_string(sequence, "euroc/V2_03_difficult", "Sequence name");

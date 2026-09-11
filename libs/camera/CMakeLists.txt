@@ -31,7 +31,7 @@ setup_staticlib_project(
     MODULE_NAME ${MODULE_NAME}
     HEADERS ${HEADERS}
     SOURCES ${SOURCES}
-    LIBRARIES common epipolar
+    LIBRARIES common epipolar params
 )
 
 add_subdirectory(test)

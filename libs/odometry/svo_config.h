@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "common/imu_calibration.h"
+#include "params/params.h"
 #include "pipelines/inertial_pnp.h"
 #include "pipelines/tracker_state_machine.h"
 #include "pnp/multicam_pnp.h"
@@ -43,6 +44,8 @@ struct KeyFrameSettings {
   int64_t max_timedelta_between_kfs_s = 60;
 
   // Explicit per-frame keyframe decision. std::nullopt uses automatic keyframe checks.
+  // Set from the caller's per-frame hint rather than from configuration: it is the one value that
+  // legitimately differs frame to frame, so it is not a registered parameter.
   std::optional<bool> override_frame_selection;
 };
 
@@ -103,4 +106,33 @@ struct Settings {
   bool use_prediction = true;
 };
 
+/**
+ * @brief Seeds the per-frame settings from the settings the tracker was constructed with.
+ *
+ * Every sub-struct that exists in both places is copied across. This is the only correct starting
+ * point for a frame: some values are re-read from the per-frame struct on every frame
+ * (sof::Settings::box3_prefilter and the border fields are consumed in MonoSOF), so building the
+ * per-frame struct from type defaults instead silently discards whatever the caller configured at
+ * construction.
+ *
+ * Solver sub-structs with no counterpart in Settings (vo_pnp, inertial_stereo_pnp, imu_pnp, icp)
+ * keep their own defaults.
+ */
+inline TrackPerFrameSettings MakeTrackPerFrameSettings(const Settings& settings) {
+  TrackPerFrameSettings result;
+  result.sof = settings.sof_settings;
+  result.kf = settings.kf_settings;
+  result.sba = settings.sba_settings;
+  result.sm = settings.sm_settings;
+  return result;
+}
+
 }  // namespace cuvslam::odom
+
+// Tunable fields of KeyFrameSettings, addressed as `kf.<name>`. override_frame_selection is absent
+// on purpose: it varies per frame, so it arrives as a per-frame hint instead of a parameter.
+CUVSLAM_PARAMS_BEGIN(cuvslam::odom::KeyFrameSettings)
+CUVSLAM_PARAM_BOUNDED(survivor_from_last, "Make a keyframe when surviving tracks fall below this percentage",
+                      InRange(0.0, 100.0))
+CUVSLAM_PARAM_BOUNDED(max_timedelta_between_kfs_s, "Maximum time between consecutive keyframes, seconds", NonNegative())
+CUVSLAM_PARAMS_END()

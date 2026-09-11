@@ -32,6 +32,8 @@
 
 #include "pipelines/track.h"
 
+#include "params/params.h"
+
 namespace cuvslam::pipelines {
 
 struct InertialPnPSettings {
@@ -39,6 +41,17 @@ struct InertialPnPSettings {
   int32_t max_iteration = 20;
   int32_t min_observations = 25;
 };
+
+}  // namespace cuvslam::pipelines
+
+// Tunable fields of InertialPnPSettings, addressed as `imu_pnp.<name>`.
+CUVSLAM_PARAMS_BEGIN(cuvslam::pipelines::InertialPnPSettings)
+CUVSLAM_PARAM_BOUNDED(robustifier_scale, "Robustifier scale for inertial PnP reprojection residuals", NonNegative())
+CUVSLAM_PARAM_BOUNDED(max_iteration, "Maximum inertial PnP solver iterations", NonNegative())
+CUVSLAM_PARAM_BOUNDED(min_observations, "Observations required to attempt inertial PnP", NonNegative())
+CUVSLAM_PARAMS_END()
+
+namespace cuvslam::pipelines {
 
 class InertialPnP {
 public:

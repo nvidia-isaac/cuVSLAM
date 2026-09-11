@@ -48,7 +48,10 @@ def save_stats_to_json(stats, output_dir):
             'gt_n_error_segments': stat.gt_n_error_segments,
             'gt_simple_error': stat.gt_simple_error,
             'num_tracking_losts': stat.num_tracking_losts,
-            'odometry_mode': stat.odometry_mode
+            'odometry_mode': stat.odometry_mode,
+            # Only parameters that differ from their default, so the run's distinctive tuning is
+            # recorded without burying it in the full list.
+            'tuned_parameters': stat.tuned_parameters
         }
         stats_list.append(stat_dict)
 
@@ -300,6 +303,11 @@ def generate_report(test_folder, comments, stats, generate_pdf=False, config_nam
     # Generate HTML with image references
     template = env.get_template("report.html")
     total = calc_summary("total", stats)
+    # The reporter gives every sequence the same tracker settings -- execution.py only overrides
+    # dataset paths, cameras, ground truth and use_slam per sequence, and refuses per-sequence
+    # tuning outright -- so this belongs to the run, once, rather than repeated under each
+    # sequence. Sorted so two reports of the same tuning diff cleanly.
+    tuned_parameters = sorted(stats[0].tuned_parameters.items()) if stats else []
     # TODO: provide correct units of measurements for use_segments=false, %, deg
     html = template.render(
         date=date_time,
@@ -308,6 +316,7 @@ def generate_report(test_folder, comments, stats, generate_pdf=False, config_nam
         commit_ts=commit_ts,
         provenance_warning=provenance_warning,
         comments=comments,
+        tuned_parameters=tuned_parameters,
         stats=stats_for_html,
         total=total,
         avg_tl_path=avg_tl_rel,
@@ -349,6 +358,7 @@ def generate_report(test_folder, comments, stats, generate_pdf=False, config_nam
                 commit_ts=commit_ts,
                 provenance_warning=provenance_warning,
                 comments=comments,
+        tuned_parameters=tuned_parameters,
                 stats=stats_for_pdf,
                 total=total,
                 avg_tl_base64=image_to_base64(avg_tl_abs) if avg_tl_abs else "",

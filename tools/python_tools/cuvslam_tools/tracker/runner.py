@@ -51,6 +51,27 @@ def get_fps(tracking_time, n_frames):
     return -1
 
 
+def non_default_parameters(parameters: dict) -> dict:
+    """Picks the entries of ``Odometry.get_parameters()`` that differ from their default.
+
+    Recorded with a run's results so a report says what the run was actually tuned with. Only the
+    differences are kept: the full list is long and mostly defaults, which would bury the handful
+    of values that make a run distinctive.
+
+    The comparison is value against default, not whether the parameter was assigned. That is
+    deliberate. Some values are derived at construction from ``Odometry.Config``, so they differ
+    from the default while still reporting a source of ``default`` -- enabling denoising is the
+    clearest case, and it is exactly the kind of thing a report must not omit.
+
+    Args:
+        parameters: as returned by ``Odometry.get_parameters()``.
+
+    Returns:
+        ``{name: value}`` for every parameter whose value differs from its default.
+    """
+    return {name: info['value'] for name, info in parameters.items() if info['value'] != info['default']}
+
+
 @dataclass
 class Stat:
     """Summary statistics and report paths from one tracking run."""
@@ -66,6 +87,9 @@ class Stat:
     gt_simple_error: float = 0
     num_tracking_losts: int = 0
     odometry_mode: str = ""
+    # Internal parameters whose value differs from the built-in default, as {name: value}. Recorded
+    # so a report says what the run was actually tuned with; see Tracker._collect_tuned_parameters.
+    tuned_parameters: dict = field(default_factory=dict)
     # per-instance list of dicts {length, t_pct, r_deg_per_m}, populated by
     # metrics.calculate_sequence_errors in the segment branch.
     seg_err_points: list = field(default_factory=list)
@@ -126,6 +150,7 @@ class Tracker:
         self.stat = Stat()
         self.stat.odometry_mode = str(self.odom_cfg.odometry_mode)
         self.tracker = vslam.Tracker(rig, self.mode, self.odom_cfg, self.slam_cfg)
+        self.stat.tuned_parameters = self._collect_tuned_parameters()
 
         self.frame_id_from_ts = {}
         self.world_from_rig = {}
@@ -143,6 +168,10 @@ class Tracker:
                 not self.odom_cfg.enable_landmarks_export and
                 not self.odom_cfg.enable_final_landmarks_export ):
                 print("Exporting landmarks or observations is disabled, skipping visualization in Rerun")
+
+    def _collect_tuned_parameters(self) -> dict:
+        """Non-default internal parameters of this run's tracker, as {name: value}."""
+        return non_default_parameters(self.tracker.odometry.get_parameters())
 
     @staticmethod
     def _tracker_mode(use_slam: bool, async_sba: bool) -> vslam.Tracker.Mode:

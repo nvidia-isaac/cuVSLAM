@@ -25,6 +25,7 @@
 #include "camera/observation.h"
 #include "common/types.h"
 #include "common/unaligned_types.h"
+#include "params/params.h"
 
 namespace cuvslam::sof {
 
@@ -173,3 +174,11 @@ private:
 };
 
 }  // namespace cuvslam::sof
+
+// Spellings accepted for TrackerType in parameter files and on the command line.
+CUVSLAM_PARAM_ENUM_BEGIN(cuvslam::sof::TrackerType)
+CUVSLAM_PARAM_ENUM_VALUE("lk", LK)
+CUVSLAM_PARAM_ENUM_VALUE("klt", KLT)
+CUVSLAM_PARAM_ENUM_VALUE("lk_horizontal", LKHorizontal)
+CUVSLAM_PARAM_ENUM_VALUE("klt_horizontal", KLTHorizontal)
+CUVSLAM_PARAM_ENUM_END()

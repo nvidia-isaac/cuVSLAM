@@ -33,14 +33,12 @@ from .pycuvslam import (
 from . import pycuvslam as _core
 
 # Python helper functions for file-based config loading
-from . import utils
 
 # # Explicit exports for better IntelliSense
 __all__ = [
     'Odometry',
     'Slam',
     'Tracker',
-    'utils',
     'get_version',
     'set_verbosity',
     'warm_up_gpu',

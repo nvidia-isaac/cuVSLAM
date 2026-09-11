@@ -25,6 +25,7 @@
 #include <optional>
 #include <random>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -42,21 +43,22 @@
 #include "common/types.h"
 #include "common/utils.h"
 #include "cuvslam/cuvslam2.h"
-#include "cuvslam/cuvslam2_internal.h"
+#include "cuvslam/cuvslam_params.h"
 #include "cuvslam/internal.h"
-#include "utils/cuvslam_yaml_config.h"
+#include "params/cli.h"
+#include "params/registry.h"
 #include "utils/image_loader.h"
+#include "utils/param_file.h"
 
 using namespace cuvslam;
 
-// Get default configurations to use for flag defaults
-namespace {
-const Odometry::Config kDefaultOdomCfg = Odometry::GetDefaultConfig();
-const Slam::Config kDefaultSlamCfg = Slam::GetDefaultConfig();
-}  // namespace
-
 DEFINE_int32(verbosity, 2, "Verbosity level");
-DEFINE_string(config, "", "Path to YAML config file (command-line flags override config file values)");
+DEFINE_string(params, "",
+              "Path to a parameter file: one 'key: value' or 'key = value' per line, # starts a comment. "
+              "Covers configuration (odometry.*, slam.*) and solver parameters (sof.*, sba.*, vo_pnp.*, ...). "
+              "Repeatable -Pkey=value overrides single entries and wins over the file; --list_params prints "
+              "every name with its type, default and description.");
+DEFINE_bool(list_params, false, "Print every parameter with its type, default and description, then exit");
 // replay settings
 DEFINE_string(edex, "", "Path to the .edex file to run on (required)");
 DEFINE_string(cameras, "", "Comma-separated list of cameras");
@@ -86,26 +88,14 @@ DEFINE_double(loc_hint_noise, 0., "Introduce noise to hints (uniform, max deviat
 DEFINE_bool(loc_random_rot, false, "Randomize hint rotation");
 DEFINE_bool(localize_wait, false, "Wait for localization to finish (not the same as reproduce_mode in slam)");
 DEFINE_bool(localize_forever, false, "Run localization continuously (each time previous call finished)");
-// cuvslam configuration
-DEFINE_string(debug_dump, "", "Path to debug dump");
-DEFINE_int32(cfg_odom_mode, static_cast<int>(kDefaultOdomCfg.odometry_mode),
-             "Odometry mode: Multicamera (0), Inertial (1), RGBD (2), Mono (3)");
-DEFINE_int32(cfg_multicam_mode, static_cast<int>(kDefaultOdomCfg.multicam_mode),
-             "Multicamera mode: performance (0), precision (1), or moderate (2)");
-DEFINE_bool(cfg_async_sba, false, "Enable asynchronous sparse bundle adjustment");
-DEFINE_bool(cfg_denoising, kDefaultOdomCfg.use_denoising, "Enable image denoising");
-DEFINE_bool(cfg_horizontal, kDefaultOdomCfg.rectified_stereo_camera,
-            "Enable tracking for rectified cameras with principal points on the horizontal line");
-DEFINE_bool(cfg_planar, kDefaultSlamCfg.planar_constraints,
-            "Slam poses are so that the camera moves on a horizontal plane");
-DEFINE_bool(cfg_enable_slam, false, "Enable localization and mapping");
-DEFINE_bool(cfg_sync_slam, kDefaultSlamCfg.sync_mode,
-            "Run localization and mapping in the same thread with visual odometry");
-DEFINE_int32(cfg_slam_max_map_size, kDefaultSlamCfg.max_map_size,
-             "Maximum numbers of poses in SLAM pose graph, 0 means unlimited pose-graph");
-DEFINE_double(cfg_max_frame_delta_s, kDefaultOdomCfg.max_frame_delta_s,
-              "Set maximum camera frame time in seconds to warn users");
-DEFINE_bool(cfg_enable_export, false, "Enable export of observations & landmarks");
+// cuvslam configuration.
+// Everything that is a plain field of Odometry::Config or Slam::Config is reachable as a parameter
+// (`--list_params` prints the names), so it gets no flag of its own. What is left here decides how
+// the launcher is wired rather than how the tracker is configured.
+DEFINE_bool(cfg_enable_slam, false, "Enable localization and mapping (constructs a Slam instance)");
+DEFINE_bool(cfg_enable_export, false,
+            "Shorthand for -Podometry.enable_observations_export=true -Podometry.enable_landmarks_export=true; "
+            "either key can still be set individually to override it");
 // Tracker-compatible SLAM flags (load map + localize on a chosen edex frame)
 DEFINE_int32(slam_simulate_slow_map_load, 0, "Delay in ms invoked from localize start_cb (after map load begins).");
 DEFINE_string(slam_input_database, "", "Folder with SLAM map DB to localize in (LocalizeInMap).");
@@ -115,35 +105,11 @@ DEFINE_string(slam_localize_guess_translation, "",
 DEFINE_double(slam_load_and_localize_timestamp, -1,
               "Timestamp in seconds for LocalizeInMap; if <=0 use current frame image timestamp.");
 DEFINE_int32(slam_load_and_localize_on_frame, -1, "If >=0, run LocalizeInMap when edex frame_number matches.");
-DEFINE_bool(slam_reproduce_mode, true, "If set: SLAM sync_mode (synced SLAM thread / reproduce semantics).");
-DEFINE_int32(max_pose_graph_nodes, 300, "SLAM pose graph node limit (maps to Slam::Config.max_map_size).");
 // image crop settings
 DEFINE_int32(border_top, 0, "top border to ignore in pixels (0 to use full frame)");
 DEFINE_int32(border_bottom, 0, "bottom border to ignore in pixels (0 to use full frame)");
 DEFINE_int32(border_left, 0, "left border to ignore in pixels (0 to use full frame)");
 DEFINE_int32(border_right, 0, "right border to ignore in pixels (0 to use full frame)");
-// rgbd settings
-// set default to 0, so users don't have to specify it explicitly for the most common case,
-// while library defaults to -1 to avoid errors
-DEFINE_int32(cfg_depth_camera, 0, "Depth camera index");
-DEFINE_double(cfg_depth_scale_factor, kDefaultOdomCfg.rgbd_settings.depth_scale_factor, "Depth scale factor");
-DEFINE_bool(cfg_enable_depth_stereo_tracking, kDefaultOdomCfg.rgbd_settings.enable_depth_stereo_tracking,
-            "Enable depth stereo tracking");
-// Expert SBA parameters — applied via ApplyPersistentInternalParameters() after tracker creation.
-// Only flags explicitly set on the command line are forwarded; unset flags keep the
-// library default.  mode and async are construction-time only and belong in cfg_* above.
-DEFINE_int32(expert_sba_num_frames, 7,
-             "sba.num_sba_frames: number of recent keyframes used in regular SBA (default: 7)");
-DEFINE_int32(expert_sba_num_inertial_frames, 10,
-             "sba.num_inertial_sba_frames: number of keyframes used in inertial SBA (default: 10)");
-DEFINE_int32(expert_sba_num_fixed_frames, 3,
-             "sba.num_fixed_sba_frames: number of fixed (anchor) keyframes in regular SBA (default: 3)");
-DEFINE_int32(expert_sba_num_iterations, 7,
-             "sba.num_sba_iterations: maximum solver iterations per SBA run (default: 7)");
-DEFINE_double(expert_sba_robustifier_scale, 0.5,
-              "sba.robustifier_scale: Huber robustifier scale for SBA reprojection residuals (default: 0.5)");
-DEFINE_bool(expert_sba_use_winsorizer, false,
-            "sba.use_sba_winsorizer: run a second SBA pass after winsorizing reprojection outliers (default: false)");
 
 #define VERIFY_TRACE(condition, ...) \
   if (!(condition)) {                \
@@ -442,8 +408,7 @@ bool RunSlamLoadAndLocalizeOnMatchingFrame(Slam& slam, const Slam::ImageSet& ima
 }
 
 bool trackEdexDataSet(const std::string& edex_name, const Odometry::Config& odom_cfg, const Slam::Config& slam_cfg,
-                      const cuvslam::internal::Internals& internals,
-                      const std::map<std::string, std::string>& expert_params, const std::string& input_map_name,
+                      const std::vector<utils::ParamEntry>& solver_params, const std::string& input_map_name,
                       const std::string& output_map_name) {
   std::vector<CameraId> camera_ids{StringToIntVector<CameraId>(FLAGS_cameras, ',')};
   std::unique_ptr<camera_rig_edex::ICameraRigReplay> edex_rig;
@@ -464,13 +429,10 @@ bool trackEdexDataSet(const std::string& edex_name, const Odometry::Config& odom
   WarmUpGPU();
   Rig rig = createRig(edex_file, edex_rig.get());
   std::unique_ptr<Odometry> odom = std::make_unique<Odometry>(rig, odom_cfg);
-  if (!expert_params.empty()) {
-    std::vector<cuvslam::internal::InternalParameter> params;
-    params.reserve(expert_params.size());
-    for (const auto& [k, v] : expert_params) {
-      params.push_back({k, v});
-    }
-    odom->ApplyPersistentInternalParameters(params);
+  // Solver parameters are only reachable once the tracker exists, since which of them apply
+  // depends on the odometry mode it was built with.
+  for (const utils::ParamEntry& entry : solver_params) {
+    odom->SetParameter(entry.key, entry.value);
   }
   TraceMessage("Odometry tracker created");
 
@@ -578,7 +540,7 @@ bool trackEdexDataSet(const std::string& edex_name, const Odometry::Config& odom
     }
 
     const auto track_start = std::chrono::steady_clock::now();
-    PoseEstimate pose_estimate = odom->Track(images, masks, depths, &internals);
+    PoseEstimate pose_estimate = odom->Track(images, masks, depths);
     const double track_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - track_start).count();
     if (!pose_estimate.world_from_rig.has_value()) {
       TraceWarning("Track(): Tracking lost at frame %zu.", frame);
@@ -655,7 +617,7 @@ bool trackEdexDataSet(const std::string& edex_name, const Odometry::Config& odom
             for (auto&& im : dummy_images) {
               im.timestamp_ns += 1000;
             }
-            odom->Track(dummy_images, /*masks=*/{}, /*depths=*/{}, &internals);
+            odom->Track(dummy_images, /*masks=*/{}, /*depths=*/{});
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
           }
           next_loc_frame = frame + FLAGS_loc_skip_frames + 1;
@@ -709,14 +671,54 @@ bool trackEdexDataSet(const std::string& edex_name, const Odometry::Config& odom
   return true;
 }
 
+/**
+ * @brief Prints every parameter with its type, default and description.
+ *
+ * Built from the descriptors, so it cannot fall behind the parameters that actually exist. Mode
+ * matters: the solver groups listed here are the ones an inertial tracker exposes, which is the
+ * widest set.
+ */
+void PrintParameterReference() {
+  Odometry::Config odom_cfg = Odometry::GetDefaultConfig();
+  Slam::Config slam_cfg = Slam::GetDefaultConfig();
+  odom_cfg.odometry_mode = Odometry::OdometryMode::Inertial;
+
+  params::Registry registry;
+  registry.Add("odometry", odom_cfg);
+  registry.Add("odometry.rgbd", odom_cfg.rgbd_settings);
+  registry.Add("odometry.multisensor", odom_cfg.multisensor_settings);
+  registry.Add("slam", slam_cfg);
+
+  size_t width = 0;
+  std::vector<params::ParamInfo> infos = registry.List();
+  for (const params::ParamInfo& info : infos) {
+    width = std::max(width, info.key.size());
+  }
+  std::cout << "Configuration, applied before the tracker is built:\n";
+  for (const params::ParamInfo& info : infos) {
+    std::cout << "  " << std::left << std::setw(static_cast<int>(width)) << info.key << "  " << info.type << " = "
+              << info.default_value << "\n      " << info.doc << "\n";
+  }
+  std::cout << "\nSolver parameters, applied to the tracker once it exists. Availability depends on the\n"
+               "odometry mode; sm.*, imu_pnp.* and inertial_stereo_pnp.* need an IMU:\n"
+            << "  run with --verbosity=2 and no --params to see the set a given mode exposes.\n";
+}
+
 }  // end of anonymous namespace
 
 int main(int arg_c, char** arg_v) {
+  const std::vector<std::string> param_overrides = params::ExtractOverrides(arg_c, arg_v);
   gflags::ParseCommandLineFlags(&arg_c, &arg_v, /*remove flags = */ true);
   if (arg_c != 1) {
     std::cout << "This tools doesn't expect command line arguments, only flags listed with --help" << std::endl
               << "If you see this message, please check your command line." << std::endl;
     return EXIT_FAILURE;
+  }
+
+  // Before the --edex check: listing the parameters does not need a dataset.
+  if (FLAGS_list_params) {
+    PrintParameterReference();
+    return EXIT_SUCCESS;
   }
 
   if (FLAGS_edex.empty()) {
@@ -730,115 +732,59 @@ int main(int arg_c, char** arg_v) {
   // Start with default configurations
   Odometry::Config odom_cfg = Odometry::GetDefaultConfig();
   Slam::Config slam_cfg = Slam::GetDefaultConfig();
-  cuvslam::internal::Internals internals;
 
-  // Load configs from YAML file if specified (command-line flags applied afterwards take precedence)
-  std::map<std::string, std::string> expert_params;
-  if (!FLAGS_config.empty()) {
-    std::cout << "Loading config from: " << FLAGS_config << std::endl;
+  // Parameters arrive from a file and from repeatable -P overrides, and split across two phases:
+  // Odometry::Config and Slam::Config must be final before the tracker is built, while the solver
+  // parameters only exist once it is. Each entry goes to whichever registry knows its name.
+  params::Registry config_registry;
+  config_registry.Add("odometry", odom_cfg);
+  config_registry.Add("odometry.rgbd", odom_cfg.rgbd_settings);
+  config_registry.Add("odometry.multisensor", odom_cfg.multisensor_settings);
+  config_registry.Add("slam", slam_cfg);
+
+  // The one shorthand the launcher still owns. It goes through the registry before the file and
+  // the -P overrides, so the run records where the two export flags came from and so naming either
+  // of them explicitly still wins.
+  if (FLAGS_cfg_enable_export) {
+    config_registry.Set("odometry.enable_observations_export", "true", params::Source::CommandLine);
+    config_registry.Set("odometry.enable_landmarks_export", "true", params::Source::CommandLine);
+  }
+
+  std::vector<utils::ParamEntry> entries;
+  try {
+    if (!FLAGS_params.empty()) {
+      entries = utils::ReadParamFile(FLAGS_params);
+    }
+  } catch (const std::exception& e) {
+    TraceError("%s\n", e.what());
+    return EXIT_FAILURE;
+  }
+  // -P wins over the file, so it goes last.
+  for (const std::string& override_arg : param_overrides) {
+    const size_t eq = override_arg.find('=');
+    if (eq == std::string::npos) {
+      TraceError("-P expects key=value, got '%s'\n", override_arg.c_str());
+      return EXIT_FAILURE;
+    }
+    entries.push_back(utils::ParamEntry{override_arg.substr(0, eq), override_arg.substr(eq + 1), 0});
+  }
+
+  std::vector<utils::ParamEntry> solver_params;
+  for (const utils::ParamEntry& entry : entries) {
+    const bool from_file = entry.line != 0;
+    const std::string where = from_file ? FLAGS_params + ":" + std::to_string(entry.line) : std::string("-P");
     try {
-      const char* config_path = FLAGS_config.c_str();
-      if (LoadOdometryConfigFromFile(config_path, odom_cfg)) {
-        std::cout << "Loaded odometry config from file." << std::endl;
-      }
-      if (LoadSlamConfigFromFile(config_path, slam_cfg)) {
-        std::cout << "Loaded SLAM config from file." << std::endl;
-      }
-      if (LoadInternalsFromFile(config_path, internals)) {
-        std::cout << "Loaded per-frame internals from file." << std::endl;
-      }
-      if (LoadExpertParamsFromFile(config_path, expert_params)) {
-        std::cout << "Loaded expert_params from file." << std::endl;
+      if (config_registry.Knows(entry.key)) {
+        config_registry.Set(entry.key, entry.value, from_file ? params::Source::File : params::Source::CommandLine);
+      } else {
+        // Deferred; an unknown name is reported once the tracker knows which parameters it has.
+        solver_params.push_back(entry);
       }
     } catch (const std::exception& e) {
-      TraceError("Failed to load config file: %s\n", e.what());
+      TraceError("%s: %s\n", where.c_str(), e.what());
       return EXIT_FAILURE;
     }
   }
 
-  // Apply command-line flag overrides. Only apply when the user explicitly set the flag
-  // (not at default), so YAML config values are not silently overwritten by flag defaults.
-  auto flag_is_set = [](const char* name) {
-    gflags::CommandLineFlagInfo info;
-    return gflags::GetCommandLineFlagInfo(name, &info) && !info.is_default;
-  };
-
-  if (!FLAGS_debug_dump.empty()) {
-    odom_cfg.debug_dump_directory = FLAGS_debug_dump;
-  }
-  if (flag_is_set("cfg_async_sba")) odom_cfg.async_sba = FLAGS_cfg_async_sba;
-  if (flag_is_set("cfg_denoising")) odom_cfg.use_denoising = FLAGS_cfg_denoising;
-  if (flag_is_set("cfg_horizontal")) odom_cfg.rectified_stereo_camera = FLAGS_cfg_horizontal;
-  if (flag_is_set("cfg_max_frame_delta_s"))
-    odom_cfg.max_frame_delta_s = static_cast<float>(FLAGS_cfg_max_frame_delta_s);
-  if (flag_is_set("cfg_enable_export")) {
-    odom_cfg.enable_observations_export = FLAGS_cfg_enable_export;
-    odom_cfg.enable_landmarks_export = FLAGS_cfg_enable_export;
-  }
-
-  // Set multicamera mode (only when explicitly set)
-  if (flag_is_set("cfg_multicam_mode")) {
-    if (FLAGS_cfg_multicam_mode == 0) {
-      odom_cfg.multicam_mode = Odometry::MulticameraMode::Performance;
-    } else if (FLAGS_cfg_multicam_mode == 1) {
-      odom_cfg.multicam_mode = Odometry::MulticameraMode::Precision;
-    } else if (FLAGS_cfg_multicam_mode == 2) {
-      odom_cfg.multicam_mode = Odometry::MulticameraMode::Moderate;
-    } else {
-      TraceError("Invalid multicamera mode");
-      return EXIT_FAILURE;
-    }
-  }
-
-  // Set odometry mode (only when explicitly set)
-  if (flag_is_set("cfg_odom_mode")) {
-    if (FLAGS_cfg_odom_mode == 0) {
-      odom_cfg.odometry_mode = Odometry::OdometryMode::Multicamera;
-    } else if (FLAGS_cfg_odom_mode == 1) {
-      odom_cfg.odometry_mode = Odometry::OdometryMode::Inertial;
-    } else if (FLAGS_cfg_odom_mode == 2) {
-      odom_cfg.odometry_mode = Odometry::OdometryMode::RGBD;
-    } else if (FLAGS_cfg_odom_mode == 3) {
-      odom_cfg.odometry_mode = Odometry::OdometryMode::Mono;
-    } else {
-      TraceError("Unsupported odometry mode");
-      return EXIT_FAILURE;
-    }
-  }
-
-  // Apply RGBD-specific flags whenever the final mode is RGBD, regardless of
-  // whether the mode came from a flag or from YAML config.
-  if (odom_cfg.odometry_mode == Odometry::OdometryMode::RGBD) {
-    if (flag_is_set("cfg_depth_camera")) odom_cfg.rgbd_settings.depth_camera_id = FLAGS_cfg_depth_camera;
-    if (flag_is_set("cfg_depth_scale_factor"))
-      odom_cfg.rgbd_settings.depth_scale_factor = static_cast<float>(FLAGS_cfg_depth_scale_factor);
-    if (flag_is_set("cfg_enable_depth_stereo_tracking"))
-      odom_cfg.rgbd_settings.enable_depth_stereo_tracking = FLAGS_cfg_enable_depth_stereo_tracking;
-  }
-
-  // Apply SLAM config from flags (only when explicitly set)
-  if (flag_is_set("cfg_sync_slam")) slam_cfg.sync_mode = FLAGS_cfg_sync_slam;
-  if (flag_is_set("cfg_slam_max_map_size")) slam_cfg.max_map_size = FLAGS_cfg_slam_max_map_size;
-  if (flag_is_set("max_pose_graph_nodes")) slam_cfg.max_map_size = static_cast<uint32_t>(FLAGS_max_pose_graph_nodes);
-  if (flag_is_set("slam_reproduce_mode")) slam_cfg.sync_mode = FLAGS_slam_reproduce_mode;
-  if (flag_is_set("cfg_planar")) slam_cfg.planar_constraints = FLAGS_cfg_planar;
-
-  // Apply explicitly-set CLI flags into expert_params, overriding any YAML values.
-  if (flag_is_set("expert_sba_num_frames"))
-    expert_params["sba.num_sba_frames"] = std::to_string(FLAGS_expert_sba_num_frames);
-  if (flag_is_set("expert_sba_num_inertial_frames"))
-    expert_params["sba.num_inertial_sba_frames"] = std::to_string(FLAGS_expert_sba_num_inertial_frames);
-  if (flag_is_set("expert_sba_num_fixed_frames"))
-    expert_params["sba.num_fixed_sba_frames"] = std::to_string(FLAGS_expert_sba_num_fixed_frames);
-  if (flag_is_set("expert_sba_num_iterations"))
-    expert_params["sba.num_sba_iterations"] = std::to_string(FLAGS_expert_sba_num_iterations);
-  if (flag_is_set("expert_sba_robustifier_scale"))
-    expert_params["sba.robustifier_scale"] = std::to_string(FLAGS_expert_sba_robustifier_scale);
-  if (flag_is_set("expert_sba_use_winsorizer"))
-    expert_params["sba.use_sba_winsorizer"] = FLAGS_expert_sba_use_winsorizer ? "true" : "false";
-
-  return trackEdexDataSet(FLAGS_edex, odom_cfg, slam_cfg, internals, expert_params, FLAGS_loc_input_map,
-                          FLAGS_output_map)
-             ? 0
-             : 1;
+  return trackEdexDataSet(FLAGS_edex, odom_cfg, slam_cfg, solver_params, FLAGS_loc_input_map, FLAGS_output_map) ? 0 : 1;
 }

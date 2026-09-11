@@ -74,6 +74,19 @@
         <td>Comments</td>
         <td>{{comments}}</td>
     </tr>
+    {# Resolved parameters, so this covers values derived from the config as well as ones asked
+       for on the command line. Only those differing from their default are listed; nothing here
+       means the run used defaults throughout. #}
+    <tr class="summary">
+        <td>Non-default parameters</td>
+        <td>
+            {% if tuned_parameters %}
+            {% for name, value in tuned_parameters %}{{ name }} = {{ value }}{% if not loop.last %}<br>{% endif %}{% endfor %}
+            {% else %}
+            (none)
+            {% endif %}
+        </td>
+    </tr>
 </table>
 <br>
 <table>
