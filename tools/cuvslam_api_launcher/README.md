@@ -39,39 +39,11 @@ Hint file rows format: `timestamp x y z [optional quaternion]`
 Float timestamps in seconds and int timestamps in ns are supported. Hints must be sorted by timestamps.
 To localize, the util will use the latest hint not later than current frame.
 
-## Configuration via YAML File
+## Expert SBA Parameters
 
-You can specify optional per-frame `internals` and persistent expert parameters using a YAML config file with the
-`--config` flag:
-
-```bash
-./bin/cuvslam_api_launcher --config=api_config.yaml --edex=<edex file>
-```
-
-Command-line flags will override values from the config file. See `api_config.yaml` for an example configuration with
-all supported options.
-
-**Note:** This launcher links the **`utils`** static library, which reads YAML and populates `Odometry::Config`,
-`Slam::Config`, and the unstable development-only `internal::Internals` struct. It applies `expert_params` once after
-tracker construction with `Odometry::ApplyPersistentInternalParameters()`. Normal applications should use the default
-internal parameters. Python development tools can load the same per-frame values with
-`cuvslam.utils.load_internals_from_file()`.
-
-### Config File Structure
-
-```yaml
-# Development-only per-frame overrides passed to Odometry::Track(..., &internals).
-# Unset keys retain the built-in defaults.
-internals:
-  num_desired_tracks: 500
-  kf_survivor_from_last: 40.0
-  kf_max_timedelta_between_kfs_s: 20
-
-# Development-only persistent parameters applied once after tracker construction.
-expert_params:
-  sba.num_sba_frames: 7
-  sba.num_sba_iterations: 7
-```
+The `--expert_sba_*` flags are development-only persistent parameters, applied once after tracker construction with
+`Odometry::ApplyPersistentInternalParameters()`. Their defaults mirror the library defaults, so leaving them alone
+changes nothing. Normal applications should use the default internal parameters.
 
 # Run tracker on EuRoC MAV Dataset (OBSOLETE)
 
