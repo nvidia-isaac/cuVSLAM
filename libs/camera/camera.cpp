@@ -374,6 +374,7 @@ std::unique_ptr<ICameraModel> CreateCameraModel(const Vector2T& resolution, cons
                                                      parameters[3]);  // P2!
     case Distortion::Model::Brown:
       if (num_parameters != 5) return {};
+      // Brown parameters are already (k1, k2, k3, p1, p2), so no reordering here unlike Polynomial above.
       return std::make_unique<Brown5KCameraModel>(resolution, focal, principal, parameters[0], parameters[1],
                                                   parameters[2], parameters[3], parameters[4]);
     case Distortion::Model::Fisheye:
