@@ -15,10 +15,15 @@
  */
 
 #include <memory>
+#include <string_view>
 #include <vector>
 
 #include "common/include_gtest.h"
 #include "cuvslam/cuvslam2.h"
+
+#ifdef USE_CUDA
+#include "cuda_modules/cuda_helper.h"
+#endif
 
 class TestImageFormat : public testing::Test {
 protected:
@@ -93,10 +98,62 @@ TEST_F(TestImageFormat, InvalidDtype) {
   EXPECT_THROW(odometry->Track({img}), std::invalid_argument);
 }
 
-#ifndef USE_CUDA
+#ifdef USE_CUDA
+
+// Odometry that runs on the GPU reads device memory directly, so both memory spaces are accepted.
+TEST_F(TestImageFormat, AcceptsGpuMemoryWhenTrackingOnGpu) {
+  cuvslam::cuda::GPUOnlyArray<uint8_t> gpu_pixels(480 * 640);
+  CUDA_CHECK(cudaMemset(gpu_pixels.ptr(), 0, gpu_pixels.size()));
+
+  cuvslam::Image img;
+  img.timestamp_ns = timestamp;
+  img.camera_index = 0;
+  img.width = 640;
+  img.height = 480;
+  img.pixels = gpu_pixels.ptr();
+  img.encoding = cuvslam::Image::Encoding::MONO;
+  img.data_type = cuvslam::Image::DataType::UINT8;
+  img.is_gpu_mem = true;
+  img.pitch = 640;
+
+  auto result = odometry->Track({img});
+  EXPECT_TRUE(result.world_from_rig.has_value());
+}
+
+// A CPU tracker dereferences the pixel pointer itself, so a device address would be read as host
+// memory. The combination has to be refused instead of producing garbage deeper in the pipeline.
+TEST_F(TestImageFormat, RejectsGpuMemoryWhenTrackingOnCpu) {
+  cuvslam::Odometry::Config cpu_cfg;
+  cpu_cfg.use_gpu = false;
+  cuvslam::Odometry cpu_odometry{rig, cpu_cfg};
+
+  cuvslam::cuda::GPUOnlyArray<uint8_t> gpu_pixels(480 * 640);
+  CUDA_CHECK(cudaMemset(gpu_pixels.ptr(), 0, gpu_pixels.size()));
+
+  cuvslam::Image img;
+  img.timestamp_ns = timestamp;
+  img.camera_index = 0;
+  img.width = 640;
+  img.height = 480;
+  img.pixels = gpu_pixels.ptr();
+  img.encoding = cuvslam::Image::Encoding::MONO;
+  img.data_type = cuvslam::Image::DataType::UINT8;
+  img.is_gpu_mem = true;
+  img.pitch = 640;
+
+  try {
+    cpu_odometry.Track({img});
+    FAIL() << "GPU memory was accepted by a tracker configured with use_gpu = false";
+  } catch (const std::invalid_argument& e) {
+    EXPECT_NE(std::string_view{e.what()}.find("tracking runs on the CPU"), std::string_view::npos) << e.what();
+  }
+}
+
+#else
+
+// A CPU-only build cannot read device memory at all, so the flag has to be refused up front instead
+// of the pointer being dereferenced as if it were host memory.
 TEST_F(TestImageFormat, RejectsGpuMemoryWithoutCuda) {
-  // A CPU-only build cannot read device memory, so the flag has to be refused up front instead of
-  // the pointer being dereferenced as if it were host memory.
   std::vector<uint8_t> pixels(480 * 640, 0);
   cuvslam::Image img;
   img.timestamp_ns = timestamp;
@@ -111,4 +168,5 @@ TEST_F(TestImageFormat, RejectsGpuMemoryWithoutCuda) {
 
   EXPECT_THROW(odometry->Track({img}), std::invalid_argument);
 }
+
 #endif

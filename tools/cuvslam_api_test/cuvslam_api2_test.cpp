@@ -28,18 +28,6 @@ DEFINE_string(slam_poses_file, ".", "Slam poses file");
 
 using namespace cuvslam;
 
-#if defined(ENFORCE_GPU)
-static_assert(USE_CUDA);
-auto use_cuda = testing::Values(true);
-auto use_gpu_mem = testing::Bool();
-#elif defined(USE_CUDA)
-auto use_cuda = testing::Bool();
-auto use_gpu_mem = testing::Bool();
-#else
-auto use_cuda = testing::Values(false);
-auto use_gpu_mem = testing::Values(false);
-#endif
-
 struct VioApi2TestParams {
   using Tuple = std::tuple<Odometry::MulticameraMode, Odometry::OdometryMode, bool, bool, bool, bool, bool, bool, bool,
                            bool, bool>;
@@ -117,19 +105,38 @@ TEST_P(VioApi2Test, TrackEdex) {
   // TODO(vikuznetsov): implement some sanity check for tracking results
 }
 
-INSTANTIATE_TEST_SUITE_P(CppApiConfigs, VioApi2Test,
+// The two suites below cover the use_gpu / use_gpu_mem pairs. GPU tracking reads images from host
+// or device memory, so both are exercised. CPU tracking only reads host memory: a device pointer is
+// rejected by the API, and that rejection is covered in libs/cuvslam/test/image_format_test.cpp.
+INSTANTIATE_TEST_SUITE_P(CppApiConfigsCPU, VioApi2Test,
                          testing::ConvertGenerator<VioApi2TestParams::Tuple>(testing::Combine(
                              testing::Values(Odometry::MulticameraMode::Performance,
                                              Odometry::MulticameraMode::Precision, Odometry::MulticameraMode::Moderate),
                              testing::Values(Odometry::OdometryMode::Multicamera, Odometry::OdometryMode::Inertial,
                                              Odometry::OdometryMode::RGBD, Odometry::OdometryMode::Mono),
-                             use_cuda, use_gpu_mem, testing::Bool(), testing::Bool(), testing::Bool(), testing::Bool(),
-                             testing::Bool(), testing::Bool(), testing::Bool())),
+                             testing::Values(false), testing::Values(false), testing::Bool(), testing::Bool(),
+                             testing::Bool(), testing::Bool(), testing::Bool(), testing::Bool(), testing::Bool())),
                          [](const testing::TestParamInfo<VioApi2TestParams>& info) -> std::string {
                            std::ostringstream ss;
                            ss << info.param;
                            return ss.str();
                          });
+
+#ifdef USE_CUDA
+INSTANTIATE_TEST_SUITE_P(CppApiConfigsGPU, VioApi2Test,
+                         testing::ConvertGenerator<VioApi2TestParams::Tuple>(testing::Combine(
+                             testing::Values(Odometry::MulticameraMode::Performance,
+                                             Odometry::MulticameraMode::Precision, Odometry::MulticameraMode::Moderate),
+                             testing::Values(Odometry::OdometryMode::Multicamera, Odometry::OdometryMode::Inertial,
+                                             Odometry::OdometryMode::RGBD, Odometry::OdometryMode::Mono),
+                             testing::Values(true), testing::Bool(), testing::Bool(), testing::Bool(), testing::Bool(),
+                             testing::Bool(), testing::Bool(), testing::Bool(), testing::Bool())),
+                         [](const testing::TestParamInfo<VioApi2TestParams>& info) -> std::string {
+                           std::ostringstream ss;
+                           ss << info.param;
+                           return ss.str();
+                         });
+#endif
 
 // Tests that need no dataset live in libs/cuvslam/test, where ctest runs them. This file keeps only
 // the edex replay suite, which requires --data_folder.
