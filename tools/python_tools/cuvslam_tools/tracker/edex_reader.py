@@ -35,13 +35,19 @@ class EdexReader(DatasetReader):
     def __init__(self, edex_dir: str, stereo_edex: Optional[str] = None, num_loops: int = 0,
                  rgbd_mode: bool = False, repeat_type: str = "none",
                  cache_uncompressed: bool = False, gt_path: Optional[str] = None,
-                 camera_ids: Optional[List[int]] = None, gt_from_shuttle: bool = False):
+                 camera_ids: Optional[List[int]] = None, gt_from_shuttle: bool = False,
+                 multisensor_mode: bool = False):
         """Load EDEX configuration, rig calibration, frame metadata, and optional IMU data."""
         super().__init__(edex_dir, stereo_edex, num_loops, repeat_type, gt_path=gt_path,
                          gt_from_shuttle=gt_from_shuttle)
         self.rgbd_mode = rgbd_mode
+        self.multisensor_mode = multisensor_mode
+        # Both modes read depth images; they differ only in the settings object
+        # the EDEX description is turned into.
+        self.depth_mode = rgbd_mode or multisensor_mode
         self.cache_uncompressed = cache_uncompressed
         self.rgbd_settings = None
+        self.multisensor_settings = None
         self.depth_sequence = None
         self.camera_ids = camera_ids
         if self.camera_ids:
@@ -77,6 +83,12 @@ class EdexReader(DatasetReader):
                     self._remap_rgbd_settings_for_filtered_cameras()
                 except ValueError as e:
                     raise ValueError(f"Failed to initialize RGBD mode: {str(e)}") from e
+
+            if self.multisensor_mode:
+                try:
+                    self.multisensor_settings = self._parse_multisensor_settings(config_data)
+                except ValueError as e:
+                    raise ValueError(f"Failed to initialize Multisensor mode: {str(e)}") from e
 
             # Load IMU data if available
             imu_data_list = []
@@ -124,8 +136,8 @@ class EdexReader(DatasetReader):
             self.fps = metadata.get('fps', 30)
             self.interval_ns = int(1e9 / self.fps)
 
-            # Load depth sequence if in RGBD mode
-            if self.rgbd_mode and 'depth_sequence' in metadata:
+            # Load depth sequence if this mode reads depth
+            if self.depth_mode and 'depth_sequence' in metadata:
                 self.depth_sequence = metadata['depth_sequence']
 
             self.frames = {}
@@ -158,8 +170,8 @@ class EdexReader(DatasetReader):
                             f"Frame {frame_id} has no cameras after applying camera_ids {self.camera_ids}."
                         )
 
-                    # Add depth data if in RGBD mode
-                    if self.rgbd_mode and self.depth_sequence:
+                    # Add depth data if this mode reads depth
+                    if self.depth_mode and self.depth_sequence:
                         self.frames[frame_id]["depth"] = []
                         for depth_id, depth_paths in enumerate(self.depth_sequence):
                             if self.camera_id_map is not None and depth_id not in self.camera_id_map:
@@ -196,17 +208,23 @@ class EdexReader(DatasetReader):
             self.tar_archives = {}
             self._detect_tar_archives()
 
+    def _remap_depth_camera_id(self, depth_camera_id: int) -> int:
+        """Move a depth camera id into the filtered rig's contiguous camera-id space."""
+        if self.camera_id_map is None:
+            return depth_camera_id
+
+        if depth_camera_id not in self.camera_id_map:
+            raise ValueError(
+                f"depth camera id {depth_camera_id} is not included in camera_ids {self.camera_ids}."
+            )
+        return self.camera_id_map[depth_camera_id]
+
     def _remap_rgbd_settings_for_filtered_cameras(self) -> None:
         """Keep RGBD depth camera id in the same camera-id space as the filtered rig."""
         if self.camera_id_map is None or self.rgbd_settings is None:
             return
 
-        original_depth_camera_id = self.rgbd_settings.depth_camera_id
-        if original_depth_camera_id not in self.camera_id_map:
-            raise ValueError(
-                f"RGBD depth_camera_id {original_depth_camera_id} is not included in camera_ids {self.camera_ids}."
-            )
-        self.rgbd_settings.depth_camera_id = self.camera_id_map[original_depth_camera_id]
+        self.rgbd_settings.depth_camera_id = self._remap_depth_camera_id(self.rgbd_settings.depth_camera_id)
 
     def _filter_and_remap_frame_cameras(self):
         """Keep only requested cameras from frame metadata and remap them to contiguous ids."""
@@ -243,8 +261,8 @@ class EdexReader(DatasetReader):
                 if folder_name:
                     folder_names.add(folder_name)
 
-            # Also check depth folders if in RGBD mode
-            if self.rgbd_mode and "depth" in frame_data:
+            # Also check depth folders if this mode reads depth
+            if self.depth_mode and "depth" in frame_data:
                 for depth_data in frame_data["depth"]:
                     folder_name = os.path.dirname(depth_data['filename'])
                     if folder_name:
@@ -470,6 +488,85 @@ class EdexReader(DatasetReader):
         #     print(f"Available files in tar: {available_files[:10]}...")  # Show first 10 files
         #     raise FileNotFoundError(f"Image file {filename} not found in tar archive")
 
+    @staticmethod
+    def _parse_depth_description(config_data):
+        """Collect every depth-capable camera and the shared depth scale from stereo.edex.
+
+        Args:
+            config_data: Configuration data loaded from stereo.edex
+
+        Returns:
+            tuple: (depth_camera_ids, depth_scale_factor, enable_depth_stereo_tracking)
+
+        Raises:
+            ValueError: If config_data structure is invalid, or if the depth cameras
+                disagree on depth_scale_factor. cuVSLAM applies one scale to every
+                depth camera, so picking one of several would misread the others.
+        """
+        # Validate config_data structure
+        if not isinstance(config_data, list):
+            raise ValueError("config_data must be a list")
+
+        if len(config_data) < 2:
+            raise ValueError("config_data must have at least 2 elements (rig config and metadata)")
+
+        if not isinstance(config_data[0], dict):
+            raise ValueError("config_data[0] (rig configuration) must be a dictionary")
+
+        if not isinstance(config_data[1], dict):
+            raise ValueError("config_data[1] (metadata) must be a dictionary")
+
+        # Validate and parse camera configuration
+        if 'cameras' not in config_data[0]:
+            raise ValueError("'cameras' key not found in rig configuration (config_data[0])")
+
+        cameras = config_data[0]['cameras']
+        if not isinstance(cameras, list):
+            raise ValueError("'cameras' must be a list")
+
+        if len(cameras) == 0:
+            raise ValueError("'cameras' list is empty")
+
+        depth_camera_ids = []
+        scale_by_camera = {}
+        for cam in cameras:
+            if not isinstance(cam, dict) or 'depth_id' not in cam:
+                continue  # Skip invalid or depth-less camera entries
+
+            try:
+                depth_camera_id = int(cam['depth_id'])
+            except (ValueError, TypeError):
+                print(f"Warning: Invalid depth_id value: {cam['depth_id']}")
+                continue
+
+            depth_camera_ids.append(depth_camera_id)
+            try:
+                scale_by_camera[depth_camera_id] = float(cam.get('depth_scale_factor', 1.0))
+            except (ValueError, TypeError):
+                print("Warning: Invalid depth_scale_factor value, using default 1.0")
+                scale_by_camera[depth_camera_id] = 1.0
+
+        distinct_scales = set(scale_by_camera.values())
+        if len(distinct_scales) > 1:
+            raise ValueError(
+                f"depth cameras declare different depth_scale_factor values ({scale_by_camera}); "
+                "cuVSLAM applies a single scale to every depth camera"
+            )
+        depth_scale_factor = next(iter(distinct_scales), 1.0)
+
+        # .npy depth holds meters, which the reader converts to millimeters on
+        # load, so the scale the EDEX declares does not describe what cuVSLAM sees.
+        depth_sequence = config_data[1].get('depth_sequence')
+        if isinstance(depth_sequence, list) and any(
+            isinstance(paths, list) and paths
+            and isinstance(paths[0], str) and paths[0].endswith('.npy')
+            for paths in depth_sequence
+        ):
+            depth_scale_factor = 1000.0
+
+        enable_depth_stereo_tracking = config_data[0].get('enable_depth_stereo_tracking', False)
+        return depth_camera_ids, depth_scale_factor, enable_depth_stereo_tracking
+
     def _parse_rgbd_settings(self, config_data):
         """Parse RGBD settings from stereo.edex config.
 
@@ -483,91 +580,66 @@ class EdexReader(DatasetReader):
             ValueError: If config_data structure is invalid or required fields are missing
         """
         try:
-            # Validate config_data structure
-            if not isinstance(config_data, list):
-                raise ValueError("config_data must be a list")
-
-            if len(config_data) < 2:
-                raise ValueError("config_data must have at least 2 elements (rig config and metadata)")
-
-            if not isinstance(config_data[0], dict):
-                raise ValueError("config_data[0] (rig configuration) must be a dictionary")
-
-            if not isinstance(config_data[1], dict):
-                raise ValueError("config_data[1] (metadata) must be a dictionary")
-
-            # Get depth_id from camera config
-            depth_camera_id = None
-            depth_scale_factor = 1.0
-
-            # Validate and parse camera configuration
-            if 'cameras' not in config_data[0]:
-                raise ValueError("'cameras' key not found in rig configuration (config_data[0])")
-
-            cameras = config_data[0]['cameras']
-            if not isinstance(cameras, list):
-                raise ValueError("'cameras' must be a list")
-
-            if len(cameras) == 0:
-                raise ValueError("'cameras' list is empty")
-
-            # Search for depth_id in camera configs
-            for cam in cameras:
-                if not isinstance(cam, dict):
-                    continue  # Skip invalid camera entries
-
-                if 'depth_scale_factor' in cam:
-                    try:
-                        depth_scale_factor = float(cam['depth_scale_factor'])
-                    except (ValueError, TypeError):
-                        print(f"Warning: Invalid depth_scale_factor value, using default 1.0")
-                        depth_scale_factor = 1.0
-
-                if 'depth_id' in cam:
-                    try:
-                        depth_camera_id = int(cam['depth_id'])
-                        break
-                    except (ValueError, TypeError):
-                        print(f"Warning: Invalid depth_id value: {cam['depth_id']}")
-                        continue
-
-            # Check for depth_sequence and update scale factor if needed
-            if 'depth_sequence' in config_data[1]:
-                depth_sequence = config_data[1]['depth_sequence']
-
-                if isinstance(depth_sequence, list):
-                    for depth_id, depth_paths in enumerate(depth_sequence):
-                        # Validate depth_paths is a list with at least one element
-                        if isinstance(depth_paths, list) and len(depth_paths) > 0:
-                            first_path = depth_paths[0]
-                            if isinstance(first_path, str) and first_path.endswith('.npy'):
-                                depth_scale_factor = 1000.0
-                                break
-
-            # Validate that depth_camera_id was found
-            if depth_camera_id is None:
-                raise ValueError(
-                    "RGBD mode is enabled but 'depth_id' not found in camera config in stereo.edex. "
-                    "Please add 'depth_id' field to one of the cameras in the configuration."
-                )
-
-            # Get enable_depth_stereo_tracking if provided
-            enable_depth_stereo_tracking = config_data[0].get('enable_depth_stereo_tracking', False)
-
-            # Create RGBDSettings
-            rgbd_settings = vslam.Odometry.RGBDSettings()
-            rgbd_settings.depth_camera_id = depth_camera_id
-            rgbd_settings.depth_scale_factor = depth_scale_factor
-            rgbd_settings.enable_depth_stereo_tracking = enable_depth_stereo_tracking
-
-            return rgbd_settings
-
+            depth_camera_ids, depth_scale_factor, enable_depth_stereo_tracking = \
+                self._parse_depth_description(config_data)
         except (KeyError, IndexError, TypeError) as e:
             raise ValueError(
                 f"Failed to parse RGBD settings from stereo.edex: {str(e)}. "
                 "Please ensure the configuration file has the correct structure with 'cameras' "
                 "and 'depth_id' fields."
             ) from e
+
+        if not depth_camera_ids:
+            raise ValueError(
+                "RGBD mode is enabled but 'depth_id' not found in camera config in stereo.edex. "
+                "Please add 'depth_id' field to one of the cameras in the configuration."
+            )
+
+        if len(depth_camera_ids) > 1:
+            raise ValueError(
+                f"RGBD mode tracks a single RGB-D camera, but stereo.edex declares depth on cameras "
+                f"{depth_camera_ids}. Use --odometry_mode=multisensor for a rig with several."
+            )
+
+        rgbd_settings = vslam.Odometry.RGBDSettings()
+        rgbd_settings.depth_camera_id = depth_camera_ids[0]
+        rgbd_settings.depth_scale_factor = depth_scale_factor
+        rgbd_settings.enable_depth_stereo_tracking = enable_depth_stereo_tracking
+
+        return rgbd_settings
+
+    def _parse_multisensor_settings(self, config_data):
+        """Parse Multisensor settings from stereo.edex config.
+
+        Args:
+            config_data: Configuration data loaded from stereo.edex
+
+        Returns:
+            Odometry.MultisensorSettings object
+
+        Raises:
+            ValueError: If config_data structure is invalid
+        """
+        try:
+            depth_camera_ids, depth_scale_factor, _ = self._parse_depth_description(config_data)
+        except (KeyError, IndexError, TypeError) as e:
+            raise ValueError(
+                f"Failed to parse Multisensor settings from stereo.edex: {str(e)}. "
+                "Please ensure the configuration file has the correct structure with a 'cameras' field."
+            ) from e
+
+        # An empty list is valid: Multisensor also accepts a rig of plain RGB
+        # cameras whose frustums overlap.
+        multisensor_settings = vslam.Odometry.MultisensorSettings()
+        multisensor_settings.depth_camera_ids = [
+            self._remap_depth_camera_id(camera_id) for camera_id in depth_camera_ids
+        ]
+        multisensor_settings.depth_scale_factor = depth_scale_factor
+        # enable_depth_stereo_tracking keeps the binding default of True, matching
+        # MultisensorCameraLauncher, which forces those cross-camera tracks on
+        # regardless of the global flag.
+
+        return multisensor_settings
 
     @staticmethod
     def _convert_depth_to_uint16(depth: np.ndarray) -> np.ndarray:
