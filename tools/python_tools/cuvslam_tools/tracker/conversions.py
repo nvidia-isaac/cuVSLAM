@@ -77,7 +77,8 @@ def str2odometry_mode(value: str) -> vslam.Odometry.OdometryMode:
         'mono': vslam.Odometry.OdometryMode.Mono,
         'multicamera': vslam.Odometry.OdometryMode.Multicamera,
         'inertial': vslam.Odometry.OdometryMode.Inertial,
-        'rgbd': vslam.Odometry.OdometryMode.RGBD
+        'rgbd': vslam.Odometry.OdometryMode.RGBD,
+        'multisensor': vslam.Odometry.OdometryMode.Multisensor
     }
     return str2odometry_mode_map[value]
 

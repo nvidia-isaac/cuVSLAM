@@ -43,6 +43,14 @@ from cuvslam_tools.tracker.video_reader import VideoReader
 from cuvslam_tools.tracker.visualizer import RerunVisualizer, plot_trajectory
 from cuvslam_tools.tracker.metrics import calculate_sequence_errors
 
+# Modes that consume IMU measurements and can report gravity. Multisensor fuses an
+# IMU only when the rig declares one, which is the same condition under which the
+# dataset reader replays IMU samples at all.
+_IMU_FUSING_MODES = (
+    vslam.Odometry.OdometryMode.Inertial,
+    vslam.Odometry.OdometryMode.Multisensor,
+)
+
 
 def get_fps(tracking_time, n_frames):
     """Return frames per second, or -1 when tracking time is not positive."""
@@ -100,6 +108,11 @@ class Tracker:
         rgbd_settings = self._initialize_rgbd_settings(args)
         if rgbd_settings:
             self.odom_cfg.rgbd_settings = rgbd_settings
+
+        # Configure Multisensor settings if in Multisensor mode
+        multisensor_settings = self._initialize_multisensor_settings(args)
+        if multisensor_settings is not None:
+            self.odom_cfg.multisensor_settings = multisensor_settings
 
         # Configure SLAM if needed
         self.slam_cfg = None
@@ -214,6 +227,37 @@ class Tracker:
 
         return rgbd_settings
 
+    def _initialize_multisensor_settings(
+        self, args: argparse.Namespace
+    ) -> Optional[vslam.Odometry.MultisensorSettings]:
+        """Initialize Multisensor settings from the depth description in stereo.edex.
+
+        Args:
+            args: Command-line arguments carrying the EDEX-derived depth configuration
+
+        Returns:
+            Odometry.MultisensorSettings if in Multisensor mode, None otherwise
+        """
+        if getattr(args, 'odometry_mode', None) != vslam.Odometry.OdometryMode.Multisensor:
+            return None
+
+        multisensor_settings = vslam.Odometry.MultisensorSettings()
+
+        # An empty list is valid: Multisensor also takes a rig of plain RGB cameras
+        # as long as one camera pair has overlapping frustums.
+        multisensor_settings.depth_camera_ids = list(getattr(args, 'depth_camera_ids', None) or [])
+        multisensor_settings.depth_scale_factor = getattr(args, 'depth_scale_factor', 1.0)
+        # enable_depth_stereo_tracking is left at its default of True, matching
+        # MultisensorCameraLauncher, which forces those cross-camera tracks on.
+
+        if args.print_config:
+            print(f"Multisensor settings initialized: "
+                  f"depth_camera_ids={multisensor_settings.depth_camera_ids}, "
+                  f"depth_scale_factor={multisensor_settings.depth_scale_factor}, "
+                  f"enable_depth_stereo_tracking={multisensor_settings.enable_depth_stereo_tracking}")
+
+        return multisensor_settings
+
     def process_images(self, frame_id: int, timestamps: Sequence[int],
                        images: Sequence, masks: Sequence,
                        depths: Optional[Sequence] = None):
@@ -269,7 +313,7 @@ class Tracker:
 
         if self.visualizer and (odom_world_from_rig is not None or slam_pose is not None):
             gravity = None
-            if self.odom_cfg.odometry_mode == vslam.Odometry.OdometryMode.Inertial:
+            if self.odom_cfg.odometry_mode in _IMU_FUSING_MODES:
                 # Gravity estimation requires collecting sufficient number of keyframes
                 # with motion diversity
                 gravity_raw = self.tracker.odometry.get_last_gravity()
@@ -303,8 +347,8 @@ class Tracker:
 
     def process_imu(self, timestamp: int, linear_accelerations: Sequence[float],
                     angular_velocities: Sequence[float]):
-        """Register one IMU sample when inertial odometry is active."""
-        if self.odom_cfg.odometry_mode == vslam.Odometry.OdometryMode.Inertial:
+        """Register one IMU sample when an IMU-fusing odometry mode is active."""
+        if self.odom_cfg.odometry_mode in _IMU_FUSING_MODES:
             imu_measurement = vslam.ImuMeasurement()
             imu_measurement.timestamp_ns = timestamp
             imu_measurement.linear_accelerations = linear_accelerations
@@ -481,13 +525,15 @@ def track(args: argparse.Namespace,
                               gt_from_shuttle=getattr(args, 'gt_from_shuttle', False))
     else:
         rgbd_mode = args.odometry_mode == vslam.Odometry.OdometryMode.RGBD
+        multisensor_mode = args.odometry_mode == vslam.Odometry.OdometryMode.Multisensor
         dataset = EdexReader(args.dataset, stereo_edex=args.config_path,
                              num_loops=args.num_loops, rgbd_mode=rgbd_mode,
                              repeat_type=args.repeat_type,
                              cache_uncompressed=getattr(args, 'cache_uncompressed', False),
                              gt_path=getattr(args, 'gt_path', None),
                              camera_ids=getattr(args, 'camera_ids', None),
-                             gt_from_shuttle=getattr(args, 'gt_from_shuttle', False))
+                             gt_from_shuttle=getattr(args, 'gt_from_shuttle', False),
+                             multisensor_mode=multisensor_mode)
 
     tracker_results = TrackerResults()
     if args.sequence_title:
@@ -512,6 +558,13 @@ def track(args: argparse.Namespace,
             args.depth_scale_factor = dataset.rgbd_settings.depth_scale_factor
         if not hasattr(args, 'enable_depth_stereo_tracking') or not args.enable_depth_stereo_tracking:
             args.enable_depth_stereo_tracking = dataset.rgbd_settings.enable_depth_stereo_tracking
+
+    # Multisensor reads the same depth description, but takes every depth camera
+    # instead of one. depth_camera_ids MUST come from stereo.edex.
+    if getattr(dataset, 'multisensor_settings', None) is not None:
+        args.depth_camera_ids = list(dataset.multisensor_settings.depth_camera_ids)
+        if not hasattr(args, 'depth_scale_factor') or args.depth_scale_factor == 1.0:
+            args.depth_scale_factor = dataset.multisensor_settings.depth_scale_factor
 
     tracker = Tracker(dataset.rig, args)
     tracker_results.rig = dataset.rig

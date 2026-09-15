@@ -46,6 +46,17 @@ class TestTrackerCli(unittest.TestCase):
         self.assertEqual(args.multicam_mode, "performance")
         self.assertEqual(args.odometry_mode, "multicamera")
 
+    def test_accepted_odometry_modes_match_the_dataset_registry(self):
+        # run_eval.sh passes registry argument tuples straight to this parser, so a
+        # mode the registry allows and the parser rejects fails only in CI.
+        from cuvslam_tools import dataset_registry
+
+        parser = argparse.ArgumentParser()
+        cli.add_tracker_arguments(parser)
+        choices = parser._option_string_actions["--odometry_mode"].choices
+
+        self.assertEqual(set(choices), set(dataset_registry.ODOMETRY_MODES))
+
 
 if __name__ == "__main__":
     unittest.main()
