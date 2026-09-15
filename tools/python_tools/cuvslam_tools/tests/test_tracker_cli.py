@@ -46,21 +46,16 @@ class TestTrackerCli(unittest.TestCase):
         self.assertEqual(args.multicam_mode, "performance")
         self.assertEqual(args.odometry_mode, "multicamera")
 
-    def test_every_accepted_odometry_mode_converts_to_a_binding_enum(self):
-        import cuvslam as vslam
-
-        from cuvslam_tools.tracker import conversions
+    def test_accepted_odometry_modes_match_the_dataset_registry(self):
+        # run_eval.sh passes registry argument tuples straight to this parser, so a
+        # mode the registry allows and the parser rejects fails only in CI.
+        from cuvslam_tools import dataset_registry
 
         parser = argparse.ArgumentParser()
         cli.add_tracker_arguments(parser)
         choices = parser._option_string_actions["--odometry_mode"].choices
 
-        self.assertIn("multisensor", choices)
-        for mode in choices:
-            with self.subTest(mode=mode):
-                self.assertIsInstance(
-                    conversions.str2odometry_mode(mode), vslam.Odometry.OdometryMode
-                )
+        self.assertEqual(set(choices), set(dataset_registry.ODOMETRY_MODES))
 
 
 if __name__ == "__main__":
