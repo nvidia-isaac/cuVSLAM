@@ -18,8 +18,23 @@ cmake_minimum_required(VERSION 3.19)
 project(pycuvslam LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
+set(CUVSLAM_PYTHON_BACKEND "" CACHE STRING
+    "CUDA-major package subdirectory for release wheels (empty, cu12, or cu13)")
+set_property(CACHE CUVSLAM_PYTHON_BACKEND PROPERTY STRINGS "" cu12 cu13)
 
-find_package(Python 3.9 REQUIRED COMPONENTS Interpreter Development.Module)
+if(CUVSLAM_PYTHON_BACKEND AND
+   NOT CUVSLAM_PYTHON_BACKEND STREQUAL "cu12" AND
+   NOT CUVSLAM_PYTHON_BACKEND STREQUAL "cu13")
+    message(FATAL_ERROR
+        "CUVSLAM_PYTHON_BACKEND must be empty, cu12, or cu13 "
+        "(got '${CUVSLAM_PYTHON_BACKEND}').")
+endif()
+
+find_package(Python 3.9 REQUIRED COMPONENTS
+    Interpreter
+    Development.Module
+    ${SKBUILD_SABI_COMPONENT}
+)
 find_package(nanobind CONFIG REQUIRED)
 
 set(CUVSLAM_BUILD_DIR_HELP "Use absolute path or shell expansion:\n"
@@ -53,7 +68,12 @@ if(NOT EXISTS "${CUVSLAM_LIBRARY}")
         ${CUVSLAM_BUILD_DIR_HELP})
 endif()
 
-nanobind_add_module(pycuvslam STABLE_ABI NB_STATIC cuvslam2.cpp)
+set(PYCUVSLAM_NANOBIND_OPTIONS NB_STATIC)
+if(SKBUILD_SABI_COMPONENT)
+    list(APPEND PYCUVSLAM_NANOBIND_OPTIONS STABLE_ABI)
+endif()
+
+nanobind_add_module(pycuvslam ${PYCUVSLAM_NANOBIND_OPTIONS} cuvslam2.cpp)
 target_link_libraries(pycuvslam PRIVATE ${CUVSLAM_LIBRARY})
 target_include_directories(pycuvslam PRIVATE ${CUVSLAM_INCLUDE_DIR})
 
@@ -63,14 +83,14 @@ set_target_properties(pycuvslam PROPERTIES
     INSTALL_RPATH "$ORIGIN"
 )
 
-install(TARGETS pycuvslam LIBRARY DESTINATION .)
-install(FILES ${CUVSLAM_LIBRARY} DESTINATION .)
+if(CUVSLAM_PYTHON_BACKEND)
+    set(PYCUVSLAM_INSTALL_DESTINATION ${CUVSLAM_PYTHON_BACKEND})
+else()
+    set(PYCUVSLAM_INSTALL_DESTINATION .)
+endif()
 
-install(FILES
-    ${CMAKE_CURRENT_SOURCE_DIR}/__init__.py
-    ${CMAKE_CURRENT_SOURCE_DIR}/utils.py
-    DESTINATION .
-)
+install(TARGETS pycuvslam LIBRARY DESTINATION ${PYCUVSLAM_INSTALL_DESTINATION})
+install(FILES ${CUVSLAM_LIBRARY} DESTINATION ${PYCUVSLAM_INSTALL_DESTINATION})
 
 nanobind_add_stub(pycuvslam_stub
     MODULE pycuvslam
@@ -82,8 +102,22 @@ nanobind_add_stub(pycuvslam_stub
 
 install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/pycuvslam.pyi
-    ${CMAKE_CURRENT_BINARY_DIR}/py.typed
-    DESTINATION .
+    DESTINATION ${PYCUVSLAM_INSTALL_DESTINATION}
 )
+
+if(CUVSLAM_PYTHON_BACKEND)
+    install(FILES
+        ${CMAKE_CURRENT_SOURCE_DIR}/backend/__init__.py
+        DESTINATION ${PYCUVSLAM_INSTALL_DESTINATION}
+    )
+else()
+    install(FILES
+        ${CMAKE_CURRENT_SOURCE_DIR}/__init__.py
+        ${CMAKE_CURRENT_SOURCE_DIR}/_backend.py
+        ${CMAKE_CURRENT_SOURCE_DIR}/utils.py
+        ${CMAKE_CURRENT_BINARY_DIR}/py.typed
+        DESTINATION .
+    )
+endif()
 
 add_subdirectory(test)

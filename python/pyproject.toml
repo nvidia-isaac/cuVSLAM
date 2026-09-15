@@ -1,17 +1,17 @@
 [build-system]
-requires = ["scikit-build-core>=0.10", "nanobind>=2.10.2"]
+requires = ["scikit-build-core>=1.0.3,<2", "nanobind>=2.10.2,<3"]
 build-backend = "scikit_build_core.build"
 
 [project]
 name = "cuvslam"
 dynamic = ["version"]
 description = "Python bindings for cuVSLAM library"
+readme = "README.md"
 authors = [
     {name = "NVIDIA Corporation"}
 ]
 license = {text = "Other/Proprietary License"}
 requires-python = ">=3.9"
-urls = {Homepage = "https://github.com/nvidia-isaac/cuVSLAM"}
 classifiers = [
     "Operating System :: POSIX :: Linux",
     "Programming Language :: C++",
@@ -23,6 +23,12 @@ classifiers = [
     "Environment :: GPU :: NVIDIA CUDA",
 ]
 dependencies = ["pyyaml>=5.3.1"]
+
+[project.urls]
+Homepage = "https://github.com/nvidia-isaac/cuVSLAM"
+Documentation = "https://nvidia-isaac.github.io/cuVSLAM/python/"
+Issues = "https://github.com/nvidia-isaac/cuVSLAM/issues"
+Source = "https://github.com/nvidia-isaac/cuVSLAM"
 
 [tool.scikit-build]
 minimum-version = "build-system.requires"
@@ -37,6 +43,7 @@ wheel.py-api = "cp312"
 
 cmake.source-dir = "."
 
+wheel.packages = []
 wheel.install-dir = "cuvslam"
 
 # For distribution mode: include prebuilt binaries and headers in source tarball

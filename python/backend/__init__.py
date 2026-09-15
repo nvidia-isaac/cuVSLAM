@@ -12,6 +12,4 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
-from setuptools import setup
-
-setup()
+"""Native implementation package selected by :mod:`cuvslam`."""

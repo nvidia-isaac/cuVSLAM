@@ -1,0 +1,62 @@
+{
+  "project": {
+    "authors": [
+      {
+        "name": "NVIDIA Corporation"
+      }
+    ],
+    "classifiers": [
+      "Environment :: GPU :: NVIDIA CUDA",
+      "Intended Audience :: Developers",
+      "Operating System :: POSIX :: Linux",
+      "Programming Language :: C++",
+      "Programming Language :: Python :: 3",
+      "Programming Language :: Python :: 3.9",
+      "Programming Language :: Python :: 3.10",
+      "Programming Language :: Python :: 3.11",
+      "Programming Language :: Python :: 3.12",
+      "Programming Language :: Python :: 3.13",
+      "Topic :: Scientific/Engineering"
+    ],
+    "description": "Python bindings for NVIDIA cuVSLAM",
+    "license-expression": "LicenseRef-NVIDIA-Community-License",
+    "readme": "README.md",
+    "requires-python": ">=3.9",
+    "urls": {
+      "Documentation": "https://nvidia-isaac.github.io/cuVSLAM/python/",
+      "Homepage": "https://github.com/nvidia-isaac/cuVSLAM",
+      "Issues": "https://github.com/nvidia-isaac/cuVSLAM/issues",
+      "Source": "https://github.com/nvidia-isaac/cuVSLAM"
+    }
+  },
+  "common": {
+    "dependencies": [
+      "pyyaml>=5.3.1"
+    ],
+    "name": "cuvslam-common"
+  },
+  "default": {
+    "backend": "13",
+    "name": "cuvslam"
+  },
+  "backends": {
+    "12": {
+      "name": "cuvslam-cu12",
+      "runtime-dependency": "cuda-toolkit[cublas,cudart,cusolver,cusparse]==12.*; platform_machine == \"x86_64\"",
+      "site-packages-rpaths": [
+        "$ORIGIN/../../nvidia/cublas/lib",
+        "$ORIGIN/../../nvidia/cuda_runtime/lib",
+        "$ORIGIN/../../nvidia/cusolver/lib",
+        "$ORIGIN/../../nvidia/cusparse/lib",
+        "$ORIGIN/../../nvidia/nvjitlink/lib"
+      ]
+    },
+    "13": {
+      "name": "cuvslam-cu13",
+      "runtime-dependency": "cuda-toolkit[cublas,cudart,cusolver,cusparse]==13.*; platform_machine == \"x86_64\"",
+      "site-packages-rpaths": [
+        "$ORIGIN/../../nvidia/cu13/lib"
+      ]
+    }
+  }
+}

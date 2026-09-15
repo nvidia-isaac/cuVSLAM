@@ -107,8 +107,11 @@ PyCuVSLAM is the Python wrapper (bindings) for the cuVSLAM library.
 
 ## Install from Wheels
 
-Pre-built wheels are available on the [cuVSLAM releases page](https://github.com/nvidia-isaac/cuVSLAM/releases)
-for the following configurations:
+Pre-built wheels are published to [PyPI](https://pypi.org/) and
+[NVIDIA's Python package index](https://pypi.nvidia.com/), and are also attached
+to the [cuVSLAM releases page](https://github.com/nvidia-isaac/cuVSLAM/releases).
+CUDA 13 is the default package; select the CUDA 12 distribution explicitly when
+needed.
 
 | Target | Ubuntu | Python wheel tag | CUDA wheel tag | Architecture |
 |--------|--------|------------------|----------------|--------------|
@@ -121,21 +124,32 @@ Only the combinations listed above are provided as pre-built wheels. The `cp312-
 and are compatible with Python 3.12 and later. Other Python, CUDA, or Jetson combinations require an
 [installation from source](#install-from-source).
 
-**Prerequisite**: [CUDA Toolkit 12 or 13](https://developer.nvidia.com/cuda/toolkit) must be installed separately
-(not included in the wheels). Its major version must match the wheel's `cu12` or `cu13` tag.
+On x86_64, pip installs the CUDA runtime and math-library components required by
+the selected wheel. An NVIDIA driver compatible with that CUDA major is still
+required. On Jetson, CUDA is supplied by JetPack and is not installed by pip.
 
 Official wheels include cuNLS support for `Multisensor` mode; no separate cuNLS installation is required.
 
 To install (virtual environment is recommended):
 
-1. Go to the [latest release](https://github.com/nvidia-isaac/cuVSLAM/releases/latest).
-2. Download the wheel matching the table above. On Jetson, also match the device family: Orin uses `cu12`/`cp310`;
-   Thor uses `cu13`/`cp312-abi3`.
-3. Install with pip:
+```bash
+# CUDA 13 (default)
+python -m pip install cuvslam
+
+# CUDA 12
+python -m pip install cuvslam-cu12
+```
+
+To use NVIDIA's index directly, select it as the index rather than mixing
+indexes with `--extra-index-url`:
 
 ```bash
-pip install cuvslam-*.whl
+python -m pip install --index-url https://pypi.nvidia.com cuvslam-cu13
 ```
+
+The distribution names contain the CUDA major, but Python code continues to use
+`import cuvslam`. If both CUDA backends are installed in one environment, set
+`CUVSLAM_CUDA_MAJOR=12` or `CUVSLAM_CUDA_MAJOR=13` before importing.
 
 If a pre-built wheel is not available for your system, see [Install from Source](#install-from-source) below.
 

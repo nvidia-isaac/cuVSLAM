@@ -1,0 +1,66 @@
+Third-Party Software Notices
+============================
+
+cuVSLAM release binaries incorporate or redistribute portions of the software
+listed below. Copyright notices and license terms remain the property of their
+respective owners.
+
+Component: Eigen 3.4.1
+Source: https://gitlab.com/libeigen/eigen
+License: Mozilla Public License 2.0 (MPL-2.0)
+
+Component: libjpeg-turbo 3.1.3
+Source: https://github.com/libjpeg-turbo/libjpeg-turbo
+License: BSD-3-Clause, IJG, and zlib licenses as described by the project
+
+Component: gflags 2.3.0
+Source: https://github.com/gflags/gflags
+License: BSD-3-Clause
+
+Component: JsonCpp 1.9.6
+Source: https://github.com/open-source-parsers/jsoncpp
+License: MIT or public domain
+
+Component: spdlog 1.17.0
+Source: https://github.com/gabime/spdlog
+License: MIT
+
+Component: zlib 1.3.1
+Source: https://github.com/madler/zlib
+License: Zlib
+
+Component: libpng 1.6.55
+Source: https://github.com/pnggroup/libpng
+License: libpng-2.0
+
+Component: cnpy, commit 4e8810b1a8637695171ed346ce68f6984e585ef4
+Source: https://github.com/rogersce/cnpy
+License: MIT
+
+Component: circularbuffer, commit cef66805cb5424e27300a966becc7c2678117c27
+Source: https://github.com/vinitjames/circularbuffer
+License: MIT
+
+Component: dense_hash_map, commit 74277fc4813028ae4a9e8d9176788eb8001177a6
+Source: https://github.com/Jiwan/dense_hash_map
+License: MIT
+
+Component: yaml-cpp 0.9.0
+Source: https://github.com/jbeder/yaml-cpp
+License: MIT
+
+Component: LMDB 0.9.31
+Source: https://github.com/LMDB/lmdb
+License: OpenLDAP Public License
+
+Component: cuNLS Release_07_13_2026
+Source: https://github.com/nvidia-isaac/cuNLS
+License: Apache-2.0
+
+Component: NVIDIA cuDSS 0.8.0.10
+Source: https://developer.nvidia.com/cudss
+License: NVIDIA cuDSS Software License Agreement
+
+The CUDA runtime and CUDA math libraries installed as Python dependencies are
+separate works and are governed by the license files shipped in their own
+distributions.

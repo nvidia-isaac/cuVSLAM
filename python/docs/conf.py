@@ -86,7 +86,7 @@ class NanobindClassDocumenter(ClassDocumenter):
     """Preserve binding definition order for extension classes."""
 
     def sort_members(self, documenters, order):
-        if self.object.__module__ == 'cuvslam.pycuvslam':
+        if self.object.__module__.endswith('.pycuvslam'):
             definition_order = {name: index for index, name in enumerate(self.object.__dict__)}
 
             def member_position(entry) -> int:
