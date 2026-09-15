@@ -1,0 +1,79 @@
+schema_version: 1
+calibration_id: d435i_243622070369_factory_rectified_px4_imu_20260720
+status: approved
+
+provenance:
+  camera_serial: "243622070369"
+  camera_firmware: "5.15.1.55"
+  joint_calibration_bag: d435_fcu_imu_kalibr_20260720_075102
+  kalibr_camchain_result: d435_fcu_imu_kalibr_ros1-camchain-imucam.yaml
+  camera_model: factory_rectified_camera_info
+  imu_clock_source: mavros_timesync_px4_boot_to_ros_system_time
+  fcu_bridge: mavros_2.14.0_ttyTHS2_921600_highres_imu105_requested_200hz
+
+camera:
+  model: Intel RealSense D435I
+  width: 640
+  height: 360
+  rate_hz: 90.0
+  distortion_model: plumb_bob
+  runtime_intrinsics_source: realsense_camera_info
+  left:
+    frame_id: camera_infra1_optical_frame
+    D: [0.0, 0.0, 0.0, 0.0, 0.0]
+    K: [323.1030578613281, 0.0, 319.8547058105469,
+        0.0, 323.1030578613281, 184.5459442138672,
+        0.0, 0.0, 1.0]
+    R: [1.0, 0.0, 0.0,
+        0.0, 1.0, 0.0,
+        0.0, 0.0, 1.0]
+    P: [323.1030578613281, 0.0, 319.8547058105469, 0.0,
+        0.0, 323.1030578613281, 184.5459442138672, 0.0,
+        0.0, 0.0, 1.0, 0.0]
+  right:
+    frame_id: camera_infra2_optical_frame
+    recorded_camera_info_frame_bug: camera_infra1_optical_frame
+    D: [0.0, 0.0, 0.0, 0.0, 0.0]
+    K: [323.1030578613281, 0.0, 319.8547058105469,
+        0.0, 323.1030578613281, 184.5459442138672,
+        0.0, 0.0, 1.0]
+    R: [1.0, 0.0, 0.0,
+        0.0, 1.0, 0.0,
+        0.0, 0.0, 1.0]
+    P: [323.1030578613281, 0.0, 319.8547058105469, -16.174942016601562,
+        0.0, 323.1030578613281, 184.5459442138672, 0.0,
+        0.0, 0.0, 1.0, 0.0]
+  stereo:
+    baseline_m: 0.050061247094552876
+    T_right_left:
+      [1.0, 0.0, 0.0, -0.050061247094552876,
+       0.0, 1.0, 0.0, 0.0,
+       0.0, 0.0, 1.0, 0.0,
+       0.0, 0.0, 0.0, 1.0]
+
+imu:
+  source_topic: /mavros/imu/data_raw
+  aligned_topic: /fcu/imu/data_raw_aligned
+  source_frame_id: base_link
+  runtime_frame_id: fcu_imu
+  measured_rate_hz: 170.0
+  hardware_id: px4-highres-imu-105-ttyTHS2
+  axes_contract: source measurements are already expressed in the Kalibr IMU axes; relay renames but does not rotate
+  time_alignment:
+    kalibr_timeshift_cam_imu_sec: -0.001737986760008108
+    kalibr_equation: t_imu = t_cam + timeshift_cam_imu
+    runtime_equation: t_aligned = t_imu_raw + imu_to_camera_offset_ns
+    imu_to_camera_offset_ns: 1737987
+extrinsics:
+  convention: p_camera_infra1_optical = T_camera_infra1_optical_fcu_imu * p_fcu_imu
+  parent_frame: camera_infra1_optical_frame
+  child_frame: fcu_imu
+  translation_m: [0.027362927932, 0.052851887430, -0.062141618519]
+  rotation_xyzw:
+    [0.5018487706479298, -0.5094252342586629,
+     0.4906496324298315, 0.4978922376339477]
+  T_parent_child:
+    [-0.000502262206, -0.999890141869, -0.014813909877, 0.027362927932,
+     -0.022727568330, 0.014821499191, -0.999631822622, 0.052851887430,
+     0.999741569292, -0.000165393136, -0.022732515801, -0.062141618519,
+     0.0, 0.0, 0.0, 1.0]
