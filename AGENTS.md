@@ -161,7 +161,18 @@ When creating a git branch, use `<user-name>/<branch-name>`, with `<branch-name>
 Project-specific skills live in `.agents/skills/` and are discovered automatically by Codex when it runs inside this
 repository. See [.agents/skills/README.md](.agents/skills/README.md) for descriptions and other agent installations.
 
-To install them into Claude Code:
+### Claude Code
+
+Skills are auto-discovered from `.claude/skills/` (project-level) when you work in this directory. Invoke them with:
+
+```bash
+/cuvslam-onboard
+/cuvslam-troubleshoot
+/cuvslam-trajectory
+/cuvslam-ci
+```
+
+To use the same skills globally across other projects, install them into `~/.claude/skills/`:
 
 ```bash
 cp -r .agents/skills/cuvslam-onboard ~/.claude/skills/
