@@ -39,11 +39,30 @@ Hint file rows format: `timestamp x y z [optional quaternion]`
 Float timestamps in seconds and int timestamps in ns are supported. Hints must be sorted by timestamps.
 To localize, the util will use the latest hint not later than current frame.
 
-## Expert SBA Parameters
+## Development Flags
 
-The `--expert_sba_*` flags are development-only persistent parameters, applied once after tracker construction with
-`Odometry::ApplyPersistentInternalParameters()`. Their defaults mirror the library defaults, so leaving them alone
-changes nothing. Normal applications should use the default internal parameters.
+The `--expert_sba_*` gflags are development-only persistent parameters applied once after tracker construction with
+`Odometry::ApplyPersistentInternalParameters()`. Normal applications should use library defaults.
+
+## Reporter Integration
+
+`--report_output=<path>` writes JSONL records for every attempted frame, loop closures, final SLAM poses, and an
+end-of-run summary. This is a machine interface for `cuvslam_reporter`; human-readable pose outputs remain unchanged.
+Reporter mode also uses `--ignore_tracking_errors=true` so losses are recorded and evaluation can continue.
+
+Run this integration through the Python package instead of constructing the machine flags manually:
+
+```bash
+cuvslam_reporter \
+    --tracker_backend api_launcher \
+    --api_launcher_path ./bin/cuvslam_api_launcher \
+    ... \
+    -- \
+    --expert_sba_num_frames=9
+```
+
+For RGB-D EDEX input, `--depth_scale_factor` is the divisor used while loading integer depth images. Loaded depths
+reach the public API as float metres, so `--cfg_depth_scale_factor=1` avoids applying the scale twice.
 
 # Run tracker on EuRoC MAV Dataset (OBSOLETE)
 

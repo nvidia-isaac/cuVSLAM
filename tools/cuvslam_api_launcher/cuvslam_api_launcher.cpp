@@ -22,6 +22,7 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <optional>
 #include <random>
 #include <string>
@@ -63,6 +64,8 @@ DEFINE_int32(repeat, 1, "Number of repetitions of the dataset");
 DEFINE_bool(shuttle, false, "Shuttle replay forward and backward");
 DEFINE_double(max_fps, 0., "Throttle main loop to not exceed max_fps. 0 (default) to disable");
 DEFINE_bool(ignore_tracking_errors, false, "Don't stop on tracking errors");
+DEFINE_int32(blackout_period, 0, "Blackout period in emitted frames; 0 disables fault injection");
+DEFINE_int32(blackout_duration, 10, "Consecutive blacked-out frames in each period");
 // output settings
 DEFINE_string(print_odom_poses, "", "Path to save odometry poses");
 DEFINE_string(print_slam_poses, "", "Path to save SLAM poses");
@@ -73,6 +76,7 @@ DEFINE_bool(ros_frame_conversion, false, "Convert input/output poses from/to ROS
 DEFINE_string(output_map, "", "Path to output map (cuVSLAM will try to save it at the end)");
 DEFINE_string(print_map_keyframes, "", "Path to save map keyframes");
 DEFINE_bool(print_stats, true, "Print an end-of-run performance and observation summary to stdout");
+DEFINE_string(report_output, "", "Path to write machine-readable JSONL tracking records");
 // hinted localization settings
 DEFINE_string(loc_input_map, "", "Path to input map (cuVSLAM will try to localize in it)");
 DEFINE_string(loc_input_hints, "", "Path to hint data for localization (format: `timestamp x y z`)");
@@ -90,8 +94,11 @@ DEFINE_int32(cfg_odom_mode, static_cast<int>(kDefaultOdomCfg.odometry_mode),
              "Odometry mode: Multicamera (0), Inertial (1), RGBD (2), Mono (3)");
 DEFINE_int32(cfg_multicam_mode, static_cast<int>(kDefaultOdomCfg.multicam_mode),
              "Multicamera mode: performance (0), precision (1), or moderate (2)");
+DEFINE_bool(cfg_use_gpu, kDefaultOdomCfg.use_gpu, "Enable GPU use for odometry and SLAM");
 DEFINE_bool(cfg_async_sba, false, "Enable asynchronous sparse bundle adjustment");
+DEFINE_bool(cfg_use_motion_model, kDefaultOdomCfg.use_motion_model, "Enable odometry motion prediction");
 DEFINE_bool(cfg_denoising, kDefaultOdomCfg.use_denoising, "Enable image denoising");
+DEFINE_bool(cfg_debug_imu_mode, kDefaultOdomCfg.debug_imu_mode, "Enable IMU debug mode");
 DEFINE_bool(cfg_horizontal, kDefaultOdomCfg.rectified_stereo_camera,
             "Enable tracking for rectified cameras with principal points on the horizontal line");
 DEFINE_bool(cfg_planar, kDefaultSlamCfg.planar_constraints,
@@ -104,6 +111,7 @@ DEFINE_int32(cfg_slam_max_map_size, kDefaultSlamCfg.max_map_size,
 DEFINE_double(cfg_max_frame_delta_s, kDefaultOdomCfg.max_frame_delta_s,
               "Set maximum camera frame time in seconds to warn users");
 DEFINE_bool(cfg_enable_export, false, "Enable export of observations & landmarks");
+DEFINE_bool(cfg_enable_final_landmarks_export, false, "Enable final-landmark export");
 // Tracker-compatible SLAM flags (load map + localize on a chosen edex frame)
 DEFINE_int32(slam_simulate_slow_map_load, 0, "Delay in ms invoked from localize start_cb (after map load begins).");
 DEFINE_string(slam_input_database, "", "Folder with SLAM map DB to localize in (LocalizeInMap).");
@@ -163,6 +171,8 @@ void setStreamFormat(std::ofstream& out_poses) {
 // end-of-run summary. Only receives numbers from the tracking loop; no cuVSLAM state of its own.
 struct RunStats {
   size_t num_frames = 0;
+  size_t successful_frames = 0;
+  size_t lost_frames = 0;
   double total_track_seconds = 0.0;
   double max_track_seconds = 0.0;
   FrameId max_track_frame = 0;
@@ -171,9 +181,13 @@ struct RunStats {
   size_t min_observations = std::numeric_limits<size_t>::max();
   FrameId min_observations_frame = 0;
 
-  // One successfully tracked frame. num_observations is empty when observation export is disabled.
-  void AddFrame(double track_seconds, std::optional<size_t> num_observations, FrameId frame) {
+  void AddFrame(double track_seconds, bool tracking_valid, std::optional<size_t> num_observations, FrameId frame) {
     ++num_frames;
+    if (tracking_valid) {
+      ++successful_frames;
+    } else {
+      ++lost_frames;
+    }
     total_track_seconds += track_seconds;
     if (track_seconds > max_track_seconds) {
       max_track_seconds = track_seconds;
@@ -190,6 +204,36 @@ struct RunStats {
   }
 };
 
+Json::Value PoseToJson(const Pose& pose) {
+  Json::Value json;
+  for (float value : pose.rotation) {
+    json["rotation"].append(value);
+  }
+  for (float value : pose.translation) {
+    json["translation"].append(value);
+  }
+  return json;
+}
+
+void WriteJsonLine(std::ostream& stream, const Json::Value& value) {
+  Json::StreamWriterBuilder builder;
+  builder["indentation"] = "";
+  stream << Json::writeString(builder, value) << '\n';
+}
+
+void WriteSummary(std::ostream& stream, const RunStats& stats, double wall_seconds, bool success) {
+  Json::Value summary;
+  summary["type"] = "summary";
+  summary["attempted_frames"] = Json::UInt64(stats.num_frames);
+  summary["successful_frames"] = Json::UInt64(stats.successful_frames);
+  summary["lost_frames"] = Json::UInt64(stats.lost_frames);
+  summary["total_track_seconds"] = stats.total_track_seconds;
+  summary["wall_seconds"] = wall_seconds;
+  summary["success"] = success;
+  summary["cuvslam_version"] = std::string(GetVersion(nullptr, nullptr, nullptr));
+  WriteJsonLine(stream, summary);
+}
+
 // total_wall_seconds is measured by the caller around the tracking loop (fps basis).
 void printRunStats(std::ostream& stream, const RunStats& stats, double total_wall_seconds) {
   if (stats.num_frames == 0) {
@@ -198,7 +242,8 @@ void printRunStats(std::ostream& stream, const RunStats& stats, double total_wal
   }
   const double fps = total_wall_seconds > 0 ? static_cast<double>(stats.num_frames) / total_wall_seconds : 0.0;
   const double avg_track_seconds = stats.total_track_seconds / static_cast<double>(stats.num_frames);
-  stream << "frames = " << stats.num_frames << ", duration = " << total_wall_seconds << " s, fps = " << fps << "\n";
+  stream << "frames = " << stats.num_frames << ", successful = " << stats.successful_frames
+         << ", lost = " << stats.lost_frames << ", duration = " << total_wall_seconds << " s, fps = " << fps << "\n";
   stream << "average track() duration = " << avg_track_seconds
          << " s, max track() duration = " << stats.max_track_seconds << " s (in frame #" << stats.max_track_frame
          << ")\n";
@@ -456,7 +501,9 @@ bool trackEdexDataSet(const std::string& edex_name, const Odometry::Config& odom
   const ErrorCode ret = edex_rig->start();
   VERIFY_TRACE(ret == ErrorCode::S_True, "Failed to start camera rig %s\n", ret.str());
 
-  WarmUpGPU();
+  if (odom_cfg.use_gpu) {
+    WarmUpGPU();
+  }
   Rig rig = createRig(edex_file, edex_rig.get());
   std::unique_ptr<Odometry> odom = std::make_unique<Odometry>(rig, odom_cfg);
   if (!expert_params.empty()) {
@@ -498,6 +545,11 @@ bool trackEdexDataSet(const std::string& edex_name, const Odometry::Config& odom
 
   std::ofstream out_odom_poses(FLAGS_print_odom_poses);
   std::ofstream out_slam_poses(FLAGS_print_slam_poses);
+  std::ofstream report_output;
+  if (!FLAGS_report_output.empty()) {
+    report_output.open(FLAGS_report_output);
+    VERIFY_TRACE(report_output.is_open(), "Unable to open report output %s", FLAGS_report_output.c_str());
+  }
 
   LocalizeInMapContext loc_context{LocalizeInMapStatus::NOT_LOCALIZED, 0, std::ofstream(FLAGS_print_loc_poses)};
 
@@ -527,6 +579,30 @@ bool trackEdexDataSet(const std::string& edex_name, const Odometry::Config& odom
                    frame);
       // if not another error, we successfully reached last frame
       break;
+    }
+
+    const bool blackout =
+        FLAGS_blackout_period > 0 && (run_stats.num_frames % FLAGS_blackout_period) < FLAGS_blackout_duration;
+    if (blackout) {
+      for (CameraId cam_id = 0; cam_id < cur_sources.size(); ++cam_id) {
+        if (cur_sources[cam_id].data != nullptr) {
+          const auto pixels = static_cast<size_t>(cur_meta[cam_id].shape.width) * cur_meta[cam_id].shape.height;
+          std::fill_n(static_cast<uint8_t*>(cur_sources[cam_id].data), pixels, uint8_t{0});
+        }
+        if (masks_sources[cam_id].data != nullptr) {
+          const auto pixels =
+              static_cast<size_t>(cur_meta[cam_id].mask_shape.width) * cur_meta[cam_id].mask_shape.height;
+          std::fill_n(static_cast<uint8_t*>(masks_sources[cam_id].data), pixels, uint8_t{0});
+        }
+        if (depth_sources[cam_id].data != nullptr) {
+          const auto pixels = static_cast<size_t>(cur_meta[cam_id].shape.width) * cur_meta[cam_id].shape.height;
+          if (depth_sources[cam_id].type == ImageSource::F32) {
+            std::fill_n(static_cast<float*>(depth_sources[cam_id].data), pixels, 0.0f);
+          } else {
+            std::fill_n(static_cast<uint16_t*>(depth_sources[cam_id].data), pixels, uint16_t{0});
+          }
+        }
+      }
     }
 
     std::vector<Image> images;
@@ -572,27 +648,43 @@ bool trackEdexDataSet(const std::string& edex_name, const Odometry::Config& odom
       }
     }
 
+    const int64_t input_timestamp_ns =
+        images.empty() ? 0 : std::max_element(images.begin(), images.end(), [](const Image& lhs, const Image& rhs) {
+                               return lhs.timestamp_ns < rhs.timestamp_ns;
+                             })->timestamp_ns;
+    const int source_frame_number = frame_camera_ids.empty() ? -1 : cur_meta[frame_camera_ids.front()].frame_number;
+
     const auto track_start = std::chrono::steady_clock::now();
     PoseEstimate pose_estimate = odom->Track(images, masks, depths);
     const double track_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - track_start).count();
-    if (!pose_estimate.world_from_rig.has_value()) {
+    const bool tracking_valid = pose_estimate.world_from_rig.has_value();
+    std::optional<Pose> odom_pose;
+    std::optional<Pose> slam_pose;
+    if (!tracking_valid) {
       TraceWarning("Track(): Tracking lost at frame %zu.", frame);
-      if (FLAGS_ignore_tracking_errors) {
-        continue;
-      } else {
-        success = false;
-        break;
-      }
+    } else {
+      odom_pose = pose_estimate.world_from_rig.value().pose;
+      printTsPose(out_odom_poses, true, pose_estimate.timestamp_ns, odom_pose.value());
     }
-    auto odom_pose = pose_estimate.world_from_rig.value().pose;
-    printTsPose(out_odom_poses, true, pose_estimate.timestamp_ns, odom_pose);
 
-    if (slam) {
+    if (tracking_valid && slam) {
       Odometry::State state;
       odom->GetState(state);
       slam->Track(state);
-      const Pose slam_pose = slam->GetPose();
-      printTsPose(out_slam_poses, true, pose_estimate.timestamp_ns, slam_pose);
+      slam_pose = slam->GetPose();
+      printTsPose(out_slam_poses, true, pose_estimate.timestamp_ns, slam_pose.value());
+
+      if (report_output) {
+        std::vector<PoseStamped> loop_closures;
+        slam->GetLoopClosurePoses(loop_closures);
+        for (const PoseStamped& loop_closure : loop_closures) {
+          Json::Value record;
+          record["type"] = "loop_closure";
+          record["timestamp_ns"] = Json::Int64(loop_closure.timestamp_ns);
+          record["pose"] = PoseToJson(loop_closure.pose);
+          WriteJsonLine(report_output, record);
+        }
+      }
 
       const auto frame_source = std::find_if(cur_sources.begin(), cur_sources.end(),
                                              [](const ImageSource& source) { return source.data != nullptr; });
@@ -610,12 +702,35 @@ bool trackEdexDataSet(const std::string& edex_name, const Odometry::Config& odom
     }
 
     std::optional<size_t> num_observations;
-    if (odom_cfg.enable_observations_export) {
+    if (tracking_valid && odom_cfg.enable_observations_export) {
       // Observations for the reference camera (camera 0).
       num_observations = odom->GetLastObservations(0).size();
       TraceDebug("Exported %zu observations at frame %zu", num_observations.value(), frame);
     }
-    run_stats.AddFrame(track_seconds, num_observations, frame);
+    run_stats.AddFrame(track_seconds, tracking_valid, num_observations, frame);
+
+    if (report_output) {
+      Json::Value record;
+      record["type"] = "frame";
+      record["frame_id"] = Json::UInt64(frame);
+      record["source_frame_number"] = source_frame_number;
+      record["timestamp_ns"] = Json::Int64(tracking_valid ? pose_estimate.timestamp_ns : input_timestamp_ns);
+      record["track_seconds"] = track_seconds;
+      record["tracking_valid"] = tracking_valid;
+      record["blackout"] = blackout;
+      record["odom_pose"] = odom_pose.has_value() ? PoseToJson(odom_pose.value()) : Json::Value(Json::nullValue);
+      record["slam_pose"] = slam_pose.has_value() ? PoseToJson(slam_pose.value()) : Json::Value(Json::nullValue);
+      WriteJsonLine(report_output, record);
+    }
+
+    if (!tracking_valid) {
+      ++frame;
+      if (FLAGS_ignore_tracking_errors) {
+        continue;
+      }
+      success = false;
+      break;
+    }
 
     if (odom_cfg.enable_landmarks_export) {
       std::vector<Landmark> landmarks = odom->GetLastLandmarks();
@@ -669,18 +784,32 @@ bool trackEdexDataSet(const std::string& edex_name, const Odometry::Config& odom
     frame++;
   }
 
+  const double total_wall_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - run_start).count();
   if (FLAGS_print_stats) {
-    const double total_wall_seconds =
-        std::chrono::duration<double>(std::chrono::steady_clock::now() - run_start).count();
     printRunStats(std::cout, run_stats, total_wall_seconds);
   }
 
   if (!success) {
+    if (report_output) {
+      WriteSummary(report_output, run_stats, total_wall_seconds, false);
+    }
     return false;
   }
 
   while (loc_context.status == LocalizeInMapStatus::IN_PROGRESS) {
     std::this_thread::sleep_for(std::chrono::seconds(1));
+  }
+
+  if (report_output && slam) {
+    std::vector<PoseStamped> final_slam_poses;
+    slam->GetAllSlamPoses(final_slam_poses);
+    for (const PoseStamped& final_pose : final_slam_poses) {
+      Json::Value record;
+      record["type"] = "final_slam_pose";
+      record["timestamp_ns"] = Json::Int64(final_pose.timestamp_ns);
+      record["pose"] = PoseToJson(final_pose.pose);
+      WriteJsonLine(report_output, record);
+    }
   }
 
   if (!output_map_name.empty() && slam) {
@@ -699,6 +828,10 @@ bool trackEdexDataSet(const std::string& edex_name, const Odometry::Config& odom
     for (const auto& kf : kf_poses) {
       printTsPose(out_kfs, true, kf.timestamp_ns, kf.pose);
     }
+  }
+
+  if (report_output) {
+    WriteSummary(report_output, run_stats, total_wall_seconds, true);
   }
 
   return true;
@@ -722,22 +855,30 @@ int main(int arg_c, char** arg_v) {
   Trace::SetVerbosity(Trace::ToVerbosity(FLAGS_verbosity));
   SetVerbosity(FLAGS_verbosity);
 
-  // Every setting comes from the flags, so the default --help prints for a flag is the value a run
-  // without that flag uses.
   Odometry::Config odom_cfg = Odometry::GetDefaultConfig();
   Slam::Config slam_cfg = Slam::GetDefaultConfig();
+  std::map<std::string, std::string> expert_params;
+
+  const auto flag_is_set = [](const char* name) {
+    gflags::CommandLineFlagInfo info;
+    return gflags::GetCommandLineFlagInfo(name, &info) && !info.is_default;
+  };
 
   if (!FLAGS_debug_dump.empty()) {
     odom_cfg.debug_dump_directory = FLAGS_debug_dump;
   }
+  odom_cfg.use_gpu = FLAGS_cfg_use_gpu;
+  slam_cfg.use_gpu = FLAGS_cfg_use_gpu;
   odom_cfg.async_sba = FLAGS_cfg_async_sba;
+  odom_cfg.use_motion_model = FLAGS_cfg_use_motion_model;
   odom_cfg.use_denoising = FLAGS_cfg_denoising;
+  odom_cfg.debug_imu_mode = FLAGS_cfg_debug_imu_mode;
   odom_cfg.rectified_stereo_camera = FLAGS_cfg_horizontal;
   odom_cfg.max_frame_delta_s = static_cast<float>(FLAGS_cfg_max_frame_delta_s);
   odom_cfg.enable_observations_export = FLAGS_cfg_enable_export;
   odom_cfg.enable_landmarks_export = FLAGS_cfg_enable_export;
+  odom_cfg.enable_final_landmarks_export = FLAGS_cfg_enable_final_landmarks_export;
 
-  // Set multicamera mode
   if (FLAGS_cfg_multicam_mode == 0) {
     odom_cfg.multicam_mode = Odometry::MulticameraMode::Performance;
   } else if (FLAGS_cfg_multicam_mode == 1) {
@@ -749,7 +890,6 @@ int main(int arg_c, char** arg_v) {
     return EXIT_FAILURE;
   }
 
-  // Set odometry mode
   if (FLAGS_cfg_odom_mode == 0) {
     odom_cfg.odometry_mode = Odometry::OdometryMode::Multicamera;
   } else if (FLAGS_cfg_odom_mode == 1) {
@@ -763,7 +903,6 @@ int main(int arg_c, char** arg_v) {
     return EXIT_FAILURE;
   }
 
-  // RGBD settings are only meaningful in RGBD mode.
   if (odom_cfg.odometry_mode == Odometry::OdometryMode::RGBD) {
     odom_cfg.rgbd_settings.depth_camera_id = FLAGS_cfg_depth_camera;
     odom_cfg.rgbd_settings.depth_scale_factor = static_cast<float>(FLAGS_cfg_depth_scale_factor);
@@ -774,14 +913,27 @@ int main(int arg_c, char** arg_v) {
   slam_cfg.max_map_size = FLAGS_cfg_slam_max_map_size;
   slam_cfg.planar_constraints = FLAGS_cfg_planar;
 
-  const std::map<std::string, std::string> expert_params{
-      {"sba.num_sba_frames", std::to_string(FLAGS_expert_sba_num_frames)},
-      {"sba.num_inertial_sba_frames", std::to_string(FLAGS_expert_sba_num_inertial_frames)},
-      {"sba.num_fixed_sba_frames", std::to_string(FLAGS_expert_sba_num_fixed_frames)},
-      {"sba.num_sba_iterations", std::to_string(FLAGS_expert_sba_num_iterations)},
-      {"sba.robustifier_scale", std::to_string(FLAGS_expert_sba_robustifier_scale)},
-      {"sba.use_sba_winsorizer", FLAGS_expert_sba_use_winsorizer ? "true" : "false"},
-  };
+  if (flag_is_set("expert_sba_num_frames"))
+    expert_params["sba.num_sba_frames"] = std::to_string(FLAGS_expert_sba_num_frames);
+  if (flag_is_set("expert_sba_num_inertial_frames"))
+    expert_params["sba.num_inertial_sba_frames"] = std::to_string(FLAGS_expert_sba_num_inertial_frames);
+  if (flag_is_set("expert_sba_num_fixed_frames"))
+    expert_params["sba.num_fixed_sba_frames"] = std::to_string(FLAGS_expert_sba_num_fixed_frames);
+  if (flag_is_set("expert_sba_num_iterations"))
+    expert_params["sba.num_sba_iterations"] = std::to_string(FLAGS_expert_sba_num_iterations);
+  if (flag_is_set("expert_sba_robustifier_scale"))
+    expert_params["sba.robustifier_scale"] = std::to_string(FLAGS_expert_sba_robustifier_scale);
+  if (flag_is_set("expert_sba_use_winsorizer"))
+    expert_params["sba.use_sba_winsorizer"] = FLAGS_expert_sba_use_winsorizer ? "true" : "false";
+
+  if (FLAGS_blackout_period < 0 || FLAGS_blackout_duration < 0) {
+    TraceError("blackout_period and blackout_duration must be non-negative");
+    return EXIT_FAILURE;
+  }
+  if (FLAGS_repeat < 1) {
+    TraceError("repeat must be at least 1");
+    return EXIT_FAILURE;
+  }
 
   return trackEdexDataSet(FLAGS_edex, odom_cfg, slam_cfg, expert_params, FLAGS_loc_input_map, FLAGS_output_map) ? 0 : 1;
 }

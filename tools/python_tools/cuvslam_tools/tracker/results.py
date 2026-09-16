@@ -12,17 +12,24 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
-set(MODULE_NAME "cuvslam_api_launcher")
+"""Binding-free result models shared by tracking backends."""
 
-set(LIBS
-    cuvslam
-    camera_rig_edex
-    edex
-    utils
-    gflags::gflags
-    jsoncpp::jsoncpp
-)
+from dataclasses import dataclass, field
 
-setup_app(MODULE_NAME ${MODULE_NAME}
-          LIBRARIES ${LIBS}
-          SOURCES cuvslam_api_launcher.cpp)
+
+@dataclass
+class Stat:
+    """Summary statistics and report paths from one tracking run."""
+
+    sequence_title: str = ""
+    n_frames: int = 0
+    tracking_time: float = 0.0
+    average_fps: float = -1.0
+    bird_view_with_errors_path: str = ""
+    gt_av_translation_error: float = 0.0
+    gt_av_rotation_error: float = 0.0
+    gt_n_error_segments: int = 0
+    gt_simple_error: float = 0.0
+    num_tracking_losts: int = 0
+    odometry_mode: str = ""
+    seg_err_points: list[dict[str, float]] = field(default_factory=list)

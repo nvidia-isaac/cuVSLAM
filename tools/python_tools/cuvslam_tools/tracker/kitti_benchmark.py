@@ -15,12 +15,11 @@
 """Export tracker poses in KITTI benchmark trajectory format."""
 
 import os
-from typing import Mapping, Optional
+from typing import Any, Mapping, Optional
 
-import cuvslam as vslam
 import numpy as np
 
-from cuvslam_tools.tracker import conversions as conv
+from cuvslam_tools.tracker.pose_utils import pose_to_transform
 
 
 _KITTI_BASIS = np.array([
@@ -31,13 +30,13 @@ _KITTI_BASIS = np.array([
 ])
 
 
-def _pose_to_kitti_benchmark_transform(pose: vslam.Pose) -> np.ndarray:
+def _pose_to_kitti_benchmark_transform(pose: Any) -> np.ndarray:
     """Convert a cuVSLAM pose to KITTI benchmark coordinate basis."""
-    transform = conv.pose_to_transform(pose)
+    transform = pose_to_transform(pose)
     return _KITTI_BASIS @ transform @ np.linalg.inv(_KITTI_BASIS)
 
 
-def save_poses_to_kitti_benchmark(poses: Mapping[int, Optional[vslam.Pose]], output_path: str) -> int:
+def save_poses_to_kitti_benchmark(poses: Mapping[int, Optional[Any]], output_path: str) -> int:
     """Write valid poses to a KITTI benchmark text file and return the count."""
     output_dir = os.path.dirname(output_path)
     if output_dir:
@@ -61,8 +60,8 @@ def save_poses_to_kitti_benchmark(poses: Mapping[int, Optional[vslam.Pose]], out
 
 
 def export_kitti_benchmark_artifacts(
-    world_from_rig: Mapping[int, Optional[vslam.Pose]],
-    loop_closures: Mapping[int, vslam.Pose],
+    world_from_rig: Mapping[int, Optional[Any]],
+    loop_closures: Mapping[int, Any],
     output_dir: str,
     sequence_title: str,
     *,

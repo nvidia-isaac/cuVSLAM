@@ -31,17 +31,16 @@ import argparse
 import os
 import time
 import warnings
-from dataclasses import dataclass, field
 from typing import Dict, List, Sequence, Any, Optional
 import numpy as np
 import cuvslam as vslam
 from cuvslam_tools.tracker import conversions as conv
 from cuvslam_tools.tracker.edex_reader import EdexReader
 from cuvslam_tools.tracker.filters import BlackoutFilter
-from cuvslam_tools.tracker.kitti_benchmark import export_kitti_benchmark_artifacts
+from cuvslam_tools.tracker.postprocess import finalize_trajectory
+from cuvslam_tools.tracker.results import Stat
 from cuvslam_tools.tracker.video_reader import VideoReader
-from cuvslam_tools.tracker.visualizer import RerunVisualizer, plot_trajectory
-from cuvslam_tools.tracker.metrics import calculate_sequence_errors
+from cuvslam_tools.tracker.visualizer import RerunVisualizer
 
 
 def get_fps(tracking_time, n_frames):
@@ -49,26 +48,6 @@ def get_fps(tracking_time, n_frames):
     if tracking_time > 0:
         return n_frames / tracking_time
     return -1
-
-
-@dataclass
-class Stat:
-    """Summary statistics and report paths from one tracking run."""
-
-    sequence_title: str = ""
-    n_frames: int = 0
-    tracking_time: float = 0
-    average_fps: float = -1
-    bird_view_with_errors_path: str = ""
-    gt_av_translation_error: float = 0
-    gt_av_rotation_error: float = 0
-    gt_n_error_segments: int = 0
-    gt_simple_error: float = 0
-    num_tracking_losts: int = 0
-    odometry_mode: str = ""
-    # per-instance list of dicts {length, t_pct, r_deg_per_m}, populated by
-    # metrics.calculate_sequence_errors in the segment branch.
-    seg_err_points: list = field(default_factory=list)
 
 
 class TrackerResults:
@@ -526,32 +505,22 @@ def track(args: argparse.Namespace,
 
     tracker.run_tracking_and_measure_performance(dataset, tracker_results, processor=processor)
 
-    if dataset.gt_transforms:
-        calculate_sequence_errors(tracker.world_from_rig, dataset.gt_transforms, tracker.stat,
-                                  tracker.frame_metadata, args.use_segments, args.segment_lengths,
-                                  args.num_loops, args.repeat_type)
-
     suffix = "_refined" if refined_focal is not None and refined_principal is not None else ""
-    plot_trajectory_path = None
-    if args.output_dir:
-        os.makedirs(os.path.join(args.output_dir, "plots"), exist_ok=True)
-        plot_trajectory_path = os.path.join(args.output_dir, "plots", f"{args.sequence_title}{suffix}.png")
-        tracker.stat.bird_view_with_errors_path = os.path.abspath(plot_trajectory_path)
-
-    plot_trajectory(
+    finalize_trajectory(
         tracker.world_from_rig,
         tracker.loop_closures,
         dataset.gt_transforms,
-        args.visualize_plot,
-        plot_trajectory_path,
-        dataset.gt_from_shuttle)
-
-    export_kitti_benchmark_artifacts(
-        tracker_results.world_from_rig,
-        tracker_results.loop_closures,
-        args.output_dir,
-        args.sequence_title,
+        tracker.stat,
+        frame_metadata=tracker.frame_metadata,
+        use_segments=args.use_segments,
+        segment_lengths=args.segment_lengths,
+        num_loops=args.num_loops,
+        repeat_type=args.repeat_type,
+        output_dir=args.output_dir,
+        sequence_title=args.sequence_title,
         use_slam=getattr(args, "use_slam", False),
+        visualize_plot=args.visualize_plot,
+        gt_from_shuttle=dataset.gt_from_shuttle,
         suffix=suffix,
     )
 

@@ -25,6 +25,40 @@ from typing import Optional
 from cuvslam_tools.tracker.cli import add_tracker_arguments
 
 
+def add_reporter_backend_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add backend selection shared by reporter and validator."""
+    parser.add_argument(
+        "--tracker_backend",
+        choices=["python", "api_launcher"],
+        default="python",
+        help="Tracking implementation. Python is in-process; api_launcher runs the C++ executable.",
+    )
+    parser.add_argument(
+        "--api_launcher_path",
+        default="",
+        help="C++ launcher executable; otherwise use CUVSLAM_BUILD_DIR/bin or PATH.",
+    )
+
+
+def parse_reporter_arguments(
+    parser: argparse.ArgumentParser, argv: Optional[list[str]] = None
+) -> tuple[argparse.Namespace, list[str]]:
+    """Parse reporter arguments and reserve trailing `--` values for the C++ launcher."""
+    full_argv = list(sys.argv[1:] if argv is None else argv)
+    if "--" in full_argv:
+        separator = full_argv.index("--")
+        parser_argv = full_argv[:separator]
+        launcher_args = full_argv[separator + 1 :]
+    else:
+        parser_argv = full_argv
+        launcher_args = []
+    args = parser.parse_args(parser_argv)
+    if launcher_args and args.tracker_backend != "api_launcher":
+        parser.error("arguments after -- are supported only with --tracker_backend=api_launcher")
+    args.api_launcher_args = launcher_args
+    return args, full_argv
+
+
 def _resolve_config_path(test_config: str, datasets_root: str):
     """Resolve a reporter config path from command-line input."""
     config_path = Path(test_config)
@@ -89,10 +123,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--output_root", type=str, default="", help="Root directory for report outputs.")
     parser.add_argument("--max_workers", type=int, default=None, help="Maximum number of sequence workers.")
     parser.add_argument("--pdf", action="store_true", help="Generate PDF report in addition to HTML.")
+    add_reporter_backend_arguments(parser)
     add_tracker_arguments(parser)
 
-    args = parser.parse_args(argv)
-    args.report_comments = sys.argv[1:] if argv is None else argv
+    args, full_argv = parse_reporter_arguments(parser, argv)
+    args.report_comments = full_argv
     try:
         run_report(args)
     except (FileNotFoundError, RuntimeError, ValueError) as exc:

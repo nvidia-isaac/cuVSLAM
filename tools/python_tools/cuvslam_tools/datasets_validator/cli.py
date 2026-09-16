@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Optional
 
 from cuvslam_tools.datasets_validator.combine_results import combine_report_stats
-from cuvslam_tools.reporter.cli import run_report
+from cuvslam_tools.reporter.cli import add_reporter_backend_arguments, parse_reporter_arguments, run_report
 from cuvslam_tools.tracker.cli import add_tracker_arguments
 
 
@@ -116,8 +116,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--base_ref", default="origin/main", help="Base ref for trivial-change detection.")
     parser.add_argument("--max_workers", type=int, default=None, help="Maximum reporter sequence workers.")
     parser.add_argument("--pdf", action="store_true", help="Generate PDF reports.")
+    add_reporter_backend_arguments(parser)
     add_tracker_arguments(parser)
-    args = parser.parse_args(argv)
+    args, full_argv = parse_reporter_arguments(parser, argv)
 
     try:
         config = _load_validation_config(args.validation_config)
@@ -134,7 +135,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         args.test_config = reporter_config
         args.output_dir = ""
         args.output_root = os.path.join(validation_output_root, Path(reporter_config).stem)
-        args.report_comments = [f"validation_config={args.validation_config}", f"reporter_config={reporter_config}"]
+        args.report_comments = [
+            f"validation_config={args.validation_config}",
+            f"reporter_config={reporter_config}",
+            *full_argv,
+        ]
         try:
             report_dirs.append(run_report(args))
         except RuntimeError as exc:

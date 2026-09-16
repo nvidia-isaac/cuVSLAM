@@ -29,7 +29,10 @@ With PDF report support:
 pip install -e ".[pdf]"
 ```
 
-`cuvslam_tracker`, `cuvslam_reporter`, and `cuvslam_validator` require the `cuvslam` Python binding in the same environment. Dataset preparation, ROS bag conversion, and undistortion should stay usable without importing `cuvslam` when their workflows do not need it.
+`cuvslam_tracker` and the default Python backend of `cuvslam_reporter`/`cuvslam_validator` require the `cuvslam`
+Python binding in the same environment. Reporter and validator can instead use `--tracker_backend api_launcher`
+with a built `cuvslam_api_launcher`; that mode does not import the Python binding. Dataset preparation, ROS bag
+conversion, and undistortion stay usable without importing `cuvslam` when their workflows do not need it.
 
 ## Install The cuVSLAM Python Binding
 
@@ -416,6 +419,33 @@ cuvslam_reporter \
 ```
 
 The reporter requires `--test_config` to point to one config file. Relative paths are resolved from the current working directory; `--datasets_root` is only used to locate dataset folders referenced by that config.
+
+### C++ API launcher backend
+
+Use the C++ backend to run the same EDEX reports while forwarding development-only launcher settings:
+
+```bash
+cuvslam_reporter \
+    --tracker_backend api_launcher \
+    --api_launcher_path /path/to/build/bin/cuvslam_api_launcher \
+    --test_config /path/to/datasets/converted/kitti/kitti-vio_gt.cfg \
+    --datasets_root /path/to/datasets/converted \
+    --output_root /tmp/cuvslam-reports \
+    --odometry_mode multicamera \
+    --use_segments \
+    -- \
+    --expert_sba_num_frames=9
+```
+
+If `--api_launcher_path` is omitted, lookup uses `CUVSLAM_BUILD_DIR/bin/cuvslam_api_launcher` and then `PATH`.
+Arguments after `--` are forwarded only in C++ mode. Reporter-owned input, output, replay, and public configuration
+flags cannot be overridden there. Development-only launcher gflags are intentionally unavailable in the Python
+backend.
+
+The C++ backend supports EDEX ODOM/SLAM reports, file ground truth, segment metrics, repeats, shuttle ground truth,
+blackout simulation, plots, and benchmark exports. MP4 input, live Rerun visualization, and
+`--save_output_tracker_data` remain Python-only. Launcher commands, stdout/stderr, and JSONL records are saved under
+the report's `logs/` directory.
 
 ### Ground truth
 
