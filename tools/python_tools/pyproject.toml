@@ -42,6 +42,7 @@ where = ["."]
 "cuvslam_tools.dataset_preparation.tum" = ["download_*.sh"]
 "cuvslam_tools.dataset_preparation.icl_nuim" = ["download_*.sh"]
 "cuvslam_tools.reporter" = ["report_templates/*.html"]
+"cuvslam_tools.vpr_reporter" = ["report_templates/*.html"]
 "cuvslam_tools.datasets_validator" = ["configs/*.cfg"]
 
 [project.scripts]
@@ -59,7 +60,9 @@ prepare_icl_nuim = "cuvslam_tools.dataset_preparation.icl_nuim.prepare:main"
 prepare_m3ed_spot = "cuvslam_tools.dataset_preparation.m3ed_spot.prepare:main"
 cuvslam_tracker = "cuvslam_tools.tracker.cli:main"
 cuvslam_reporter = "cuvslam_tools.reporter.cli:main"
+cuvslam_vpr_reporter = "cuvslam_tools.vpr_reporter.cli:main"
 cuvslam_validator = "cuvslam_tools.datasets_validator.cli:main"
+cuvslam_export_dinov2 = "cuvslam_tools.vpr.export_dinov2_onnx:main"
 
 [tool.ruff.lint.per-file-ignores]
 # PT027 rewrites assertRaises into pytest.raises. These tests run under

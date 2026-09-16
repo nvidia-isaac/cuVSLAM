@@ -1,0 +1,199 @@
+<html>
+<head>
+    <style>
+        body {
+            width: 1400px;
+        }
+
+        * {
+            font-size: 16pt;
+        }
+
+        h2 {
+            font-size: 40pt;
+        }
+
+        table {
+            font-family: "Trebuchet MS", Arial, Helvetica, sans-serif;
+            border-collapse: collapse;
+            width: 100%;
+        }
+
+        table td, table th {
+            border: 1px solid #ddd;
+            text-align: left;
+            padding: 8px;
+        }
+
+        table tr:nth-child(even) {
+            background-color: #f2f2f2
+        }
+
+        /* The plot and the frame strip are two views of the same run, so they sit side by side. */
+        table.run {
+            width: 100%;
+            table-layout: fixed;
+            border-collapse: collapse;
+        }
+
+        table.run td {
+            vertical-align: top;
+            border: none;
+            background: none;
+            padding: 0 12px 0 0;
+        }
+
+        table.run td.frames {
+            width: 46%;
+            padding: 0 0 0 12px;
+        }
+
+        table tr.leader td {
+            background-color: #d9efd9;
+            font-weight: bold;
+        }
+
+        table tr.leader td:first-child {
+            border-left: 3px solid #0ca30c;
+        }
+
+        table tr.summary {
+            font-weight: bold;
+        }
+
+        table tr.warning {
+            font-weight: bold;
+            background-color: #f6d7d7;
+            color: #8a1c1c;
+        }
+
+        table th {
+            padding-top: 12px;
+            padding-bottom: 12px;
+            background-color: #4CAF50;
+            color: white;
+        }
+
+        /* A trajectory plot is up to 1650 px wide and the frame strip is twice that, so both are
+           held to the body width rather than shown at their natural size. */
+        img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        .caption {
+            font-style: italic;
+            color: #55534d;
+            margin: 4px 0 12px 0;
+        }
+
+        .keeptogether {
+            page-break-inside: avoid !important;
+            display: block;
+        }
+    </style>
+</head>
+<body>
+<table>
+    <tr>
+        <th>cuVSLAM Visual Place Recognition</th>
+        <th>{{date}}</th>
+    </tr>
+    <tr class="summary">
+        <td>Branch name</td>
+        <td>{{branch_name}}</td>
+    </tr>
+    <tr class="summary">
+        <td>Commit SHA</td>
+        <td>{{commit_sha}}</td>
+    </tr>
+    <tr class="summary">
+        <td>Commit Date/Time</td>
+        <td>{{commit_ts}}</td>
+    </tr>
+    {% if provenance_warning %}
+    <tr class="summary">
+        <td>Provenance</td>
+        <td>{{provenance_warning}}</td>
+    </tr>
+    {% endif %}
+    <tr class="summary">
+        <td>Success radius [m]</td>
+        <td>{{ '%0.2f' % success_radius_m }}</td>
+    </tr>
+    <tr class="summary">
+        <td>Ground truth</td>
+        <td>{{alignment_note}}</td>
+    </tr>
+    <tr class="summary">
+        <td>How to read this</td>
+        <td>{{how_to_read_note}}</td>
+    </tr>
+    {% if self_match_warning %}
+    <tr class="warning">
+        <td>Warning</td>
+        <td>{{self_match_warning}}</td>
+    </tr>
+    {% endif %}
+    <tr class="summary">
+        <td>Comments</td>
+        <td>{{comments}}</td>
+    </tr>
+</table>
+<br>
+<table>
+    <tr>
+        <th>Mode</th>
+        <th>Sequence pair</th>
+        <th>Query frames</th>
+        <th>Mapped frames</th>
+        <th>Success [%]</th>
+        <th>False positive [%]</th>
+        <th>Unrecognized [%]</th>
+        <th>Precision</th>
+        <th>Map build [ms/frame]</th>
+        <th>Add to map [ms/frame]</th>
+        <th>Search [ms/frame]</th>
+        <th>Map size [MB/frame]</th>
+    </tr>
+    {% for s in stats %}
+        <tr{% if s.is_leader %} class="leader"{% endif %}>
+            <td>{{ s.vpr_mode }}</td>
+            <td>{{ s.title }}</td>
+            <td>{{ s.n_query_frames }}</td>
+            <td>{{ s.n_map_frames }}</td>
+            <td>{{ '%0.2f' % s.success_rate }}</td>
+            <td>{{ '%0.2f' % s.false_positive_rate }}</td>
+            <td>{{ '%0.2f' % s.unrecognized_rate }}</td>
+            <td>{{ '%0.3f' % s.precision }}</td>
+            <td>{{ '%0.2f' % s.map_build_time_ms_per_frame }}</td>
+            <td>{{ '%0.3f' % s.mean_add_time_ms }}</td>
+            <td>{{ '%0.2f' % s.mean_search_time_ms }}</td>
+            <td>{{ '%0.4f' % s.map_mb_per_frame }}</td>
+        </tr>
+    {% endfor %}
+</table>
+
+{% for s in stats %}
+    <div class="keeptogether">
+        <h2>{{ s.title }} - {{ s.vpr_mode }}</h2>
+        <table class="run">
+            <tr>
+                <td>
+                    {% if s.plot_image %}
+                    <img src="{{ s.plot_image }}">
+                    {% endif %}
+                </td>
+                <td class="frames">
+                    {% if s.strip_image %}
+                    <img class="strip" src="{{ s.strip_image }}">
+                    <div class="caption">{{ strip_caption }}</div>
+                    {% endif %}
+                </td>
+            </tr>
+        </table>
+    </div>
+{% endfor %}
+</body>
+</html>

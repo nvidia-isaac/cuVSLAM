@@ -70,6 +70,7 @@ AsyncSlam::AsyncSlam(const camera::Rig& rig, const std::vector<CameraId>& camera
     : rig_(rig),
       cameras_(cameras),
       options_(options),
+      vpr_enabled_(options.vpr_options.type != vpr::VprType::kNone),
       slam_(std::make_unique<LocalizerAndMapper>(rig, FeatureDescriptorType::kShiTomasi6, options.use_gpu)),
       tail_(options.retention_time_ms * 1'000'000ULL),
       loop_closure_solver_(
@@ -88,6 +89,13 @@ AsyncSlam::AsyncSlam(const camera::Rig& rig, const std::vector<CameraId>& camera
   }
   if (options.pose_for_frame_required) {
     slam_->SetKeepTrackPoses(true);
+  }
+
+  if (options.vpr_options.type != vpr::VprType::kNone) {
+    slam_->SetVprOptions(options.vpr_options);
+    if (!options.vpr_map_path.empty() && !slam_->LoadVprMap(options.vpr_map_path)) {
+      throw std::runtime_error("Failed to load the visual place recognition map at " + options.vpr_map_path);
+    }
   }
 
   tail_.Clear();
@@ -219,6 +227,58 @@ void AsyncSlam::TrackResult(const FrameId frameId, const int64_t timestamp_ns,
           TrajectoryType::GT);
   }
 #endif
+}
+
+void AsyncSlam::AddFrameToVprMap(vpr::VprImage image, const int64_t timestamp_ns) {
+  if (!vpr_enabled_ || image.Empty()) {
+    return;
+  }
+  const auto vo_keyframe = std::make_shared<VOKeyframeInfo>(VOKeyframeInfo());
+  vo_keyframe->command = std::make_shared<AddFrameToVprMapCmd>(std::move(image), timestamp_ns);
+  input_queue_.Push(vo_keyframe);
+  if (reproduce_mode_) {
+    ProcessInputSynchronously();
+  }
+}
+
+void AsyncSlam::AddFrameToVprMapCmd::Execute(AsyncSlam& async_slam, FrameId, const Isometry3T&) {
+  const std::lock_guard slam_guard(async_slam.slam_mutex_);
+  async_slam.slam_->AddVprFrame(image_, timestamp_ns_);
+  async_slam.vpr_wants_frame_ = async_slam.slam_->VprHeadNeedsImage();
+}
+
+void AsyncSlam::RecognizePlace(vpr::VprImage image, Slam::RecognizePlaceFinishCB finish_cb) {
+  const auto vo_keyframe = std::make_shared<VOKeyframeInfo>(VOKeyframeInfo());
+  vo_keyframe->command = std::make_shared<RecognizePlaceCmd>(std::move(image), std::move(finish_cb));
+  input_queue_.Push(vo_keyframe);
+  if (reproduce_mode_) {
+    ProcessInputSynchronously();
+  }
+}
+
+void AsyncSlam::RecognizePlaceCmd::Execute(AsyncSlam& async_slam, FrameId, const Isometry3T&) {
+  if (!finish_cb_) {
+    return;
+  }
+  if (!async_slam.vpr_enabled_) {
+    finish_cb_(Result<Slam::PlaceRecognition>::Error("Place recognition is off: Slam::Config::vpr_mode is Off."));
+    return;
+  }
+
+  vpr::VprPlace place;
+  {
+    const std::lock_guard slam_guard(async_slam.slam_mutex_);
+    place = async_slam.slam_->RecognizePlace(image_);
+  }
+
+  Slam::PlaceRecognition result{};
+  result.found = place.found;
+  result.node_id = static_cast<uint64_t>(place.node_id);
+  result.pose = ConvertIsometryToPose(place.pose);
+  result.score = place.score;
+  result.timestamp_ns = place.timestamp_ns;
+  result.imported = place.imported;
+  finish_cb_(Result<Slam::PlaceRecognition>::Success(std::move(result)));
 }
 
 Isometry3T AsyncSlam::GetSlamPose() const {

@@ -66,6 +66,14 @@ set_target_properties(pycuvslam PROPERTIES
 install(TARGETS pycuvslam LIBRARY DESTINATION .)
 install(FILES ${CUVSLAM_LIBRARY} DESTINATION .)
 
+# A build with the AnyLoc place recognition backend leaves libonnxruntime.so next to libcuvslam.so;
+# it has to travel with it, because libcuvslam.so resolves it through an $ORIGIN rpath.
+file(GLOB CUVSLAM_RUNTIME_DEPS "${CUVSLAM_BUILD_DIR_PATH}/bin/libonnxruntime.so*")
+if(CUVSLAM_RUNTIME_DEPS)
+    message(STATUS "pycuvslam: shipping runtime dependencies ${CUVSLAM_RUNTIME_DEPS}")
+    install(FILES ${CUVSLAM_RUNTIME_DEPS} DESTINATION .)
+endif()
+
 install(FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/__init__.py
     ${CMAKE_CURRENT_SOURCE_DIR}/utils.py

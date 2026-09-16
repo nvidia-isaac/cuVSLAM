@@ -826,9 +826,19 @@ NB_MODULE(pycuvslam, m) {
   // so we only need layer names for ReadLandmarks() binding
   // .value("PoseGraph", Slam::DataLayer::PoseGraph, "Pose Graph");
 
+  nb::enum_<Slam::VprMode>(slam_cls, "VprMode",
+                           "Visual place recognition backend, see :meth:`Slam.recognize_place_by_frame`.\n\n"
+                           "Selecting a backend this build does not have raises when Slam is constructed.")
+      .value("Off", Slam::VprMode::Off, "Place recognition is off")
+      .value("Simple", Slam::VprMode::Simple, "Grayscale thumbnails, always available")
+      .value("DBoW2", Slam::VprMode::DBoW2, "Bag of binary words over ORB features, needs a build with USE_DBOW2")
+      .value("AnyLoc", Slam::VprMode::AnyLoc,
+             "VLAD over DINOv2 dense features, needs USE_ONNXRUNTIME and `Slam.Config.vpr_model_path`")
+      .value("Bow", Slam::VprMode::Bow, "In-tree ORB and a binary bag of words; no third-party dependency");
+
   nb::class_<Slam::Config>(slam_cls, "Config", "SLAM configuration parameters")
       .def(nb::init<std::string_view, bool, bool, bool, bool, bool, float, float, uint32_t, uint32_t, uint32_t,
-                    uint32_t>(),
+                    uint32_t, Slam::VprMode, std::string_view, std::string_view, float>(),
            nb::kw_only(), nb::arg("map_cache_path") = Slam::Config{}.map_cache_path,
            nb::arg("use_gpu") = Slam::Config{}.use_gpu, nb::arg("sync_mode") = Slam::Config{}.sync_mode,
            nb::arg("enable_reading_internals") = true,  // enable by default; in Python convenience is a priority
@@ -839,7 +849,10 @@ NB_MODULE(pycuvslam, m) {
            nb::arg("max_map_size") = Slam::Config{}.max_map_size,
            nb::arg("throttling_time_ms") = Slam::Config{}.throttling_time_ms,
            nb::arg("retention_time_ms") = Slam::Config{}.retention_time_ms,
-           nb::arg("delay_warning_queue_size") = Slam::Config{}.delay_warning_queue_size)
+           nb::arg("delay_warning_queue_size") = Slam::Config{}.delay_warning_queue_size,
+           nb::arg("vpr_mode") = Slam::Config{}.vpr_mode, nb::arg("vpr_map_path") = Slam::Config{}.vpr_map_path,
+           nb::arg("vpr_model_path") = Slam::Config{}.vpr_model_path,
+           nb::arg("vpr_score_threshold") = Slam::Config{}.vpr_score_threshold)
       .def_rw("map_cache_path", &Slam::Config::map_cache_path,
               "If empty, map is kept in memory only. Else, map is synced to disk (LMDB) at this path, allowing "
               "large-scale maps; if the path already exists it will be overwritten. To load an existing map, use "
@@ -867,14 +880,31 @@ NB_MODULE(pycuvslam, m) {
               "Length of the SLAM input queue at which cuVSLAM warns that SLAM is falling behind odometry. "
               "Diagnostic only: exceeding it does not change tracking behavior, it only prints a warning (requires "
               "verbosity Warning or higher, see set_verbosity). Default: 10 queued commands.")
+      .def_rw("vpr_mode", &Slam::Config::vpr_mode,
+              "Visual place recognition backend, see `Slam.VprMode`. `VprMode.Off` disables it, and "
+              "`add_frame_to_vpr_map` and `recognize_place_by_frame` then do nothing. The map holds one frame "
+              "per pose graph node, so `max_map_size` bounds it too.")
+      .def_rw("vpr_map_path", &Slam::Config::vpr_map_path,
+              "If non-empty, the place recognition map `save_map` wrote into this folder is loaded when Slam is "
+              "constructed and is then read only: this session's keyframes are not added to it. Must name the same "
+              "`vpr_mode` the map was built with. It brings no landmarks, so a match cannot be verified; pass the "
+              "same folder to `localize_in_map` with guess_pose=None to relocalize metrically.")
+      .def_rw("vpr_model_path", &Slam::Config::vpr_model_path,
+              "Model file the backend needs. `VprMode.AnyLoc` reads a DINOv2 ONNX model from here; the other "
+              "backends ignore it.")
+      .def_rw("vpr_score_threshold", &Slam::Config::vpr_score_threshold,
+              "Minimum similarity in [0, 1] for `recognize_place_by_frame` to report a match, trading recall for "
+              "precision. 0 selects the backend default.")
       .def("__repr__", [](const Slam::Config& cfg) {
         return nb::str(
                    "cuvslam.Slam.Config(map_cache_path={}, use_gpu={}, sync_mode={}, enable_reading_internals={}, "
                    "planar_constraints={}, gt_align_mode={}, map_cell_size={}, max_landmarks_distance={}, "
-                   "max_map_size={}, throttling_time_ms={}, retention_time_ms={}, delay_warning_queue_size={})")
+                   "max_map_size={}, throttling_time_ms={}, retention_time_ms={}, delay_warning_queue_size={}, "
+                   "vpr_mode={}, vpr_map_path={}, vpr_model_path={}, vpr_score_threshold={})")
             .format(cfg.map_cache_path, cfg.use_gpu, cfg.sync_mode, cfg.enable_reading_internals,
                     cfg.planar_constraints, cfg.gt_align_mode, cfg.map_cell_size, cfg.max_landmarks_distance,
-                    cfg.max_map_size, cfg.throttling_time_ms, cfg.retention_time_ms, cfg.delay_warning_queue_size);
+                    cfg.max_map_size, cfg.throttling_time_ms, cfg.retention_time_ms, cfg.delay_warning_queue_size,
+                    cfg.vpr_mode, cfg.vpr_map_path, cfg.vpr_model_path, cfg.vpr_score_threshold);
       });
 
   nb::class_<Slam::LocalizationSettings>(slam_cls, "LocalizationSettings", "Localization settings")
@@ -882,16 +912,18 @@ NB_MODULE(pycuvslam, m) {
       .def(
           "__init__",
           [](Slam::LocalizationSettings* self, float horizontal_search_radius, float vertical_search_radius,
-             float horizontal_step, float vertical_step, float angular_step_rads) {
+             float horizontal_step, float vertical_step, float angular_step_rads, uint32_t vpr_candidates) {
             new (self) Slam::LocalizationSettings{};
             self->horizontal_search_radius = horizontal_search_radius;
             self->vertical_search_radius = vertical_search_radius;
             self->horizontal_step = horizontal_step;
             self->vertical_step = vertical_step;
             self->angular_step_rads = angular_step_rads;
+            self->vpr_candidates = vpr_candidates;
           },
           nb::kw_only(), nb::arg("horizontal_search_radius"), nb::arg("vertical_search_radius"),
-          nb::arg("horizontal_step"), nb::arg("vertical_step"), nb::arg("angular_step_rads"))
+          nb::arg("horizontal_step"), nb::arg("vertical_step"), nb::arg("angular_step_rads"),
+          nb::arg("vpr_candidates") = Slam::LocalizationSettings{}.vpr_candidates)
       .def_rw("horizontal_search_radius", &Slam::LocalizationSettings::horizontal_search_radius,
               "Horizontal search radius in meters")
       .def_rw("vertical_search_radius", &Slam::LocalizationSettings::vertical_search_radius,
@@ -900,13 +932,16 @@ NB_MODULE(pycuvslam, m) {
       .def_rw("vertical_step", &Slam::LocalizationSettings::vertical_step, "Vertical step in meters")
       .def_rw("angular_step_rads", &Slam::LocalizationSettings::angular_step_rads,
               "Angular step around vertical axis in radians")
+      .def_rw("vpr_candidates", &Slam::LocalizationSettings::vpr_candidates,
+              "Places `localize_in_map` tries when called without a guess pose, best first; the first one that "
+              "verifies wins. Ignored when a guess pose is given. 0 selects the default of 5.")
       .def("__repr__", [](const Slam::LocalizationSettings& settings) {
         return nb::str(
                    "cuvslam.Slam.LocalizationSettings(horizontal_search_radius={}, "
                    "vertical_search_radius={}, horizontal_step={}, vertical_step={}, "
-                   "angular_step_rads={})")
+                   "angular_step_rads={}, vpr_candidates={})")
             .format(settings.horizontal_search_radius, settings.vertical_search_radius, settings.horizontal_step,
-                    settings.vertical_step, settings.angular_step_rads);
+                    settings.vertical_step, settings.angular_step_rads, settings.vpr_candidates);
       });
 
   nb::class_<Slam::Metrics>(slam_cls, "Metrics", "SLAM metrics")
@@ -982,6 +1017,27 @@ NB_MODULE(pycuvslam, m) {
             .format(ls.timestamp_ns, ls.landmarks.size());
       });
 
+  nb::class_<Slam::PlaceRecognition>(slam_cls, "PlaceRecognition",
+                                     "Where a frame was observed from, see :meth:`Slam.recognize_place_by_frame`")
+      .def(nb::init<>())
+      .def_rw("found", &Slam::PlaceRecognition::found,
+              "False when no mapped place matched; the other fields are then meaningless")
+      .def_rw("node_id", &Slam::PlaceRecognition::node_id,
+              "Pose graph node the matched frame was observed from, see :class:`Slam.PoseGraphNode`")
+      .def_rw("pose", &Slam::PlaceRecognition::pose,
+              "Current world pose of that node, in the same frame as :meth:`Slam.get_pose`")
+      .def_rw("score", &Slam::PlaceRecognition::score, "Similarity in [0, 1]; 1 means the frames are identical")
+      .def_rw("timestamp_ns", &Slam::PlaceRecognition::timestamp_ns, "Timestamp of the mapped frame that matched")
+      .def_rw("imported", &Slam::PlaceRecognition::imported,
+              "True when the match came from a map loaded through `Slam.Config.vpr_map_path`. `node_id` and `pose` "
+              "then belong to the pose graph of the session that recorded that map, not to this one's.")
+      .def("__repr__", [](const Slam::PlaceRecognition& p) {
+        return nb::str(
+                   "cuvslam.Slam.PlaceRecognition(found={}, node_id={}, pose={}, score={}, timestamp_ns={}, "
+                   "imported={})")
+            .format(p.found, p.node_id, p.pose, p.score, p.timestamp_ns, p.imported);
+      });
+
   // Slam class methods
   slam_cls
       .def(nb::init<const Rig&, const std::vector<uint8_t>&, const Slam::Config&>(), nb::arg("rig"),
@@ -1032,9 +1088,9 @@ NB_MODULE(pycuvslam, m) {
           "    callback: Function to be called when save is complete (takes bool success parameter)")
       .def(
           "localize_in_map",
-          [](Slam& self, const std::string_view& folder_name, int64_t timestamp_ns, const Pose& guess_pose,
-             const std::vector<nb::ndarray<nb::ro>>& images, const Slam::LocalizationSettings& settings,
-             nb::callable start_cb, nb::callable finish_cb) {
+          [](Slam& self, const std::string_view& folder_name, int64_t timestamp_ns,
+             const std::optional<Pose>& guess_pose, const std::vector<nb::ndarray<nb::ro>>& images,
+             const Slam::LocalizationSettings& settings, nb::callable start_cb, nb::callable finish_cb) {
             auto image_set = ImageSetFromNDArrays(images, timestamp_ns, ArrayType::Image);
             self.LocalizeInMap(
                 folder_name, timestamp_ns, guess_pose, image_set, settings,
@@ -1047,18 +1103,22 @@ NB_MODULE(pycuvslam, m) {
                   finish_cb(result.data, result.error_message);
                 });
           },
-          nb::arg("folder_name"), nb::arg("timestamp_ns"), nb::arg("guess_pose"), nb::arg("images"),
+          nb::arg("folder_name"), nb::arg("timestamp_ns"), nb::arg("guess_pose").none(), nb::arg("images"),
           nb::arg("settings"), nb::arg("start_cb"), nb::arg("finish_cb"),
           "Localize in the existing database (map).\n\n"
           "If ``Slam.Config.sync_mode`` is false, work is queued for the background slam thread and the callback runs "
           "when localization finishes (possibly on another thread than the caller). If ``Slam.Config.sync_mode`` is "
           "true, localization runs immediately before this call returns.\n"
           "Finds the rig pose in the saved map. If successful, replace current map with saved one.\n"
-          "`finish_cb` receives the localization result or an error message.\n"
+          "`finish_cb` receives the localization result or an error message.\n\n"
+          "`guess_pose` may be None: the saved map's place recognition map then proposes up to "
+          "`LocalizationSettings.vpr_candidates` places that look like the images, and each is verified "
+          "geometrically until one holds. That needs the map to have been saved with a `vpr_mode` other than Off, "
+          "and this session's `vpr_mode` to match it.\n"
           "Parameters:\n"
           "    folder_name: Folder containing the saved SLAM map\n"
           "    timestamp_ns: Timestamp for the image frame in nanoseconds\n"
-          "    guess_pose: Initial guess for rig pose at the image timestamp\n"
+          "    guess_pose: Initial guess for rig pose at the image timestamp, or None to search by appearance\n"
           "    images: List of numpy arrays containing the camera images\n"
           "    settings: Localization settings\n"
           "    start_cb: Called when localization begins (no arguments)\n"
@@ -1086,6 +1146,45 @@ NB_MODULE(pycuvslam, m) {
           "Get pose graph consisting of all keyframes and their connections including loop closures.\n\n"
           "Returns:\n"
           "    Pose graph with nodes and edges")
+      .def(
+          "add_frame_to_vpr_map",
+          [](Slam& self, const std::vector<nb::ndarray<nb::ro>>& images, int64_t timestamp_ns) {
+            self.AddFrameToVprMap(ImageSetFromNDArrays(images, timestamp_ns, ArrayType::Image));
+          },
+          nb::arg("images"), nb::arg("timestamp_ns") = 0,
+          "Offer the current frame to the place recognition map.\n\n"
+          "The map holds one frame per pose graph node, so this stores `images` only when the newest node does not "
+          "have a frame yet. Call it on every frame, right after `track`: the calls that land on an already mapped "
+          "node cost almost nothing.\n\n"
+          "Like `track`, the work is queued for the SLAM thread; with `Slam.Config.sync_mode` it runs before the "
+          "call returns. Does nothing when `Slam.Config.vpr_mode` is `Slam.VprMode.Off`, or when the map was "
+          "loaded from `Slam.Config.vpr_map_path`, which makes it read only.\n\n"
+          "Parameters:\n"
+          "    images: List of numpy arrays containing the camera images\n"
+          "    timestamp_ns: Timestamp of the frame in nanoseconds")
+      .def(
+          "recognize_place_by_frame",
+          [](Slam& self, const std::vector<nb::ndarray<nb::ro>>& images, int64_t timestamp_ns, nb::callable finish_cb) {
+            auto image_set = ImageSetFromNDArrays(images, timestamp_ns, ArrayType::Image);
+            self.RecognizePlaceByFrame(image_set, [finish_cb](const Result<Slam::PlaceRecognition>& result) {
+              nb::gil_scoped_acquire gil;
+              finish_cb(result.data, result.error_message);
+            });
+          },
+          nb::arg("images"), nb::arg("timestamp_ns"), nb::arg("finish_cb"),
+          "Recognize where a frame was taken.\n\n"
+          "Reports the pose graph node whose mapped frame looks most like `images`, and that node's current world "
+          "pose. Unlike `localize_in_map` this needs no pose guess and does no geometric verification, so it is "
+          "cheap enough to call on every frame, and the pose it reports is a mapped node's rather than the "
+          "camera's.\n\n"
+          "The search is queued for the SLAM thread and `finish_cb` runs when it completes, possibly on that "
+          "thread; with `Slam.Config.sync_mode` it runs before this returns. `finish_cb` receives "
+          "(result, error_message): a search that simply found nothing reports a `Slam.PlaceRecognition` with "
+          "`found` False, while an error message means the backend could not answer at all.\n\n"
+          "Parameters:\n"
+          "    images: List of numpy arrays containing the camera images\n"
+          "    timestamp_ns: Timestamp of the frame in nanoseconds\n"
+          "    finish_cb: Called when the search completes (receives the result and an error message)")
       .def(
           "get_slam_metrics",
           [](const Slam& self) -> Slam::Metrics {

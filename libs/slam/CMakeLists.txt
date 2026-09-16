@@ -43,6 +43,14 @@ set(HEADERS
     slam/loop_closure_solver/lcs_simple_single_kf.h
     slam/loop_closure_solver/lcs_two_steps_easy.h
     slam/loop_closure_solver/pnp_ransac_hypothesis.h
+    vpr/ivpr.h
+    vpr/vpr_bow.h
+    vpr/vpr_image.h
+    vpr/vpr_orb.h
+    vpr/vpr_map.h
+    vpr/vpr_simple.h
+    vpr/vpr_sof_image.h
+    vpr/vpr_types.h
     view/map_to_view.h
     view/view_landmarks.h
     view/view_manager.h
@@ -73,6 +81,13 @@ set(SOURCES
     slam/loop_closure_solver/lcs_simple_single_kf.cpp
     slam/loop_closure_solver/lcs_two_steps_easy.cpp
     slam/slam_check_hypothesis.cpp
+    vpr/ivpr.cpp
+    vpr/vpr_bow.cpp
+    vpr/vpr_image.cpp
+    vpr/vpr_orb.cpp
+    vpr/vpr_map.cpp
+    vpr/vpr_simple.cpp
+    vpr/vpr_sof_image.cpp
     view/map_to_view.cpp
 )
 
@@ -85,7 +100,20 @@ set(LIBS
     log
     pnp
     profiler
+    sof
 )
+
+if (USE_DBOW2)
+  set(HEADERS ${HEADERS} vpr/vpr_dbow2.h)
+  set(SOURCES ${SOURCES} vpr/vpr_dbow2.cpp)
+  set(LIBS ${LIBS} dbow2::dbow2 ${VPR_DBOW2_OPENCV_LIBS})
+endif (USE_DBOW2)
+
+if (USE_ONNXRUNTIME)
+  set(HEADERS ${HEADERS} vpr/vpr_anyloc.h)
+  set(SOURCES ${SOURCES} vpr/vpr_anyloc.cpp)
+  set(LIBS ${LIBS} onnxruntime::onnxruntime)
+endif (USE_ONNXRUNTIME)
 
 if (USE_CUDA)
   set(LIBS ${LIBS} cuda_modules)

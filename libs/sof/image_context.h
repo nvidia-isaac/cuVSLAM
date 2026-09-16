@@ -50,6 +50,12 @@ public:
   const ImagePyramidU8& cpu_image_pyramid_u8() const;
   const GradientPyramidT& cpu_gradient_pyramid() const;
 
+  // The CPU and GPU pyramids are mutually exclusive: a context built for the GPU never fills the
+  // CPU ones, and the CPU getters assert on that. A caller that does not know which pipeline built
+  // this frame asks here first.
+  bool has_cpu_image() const;
+  bool has_gpu_image() const;
+
   bool support_depth() const;
 
   void reset();

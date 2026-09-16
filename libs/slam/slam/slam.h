@@ -35,6 +35,7 @@
 #include "slam/common/slam_common.h"
 #include "slam/map/map.h"
 #include "slam/slam/loop_closure_solver/iloop_closure_solver.h"
+#include "slam/vpr/vpr_map.h"
 
 namespace cuvslam::slam {
 
@@ -285,6 +286,41 @@ public:
 
   [[nodiscard]] bool SelectHeadKeyframe(KeyFrameId const_slam_keyframe_id, int64_t timestamp_ns);
 
+  // ----- Visual place recognition -----
+
+  // Install the place recognition backend. Must be called before the first keyframe.
+  // Passing VprType::kNone leaves place recognition off, which is the default.
+  void SetVprOptions(const vpr::VprOptions& options);
+
+  // True when a place recognition backend is installed.
+  bool IsVprEnabled() const;
+
+  // Number of frames in the place recognition map.
+  size_t GetVprMapSize() const;
+
+  // True when the newest pose graph node has no image in the place recognition map yet, so
+  // handing it one would do something. Lets a caller skip converting pixels it does not need.
+  bool VprHeadNeedsImage() const;
+
+  // Attach `image` to the newest pose graph node, unless that node already has one, so a caller may
+  // offer every frame and still store exactly one image per node. True when the image was stored.
+  bool AddVprFrame(const vpr::VprImage& image, int64_t timestamp_ns);
+
+  // Find the pose graph node from which `image` was observed, and its current world pose.
+  vpr::VprPlace RecognizePlace(const vpr::VprImage& image);
+
+  // The `max_results` best places for `image`, best first, for a relocalizer to verify in turn.
+  std::vector<vpr::VprPlace> RecognizePlaces(const vpr::VprImage& image, size_t max_results);
+
+  // Write the place recognition map into `folder` alongside the SLAM map, refreshing the stored node
+  // poses first so a session that has no pose graph for these nodes can still use it.
+  bool SaveVprMap(const std::string& folder);
+
+  // Load a place recognition map written by SaveVprMap.
+  // kWithPoseGraph is for a map whose pose graph this instance also loaded, so the node ids in the
+  // file are its own; kStandalone is for a map that belongs to another session.
+  bool LoadVprMap(const std::string& folder, vpr::VprMap::LoadMode mode = vpr::VprMap::LoadMode::kStandalone);
+
 private:
   // ----- internal types -----
   struct TrackOnKeyframe {
@@ -336,6 +372,11 @@ private:
   mutable std::random_device random_device_;
   mutable std::mt19937 random_generator_;
 
+  // ----- Visual place recognition -----
+  // Lives here rather than in Map so that LocalizeInMap, which swaps the whole
+  // LocalizerAndMapper, swaps the place recognition map with the pose graph its node ids refer to.
+  std::unique_ptr<vpr::VprMap> vpr_map_;
+
   // ----- Cache to reallocation -----
   std::vector<TrackId> to_remove_;
 
@@ -344,6 +385,10 @@ private:
   uint32_t profiler_color_ = 0xFF0000;
 
   // ----- Internal methods -----
+  // Install the single PoseGraph removal callback that keeps keyframe_removed_ and the place
+  // recognition map in step with keyframe merges.
+  void RegisterRemoveNodeCB();
+
   // Attempts to add an edge between two keyframes in the pose graph.
   // Returns false if an existing edge has higher weight or if the 'start' keyframe pose is not found.
   bool AddEdgeToPoseGraph(KeyFrameId start, KeyFrameId end, const Isometry3T& start_from_end,

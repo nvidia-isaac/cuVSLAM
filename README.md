@@ -16,6 +16,7 @@ cuVSLAM is the library by NVIDIA, providing various Visual Tracking Camera modes
 ## Table of Contents
 
 - [Tracking modes](#tracking-modes)
+- [Visual place recognition](#visual-place-recognition)
 - [Using cuVSLAM](#using-cuvslam)
 - [Performance](#performance)
 - [Install PyCuVSLAM](#install-pycuvslam)
@@ -55,6 +56,75 @@ Notes:
 
 Multisensor tracking is experimental: tracking may be inaccurate or fail for some sensor configurations and scenes.
 The current implementation supports pinhole cameras only.
+
+# Visual place recognition
+
+Loop closure answers "have I drifted?" and needs a pose to search around. Visual place recognition answers "where
+am I?" from a single image and no pose at all. That is what a **kidnapped robot** needs: a robot switched on inside
+a map it has never localized in, or picked up mid-run and put down elsewhere, has no prior to search around.
+
+`Slam` keeps a place recognition map alongside the pose graph: one frame per pose graph node, written into the SLAM
+map by `save_map`. A match names a node rather than a stored pose, so the pose it reports follows loop closures and
+pose graph optimization instead of being the drifted one that was current when the frame was mapped.
+
+It is a hint, not a fix. The reported pose is a mapped node's, not the camera's, so its accuracy is bounded by how
+far apart the mapped nodes are, and nothing verifies it geometrically. In exchange it is cheap enough to run on
+every frame, which makes it the way to *detect* that a robot has been kidnapped. Resolving the kidnapping is
+`localize_in_map`'s job — called with `guess_pose=None` it takes candidate places from the saved map's place
+recognition map and verifies them against that map's landmarks, instead of searching a grid around a guess the
+robot does not have.
+
+## Using it
+
+```python
+import cuvslam as vslam
+
+def on_place(place, error):
+    if error:
+        print(error)   # the backend could not answer at all, for example its model file is unreadable
+    elif place.found:
+        print(place.node_id, place.pose, place.score)
+
+# Mapping run: offer every frame. The map keeps one frame per pose graph node, so the calls that
+# land on an already mapped node cost almost nothing.
+slam_cfg = vslam.Slam.Config(vpr_mode=vslam.Slam.VprMode.Simple, sync_mode=True)
+tracker = vslam.Tracker(rig, vslam.Tracker.Mode.OdometryWithSlamOffline, odom_cfg, slam_cfg)
+for timestamp, images in sequence:
+    tracker.track(timestamp, images)
+    tracker.slam.add_frame_to_vpr_map(images, timestamp)
+tracker.slam.save_map('/path/to/map', lambda saved: print('map saved' if saved else 'map not saved'))
+
+# Later run, starting from an unknown pose, with that map loaded read only.
+slam_cfg = vslam.Slam.Config(vpr_mode=vslam.Slam.VprMode.Simple, vpr_map_path='/path/to/map', sync_mode=True)
+tracker = vslam.Tracker(rig, vslam.Tracker.Mode.OdometryWithSlamOffline, odom_cfg, slam_cfg)
+for timestamp, images in sequence:
+    tracker.track(timestamp, images)
+    tracker.slam.recognize_place_by_frame(images, timestamp, on_place)
+```
+
+`save_map` and `recognize_place_by_frame` are asynchronous: they queue the work for the SLAM thread and their
+callbacks run when it finishes, possibly on that thread. `sync_mode=True` above, which `Tracker.Mode`'s offline
+modes require anyway, runs the work before the call returns, so the callback has already fired by the time it does.
+
+## Backends
+
+`Slam::Config::vpr_mode` (C++) / `cuvslam.Slam.Config.vpr_mode` (Python) selects the backend. All three search
+the map exhaustively.
+
+| Mode | What it stores | Build flag | Notes |
+|------|----------------|------------|-------|
+| `Off` | nothing | — | default; the place recognition calls do nothing |
+| `Simple` | an 8x downscaled grayscale thumbnail | — | zero dependencies; compares thumbnails by zero-mean normalized cross correlation, so it tolerates exposure changes but has no viewpoint invariance |
+| `Bow` | a bag of binary words over in-tree ORB features | — | zero dependencies: it brings its own ORB extractor and fits a 1024 word binary vocabulary to the first 50 mapped frames. DBoW2's algorithm without OpenCV, at the cost of a flat vocabulary instead of a tree |
+| `DBoW2` | a bag of binary words over ORB features | `USE_DBOW2` | [DBoW2](https://github.com/dorian3d/DBoW2); needs OpenCV. The vocabulary is trained from the mapped frames themselves the first time the map is queried |
+| `AnyLoc` | a VLAD aggregation of DINOv2 dense features | `USE_ONNXRUNTIME` | [AnyLoc](https://anyloc.github.io/); needs a DINOv2 ONNX model in `Slam::Config::vpr_model_path`, exported by `cuvslam_export_dinov2` |
+
+## Evaluating it
+
+`cuvslam_vpr_reporter` (in `tools/python_tools`) scores a backend on two recordings of the same route: it maps the
+first, replays the second with that map loaded, and reports the recognition and false positive rates against ground
+truth. It draws the query trajectory green where the place was recognized correctly, red where it was not
+recognized at all, and amber where the map answered with the wrong place. See `tools/python_tools/README.md`.
 
 # Using cuVSLAM
 
@@ -215,6 +285,8 @@ All flags have defaults; override with `-DFLAG=VALUE`.
 | `USE_LMDB` | ON | LMDB map database |
 | `USE_RERUN` | OFF | Rerun SDK visualization |
 | `USE_NVTX` | OFF | NVIDIA NVTX profiling |
+| `USE_DBOW2` | OFF | DBoW2 place recognition backend; requires OpenCV |
+| `USE_ONNXRUNTIME` | OFF | AnyLoc place recognition backend; downloads a prebuilt ONNX Runtime |
 
 Build types: `Release` (default), `Debug`, `RelWithDebInfo`, `MinSizeRel`. Do not mix types in the same build directory.
 
