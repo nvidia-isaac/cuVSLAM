@@ -244,8 +244,8 @@ With Rerun: `cmake -S . -B build -DUSE_RERUN=ON && cmake --build build --target 
 
 | Tool | Purpose | Usage |
 |------|---------|-------|
-| `tracker` | CLI image-sequence tracking | `./bin/tracker config.cfg` |
-| `cuvslam_api_launcher` | Track, save map, localize | `./bin/cuvslam_api_launcher -dataset=<edex>` |
+| `cuvslam_tracker` | Rich Python image-sequence tracking | `cuvslam_tracker --dataset <sequence>` |
+| `cuvslam_api_launcher` | C++ tracking, map, localization, debugging | `./bin/cuvslam_api_launcher --edex=<edex>` |
 | `undistort` | Remove lens distortion | `./bin/undistort in.png calib.edex out.png` |
 | `result_visualizer` | Visualize EDEX trajectories | `python3 tools/edex/result_visualizer/result_visualizer.py result.edex` |
 | `bag2edex` | Convert ROS2 bag → EDEX | `python3 bag_to_edex.py <bag> <out.edex>` |

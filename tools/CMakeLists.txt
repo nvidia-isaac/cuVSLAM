@@ -19,7 +19,6 @@ add_subdirectory(cuvslam_api_launcher)
 add_subdirectory(cuvslam_api_test)
 add_subdirectory(gravity_calc)
 add_subdirectory(map_extractor)
-add_subdirectory(tracker)
 
 find_package(OpenCV QUIET)
 

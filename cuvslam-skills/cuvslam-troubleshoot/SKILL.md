@@ -138,20 +138,20 @@ Open `stereo.edex` and verify:
 - `distortion_model` is `"pinhole"` for rectified images — a `"fisheye"` model with zero params is a misconfiguration; see `references/edex-calibration-pitfalls.md`
 - If VIO: `imu` block exists with non-zero `gyro_noise_density`, `accel_noise_density`, and a valid `transform`
 
-If the EDEX came from an `isaac_ros_visual_slam` debug dump, note this — it will need to be patched before the tracker can use it (see Phase 3).
+If the EDEX came from an `isaac_ros_visual_slam` debug dump, note this — it may need to be patched before an offline
+tool can use it (see Phase 3).
 
 #### 1c. Ground truth
 
 Ask the user whether they have ground truth trajectory data:
 
-**If yes** — ask them to provide it. The tracker tool accepts a ground truth file directly:
+**If yes** — ask them to provide it. The Python tracker accepts a ground truth file directly:
 ```bash
-CUVSLAM_DATASETS=<parent>/ CUVSLAM_OUTPUT=/tmp/out/ \
-  ./build/bin/tracker \
-    -edex <sequence_subfolder> \
-    -edex_filename stereo.edex \
-    -output_edex result.edex \
-    -gt_file gt.txt
+cuvslam_tracker \
+  --dataset <sequence_folder> \
+  --config_path <sequence_folder>/stereo.edex \
+  --gt_path gt.txt \
+  --output_dir /tmp/out
 ```
 Ground truth enables ATE/RTE metrics in the tracker output and makes drift quantitative rather than qualitative.
 
@@ -186,7 +186,7 @@ Read `../../TROUBLESHOOTING.md` for the full 14-step diagnostic flow. The summar
 #### Dataset path into the diagnostic workflow
 
 **Rosbag (`.bag` / `.db3`):**
-- Do NOT run the tracker tool directly on a rosbag.
+- Do NOT run an offline tracking tool directly on a rosbag.
 - First reproduce the issue through **Isaac ROS cuVSLAM** (`isaac_ros_visual_slam`).
 - Read `references/isaac-ros-visual-slam-usage.md` for installation, launch steps, key parameters, and how to verify it is running correctly.
 - Use `scripts/isaac_ros_visual_slam_realsense_bag.launch.py` as the reference launch file for RealSense bag playback (Isaac ROS 4.3 — adapt for other versions). Pass `enable_debug_mode:=true` to capture a debug dump (EDEX + images) for offline analysis.
@@ -199,14 +199,15 @@ Read `../../TROUBLESHOOTING.md` for the full 14-step diagnostic flow. The summar
   # Then reference them inside the container as /workspaces/isaac_ros-dev/vo_pose_diff_recorder.py
   ```
 - **Debug dump ownership:** The dump directory is written by the container as root. To work with the dump files, either run commands via `docker exec` or write output to a host-owned directory.
-- **Patch the debug dump EDEX before running tracker** — the dump produced by `isaac_ros_visual_slam` has format incompatibilities with the tracker CLI. See `commands/debug-dump-patch.md` for the full list and the patch script `scripts/patch_debug_dump_edex.py`.
-- Once the EDEX dump is captured and patched, proceed with the tracker-based workflow below.
+- **Patch the debug dump EDEX before offline tracking** — see `commands/debug-dump-patch.md` for the full list and
+  the patch script `scripts/patch_debug_dump_edex.py`.
+- Once the EDEX dump is captured and patched, proceed with the offline workflow below.
 
 **EDEX file (`.edex` + image folder):**
-- The sequence can be run directly with the `tracker` tool — no ROS step needed.
+- Run the sequence with `cuvslam_tracker`, or use `cuvslam_api_launcher` for C++ debugging.
 - If the EDEX came from an `isaac_ros_visual_slam` debug dump, patch it first — see `commands/debug-dump-patch.md`.
-- See `commands/tracker.md` for the full flag reference, all tracking modes, and worked examples.
-- Inspect the output trajectory with `result_visualizer`.
+- See `commands/tracker.md` for current Python and C++ commands.
+- Inspect the plots written to the selected output directory.
 
 **Converting a rosbag to EDEX for offline tracker use:**
 - Use `commands/bag2edex.md` — install, config, and usage for the `cuvslam-tools` package (`tools/python_tools/`).
@@ -217,18 +218,21 @@ Read `../../TROUBLESHOOTING.md` for the full 14-step diagnostic flow. The summar
 
 Follow the `#### Dataset path into the diagnostic workflow` section above for the correct path:
 
-- **Rosbag**: First run at slow rate (0.05) in `isaac_ros_visual_slam` to confirm the issue appears. If jumps are gone at slow rate, the root cause is a real-time performance problem — investigate CPU/GPU load and stop here. If jumps persist, capture a debug dump, patch the EDEX, and continue with the tracker below.
-- **EDEX**: Run the tracker directly.
+- **Rosbag**: First run at slow rate (0.05) in `isaac_ros_visual_slam` to confirm the issue appears. If jumps are gone at slow rate, the root cause is a real-time performance problem — investigate CPU/GPU load and stop here. If jumps persist, capture a debug dump, patch the EDEX, and continue with an offline tool below.
+- **EDEX**: Run `cuvslam_tracker` directly.
 
-Once you have a runnable EDEX, run the tracker in the **same mode the user was using** (match their `tracking_mode`, SLAM on/off, etc.):
+Once you have a runnable EDEX, run the Python tracker in the **same mode the user was using**:
 
 ```bash
-CUVSLAM_DATASETS=<parent>/ CUVSLAM_OUTPUT=/tmp/out/ \
-  ./build/bin/tracker -edex <sequence> -edex_filename stereo.edex \
-  -output_edex result.edex -mode <user_mode>
+cuvslam_tracker \
+  --dataset <sequence> \
+  --config_path <sequence>/stereo.edex \
+  --output_dir /tmp/out \
+  --odometry_mode <user_mode>
 ```
 
-Confirm the issue appears in the output (jumps, drift, lost tracking). Use the jump-analysis snippet in `commands/tracker.md` to count and locate jumps in the result EDEX.
+Confirm the issue appears in the output (jumps, drift, lost tracking). Use the exported KITTI pose file and plots to
+locate jumps.
 
 Do not proceed to Steps 3–14 until the issue is confirmed reproducible here.
 

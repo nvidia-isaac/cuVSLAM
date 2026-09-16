@@ -56,7 +56,7 @@ See [Requirements](README.md#performance).
 - [Step 13: Adjust SLAM map parameters](#step-13-adjust-slam-map-parameters)
 - [Step 14: Run in async mode](#step-14-run-in-async-mode)
 - [EDEX file](#edex-file)
-- [Tracker](#tracker)
+- [Tracking tools](#tracking-tools)
 - [Result visualizer](#result-visualizer)
 - [Debug visualization](#debug-visualization)
 - [Shuttle-mode debug approach](#shuttle-mode-debug-approach)
@@ -67,10 +67,9 @@ cuVSLAM can be used either through the native C++ API or via one of the availabl
 
 1. [Isaac ROS cuVSLAM](README.md#ros2-support) — a ROS 2 wrapper around the C++ API
 2. [PyCuVSLAM](README.md#install-pycuvslam) — a Python wrapper around the C++ API.
-3. [Command-line tools](tools) built on the C++ API, for example:
-    1. [tracker](#tracker) — a standalone command-line application for image-sequence tracking with real-time
-       benchmarking and debugging capabilities.
-    2. [cuvslam_api_launcher](tools/cuvslam_api_launcher/README.md) — a test utility for tracking, saving maps, and
+3. Command-line tools, for example:
+    1. `cuvslam_tracker` and `cuvslam_reporter` from [tools/python_tools](tools/python_tools/README.md).
+    2. [cuvslam_api_launcher](tools/cuvslam_api_launcher/README.md) — a C++ utility for tracking, saving maps, and
        performing localization using the cuVSLAM API.
     3. [undistort](tools/undistort/README.md) — a tool for removing lens distortion from images using camera intrinsics
        from an [EDEX](#edex-file) file.
@@ -103,8 +102,8 @@ debug_dump_path
 
 See [Isaac ROS cuVSLAM parameters][].
 
-**Important:** After dumping [EDEX](#edex-file) and TGA images, use the [tracker](#tracker) and
-[result_visualizer](#result-visualizer) tools.
+**Important:** After dumping [EDEX](#edex-file) and images, use `cuvslam_api_launcher` for C++ debugging or
+`cuvslam_reporter` for evaluated runs and plots.
 
 ## Step 1: Verify you have a working setup
 
@@ -558,10 +557,9 @@ tracking relies only on the IMU. Translation is also locked, so only rotation is
 
 ### Debug IMU with blackout_oscillator
 
-A final step to verify IMU operation is to simulate a visual blackout. The [tracker](#tracker) applications provide
-`blackout_oscillator` and `blackout_oscillator_duration` options for this purpose. Using the
-[result-visualizer](#result-visualizer) tool, verify that switching from visual tracking to IMU-only tracking, and then
-back to visual, occurs smoothly.
+A final step to verify IMU operation is to simulate a visual blackout. `cuvslam_tracker` and the
+`cuvslam_reporter --tracker_backend api_launcher` path provide `--blackout_period` and `--blackout_duration`.
+Use the generated report plot to verify that switching from visual tracking to IMU-only tracking and back is smooth.
 
 Debug IMU with the signal-loss oscillator.
 ![IMU debug](doc/images/troubleshooting_imu_oscillator.gif)
@@ -671,9 +669,8 @@ cuvslam::Slam::Config::delay_warning_queue_size
 ## EDEX file
 
 An EDEX file is the standard JSON “scene file” for cuVSLAM. It describes the camera rig, image (and optional depth)
-sequences, and optional IMU data, and can also hold tracking output (poses and observations/landmarks).
-[tracker](tools/tracker/README.md) reads an input EDEX with scene description only and outputs an EDEX with poses and
-observations/landmarks.
+sequences, and optional IMU data. Run it with `cuvslam_tracker` for the Python workflow or
+[`cuvslam_api_launcher`](tools/cuvslam_api_launcher/README.md) for C++ API debugging.
 
 Example of KITTI 01 input EDEX:
 
@@ -719,25 +716,19 @@ Example of KITTI 01 input EDEX:
 ]
 ```
 
-Use [result_visualizer](#result-visualizer) to visualize and compare trajectories from multiple [tracker](#tracker)
-runs.
+Use `cuvslam_reporter` to generate trajectory plots and compare evaluated runs.
 
-## Tracker
+## Tracking tools
 
-The tracker is a standalone command-line application for image-sequence tracking with real-time benchmarking and
-debugging capabilities. See [tracker](tools/tracker/README.md). Set `--out_edex` to dump the result trajectory. Use
-[result visualizer](#result-visualizer) to inspect and compare results.
-
-It’s also the easiest way to dig deeper using the C++ debugger.
-
-Also, there is a pure Python version of this tool:
-[track_kitti.py](https://github.com/nvidia-isaac/cuVSLAM/blob/main/examples/kitti/track_kitti.py) script (adjust topics
-and calibration as needed) to run PyCuVSLAM and rerun visualization.
+Use `cuvslam_tracker` for rich single-sequence Python tracking and `cuvslam_reporter` for ground-truth metrics,
+plots, and dataset reports. For a clean C++ debugging process, use
+[`cuvslam_api_launcher`](tools/cuvslam_api_launcher/README.md). The reporter can select it with
+`--tracker_backend api_launcher`, retaining report metrics while allowing development-only flags after `--`.
 
 ## Result visualizer
 
-The result_visualizer script is a Python tool that visualizes output [EDEX](#edex-file) files (tracking results) from
-the [tracker](#tracker).
+The result_visualizer script is retained for old EDEX files that already contain tracking results. New runs should
+use the plots emitted by `cuvslam_tracker` or `cuvslam_reporter`.
 
 **Location:** `tools/edex/result_visualizer/result_visualizer.py`
 
@@ -762,7 +753,7 @@ Enable visualization support as described in [Step 2](#step-2-create-a-reproduci
 
 ![ReRun](doc/images/troubleshooting_rerun.png)
 
-- **C++**: Add the `-DUSE_RERUN=True` CMake flag and rebuild the [tracker](#tracker).
+- **C++ launcher**: use reporter-generated static plots; live Rerun remains a Python-only workflow.
 - **Python API**: See [Examples](examples/kitti/track_kitti.py) for how to run [Rerun](https://rerun.io/) visualization.
 - **Isaac ROS**: Use [Foxglove](https://foxglove.dev/product/visualization) or [RViz](https://wiki.ros.org/rviz) to
   inspect images, topics, the TF tree, and any cuVSLAM output.
@@ -771,8 +762,8 @@ Enable visualization support as described in [Step 2](#step-2-create-a-reproduci
 
 ## Shuttle-mode debug approach
 
-Run the tracker forward and then backward over the same sequence several times. If the trajectory is consistent in both
-directions, odometry is likely correct. Large discrepancies indicate drift or calibration issues.
+Run `cuvslam_reporter` with shuttle settings in its sequence config. Both reporter backends score the final backward
+pass against the first forward pass. Large discrepancies indicate drift or calibration issues.
 
 <!-- Long links -->
 

@@ -156,14 +156,11 @@ def patch_debug_dump_edex(dump_dir: Path, out_dir: Path) -> None:
         print("  -> copied IMU.jsonl")
 
     print(f"\nPatched EDEX ready at: {out_dir}")
-    print("\nRun tracker with:")
-    print(f"  CUVSLAM_DATASETS={out_dir.parent}/ \\")
-    print("  CUVSLAM_OUTPUT=/tmp/cuvslam_output/ \\")
-    print("  ./build/bin/tracker \\")
-    print(f"  -edex {out_dir.name} \\")
-    print("  -edex_filename stereo.edex \\")
-    print(f"  -output_edex {out_dir}/result.edex \\")
-    print("  -mode multicamera")
+    print("\nRun the C++ API launcher with:")
+    print("  ./build/bin/cuvslam_api_launcher \\")
+    print(f"  --edex={out_dir}/stereo.edex \\")
+    print(f"  --print_odom_poses={out_dir}/odom.txt \\")
+    print("  --cfg_odom_mode=0")
 
 
 if __name__ == "__main__":
