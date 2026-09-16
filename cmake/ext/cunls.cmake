@@ -32,8 +32,14 @@ endif()
 
 set(CUNLS_VERSION "Release_07_13_2026")
 
-# Keep cuNLS's own tests and Python bindings out of this build.
-set(BUILD_TESTING OFF)
+# Control cuNLS's generic BUILD_TESTING option without changing it for the rest of cuVSLAM.
+if(DEFINED BUILD_TESTING)
+    set(_CUVSLAM_BUILD_TESTING_WAS_DEFINED TRUE)
+    set(_CUVSLAM_SAVED_BUILD_TESTING "${BUILD_TESTING}")
+else()
+    set(_CUVSLAM_BUILD_TESTING_WAS_DEFINED FALSE)
+endif()
+set(BUILD_TESTING "${CUVSLAM_BUILD_CUNLS_TESTS}")
 set(BUILD_PYTHON_BINDINGS OFF)
 
 # cuNLS declares cmake_minimum_required(VERSION 3.24), but the Ubuntu 22.04 base images used for
@@ -52,6 +58,35 @@ FetchContent_Declare(
     PATCH_COMMAND sed -i "s/cmake_minimum_required(VERSION 3.24)/cmake_minimum_required(VERSION 3.22)/" CMakeLists.txt
 )
 FetchContent_MakeAvailable(cunls)
+
+if(_CUVSLAM_BUILD_TESTING_WAS_DEFINED)
+    set(BUILD_TESTING "${_CUVSLAM_SAVED_BUILD_TESTING}")
+else()
+    unset(BUILD_TESTING)
+endif()
+unset(_CUVSLAM_BUILD_TESTING_WAS_DEFINED)
+unset(_CUVSLAM_SAVED_BUILD_TESTING)
+
+if(CUVSLAM_BUILD_CUNLS_TESTS)
+    if(NOT TARGET nls_tests)
+        message(FATAL_ERROR "cuNLS tests were requested, but the 'nls_tests' target was not created")
+    endif()
+
+    # The x86 cuDSS static archive bundled into libcunls.a contains a main.o. Ensure GoogleTest's
+    # main is resolved first; otherwise the linker silently selects cuDSS's main and discovers zero tests.
+    get_target_property(_CUVSLAM_CUNLS_TEST_LIBRARIES nls_tests LINK_LIBRARIES)
+    list(REMOVE_ITEM _CUVSLAM_CUNLS_TEST_LIBRARIES GTest::gtest_main)
+    list(PREPEND _CUVSLAM_CUNLS_TEST_LIBRARIES GTest::gtest_main)
+    set_property(TARGET nls_tests PROPERTY LINK_LIBRARIES "${_CUVSLAM_CUNLS_TEST_LIBRARIES}")
+    unset(_CUVSLAM_CUNLS_TEST_LIBRARIES)
+
+    # cuNLS derives its test-data path from CMAKE_SOURCE_DIR, which points at cuVSLAM when embedded.
+    get_target_property(_CUVSLAM_CUNLS_TEST_DEFINITIONS nls_tests COMPILE_DEFINITIONS)
+    list(FILTER _CUVSLAM_CUNLS_TEST_DEFINITIONS EXCLUDE REGEX "^CUNLS_TEST_DATA_DIR=")
+    list(APPEND _CUVSLAM_CUNLS_TEST_DEFINITIONS "CUNLS_TEST_DATA_DIR=\"${cunls_SOURCE_DIR}/tests/data\"")
+    set_property(TARGET nls_tests PROPERTY COMPILE_DEFINITIONS "${_CUVSLAM_CUNLS_TEST_DEFINITIONS}")
+    unset(_CUVSLAM_CUNLS_TEST_DEFINITIONS)
+endif()
 
 if(NOT TARGET cunls)
     message(FATAL_ERROR "cuNLS source build did not define the 'cunls' target")
