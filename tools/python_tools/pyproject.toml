@@ -5,17 +5,18 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "cuvslam-tools"
 version = "0.1.0"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "av",
+    "fonttools>=4.60.2",
     "h5py",
     "jinja2",
     "matplotlib",
-    "numpy==2.2.3",
+    "numpy==2.2.6",
     "scipy==1.15.3",
     "opencv-python==4.11.0.86",
     "pandas",
-    "pillow==12.2.0",
+    "pillow==12.3.0",
     "pyarrow",
     "pydantic",
     "pytransform3d==3.8.0",
@@ -26,7 +27,7 @@ dependencies = [
 
 [project.optional-dependencies]
 pdf = [
-    "weasyprint>=60.0",
+    "weasyprint>=69.0",
 ]
 
 [tool.setuptools.packages.find]
