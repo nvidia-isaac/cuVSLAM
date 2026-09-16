@@ -5,4 +5,4 @@ ruamel.yaml.clib==0.2.12        # required for rosbags
 typing_extensions==4.14.0       # required for rosbags
 zstandard==0.23.0               # required for rosbags
 rosbags==0.10.10
-pillow==11.2.1
+pillow==12.3.0

@@ -1,5 +1,5 @@
-numpy==2.2.4
-pillow==11.1.0
+numpy==2.2.6
+pillow==12.3.0
 pyyaml==6.0.2
 rerun-sdk==0.22.1
-scipy==1.14.1
+scipy==1.15.3
