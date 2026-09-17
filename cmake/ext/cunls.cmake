@@ -30,7 +30,7 @@ if(CUDAToolkit_VERSION VERSION_LESS "12.6")
                         "Either install CUDA 12.6+ or set -DUSE_CUNLS=OFF.")
 endif()
 
-set(CUNLS_VERSION "Release_07_13_2026")
+set(CUNLS_VERSION "a4f7d645788b3d20a5850f2328d0caa32ef8cd7e")
 
 # Control cuNLS's generic BUILD_TESTING option without changing it for the rest of cuVSLAM.
 if(DEFINED BUILD_TESTING)
@@ -53,8 +53,8 @@ set(BUILD_PYTHON_BINDINGS OFF)
 # On cmake >= 3.24 its absence only triggers a harmless one-time CMP0135 dev warning.
 FetchContent_Declare(
     cunls
-    URL https://github.com/nvidia-isaac/cuNLS/archive/refs/tags/${CUNLS_VERSION}.tar.gz
-    URL_HASH SHA256=23b2917ae3903e6a688edb1652e40202d314527cd7fa9db68c762f0429375f77
+    GIT_REPOSITORY https://github.com/nvidia-isaac/cuNLS.git
+    GIT_TAG ${CUNLS_VERSION}
     PATCH_COMMAND sed -i "s/cmake_minimum_required(VERSION 3.24)/cmake_minimum_required(VERSION 3.22)/" CMakeLists.txt
 )
 FetchContent_MakeAvailable(cunls)
