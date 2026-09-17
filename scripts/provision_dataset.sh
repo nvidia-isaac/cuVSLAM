@@ -104,18 +104,33 @@ fi
 
 echo "=== Creating tarball from $upload_src ==="
 echo "Archiving ${file_count} files"
-sync
-tar_rc=0
-tar -C "$upload_src" -cf "$tarball" \
-  --warning=no-file-changed \
-  --checkpoint=1000 \
-  --checkpoint-action=echo='tar checkpoint %d' \
-  --totals \
-  . || tar_rc=$?
-if [ "$tar_rc" -ne 0 ]; then
-  echo "Error: tar failed with exit code $tar_rc" >&2
-  exit 1
-fi
+# Exit 1 means a file changed while being archived, so the tarball is not a
+# faithful copy of the tree. Conversion has finished by now and nothing else
+# writes here, so a single race does not repeat: archive again rather than
+# discard hours of conversion. Anything above 1 is a hard error that a retry
+# cannot fix.
+#
+# The file-changed warning stays on. It was suppressed while two runs shared
+# one $RUNNER_TEMP/provision-work, which per-run directories then fixed; since
+# then it only hid which file tar was complaining about.
+for attempt in 1 2; do
+  sync
+  tar_rc=0
+  tar -C "$upload_src" -cf "$tarball" \
+    --checkpoint=1000 \
+    --checkpoint-action=echo='tar checkpoint %d' \
+    --totals \
+    . || tar_rc=$?
+  if [ "$tar_rc" -eq 0 ]; then
+    break
+  fi
+  if [ "$tar_rc" -ne 1 ] || [ "$attempt" -eq 2 ]; then
+    echo "Error: tar failed with exit code $tar_rc on attempt $attempt" >&2
+    exit 1
+  fi
+  echo "Warning: tar reported a file changed while archiving; archiving again" >&2
+  rm -f "$tarball"
+done
 ls -lh "$tarball"
 
 if [ "$DRY_RUN" = "true" ]; then
