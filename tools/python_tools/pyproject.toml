@@ -27,7 +27,7 @@ dependencies = [
 
 [project.optional-dependencies]
 pdf = [
-    "weasyprint>=69.0",
+    "weasyprint>=70.0",
 ]
 
 [tool.setuptools.packages.find]
