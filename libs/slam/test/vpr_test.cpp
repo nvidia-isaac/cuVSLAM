@@ -623,6 +623,7 @@ TEST(VprTypeNames, EveryBackendHasAPrintableName) {
   EXPECT_STREQ(ToString(VprType::kSimple), "Simple");
   EXPECT_STREQ(ToString(VprType::kDBoW2), "DBoW2");
   EXPECT_STREQ(ToString(VprType::kAnyLoc), "AnyLoc");
+  EXPECT_STREQ(ToString(VprType::kBow), "Bow");
   // A value outside the enum reaches the fallback instead of running off the end of the switch.
   EXPECT_STREQ(ToString(static_cast<VprType>(200)), "Unknown");
 }

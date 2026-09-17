@@ -110,7 +110,7 @@ class TestVprBindings(unittest.TestCase):
     """The place recognition API surface, without a tracker."""
 
     def test_vpr_mode_enum(self):
-        self.assertEqual(set(vslam.Slam.VprMode.__members__), {'Off', 'Simple', 'DBoW2', 'AnyLoc'})
+        self.assertEqual(set(vslam.Slam.VprMode.__members__), {'Off', 'Simple', 'DBoW2', 'AnyLoc', 'Bow'})
         self.assertEqual(vslam.Slam.Config().vpr_mode, vslam.Slam.VprMode.Off)
 
     def test_config_vpr_keyword_arguments(self):
