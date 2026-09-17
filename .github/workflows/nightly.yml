@@ -59,19 +59,18 @@ jobs:
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 ref: context.sha,
-                check_name: 'Build status & summary',
+                check_name: 'Nightly full build status & summary',
                 filter: 'all',
                 per_page: 100,
               });
               const currentRunPath = `/actions/runs/${context.runId}/`;
-              const timestamp = check => Date.parse(check.started_at || check.completed_at || '') || 0;
+              const timestamp = check => Date.parse(check.completed_at || '') || 0;
               const latest = checkRuns
-                .filter(check => check.app && check.app.slug === 'github-actions'
+                .filter(check => check.status === 'completed'
+                  && check.app && check.app.slug === 'github-actions'
                   && !(check.details_url || '').includes(currentRunPath))
                 .sort((left, right) => timestamp(right) - timestamp(left))[0];
-              const result = latest && latest.status === 'completed'
-                ? latest.conclusion || 'unknown'
-                : latest && latest.status || 'missing';
+              const result = latest ? latest.conclusion || 'unknown' : 'missing';
               const url = latest ? (latest.details_url || '').replace(/\/job\/\d+$/, '') : '';
 
               core.setOutput('result', result);
@@ -466,7 +465,7 @@ jobs:
     name: >-
       ${{
         needs.check-changes.result != 'success' && 'Nightly preflight failed' ||
-        needs.check-changes.outputs.should_build == 'true' && 'Build status & summary' ||
+        needs.check-changes.outputs.should_build == 'true' && 'Nightly full build status & summary' ||
         'Nightly skipped — revision already passed'
       }}
     runs-on: ubuntu-latest
