@@ -1,22 +1,26 @@
 ---
 name: cuvslam-trajectory
-description: >
-  Replay a recorded cuVSLAM dataset offline and export a validated pose trajectory file.
-  Use when asked to: run/replay a EuRoC/ASL, KITTI odometry, EDEX, or ROS bag dataset
-  through cuVSLAM and get the poses out; generate a trajectory.txt; produce a TUM or KITTI
-  trajectory/pose file; export the camera path or odometry output; or create a trajectory
-  to compare against ground truth. Triggers on: "run KITTI through cuvslam and give me the
-  poses", "generate trajectory.txt from this bag", "export a TUM trajectory", "replay EuRoC
-  dataset", "get the camera path/poses", "convert a ROS bag to a trajectory". The deliverable
-  is a trajectory FILE from a recorded dataset — for live-camera tracking or first-time
-  build/setup use cuvslam-onboard; for diagnosing drift or accuracy regressions in an existing
-  run use cuvslam-troubleshoot.
+description: >-
+  Replay recorded EuRoC/ASL, KITTI odometry, EDEX, or ROS bag data through NVIDIA
+  cuVSLAM to export trajectory.txt, TUM poses, or KITTI poses. Also inspect replay
+  inputs and validate existing TUM trajectory files. Use for a recorded-data pose
+  deliverable; use cuvslam-onboard for first-time setup or live cameras, and
+  cuvslam-troubleshoot for tracking failures or drift diagnosis.
+license: NVIDIA Community License
+allowed-tools: Read Glob Grep Bash Edit Write WebFetch
+metadata:
+  author: Zheng Wang <zhengwang@nvidia.com>
 ---
 
 # cuVSLAM trajectory replay
 
 Use the bundled scripts instead of writing a one-off tracker. They handle dataset detection, the extra-camera-frame
 case, released/source API differences, atomic output, and validation.
+
+`<skill-dir>` is this installed skill directory; `<cuvslam-repo>` is a separate cuVSLAM checkout
+containing `VERSION` and `tools/python_tools/`. Do not assume the skill is installed inside that
+checkout. Inspection and TUM validation use Python's standard library and need no CUDA runtime.
+For validation-only requests, run step 4 directly; for inspection-only requests, stop after step 2.
 
 ## Defaults
 

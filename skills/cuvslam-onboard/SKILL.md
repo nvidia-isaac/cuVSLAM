@@ -1,14 +1,15 @@
 ---
 name: cuvslam-onboard
-description: >
-  Build, install, and run NVIDIA cuVSLAM and PyCuVSLAM from source or wheels.
-  Covers environment setup, dataset preparation, and running examples for all
-  tracking modes (stereo, mono, mono-depth, stereo-inertial, multi-camera, and
-  Multisensor) and SLAM (mapping, localization, loop closure). Use when asked to: build cuVSLAM,
-  install PyCuVSLAM, set up cuVSLAM environment, run cuVSLAM examples, prepare
-  KITTI/EuRoC/TUM datasets, run visual odometry, set up live camera tracking
-  (RealSense/ZED/OAK-D/Orbbec), run cuVSLAM in Docker, or use cuVSLAM C++ tools.
-  To replay a recorded dataset and export a pose/trajectory file, use cuvslam-trajectory instead.
+description: >-
+  Set up NVIDIA cuVSLAM or PyCuVSLAM from wheels, source, or Docker; choose a tracking
+  mode; run dataset examples, live cameras, or SLAM mapping and localization.
+  Use for first-time installation and example setup. Exporting a recorded dataset
+  to a trajectory file belongs to cuvslam-trajectory; diagnosing an existing build
+  or tracking failure belongs to cuvslam-troubleshoot.
+license: NVIDIA Community License
+allowed-tools: Read Glob Grep Bash Edit Write WebFetch
+metadata:
+  author: Zheng Wang <zhengwang@nvidia.com>
 ---
 
 # cuVSLAM Onboarding
@@ -28,15 +29,16 @@ For live camera setup (RealSense, ZED, OAK-D, Orbbec), read `references/live-cam
 
 ---
 
-## Agent Interaction Guidelines
+## Paths and prerequisites
 
-Before executing any setup step, ask the user for missing paths. Do not assume defaults.
+This skill can be installed separately from the product. Resolve the cuVSLAM checkout before using
+`examples/`, `python/`, `docker/`, or build commands; those paths are relative to that checkout.
+Read its `README.md` and the relevant example README for version-specific requirements. Bundled
+`references/` paths are relative to this skill directory.
 
-- **Cloning the repo:** Always ask — "Where would you like to clone the cuVSLAM repository? (e.g. `~/cuVSLAM`)"
-- **Dataset preparation:** Always ask — "Where would you like to save the [KITTI/EuRoC/TUM/etc.] dataset? (e.g. `~/datasets/kitti`)"
-- **Virtual environment:** If not already set up, ask — "Where would you like to create the Python virtual environment? (e.g. `~/cuVSLAM/.venv`)"
-
-Once the user provides a path, use it consistently throughout all subsequent commands in that session. Do not re-ask for the same path.
+Reuse paths and authorization already supplied by the user, and prefer an existing compatible environment.
+Ask for a clone, dataset, or virtual-environment destination only when it is needed and still unresolved.
+For a request for instructions only, explain the commands without starting downloads or builds.
 
 ---
 
@@ -71,7 +73,7 @@ pip install -r examples/requirements.txt   # rerun-sdk, numpy, etc.
 
 ### Clone
 
-> **Ask the user:** "Where would you like to clone the cuVSLAM repository?" before running these commands. Use their answer as `<install-dir>`.
+Use the resolved clone destination as `<install-dir>`; reuse an existing checkout when available.
 
 ```bash
 git clone https://github.com/nvidia-isaac/cuVSLAM.git <install-dir>
@@ -147,8 +149,7 @@ pip install -r requirements.txt
 
 ### KITTI (Stereo Odometry) — quickest demo
 
-> **Ask the user:** "Where would you like to save the KITTI dataset? (e.g. `~/datasets/kitti`)" before downloading.
-> Then create a symlink so the example script can find it: `ln -s <dataset-dir> examples/kitti/dataset`
+Resolve `<dataset-dir>` before downloading; use an existing dataset when available.
 
 ```bash
 cd examples/kitti
@@ -166,8 +167,7 @@ python3 track_kitti_slam.py     # maps, saves trajectory + map/data.mdb
 
 ### EuRoC (Stereo-Inertial)
 
-> **Ask the user:** "Where would you like to save the EuRoC dataset? (e.g. `~/datasets/euroc`)" before downloading.
-> Then create a symlink: `ln -s <dataset-dir> examples/euroc/dataset`
+Resolve `<dataset-dir>` before downloading; use an existing dataset when available.
 
 ```bash
 cd examples/euroc
@@ -182,13 +182,13 @@ python3 track_euroc.py
 
 ### TUM RGB-D (Mono-Depth)
 
-> **Ask the user:** "Where would you like to save the TUM RGB-D dataset? (e.g. `~/datasets/tum`)" before downloading.
+Resolve `<dataset-dir>` before downloading; use an existing dataset when available.
 
 ```bash
 cd examples/tum
 mkdir -p <dataset-dir>
 wget https://cvg.cit.tum.de/rgbd/dataset/freiburg3/rgbd_dataset_freiburg3_long_office_household.tgz -O <dataset-dir>/fr3.tgz
-tar -xzf <dataset-dir>/fr3.tgz -C <dataset-dir> && rm <dataset-dir>/fr3.tgz
+tar -xzf <dataset-dir>/fr3.tgz -C <dataset-dir>
 ln -s <dataset-dir> dataset
 cp freiburg3_rig.yaml dataset/rgbd_dataset_freiburg3_long_office_household/
 python3 track_tum.py
