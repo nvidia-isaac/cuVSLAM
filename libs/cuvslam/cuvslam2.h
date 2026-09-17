@@ -256,7 +256,8 @@ struct ImageData {
   int32_t pitch;       ///< bytes per image row including padding for GPU memory images, ignored for CPU images
   Encoding encoding;   ///< grayscale and RGB are supported now
   DataType data_type;  ///< image data type
-  bool is_gpu_mem;     ///< is pixels pointer points to GPU or CPU memory buffer
+  bool is_gpu_mem;     ///< is pixels pointer points to GPU or CPU memory buffer. GPU buffers require
+                       ///< Odometry::Config::use_gpu (or Slam::Config::use_gpu) to be enabled
 };
 
 /**

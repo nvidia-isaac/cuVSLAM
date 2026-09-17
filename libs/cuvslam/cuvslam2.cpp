@@ -260,7 +260,15 @@ void CheckImuCalibration(const ImuCalibration& imu_calibration) {
   THROW_INVALID_ARG_IF(std::isnan(imu_calibration.frequency), "IMU Calibration: IMU data frequency is not valid");
 }
 
-void CheckImages(const Odometry::ImageSet& images, int64_t frame_sync_threshold_ns,
+// Device memory is only readable when tracking runs on the GPU. The CPU pipeline dereferences
+// `pixels` itself, so a device address handed to it would be read as if it were host memory.
+void CheckImageMemory(const ImageData& image, bool use_gpu, const std::string& what) {
+  THROW_INVALID_ARG_IF(
+      image.is_gpu_mem && !use_gpu,
+      "is_gpu_mem is set for " + what + ", but tracking runs on the CPU. Pass host memory or set use_gpu to true.");
+}
+
+void CheckImages(const Odometry::ImageSet& images, bool use_gpu, int64_t frame_sync_threshold_ns,
                  const std::vector<std::unique_ptr<camera::ICameraModel>>& cameras_models) {
   THROW_INVALID_ARG_IF(images.empty(), "No images provided");
   for (size_t i = 0; i < images.size(); ++i) {
@@ -272,6 +280,7 @@ void CheckImages(const Odometry::ImageSet& images, int64_t frame_sync_threshold_
     THROW_INVALID_ARG_IF(images[i].is_gpu_mem,
                          "GPU memory requires a build with CUDA support (USE_CUDA=ON) for image " + std::to_string(i));
 #endif
+    CheckImageMemory(images[i], use_gpu, "image " + std::to_string(i));
     THROW_INVALID_ARG_IF(images[i].data_type != Image::DataType::UINT8,
                          "Image data type must be UINT8 for image " + std::to_string(i));
     THROW_INVALID_ARG_IF(images[i].camera_index >= cameras_models.size(),
@@ -292,6 +301,13 @@ void CheckImages(const Odometry::ImageSet& images, int64_t frame_sync_threshold_
       THROW_INVALID_ARG_IF(images[j].camera_index == images[i].camera_index,
                            "The same camera index for images " + std::to_string(j) + ", " + std::to_string(i));
     }
+  }
+}
+
+// Masks travel with the images they belong to, so they must live in the same memory space.
+void CheckMasks(const Odometry::ImageSet& masks, bool use_gpu) {
+  for (size_t i = 0; i < masks.size(); ++i) {
+    CheckImageMemory(masks[i], use_gpu, "mask " + std::to_string(i));
   }
 }
 
@@ -319,7 +335,7 @@ void FillImageSourceAndShape(const Image& image, ImageSource& source, ImageShape
 }
 
 // Validates depth images for the RGBD path: exactly one depth image is required.
-void CheckDepths(const Odometry::ImageSet& depths,
+void CheckDepths(const Odometry::ImageSet& depths, bool use_gpu,
                  const std::vector<std::unique_ptr<camera::ICameraModel>>& cameras_models) {
   THROW_INVALID_ARG_IF(depths.empty(), "Depth images are required for RGBD odometry");
   THROW_INVALID_ARG_IF(depths.size() > 1, "Only one depth image is supported by RGBD odometry");
@@ -333,6 +349,7 @@ void CheckDepths(const Odometry::ImageSet& depths,
         depths[i].is_gpu_mem,
         "GPU memory requires a build with CUDA support (USE_CUDA=ON) for depth image " + std::to_string(i));
 #endif
+    CheckImageMemory(depths[i], use_gpu, "depth image " + std::to_string(i));
     THROW_INVALID_ARG_IF(
         depths[i].data_type != Image::DataType::UINT16 && depths[i].data_type != Image::DataType::FLOAT32,
         "Depth data type must be UINT16 or FLOAT32");
@@ -349,7 +366,8 @@ void CheckDepths(const Odometry::ImageSet& depths,
 // Validates depth images for the Multisensor path: zero or more depth images, each tied to a
 // distinct camera id from `expected_depth_cam_ids` (the configured depth-camera set). Permitting
 // fewer than configured covers frame drops on individual depth streams.
-void CheckMultisensorDepths(const Odometry::ImageSet& depths, const std::vector<int32_t>& expected_depth_cam_ids,
+void CheckMultisensorDepths(const Odometry::ImageSet& depths, bool use_gpu,
+                            const std::vector<int32_t>& expected_depth_cam_ids,
                             const std::vector<std::unique_ptr<camera::ICameraModel>>& cameras_models) {
   for (size_t i = 0; i < depths.size(); ++i) {
     THROW_INVALID_ARG_IF(depths[i].pixels == nullptr,
@@ -362,6 +380,7 @@ void CheckMultisensorDepths(const Odometry::ImageSet& depths, const std::vector<
         depths[i].is_gpu_mem,
         "GPU memory requires a build with CUDA support (USE_CUDA=ON) for multisensor depth image " + std::to_string(i));
 #endif
+    CheckImageMemory(depths[i], use_gpu, "multisensor depth image " + std::to_string(i));
     THROW_INVALID_ARG_IF(
         depths[i].data_type != Image::DataType::UINT16 && depths[i].data_type != Image::DataType::FLOAT32,
         "Multisensor depth data type must be UINT16 or FLOAT32");
@@ -433,6 +452,7 @@ public:
   int64_t frame_sync_threshold_ns{1'000'000};  // 1 ms
   // settings
   odom::Settings svo_settings;  // construction-time settings passed to odometry components
+  bool use_gpu;
   bool imu_fusion_enabled;
   RGBDSettings rgbd_settings;
   MultisensorSettings multisensor_settings;
@@ -480,11 +500,7 @@ Odometry::~Odometry() = default;
 
 Odometry::Odometry(const Rig& rig, const Config& cfg) {
   std::string message;
-  TracePrintIf(!CheckCudaCompatibility(message), "[WARNING] %s\n", message.c_str());
-#ifdef ENFORCE_GPU
-  THROW_INVALID_ARG_IF(!cfg.use_gpu, "cfg.use_gpu must be enabled");
-#endif
-
+  TracePrintIf(cfg.use_gpu && !CheckCudaCompatibility(message), "[WARNING] %s\n", message.c_str());
   CheckCameras(rig);
 
   THROW_INVALID_ARG_IF(cfg.odometry_mode == OdometryMode::Inertial && rig.imus.empty(),
@@ -632,6 +648,7 @@ Odometry::Odometry(const Rig& rig, const Config& cfg) {
   tracker->enable_final_landmarks_export = cfg.enable_final_landmarks_export;
 
   tracker->svo_settings = svo_settings;
+  tracker->use_gpu = cfg.use_gpu;
   tracker->imu_fusion_enabled = cfg.odometry_mode == OdometryMode::Inertial || multisensor_with_imu;
   tracker->debug_dump_directory = cfg.debug_dump_directory;
   tracker->max_frame_delta_ns = static_cast<int64_t>(cfg.max_frame_delta_s * 1e9);
@@ -687,11 +704,12 @@ PoseEstimate Odometry::Track(const ImageSet& images, const ImageSet& masks, cons
   per_frame_setting.sba = impl->svo_settings.sba_settings;
   per_frame_setting.sm = impl->svo_settings.sm_settings;
 
-  CheckImages(images, impl->frame_sync_threshold_ns, impl->cameras_models);
+  CheckImages(images, impl->use_gpu, impl->frame_sync_threshold_ns, impl->cameras_models);
+  CheckMasks(masks, impl->use_gpu);
   if (impl->odometry_mode == OdometryMode::RGBD) {
-    CheckDepths(depths, impl->cameras_models);
+    CheckDepths(depths, impl->use_gpu, impl->cameras_models);
   } else if (impl->odometry_mode == OdometryMode::Multisensor) {
-    CheckMultisensorDepths(depths, impl->multisensor_settings.depth_camera_ids, impl->cameras_models);
+    CheckMultisensorDepths(depths, impl->use_gpu, impl->multisensor_settings.depth_camera_ids, impl->cameras_models);
   } else {
     THROW_INVALID_ARG_IF(!depths.empty(), "Depth images are only accepted for RGBD or Multisensor odometry");
   }
@@ -1176,6 +1194,9 @@ void Slam::LocalizeInMap(const std::string_view& folder_name, int64_t timestamp_
   localizer_options.angle_step_rads = settings.angular_step_rads;
 
   THROW_INVALID_ARG_IF(images.empty(), "No images provided");
+  for (size_t i = 0; i < images.size(); ++i) {
+    CheckImageMemory(images[i], impl->use_gpu_, "image " + std::to_string(i));
+  }
 
   const Isometry3T isometry_guess_pose = ConvertPoseToIsometry(guess_pose);
 
