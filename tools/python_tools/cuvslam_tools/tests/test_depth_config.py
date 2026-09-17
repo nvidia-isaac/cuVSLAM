@@ -66,6 +66,45 @@ class TestParseDepthDescription(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "'cameras' list is empty"):
             depth_config.parse_depth_description(_edex([]))
 
+    def test_a_malformed_depth_id_is_not_silently_skipped(self):
+        # Skipping it would track a rig with fewer depth cameras than it declares.
+        config = _edex([_camera(), _camera(depth_id="left", depth_scale_factor=5000)])
+
+        with self.assertRaises((ValueError, TypeError)):
+            depth_config.parse_depth_description(config)
+
+    def test_a_malformed_depth_scale_is_not_silently_defaulted(self):
+        # Defaulting it to 1.0 would read depth in raw units.
+        config = _edex([_camera(depth_id=0, depth_scale_factor="5000mm")])
+
+        with self.assertRaises((ValueError, TypeError)):
+            depth_config.parse_depth_description(config)
+
+    def test_mixed_npy_and_image_depth_streams_are_rejected(self):
+        config = _edex([_camera(depth_id=0, depth_scale_factor=5000),
+                        _camera(depth_id=1, depth_scale_factor=5000)],
+                       {"depth_sequence": [["depth0/000000.npy"], ["depth1/000000.png"]]})
+
+        with self.assertRaisesRegex(ValueError, "mixes .npy and image depth streams"):
+            depth_config.parse_depth_description(config)
+
+    def test_every_npy_stream_still_overrides_the_declared_scale(self):
+        config = _edex([_camera(depth_id=0, depth_scale_factor=5000),
+                        _camera(depth_id=1, depth_scale_factor=5000)],
+                       {"depth_sequence": [["depth0/000000.npy"], ["depth1/000000.npy"]]})
+
+        description = depth_config.parse_depth_description(config)
+
+        self.assertEqual(description.scale_factor, depth_config.NPY_DEPTH_SCALE_FACTOR)
+
+    def test_image_depth_streams_keep_the_declared_scale(self):
+        config = _edex([_camera(depth_id=0, depth_scale_factor=5000)],
+                       {"depth_sequence": [["depth/000000.png"]]})
+
+        description = depth_config.parse_depth_description(config)
+
+        self.assertEqual(description.scale_factor, 5000.0)
+
 
 class TestSingleDepthCameraId(unittest.TestCase):
     def test_one_depth_camera_is_accepted(self):

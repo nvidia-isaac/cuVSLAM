@@ -704,8 +704,16 @@ class EdexReader(DatasetReader):
         # Iterate over events sorted by timestamp
         images = [np.array([])] * len(self.rig.cameras)
         masks = [np.array([])] * len(self.rig.cameras)
-        depths = [np.array([])] * len(self.rig.cameras) if self.rgbd_mode else None
+        depths = [np.array([])] * len(self.rig.cameras) if self.depth_mode else None
         timestamps = [0] * len(self.rig.cameras)
+        # Camera ids the active mode expects depth for. RGBD names one; Multisensor
+        # names every depth-providing camera and requires one image per camera.
+        if self.rgbd_settings is not None:
+            depth_camera_ids = {self.rgbd_settings.depth_camera_id}
+        elif self.multisensor_settings is not None:
+            depth_camera_ids = set(self.multisensor_settings.depth_camera_ids)
+        else:
+            depth_camera_ids = set()
         frame_id = self.current_frame
         while self.check_end_of_sequence():
             frame_data = self.frames[self.current_frame]
@@ -771,10 +779,9 @@ class EdexReader(DatasetReader):
 
                 timestamps[cam_id] = self.adjust_timestamp(cam_data['timestamp'])
 
-            # Load depth images if in RGBD mode
-            if self.rgbd_mode and "depth" in frame_data:
-                assert depths is not None  # guaranteed by rgbd_mode init at the top of replay
-                depth_scale_factor = self.rgbd_settings.depth_scale_factor if self.rgbd_settings else 1.0
+            # Load depth images if this mode reads depth
+            if self.depth_mode and "depth" in frame_data:
+                assert depths is not None  # guaranteed by depth_mode init at the top of replay
                 for depth_data in frame_data["depth"]:
                     depth_id = depth_data['id']
                     depth_path = os.path.join(self.edex_dir, depth_data['filename'])
@@ -790,8 +797,8 @@ class EdexReader(DatasetReader):
                         depth = self.load_depth_image(depth_path)
 
                     # Store depth at the camera index corresponding to depth_id
-                    if self.rgbd_settings and depth_id == self.rgbd_settings.depth_camera_id:
-                        depths[self.rgbd_settings.depth_camera_id] = depth
+                    if depth_id in depth_camera_ids:
+                        depths[depth_id] = depth
 
             processor.process_images(frame_id, timestamps, images, masks, depths)
 

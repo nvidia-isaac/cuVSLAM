@@ -75,24 +75,18 @@ def parse_depth_description(config_data) -> DepthDescription:
     if len(cameras) == 0:
         raise ValueError("'cameras' list is empty")
 
+    # A malformed value propagates rather than being skipped or defaulted: dropping
+    # a depth_id would track a rig with fewer depth cameras than it declares, and
+    # defaulting a scale would read depth in raw units.
     camera_ids = []
     scale_by_camera = {}
     for cam in cameras:
         if not isinstance(cam, dict) or 'depth_id' not in cam:
             continue  # Skip invalid or depth-less camera entries
 
-        try:
-            camera_id = int(cam['depth_id'])
-        except (ValueError, TypeError):
-            print(f"Warning: Invalid depth_id value: {cam['depth_id']}")
-            continue
-
+        camera_id = int(cam['depth_id'])
         camera_ids.append(camera_id)
-        try:
-            scale_by_camera[camera_id] = float(cam.get('depth_scale_factor', 1.0))
-        except (ValueError, TypeError):
-            print("Warning: Invalid depth_scale_factor value, using default 1.0")
-            scale_by_camera[camera_id] = 1.0
+        scale_by_camera[camera_id] = float(cam.get('depth_scale_factor', 1.0))
 
     distinct_scales = set(scale_by_camera.values())
     if len(distinct_scales) > 1:
@@ -103,12 +97,22 @@ def parse_depth_description(config_data) -> DepthDescription:
     scale_factor = next(iter(distinct_scales), 1.0)
 
     depth_sequence = config_data[1].get('depth_sequence')
-    if isinstance(depth_sequence, list) and any(
-        isinstance(paths, list) and paths
-        and isinstance(paths[0], str) and paths[0].endswith('.npy')
-        for paths in depth_sequence
-    ):
-        scale_factor = NPY_DEPTH_SCALE_FACTOR
+    if isinstance(depth_sequence, list):
+        is_npy = {
+            paths[0].endswith('.npy')
+            for paths in depth_sequence
+            if isinstance(paths, list) and paths and isinstance(paths[0], str)
+        }
+        # The reader converts .npy meters to millimeters on load but passes image
+        # depth through unchanged, so the two formats need different scales. One
+        # scale covers every depth camera, so a mixed rig cannot be described.
+        if len(is_npy) > 1:
+            raise ValueError(
+                "depth_sequence mixes .npy and image depth streams; cuVSLAM applies a single "
+                "scale to every depth camera, so convert them to one format"
+            )
+        if is_npy == {True}:
+            scale_factor = NPY_DEPTH_SCALE_FACTOR
 
     return DepthDescription(
         camera_ids=tuple(camera_ids),

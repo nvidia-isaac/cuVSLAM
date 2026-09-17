@@ -515,8 +515,10 @@ def track(args: argparse.Namespace,
         )
         args.repeat_type = 'repeat'
 
-    if args.repeat_type == 'shuttle' and args.odometry_mode == vslam.Odometry.OdometryMode.Inertial:
-        raise ValueError("Inertial mode is not supported for shuttle mode")
+    # Every IMU-fusing mode, not just Inertial: the backward pass would replay IMU
+    # samples with decreasing timestamps, which RegisterImuMeasurement rejects.
+    if args.repeat_type == 'shuttle' and args.odometry_mode in _IMU_FUSING_MODES:
+        raise ValueError(f"{args.odometry_mode} is not supported for shuttle mode")
 
     if args.dataset.endswith('.mp4'):
         dataset = VideoReader(args.dataset, stereo_edex=args.config_path,

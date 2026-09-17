@@ -95,9 +95,9 @@ def odometry_mode_to_type(odometry_mode):
     """Convert odometry_mode string to dataset type.
 
     Args:
-        odometry_mode: String like "OdometryMode.Multicamera". Matching is
-            case-insensitive, so command-line values like "multicamera" map the
-            same way.
+        odometry_mode: String like "OdometryMode.Multicamera". The enum qualifier
+            is optional and matching is case-insensitive, so command-line values
+            like "multicamera" map the same way.
 
     Returns:
         str: Dataset type (MCAM, MONO, VIO, RGBD, MSF)
@@ -106,10 +106,12 @@ def odometry_mode_to_type(odometry_mode):
         ValueError: If the mode is unrecognized. Defaulting would file the run
             under another mode's KPI keys and overwrite them.
     """
-    normalized = str(odometry_mode).lower()
-    for mode, dataset_type in ODOMETRY_MODE_TYPES.items():
-        if mode in normalized:
-            return dataset_type
+    # Exact lookup on the unqualified name, not substring containment: a value
+    # such as "notmultisensor" has to stay unmapped so the caller skips the run
+    # instead of recording it as MSF.
+    normalized = str(odometry_mode).rsplit('.', 1)[-1].lower()
+    if normalized in ODOMETRY_MODE_TYPES:
+        return ODOMETRY_MODE_TYPES[normalized]
     raise ValueError(
         f"unknown odometry_mode {odometry_mode!r}; expected one of {', '.join(ODOMETRY_MODE_TYPES)}"
     )
