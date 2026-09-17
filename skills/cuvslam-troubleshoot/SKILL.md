@@ -1,13 +1,15 @@
 ---
 name: cuvslam-troubleshoot
-description: >
-  Troubleshoot NVIDIA cuVSLAM (CUDA Visual SLAM) pose accuracy, tracking, build, and
-  integration issues. Use when asked to debug cuVSLAM tracking failures, pose drift,
-  lost tracking, calibration problems, image quality issues, IMU integration, multi-camera
-  setups, SLAM loop closure, or build/install problems with cuVSLAM, PyCuVSLAM, or
-  Isaac ROS cuVSLAM. Triggers on: "cuVSLAM not tracking", "visual odometry drift",
-  "SLAM lost", "cuvslam build error", "PyCuVSLAM install", "Isaac ROS visual_slam",
-  "camera calibration issue", "stereo tracking bad", "cuVSLAM pose inaccurate".
+description: >-
+  Diagnose an existing NVIDIA cuVSLAM, PyCuVSLAM, or Isaac ROS visual_slam failure:
+  pose drift, lost tracking, calibration or synchronization errors, IMU fusion,
+  loop closure, build errors, and runtime integration. Use when behavior is failing
+  or inaccurate. Use cuvslam-onboard for first-time setup and cuvslam-trajectory
+  for exporting or validating a recorded dataset's pose file.
+license: NVIDIA Community License
+allowed-tools: Read Glob Grep Bash Edit Write WebFetch
+metadata:
+  author: Zheng Wang <zhengwang@nvidia.com>
 ---
 
 # cuVSLAM Troubleshooting
@@ -15,8 +17,15 @@ description: >
 Diagnose and fix issues with NVIDIA cuVSLAM — visual odometry and SLAM.
 
 **Source repo:** https://github.com/nvidia-isaac/cuVSLAM
-**Full troubleshooting guide:** `../../TROUBLESHOOTING.md` (read when investigating pose/tracking issues)
+**Full troubleshooting guide:** `<cuvslam-repo>/TROUBLESHOOTING.md` (read when investigating pose/tracking issues)
 **Known limitations:** `references/cuvslam-limitations.md` — check this first if the scene has dynamic objects, reflective surfaces, IR projector patterns, line-dominated environments, or agile/drone motion
+
+This skill may be installed outside the product checkout. Resolve `<cuvslam-repo>` before using
+repository files or tools. `references/`, `commands/`, and `scripts/` below belong to this skill;
+run bundled scripts by their absolute installed paths. Build, `examples/`, and `tools/` paths
+belong to the cuVSLAM checkout. If it is unavailable, use the matching product version's
+[published troubleshooting guide](https://github.com/nvidia-isaac/cuVSLAM/blob/main/TROUBLESHOOTING.md)
+and request a checkout only when the diagnosis needs source or built tools.
 
 ## Quick Triage
 
@@ -181,7 +190,7 @@ With the config and dataset in hand, verify these before touching the diagnostic
 
 **Only start this phase after Phases 1 and 2 are complete.** This is where replication, bag conversion, and tracker runs happen.
 
-Read `../../TROUBLESHOOTING.md` for the full 14-step diagnostic flow. The summary below uses the same step numbers as that document.
+Read `<cuvslam-repo>/TROUBLESHOOTING.md` for the full 14-step diagnostic flow. The summary below uses the same step numbers as that document.
 
 #### Dataset path into the diagnostic workflow
 

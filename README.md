@@ -299,9 +299,10 @@ See [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
 
 # Agent Skills
 
-Codex automatically discovers the repository skills under [.agents/skills](.agents/skills/README.md). They cover
-cuVSLAM setup, troubleshooting, dataset trajectory replay, and CI/CD workflows. The skills README also explains how
-to install the same skills into Claude Code or OpenClaw.
+Customer-facing skills live under [skills/](skills/README.md), with `.agents/skills` and `.claude/skills` aliases
+for local discovery. They cover cuVSLAM setup, troubleshooting, and dataset trajectory replay. The contributor-only
+[CI/CD skill](.agents/contributor-skills/cuvslam-ci/SKILL.md) covers repository development workflows. See the skills
+README for local discovery and installation.
 
 # Feedback
 

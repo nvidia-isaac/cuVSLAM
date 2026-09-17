@@ -5,6 +5,9 @@ description: Use when working on cuVSLAM CI/CD - the GitHub Actions nightly and 
 
 # cuVSLAM CI/CD
 
+This contributor skill covers development workflows in the cuVSLAM repository.
+Paths below are relative to the cuVSLAM checkout.
+
 CI/CD runs build, unit test, lint, dataset evaluation, dataset provisioning, and
 nightly releases on GitHub Actions with self-hosted GPU and Jetson runners. This
 file is the task entry point. Read [reference.md](reference.md) for the
