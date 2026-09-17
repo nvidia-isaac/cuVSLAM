@@ -35,6 +35,23 @@ Unless the user overrides them:
 Treat any user-specified format, filename, location, sequence, mode, calibration, or ROS topic mapping as
 authoritative.
 
+## Replay command options
+
+For TUM output named `trajectory.txt` in the default output directory, omit output flags entirely. When the user
+requests an override, use these exact `replay_dataset.py` options:
+
+| Option | Meaning |
+| --- | --- |
+| `--output PATH` | Output filename or full path. Relative paths resolve in the default output directory, not the shell's working directory. |
+| `--output-format FORMAT` | Either `tum` (default) or `kitti`. |
+
+`--output-path` and `--output-file` are unsupported. The `output_path` key printed by `--inspect` is a JSON field,
+not a command-line option. Before adding an option not shown here, check its exact spelling and accepted values:
+
+```bash
+python3 <skill-dir>/scripts/replay_dataset.py --help
+```
+
 ## Required workflow
 
 1. Resolve the cuVSLAM repository and dataset paths. If the prompt does not identify one dataset and discovery finds
@@ -52,8 +69,17 @@ authoritative.
 
    ```bash
    python3 <skill-dir>/scripts/bootstrap_runtime.py --repo <cuvslam-repo>
+   # Default: TUM trajectory.txt in the dataset directory, or beside a dataset file.
    <cuvslam-repo>/.venv-trajectory/bin/python \
-       <skill-dir>/scripts/replay_dataset.py <dataset> --repo <cuvslam-repo> [user overrides]
+       <skill-dir>/scripts/replay_dataset.py <dataset> --repo <cuvslam-repo>
+   ```
+
+   If the user requests a specific output location, pass it with `--output`:
+
+   ```bash
+   <cuvslam-repo>/.venv-trajectory/bin/python \
+       <skill-dir>/scripts/replay_dataset.py <dataset> --repo <cuvslam-repo> \
+       --output /requested/output/trajectory.txt --output-format tum
    ```
 
    The bootstrap selects the wheel by repository version, CUDA major, Python ABI, glibc, and architecture. It is
