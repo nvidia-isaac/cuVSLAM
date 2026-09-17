@@ -1,0 +1,87 @@
+{
+  "skill_name": "cuvslam-trajectory",
+  "evals": [
+    {
+      "id": "trajectory-valid-tum",
+      "prompt": "Use cuvslam-trajectory to validate /workspace/input/valid-tum.txt, an existing TUM trajectory expected to contain three poses. Report its row count, coverage, duration, and path length. Do not replay a dataset or install a runtime.",
+      "expected_output": "The validator exits zero and reports valid=true, rows=3, expected_rows=3, coverage=1.0, duration_seconds=2.0, and path_length=2.0. Validation establishes structural validity, not that these synthetic poses came from cuVSLAM or match ground truth.",
+      "assertions": [
+        "Read cuvslam-trajectory/SKILL.md.",
+        "Execute scripts/validate_tum.py with --expected-rows 3 on the supplied file.",
+        "Report the measured statistics without bootstrapping a runtime or claiming tracking accuracy."
+      ],
+      "expected_skill": "cuvslam-trajectory",
+      "expected_script": "scripts/validate_tum.py",
+      "files": [
+        "files/valid-tum.txt"
+      ]
+    },
+    {
+      "id": "trajectory-reject-duplicate-time",
+      "prompt": "Check whether /workspace/input/duplicate-time.txt is a valid TUM pose file for three frames. Preserve the file exactly and report validation failures rather than repairing it.",
+      "expected_output": "The bundled validator exits nonzero because the second row repeats timestamp 1.0. Report that timestamps must be strictly increasing. Leave the input unchanged and do not report a successful trajectory.",
+      "assertions": [
+        "Read cuvslam-trajectory/SKILL.md.",
+        "Execute scripts/validate_tum.py against the supplied file.",
+        "Report the nonzero validation result and duplicate timestamp without altering the input."
+      ],
+      "expected_skill": "cuvslam-trajectory",
+      "expected_script": "scripts/validate_tum.py",
+      "files": [
+        "files/duplicate-time.txt"
+      ]
+    },
+    {
+      "id": "trajectory-inspect-edex",
+      "prompt": "Before I move this recording to a GPU machine, inspect /workspace/input/stereo.edex with cuvslam-trajectory. Tell me the inferred mode and default output format and location. This is metadata-only input: do not replay it, build anything, or generate poses.",
+      "expected_output": "The replay helper with --inspect identifies EDEX, multicamera mode, TUM output, and /workspace/input/trajectory.txt. It exits without loading cuVSLAM or writing poses. The inspection fixture is not a runnable recording.",
+      "assertions": [
+        "Read cuvslam-trajectory/SKILL.md.",
+        "Run scripts/replay_dataset.py with --inspect on the supplied EDEX file.",
+        "Report the mode and default output path while stating no trajectory was generated."
+      ],
+      "expected_skill": "cuvslam-trajectory",
+      "expected_script": "scripts/replay_dataset.py",
+      "files": [
+        "files/stereo.edex"
+      ]
+    },
+    {
+      "id": "trajectory-bag-missing-mapping",
+      "prompt": "I want to export a TUM trajectory from a custom ROS bag using cuVSLAM. I have not provided the bag, camera topics, rig frame, or extraction config yet. Explain what information you need before replay; do not invent a camera mapping.",
+      "expected_output": "Request the bag location or metadata and a matching extraction config. Resolve image/camera-info topics, rig frame and extrinsics, ROS distribution, and optional IMU mapping from actual metadata. Convert through EDEX before offline replay. No trajectory can be claimed yet.",
+      "assertions": [
+        "Read cuvslam-trajectory/SKILL.md and its dataset-routing reference.",
+        "Identify missing bag/configuration information before proposing executable replay.",
+        "Do not invent topics or extrinsics or claim a generated trajectory."
+      ],
+      "expected_skill": "cuvslam-trajectory",
+      "expected_script": null,
+      "files": []
+    },
+    {
+      "id": "trajectory-negative-live",
+      "prompt": "Set up live cuVSLAM tracking from my RealSense camera. I have no recording and do not need a trajectory file.",
+      "expected_output": "Do not activate cuvslam-trajectory. Route to cuvslam-onboard if available for live-camera setup.",
+      "assertions": [
+        "Do not read cuvslam-trajectory/SKILL.md.",
+        "Do not invoke dataset replay or create a pose file."
+      ],
+      "expected_skill": null,
+      "expected_script": null,
+      "files": []
+    },
+    {
+      "id": "trajectory-negative-drift",
+      "prompt": "cuVSLAM tracking loses features and drifts in my existing stereo setup. Help diagnose calibration and image synchronization; I am not asking for pose export or file validation.",
+      "expected_output": "Do not activate cuvslam-trajectory. Route to cuvslam-troubleshoot if available for the accuracy failure.",
+      "assertions": [
+        "Do not read cuvslam-trajectory/SKILL.md.",
+        "Treat the request as tracking diagnosis rather than a trajectory-file deliverable."
+      ],
+      "expected_skill": null,
+      "expected_script": null,
+      "files": []
+    }
+  ]
+}
