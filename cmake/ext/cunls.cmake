@@ -30,10 +30,16 @@ if(CUDAToolkit_VERSION VERSION_LESS "12.6")
                         "Either install CUDA 12.6+ or set -DUSE_CUNLS=OFF.")
 endif()
 
-set(CUNLS_VERSION "Release_07_13_2026")
+set(CUNLS_VERSION "a4f7d645788b3d20a5850f2328d0caa32ef8cd7e")
 
-# Keep cuNLS's own tests and Python bindings out of this build.
-set(BUILD_TESTING OFF)
+# Control cuNLS's generic BUILD_TESTING option without changing it for the rest of cuVSLAM.
+if(DEFINED BUILD_TESTING)
+    set(_CUVSLAM_BUILD_TESTING_WAS_DEFINED TRUE)
+    set(_CUVSLAM_SAVED_BUILD_TESTING "${BUILD_TESTING}")
+else()
+    set(_CUVSLAM_BUILD_TESTING_WAS_DEFINED FALSE)
+endif()
+set(BUILD_TESTING "${CUVSLAM_BUILD_CUNLS_TESTS}")
 set(BUILD_PYTHON_BINDINGS OFF)
 
 # cuNLS declares cmake_minimum_required(VERSION 3.24), but the Ubuntu 22.04 base images used for
@@ -47,11 +53,40 @@ set(BUILD_PYTHON_BINDINGS OFF)
 # On cmake >= 3.24 its absence only triggers a harmless one-time CMP0135 dev warning.
 FetchContent_Declare(
     cunls
-    URL https://github.com/nvidia-isaac/cuNLS/archive/refs/tags/${CUNLS_VERSION}.tar.gz
-    URL_HASH SHA256=23b2917ae3903e6a688edb1652e40202d314527cd7fa9db68c762f0429375f77
+    GIT_REPOSITORY https://github.com/nvidia-isaac/cuNLS.git
+    GIT_TAG ${CUNLS_VERSION}
     PATCH_COMMAND sed -i "s/cmake_minimum_required(VERSION 3.24)/cmake_minimum_required(VERSION 3.22)/" CMakeLists.txt
 )
 FetchContent_MakeAvailable(cunls)
+
+if(_CUVSLAM_BUILD_TESTING_WAS_DEFINED)
+    set(BUILD_TESTING "${_CUVSLAM_SAVED_BUILD_TESTING}")
+else()
+    unset(BUILD_TESTING)
+endif()
+unset(_CUVSLAM_BUILD_TESTING_WAS_DEFINED)
+unset(_CUVSLAM_SAVED_BUILD_TESTING)
+
+if(CUVSLAM_BUILD_CUNLS_TESTS)
+    if(NOT TARGET nls_tests)
+        message(FATAL_ERROR "cuNLS tests were requested, but the 'nls_tests' target was not created")
+    endif()
+
+    # The x86 cuDSS static archive bundled into libcunls.a contains a main.o. Ensure GoogleTest's
+    # main is resolved first; otherwise the linker silently selects cuDSS's main and discovers zero tests.
+    get_target_property(_CUVSLAM_CUNLS_TEST_LIBRARIES nls_tests LINK_LIBRARIES)
+    list(REMOVE_ITEM _CUVSLAM_CUNLS_TEST_LIBRARIES GTest::gtest_main)
+    list(PREPEND _CUVSLAM_CUNLS_TEST_LIBRARIES GTest::gtest_main)
+    set_property(TARGET nls_tests PROPERTY LINK_LIBRARIES "${_CUVSLAM_CUNLS_TEST_LIBRARIES}")
+    unset(_CUVSLAM_CUNLS_TEST_LIBRARIES)
+
+    # cuNLS derives its test-data path from CMAKE_SOURCE_DIR, which points at cuVSLAM when embedded.
+    get_target_property(_CUVSLAM_CUNLS_TEST_DEFINITIONS nls_tests COMPILE_DEFINITIONS)
+    list(FILTER _CUVSLAM_CUNLS_TEST_DEFINITIONS EXCLUDE REGEX "^CUNLS_TEST_DATA_DIR=")
+    list(APPEND _CUVSLAM_CUNLS_TEST_DEFINITIONS "CUNLS_TEST_DATA_DIR=\"${cunls_SOURCE_DIR}/tests/data\"")
+    set_property(TARGET nls_tests PROPERTY COMPILE_DEFINITIONS "${_CUVSLAM_CUNLS_TEST_DEFINITIONS}")
+    unset(_CUVSLAM_CUNLS_TEST_DEFINITIONS)
+endif()
 
 if(NOT TARGET cunls)
     message(FATAL_ERROR "cuNLS source build did not define the 'cunls' target")
