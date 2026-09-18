@@ -12,6 +12,8 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
+import argparse
+import json
 import os
 import subprocess
 import sys
@@ -22,6 +24,7 @@ from pathlib import Path
 from unittest import mock
 
 from cuvslam_tools.reporter import cli
+from cuvslam_tools.reporter import execution
 from cuvslam_tools.reporter import generate_report
 
 
@@ -35,6 +38,53 @@ class TestReporterCli(unittest.TestCase):
             resolved = cli._resolve_config_path("kitti/kitti-vio_slam_gt.cfg", datasets_root)
 
         self.assertEqual(resolved, config_path)
+
+
+class TestReporterOutputDirectory(unittest.TestCase):
+    """The registry may evaluate one reporter config in several odometry modes."""
+
+    def _run_report(self, root, odometry_mode):
+        datasets_root = Path(root) / "datasets"
+        config_path = datasets_root / "kitti" / "kitti-vio_slam_gt.cfg"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(json.dumps({"segment_lengths": [1], "sequence_cfgs": []}), encoding="utf-8")
+
+        args = argparse.Namespace(
+            test_config="kitti/kitti-vio_slam_gt.cfg",
+            datasets_root=str(datasets_root),
+            output_root=str(Path(root) / "stats"),
+            output_dir="",
+            odometry_mode=odometry_mode,
+            max_workers=1,
+            pdf=False,
+            report_comments=[],
+        )
+        with mock.patch.object(execution, "run_parallel_tracking", return_value=[]), \
+             mock.patch.object(generate_report, "save_stats_to_json"), \
+             mock.patch.object(generate_report, "generate_report") as report:
+            output_dir = cli.run_report(args)
+
+        return Path(output_dir).parent, report.call_args.kwargs["config_name"]
+
+    def test_each_odometry_mode_gets_its_own_directory(self):
+        with tempfile.TemporaryDirectory() as root:
+            stereo, _ = self._run_report(root, "multicamera")
+            multisensor, _ = self._run_report(root, "multisensor")
+
+        self.assertEqual(stereo.name, "kitti-vio_slam_gt-multicamera")
+        self.assertEqual(multisensor.name, "kitti-vio_slam_gt-multisensor")
+
+    def test_the_mode_suffix_leaves_the_kpi_prefix_alone(self):
+        with tempfile.TemporaryDirectory() as root:
+            multisensor, _ = self._run_report(root, "multisensor")
+
+        self.assertEqual(multisensor.name.split("-")[0], "kitti")
+
+    def test_the_report_is_named_for_the_run(self):
+        with tempfile.TemporaryDirectory() as root:
+            _, config_name = self._run_report(root, "rgbd")
+
+        self.assertEqual(config_name, "kitti-vio_slam_gt-rgbd")
 
 
 class TestGitSourceMetadata(unittest.TestCase):

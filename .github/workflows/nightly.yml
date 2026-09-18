@@ -9,7 +9,7 @@ on:
       force_build:
         type: boolean
         default: false
-        description: 'Force build even without recent changes'
+        description: 'Force another full build even if this revision already passed'
 
 concurrency:
   group: nightly-${{ github.ref }}
@@ -29,29 +29,73 @@ env:
 
 jobs:
   check-changes:
-    name: Check for recent changes
+    name: Decide whether to build
     runs-on: ubuntu-latest
     permissions:
+      checks: read
       contents: read
     outputs:
       should_build: ${{ steps.decide.outputs.should_build }}
       is_release: ${{ steps.decide.outputs.is_release }}
       release_tag: ${{ steps.decide.outputs.release_tag }}
       package_version: ${{ steps.decide.outputs.package_version }}
+      previous_full_url: ${{ steps.previous-full-run.outputs.url }}
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Detect commits in the last 24 hours
+      # Skipped runs use a different summary-job name, so this check name
+      # identifies only full attempts for the current revision.
+      - name: Find latest full result for this revision
+        id: previous-full-run
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            try {
+              const checkRuns = await github.paginate(github.rest.checks.listForRef, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: context.sha,
+                check_name: 'Nightly full build status & summary',
+                filter: 'all',
+                per_page: 100,
+              });
+              const currentRunPath = `/actions/runs/${context.runId}/`;
+              const timestamp = check => Date.parse(check.completed_at || '') || 0;
+              const latest = checkRuns
+                .filter(check => check.status === 'completed'
+                  && check.app && check.app.slug === 'github-actions'
+                  && !(check.details_url || '').includes(currentRunPath))
+                .sort((left, right) => timestamp(right) - timestamp(left))[0];
+              const result = latest ? latest.conclusion || 'unknown' : 'missing';
+              const url = latest ? (latest.details_url || '').replace(/\/job\/\d+$/, '') : '';
+
+              core.setOutput('result', result);
+              core.setOutput('url', url);
+              if (latest) {
+                core.info(`Latest full nightly result for ${context.sha}: ${result} (${url})`);
+              } else {
+                core.info(`No previous full nightly result found for ${context.sha}.`);
+              }
+            } catch (error) {
+              core.warning(`Unable to inspect previous full nightly results; defaulting to a build: ${error}`);
+              core.setOutput('result', 'unknown');
+              core.setOutput('url', '');
+            }
+
+      - name: Decide whether to build current revision
         id: decide
+        if: always()
         shell: bash
         env:
           FORCE_BUILD: ${{ github.event.inputs.force_build }}
+          PREVIOUS_FULL_RESULT: ${{ steps.previous-full-run.outputs.result }}
+          PREVIOUS_FULL_URL: ${{ steps.previous-full-run.outputs.url }}
         run: |
           set -euo pipefail
-          COMMIT_COUNT=$(git log --since="24 hours ago" --oneline | wc -l)
           FORCE="${FORCE_BUILD:-false}"
           IS_RELEASE=false
           RELEASE_TAG=""
@@ -80,12 +124,15 @@ jobs:
           echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
           echo "package_version=$PACKAGE_VERSION" >> "$GITHUB_OUTPUT"
 
-          if [ "${COMMIT_COUNT}" -gt 0 ] || [ "${FORCE}" = "true" ] || [ "$IS_RELEASE" = "true" ]; then
+          if [ "${FORCE}" = "true" ] || [ "$IS_RELEASE" = "true" ]; then
             echo "should_build=true" >> "$GITHUB_OUTPUT"
-            echo "Building: ${COMMIT_COUNT} commit(s) in last 24h, force=${FORCE}, release=${IS_RELEASE}"
-          else
+            echo "Building: force=${FORCE}, release=${IS_RELEASE}"
+          elif [ "${PREVIOUS_FULL_RESULT:-missing}" = "success" ] && [ -n "${PREVIOUS_FULL_URL:-}" ]; then
             echo "should_build=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping: no commits in last 24h, force=${FORCE}, release=${IS_RELEASE}"
+            echo "Skipping: this revision already passed a full nightly at ${PREVIOUS_FULL_URL}"
+          else
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            echo "Building: latest full result for this revision is ${PREVIOUS_FULL_RESULT:-missing}"
           fi
 
       - name: Verify release target is available
@@ -415,7 +462,12 @@ jobs:
           if-no-files-found: error
 
   nightly-summary:
-    name: Build status & summary
+    name: >-
+      ${{
+        needs.check-changes.result != 'success' && 'Nightly preflight failed' ||
+        needs.check-changes.outputs.should_build == 'true' && 'Nightly full build status & summary' ||
+        'Nightly skipped — revision already passed'
+      }}
     runs-on: ubuntu-latest
     if: always()
     needs: [check-changes, build-and-test]
@@ -475,6 +527,7 @@ jobs:
         shell: bash
         env:
           PACKAGE_VERSION: ${{ needs.check-changes.outputs.package_version }}
+          PREVIOUS_FULL_URL: ${{ needs.check-changes.outputs.previous_full_url }}
         run: |
           set -euo pipefail
           mkdir -p consolidated/test-results consolidated/benchmark-results consolidated/kpis consolidated/eval-reports
@@ -503,7 +556,8 @@ jobs:
 
           if [ "${{ needs.check-changes.outputs.should_build }}" != "true" ]; then
             {
-              echo "Nightly skipped because there were no commits in the last 24 hours and the build was not forced."
+              echo "Nightly skipped because this revision already passed a full nightly."
+              echo "Previous successful full run: [view run](${PREVIOUS_FULL_URL})"
               echo ""
             } >> "$REPORT"
             echo "has_test_results=false" >> "$GITHUB_OUTPUT"
@@ -584,12 +638,8 @@ jobs:
           if [ "$benchmark_config_count" -gt 0 ]; then
             echo "has_benchmark_results=true" >> "$GITHUB_OUTPUT"
             {
-              echo "## Jetson CUDA Benchmarks"
+              echo "Jetson CUDA benchmark reports: $benchmark_config_count collected; detailed tables are in the Orin and Thor job summaries."
               echo ""
-              for benchmark_summary in consolidated/benchmark-results/*/benchmark-summary.md; do
-                [ -f "$benchmark_summary" ] || continue
-                cat "$benchmark_summary"
-              done
             } >> "$REPORT"
           else
             echo "has_benchmark_results=false" >> "$GITHUB_OUTPUT"
@@ -780,12 +830,14 @@ jobs:
 
       - name: Check overall result
         if: always()
+        env:
+          PREVIOUS_FULL_URL: ${{ needs.check-changes.outputs.previous_full_url }}
         run: |
           if [ "${{ needs.check-changes.result }}" != "success" ]; then
             echo "::error::The build preflight job did not succeed: ${{ needs.check-changes.result }}"
             exit 1
           elif [ "${{ needs.check-changes.outputs.should_build }}" = "false" ]; then
-            echo "Nightly skipped: no changes in the last 24 hours."
+            echo "Nightly skipped: this revision already passed at ${PREVIOUS_FULL_URL}."
           elif [ "${{ needs.build-and-test.result }}" != "success" ]; then
             echo "::error::One or more build-and-test matrix jobs did not succeed: ${{ needs.build-and-test.result }}"
             exit 1

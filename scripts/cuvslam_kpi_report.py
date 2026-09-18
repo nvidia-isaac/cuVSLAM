@@ -40,7 +40,7 @@ METRIC_UNITS = {"ATE": "%", "ARE": "º/m", "Kabsch": "", "TrackingLosts": "", "F
 
 
 def display_dataset_key(key):
-    """TARTAN_FLAKY-STEREO_ODOM -> TARTAN_F-STEREO_ODOM (display only)."""
+    """TARTAN_FLAKY-MCAM_ODOM -> TARTAN_F-MCAM_ODOM (display only)."""
     for full, short in DATASET_DISPLAY_ALIASES.items():
         if key.startswith(full + "-"):
             return short + key[len(full):]
@@ -78,28 +78,43 @@ def parse_all_stats_json(json_path):
         return None
 
 
+# One KPI type per odometry mode. Keep in step with ODOMETRY_MODE_TYPES in
+# tools/python_tools/cuvslam_tools/dataset_registry.py, which names the keys a
+# suite is expected to produce: a mismatch reads as a missing KPI. A type must
+# not contain an underscore, because parse_kpi_key splits keys on it.
+ODOMETRY_MODE_TYPES = {
+    'multicamera': 'MCAM',
+    'mono': 'MONO',
+    'inertial': 'VIO',
+    'rgbd': 'RGBD',
+    'multisensor': 'MSF',
+}
+
+
 def odometry_mode_to_type(odometry_mode):
     """Convert odometry_mode string to dataset type.
 
     Args:
-        odometry_mode: String like "OdometryMode.Multicamera". Matching is
-            case-insensitive, so command-line values like "multicamera" map the
-            same way. None or non-string values fall back to STEREO.
+        odometry_mode: String like "OdometryMode.Multicamera". The enum qualifier
+            is optional and matching is case-insensitive, so command-line values
+            like "multicamera" map the same way.
 
     Returns:
-        str: Dataset type (MONO, STEREO, VIO, RGBD)
+        str: Dataset type (MCAM, MONO, VIO, RGBD, MSF)
+
+    Raises:
+        ValueError: If the mode is unrecognized. Defaulting would file the run
+            under another mode's KPI keys and overwrite them.
     """
-    normalized = str(odometry_mode).lower()
-    if 'multicamera' in normalized:
-        return 'STEREO'
-    elif 'mono' in normalized:
-        return 'MONO'
-    elif 'inertial' in normalized:
-        return 'VIO'
-    elif 'rgbd' in normalized:
-        return 'RGBD'
-    else:
-        return 'STEREO'
+    # Exact lookup on the unqualified name, not substring containment: a value
+    # such as "notmultisensor" has to stay unmapped so the caller skips the run
+    # instead of recording it as MSF.
+    normalized = str(odometry_mode).rsplit('.', 1)[-1].lower()
+    if normalized in ODOMETRY_MODE_TYPES:
+        return ODOMETRY_MODE_TYPES[normalized]
+    raise ValueError(
+        f"unknown odometry_mode {odometry_mode!r}; expected one of {', '.join(ODOMETRY_MODE_TYPES)}"
+    )
 
 
 def load_baseline_ranges(path):
@@ -210,20 +225,19 @@ def process_dataset_folder(dataset_folder_path):
         print(f'Warning: failed to parse all_stats.json in {stats_folder}')
         return None
 
-    if all_stats and 'odometry_mode' in all_stats[0]:
+    # The mode is the only trustworthy source of the KPI type. Guessing it from
+    # the folder name mislabels every config whose name mentions another mode,
+    # such as kitti-vio_slam_gt run as multicamera.
+    if 'odometry_mode' not in all_stats[0]:
+        print(f'Warning: odometry_mode not found in {all_stats_json}; cannot name this run\'s KPI keys')
+        return None
+
+    try:
         dataset_type = odometry_mode_to_type(all_stats[0]['odometry_mode'])
-        print(f'  Detected dataset type: {dataset_type} (from odometry_mode: {all_stats[0]["odometry_mode"]})')
-    else:
-        print(f'  Warning: odometry_mode not found in JSON, falling back to folder name parsing')
-        folder_name = os.path.basename(dataset_folder_path).lower()
-        if 'mono' in folder_name:
-            dataset_type = 'MONO'
-        elif 'vio' in folder_name or 'imu' in folder_name:
-            dataset_type = 'VIO'
-        elif 'rgbd' in folder_name or 'depth' in folder_name:
-            dataset_type = 'RGBD'
-        else:
-            dataset_type = 'STEREO'
+    except ValueError as exc:
+        print(f'Warning: {exc} in {all_stats_json}')
+        return None
+    print(f'  Detected dataset type: {dataset_type} (from odometry_mode: {all_stats[0]["odometry_mode"]})')
 
     odom_stats = [s for s in all_stats if 'ODOM' in s.get('sequence_title', '').upper()]
     slam_stats = [s for s in all_stats if 'SLAM' in s.get('sequence_title', '').upper()]
