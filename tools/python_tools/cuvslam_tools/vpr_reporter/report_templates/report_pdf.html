@@ -1,0 +1,260 @@
+<html>
+<head>
+    <style>
+        @page {
+            size: A4 landscape;
+            margin: 1cm;
+        }
+
+        body {
+            width: 100%;
+            max-width: 100%;
+            margin: 0;
+            padding: 0;
+            font-family: "Trebuchet MS", Arial, Helvetica, sans-serif;
+        }
+
+        * {
+            font-size: 9pt;
+        }
+
+        h2 {
+            font-size: 14pt;
+            margin-top: 10px;
+            margin-bottom: 5px;
+        }
+
+        table {
+            font-family: "Trebuchet MS", Arial, Helvetica, sans-serif;
+            border-collapse: collapse;
+            width: 100%;
+            table-layout: fixed;
+            font-size: 8pt;
+        }
+
+        /* The metrics columns are short and self-sizing; a fixed layout breaks their headers
+           mid-word, while the notes table above needs fixed columns to keep its labels narrow. */
+        table.metrics {
+            table-layout: auto;
+        }
+
+        table td, table th {
+            border: 1px solid #ddd;
+            text-align: left;
+            padding: 4px;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+        }
+
+        table tr:nth-child(even) {
+            background-color: #f2f2f2
+        }
+
+        /* The best backend for each sequence pair, so a reader can find the winner per pair
+           without comparing twelve rows by eye. */
+        table tr.leader td {
+            background-color: #d9efd9;
+            font-weight: bold;
+        }
+
+        table tr.leader td:first-child {
+            border-left: 3px solid #0ca30c;
+        }
+
+        /* The metrics table is the one thing a reader compares row against row, so it gets a page
+           to itself and is never split across two. */
+        .metrics-page {
+            page-break-before: always;
+            page-break-after: always;
+            page-break-inside: avoid;
+            break-inside: avoid;
+        }
+
+        table.metrics tr {
+            page-break-inside: avoid;
+        }
+
+        table tr.summary {
+            font-weight: bold;
+        }
+
+        table tr.warning {
+            font-weight: bold;
+            background-color: #f6d7d7;
+            color: #8a1c1c;
+        }
+
+        table th {
+            padding-top: 6px;
+            padding-bottom: 6px;
+            background-color: #4CAF50;
+            color: white;
+        }
+
+        /* A tall plot has to be capped by the page, not only by its width: scaled to the full
+           content width a portrait trajectory runs off the bottom of the page and is cut in half.
+           15.5cm is the 19cm content height of a landscape A4 less the section heading, the frame
+           strip below the plot, and its caption. */
+        img {
+            max-width: 100%;
+            max-height: 15.5cm;
+            width: auto;
+            height: auto;
+            display: block;
+            margin: 0 auto;
+        }
+
+        /* The plot and the frame strip are two views of the same run, so they sit side by side on
+           one page rather than stacked across two. Splitting the width lets the strip be read at
+           roughly twice the size it managed underneath a full-width plot. */
+        .run {
+            width: 100%;
+            table-layout: fixed;
+            border-collapse: collapse;
+        }
+
+        .run td {
+            vertical-align: top;
+            padding: 0 4mm 0 0;
+            border: none;
+            background: none;
+        }
+
+        .run td.frames {
+            padding: 0 0 0 4mm;
+            width: 46%;
+        }
+
+        .run img {
+            max-height: 15.5cm;
+        }
+
+        /* The strip is laid out to the shape of this cell, so let it use the cell's full height and
+           width and stay centred; forcing width: 100% would only stretch a grid that is already as
+           wide as it should be. */
+        img.strip {
+            width: auto;
+            max-width: 100%;
+            max-height: 15.5cm;
+            margin: 0 auto;
+        }
+
+        .caption {
+            font-style: italic;
+            color: #55534d;
+            margin-top: 3px;
+        }
+
+        .keeptogether {
+            page-break-inside: avoid !important;
+            display: block;
+        }
+
+        br {
+            margin: 5px 0;
+        }
+    </style>
+</head>
+<body>
+<table>
+    <tr>
+        <th>cuVSLAM Visual Place Recognition</th>
+        <th>{{date}}</th>
+    </tr>
+    <tr class="summary">
+        <td>Branch name</td>
+        <td>{{branch_name}}</td>
+    </tr>
+    <tr class="summary">
+        <td>Commit SHA</td>
+        <td>{{commit_sha}}</td>
+    </tr>
+    <tr class="summary">
+        <td>Commit Date/Time</td>
+        <td>{{commit_ts}}</td>
+    </tr>
+    {% if provenance_warning %}
+    <tr class="summary">
+        <td>Provenance</td>
+        <td>{{provenance_warning}}</td>
+    </tr>
+    {% endif %}
+    <tr class="summary">
+        <td>Success radius [m]</td>
+        <td>{{ '%0.2f' % success_radius_m }}</td>
+    </tr>
+    <tr class="summary">
+        <td>Ground truth</td>
+        <td>{{alignment_note}}</td>
+    </tr>
+    <tr class="summary">
+        <td>How to read this</td>
+        <td>{{how_to_read_note}}</td>
+    </tr>
+    {% if self_match_warning %}
+    <tr class="warning">
+        <td>Warning</td>
+        <td>{{self_match_warning}}</td>
+    </tr>
+    {% endif %}
+    <tr class="summary">
+        <td>Comments</td>
+        <td>{{comments}}</td>
+    </tr>
+</table>
+<br>
+<table class="metrics metrics-page">
+    <tr>
+        <th>Mode</th>
+        <th>Sequence pair</th>
+        <th>Query frames</th>
+        <th>Mapped frames</th>
+        <th>Success [%]</th>
+        <th>False positive [%]</th>
+        <th>Unrecognized [%]</th>
+        <th>Precision</th>
+        <th>Map build [ms/frame]</th>
+        <th>Add to map [ms/frame]</th>
+        <th>Search [ms/frame]</th>
+        <th>Map size [MB/frame]</th>
+    </tr>
+    {% for s in stats %}
+        <tr{% if s.is_leader %} class="leader"{% endif %}>
+            <td>{{ s.vpr_mode }}</td>
+            <td>{{ s.title }}</td>
+            <td>{{ s.n_query_frames }}</td>
+            <td>{{ s.n_map_frames }}</td>
+            <td>{{ '%0.2f' % s.success_rate }}</td>
+            <td>{{ '%0.2f' % s.false_positive_rate }}</td>
+            <td>{{ '%0.2f' % s.unrecognized_rate }}</td>
+            <td>{{ '%0.3f' % s.precision }}</td>
+            <td>{{ '%0.2f' % s.map_build_time_ms_per_frame }}</td>
+            <td>{{ '%0.3f' % s.mean_add_time_ms }}</td>
+            <td>{{ '%0.2f' % s.mean_search_time_ms }}</td>
+            <td>{{ '%0.4f' % s.map_mb_per_frame }}</td>
+        </tr>
+    {% endfor %}
+</table>
+
+{% for s in stats %}
+    <div class="keeptogether">
+        <h2>{{ s.title }} - {{ s.vpr_mode }}</h2>
+        <table class="run">
+            <tr>
+                <td>
+                    {% if s.plot_image %}
+                    <img src="{{ s.plot_image }}">
+                    {% endif %}
+                </td>
+                <td class="frames">
+                    {% if s.strip_image %}
+                    <img class="strip" src="{{ s.strip_image }}">
+                    <div class="caption">{{ strip_caption }}</div>
+                    {% endif %}
+                </td>
+            </tr>
+        </table>
+    </div>
+{% endfor %}
+</body>
+</html>

@@ -17,10 +17,12 @@
 
 #pragma once
 
+#include <atomic>
 #include <functional>
 #include <limits>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <utility>
@@ -55,6 +57,8 @@ struct AsyncSlamOptions {
   float max_landmarks_distance = std::numeric_limits<float>::max();
   LoopClosureSolverType loop_closure_solver_type = LoopClosureSolverType::kTwoStepsEasy;
   bool planar_constraints = false;
+  vpr::VprOptions vpr_options;  // visual place recognition backend; kNone disables it
+  std::string vpr_map_path;     // if non-empty, a place recognition map is loaded from here
 };
 
 struct AsyncSlamLCTelemetry {
@@ -85,9 +89,12 @@ public:
   void TrackResult(FrameId frameId, int64_t timestamp_ns, const odom::IVisualOdometry::VOFrameStat& stat,
                    const sof::Images& images, const Isometry3T& delta);
 
-  void LocalizeInMap(const std::string_view& folder_name, int64_t timestamp_ns, const Isometry3T& guess_pose,
-                     const sof::Images& images, const Slam::LocalizationSettings& settings,
-                     Slam::LocalizeStartCB start_cb, Slam::LocalizeFinishCB finish_cb);
+  // `guess_pose` is optional: without one the saved map's place recognition map proposes the poses
+  // to verify, which is how a robot with no idea where it is relocalizes.
+  void LocalizeInMap(const std::string_view& folder_name, int64_t timestamp_ns,
+                     const std::optional<Isometry3T>& guess_pose, const sof::Images& images,
+                     const Slam::LocalizationSettings& settings, Slam::LocalizeStartCB start_cb,
+                     Slam::LocalizeFinishCB finish_cb);
 
   Isometry3T GetSlamPose() const;
 
@@ -107,6 +114,19 @@ public:
   void SetLoopClosureView(std::shared_ptr<ViewManager<ViewLandmarks>> view);
   // Set pose graph view
   void SetPoseGraphView(std::shared_ptr<ViewManager<ViewPoseGraph>> view);
+
+  // ----- Visual place recognition -----
+  // Adding and recognizing are queued for the worker like every other SLAM command, so they never
+  // block the caller behind a backend that is running a neural network.
+  bool IsVprEnabled() const { return vpr_enabled_; }
+
+  // True when the newest pose graph node still has no image, so offering one would do something.
+  // Reads a value the worker publishes without taking the SLAM lock, so a caller can ask on every
+  // frame without waiting behind a query in flight.
+  bool VprNeedsFrame() const { return vpr_wants_frame_; }
+
+  void AddFrameToVprMap(vpr::VprImage image, int64_t timestamp_ns);
+  void RecognizePlace(vpr::VprImage image, Slam::RecognizePlaceFinishCB finish_cb);
 
 private:
   struct VOTrackData {
@@ -131,9 +151,10 @@ private:
 
   class LocalizeInMapCmd : public ICommand {
   public:
-    LocalizeInMapCmd(const std::string_view& folder_name, int64_t timestamp_ns, const Isometry3T& guess_pose,
-                     const sof::Images& images, const Slam::LocalizationSettings& settings,
-                     Slam::LocalizeStartCB start_cb, Slam::LocalizeFinishCB finish_cb);
+    LocalizeInMapCmd(const std::string_view& folder_name, int64_t timestamp_ns,
+                     const std::optional<Isometry3T>& guess_pose, const sof::Images& images,
+                     const Slam::LocalizationSettings& settings, Slam::LocalizeStartCB start_cb,
+                     Slam::LocalizeFinishCB finish_cb);
 
     ~LocalizeInMapCmd() override = default;
     void Execute(AsyncSlam& async_slam, FrameId, const Isometry3T&) override;
@@ -141,7 +162,7 @@ private:
   private:
     const std::string folder_name_;
     const int64_t timestamp_ns_;
-    const Isometry3T guess_pose_;
+    const std::optional<Isometry3T> guess_pose_;
     const sof::Images images_;
     const Slam::LocalizationSettings settings_;
     Slam::LocalizeStartCB start_cb_;
@@ -157,10 +178,41 @@ private:
     void Execute(AsyncSlam& async_slam, FrameId, const Isometry3T&) override;
   };
 
+  class AddFrameToVprMapCmd : public ICommand {
+  public:
+    AddFrameToVprMapCmd(vpr::VprImage image, int64_t timestamp_ns)
+        : image_(std::move(image)), timestamp_ns_(timestamp_ns) {}
+    ~AddFrameToVprMapCmd() override = default;
+
+    void Execute(AsyncSlam& async_slam, FrameId, const Isometry3T&) override;
+
+  private:
+    const vpr::VprImage image_;
+    const int64_t timestamp_ns_;
+  };
+
+  class RecognizePlaceCmd : public ICommand {
+  public:
+    RecognizePlaceCmd(vpr::VprImage image, Slam::RecognizePlaceFinishCB finish_cb)
+        : image_(std::move(image)), finish_cb_(std::move(finish_cb)) {}
+    ~RecognizePlaceCmd() override = default;
+
+    void Execute(AsyncSlam& async_slam, FrameId, const Isometry3T&) override;
+
+  private:
+    const vpr::VprImage image_;
+    Slam::RecognizePlaceFinishCB finish_cb_;
+  };
+
   // --- Immutable after construction; read by both the caller's thread and the background worker thread ---
   const camera::Rig rig_;
   const std::vector<CameraId> cameras_;
   const AsyncSlamOptions options_;
+  const bool vpr_enabled_;
+
+  // Published by the worker under slam_mutex_, read by the caller without it. A stale read costs at
+  // most one queued command that turns out to be a no-op.
+  std::atomic<bool> vpr_wants_frame_{false};
 
   // --- Accessed only from the caller's thread (e.g. TrackResult(), GetPoseForFrame() callers) ---
   bool reproduce_mode_ = false;

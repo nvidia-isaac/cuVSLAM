@@ -86,22 +86,128 @@ bool LocalizerAndMapper::SetPoseGraphOptimizerOptions(const PoseGraphOptimizerOp
 
 PoseGraphOptimizerOptions LocalizerAndMapper::GetPoseGraphOptimizerOptions() const { return pg_options_; }
 
+void LocalizerAndMapper::RegisterRemoveNodeCB() {
+  // PoseGraph holds a single removal callback, so everything that has to follow a keyframe merge
+  // is dispatched from this one lambda. Each branch checks whether its feature is switched on,
+  // which lets the callback be installed before either feature is configured.
+  const PoseGraph::RemoveNodeCB remove_node_cb =
+      [this](const KeyFrameId keyframe_id, const KeyFrameId instead_keyframe_id, const Isometry3T& to_instead) -> void {
+    if (keep_track_poses_) {
+      ChangeKeyframeInfo change_keyframe_info;
+      change_keyframe_info.new_node = instead_keyframe_id;
+      change_keyframe_info.old_node_to_new = to_instead;
+      keyframe_removed_[keyframe_id] = change_keyframe_info;
+    }
+    if (vpr_map_) {
+      vpr_map_->OnKeyframeRemoved(keyframe_id, instead_keyframe_id);
+    }
+  };
+  map_.pose_graph_.RegisterRemoveNodeCB(remove_node_cb);
+}
+
 void LocalizerAndMapper::SetKeepTrackPoses(bool keep_track_poses) {
   // if true - CalcFramePose() will working
   keep_track_poses_ = keep_track_poses;
 
   if (keep_track_poses_) {
-    PoseGraph::RemoveNodeCB remove_node_cb = [&](KeyFrameId keyframe_id, KeyFrameId instead_keyframe_id,
-                                                 const Isometry3T& to_instead) -> void {
-      ChangeKeyframeInfo change_keyframe_info;
-      change_keyframe_info.new_node = instead_keyframe_id;
-      change_keyframe_info.old_node_to_new = to_instead;
-      keyframe_removed_[keyframe_id] = change_keyframe_info;
-      // SlamStdout("\nkeyframe_removed_[%zd]={%zd, %zd}", keyframe_id, change_keyframe_info.new_node,
-      // change_keyframe_info.old_node_to_new);
-    };
-    map_.pose_graph_.RegisterRemoveNodeCB(remove_node_cb);
+    RegisterRemoveNodeCB();
   }
+}
+
+void LocalizerAndMapper::SetVprOptions(const vpr::VprOptions& options) {
+  if (options.type == vpr::VprType::kNone) {
+    vpr_map_.reset();
+    return;
+  }
+  vpr_map_ = std::make_unique<vpr::VprMap>(options);
+  RegisterRemoveNodeCB();
+}
+
+bool LocalizerAndMapper::IsVprEnabled() const { return vpr_map_ && vpr_map_->Enabled(); }
+
+size_t LocalizerAndMapper::GetVprMapSize() const { return vpr_map_ ? vpr_map_->Size() : 0; }
+
+bool LocalizerAndMapper::VprHeadNeedsImage() const {
+  if (!IsVprEnabled()) {
+    return false;
+  }
+  KeyFrameId head = InvalidKeyFrameId;
+  if (!map_.pose_graph_.GetHeadKeyframe(head) || head == InvalidKeyFrameId) {
+    return false;
+  }
+  return !vpr_map_->HasImage(head);
+}
+
+bool LocalizerAndMapper::AddVprFrame(const vpr::VprImage& image, const int64_t timestamp_ns) {
+  if (!IsVprEnabled()) {
+    return false;
+  }
+  KeyFrameId head = InvalidKeyFrameId;
+  if (!map_.pose_graph_.GetHeadKeyframe(head) || head == InvalidKeyFrameId) {
+    // Nothing has been mapped yet. The frame is dropped rather than queued: the caller offers one
+    // on every frame, so the next keyframe will get an equally good picture of the same place.
+    return false;
+  }
+  if (!vpr_map_->AddFrame(head, timestamp_ns, image)) {
+    return false;
+  }
+  const Isometry3T* pose = map_.pose_graph_hypothesis_.GetKeyframePose(head);
+  if (pose != nullptr) {
+    vpr_map_->UpdateNodePose(head, *pose);
+  }
+  return true;
+}
+
+vpr::VprPlace LocalizerAndMapper::RecognizePlace(const vpr::VprImage& image) {
+  const std::vector<vpr::VprPlace> places = RecognizePlaces(image, 1);
+  return places.empty() ? vpr::VprPlace{} : places.front();
+}
+
+std::vector<vpr::VprPlace> LocalizerAndMapper::RecognizePlaces(const vpr::VprImage& image, size_t max_results) {
+  std::vector<vpr::VprPlace> places;
+  if (!IsVprEnabled()) {
+    return places;
+  }
+
+  places = vpr_map_->QueryTopK(image, max_results);
+  for (auto it = places.begin(); it != places.end();) {
+    if (it->imported) {
+      // An imported entry keeps the pose stored with the map it came from; this session has no pose
+      // graph node for it, which is exactly the relocalization case the map was saved for.
+      ++it;
+      continue;
+    }
+    // Everything else is resolved through the pose graph at query time rather than from a stored
+    // copy, so a place recognized after a loop closure reports the corrected position.
+    const Isometry3T* pose = map_.pose_graph_hypothesis_.GetKeyframePose(it->node_id);
+    if (pose == nullptr) {
+      it = places.erase(it);  // the node was merged away between the query and this lookup
+      continue;
+    }
+    it->pose = *pose;
+    ++it;
+  }
+  return places;
+}
+
+bool LocalizerAndMapper::SaveVprMap(const std::string& folder) {
+  if (!IsVprEnabled()) {
+    return false;
+  }
+  map_.pose_graph_.QueryKeyframes([this](const KeyFrameId keyframe_id) {
+    const Isometry3T* pose = map_.pose_graph_hypothesis_.GetKeyframePose(keyframe_id);
+    if (pose != nullptr) {
+      vpr_map_->UpdateNodePose(keyframe_id, *pose);
+    }
+  });
+  return vpr_map_->Save(folder);
+}
+
+bool LocalizerAndMapper::LoadVprMap(const std::string& folder, vpr::VprMap::LoadMode mode) {
+  if (!IsVprEnabled()) {
+    return false;
+  }
+  return vpr_map_->Load(folder, mode);
 }
 
 bool LocalizerAndMapper::GetKeepTrackPoses() const { return keep_track_poses_; }

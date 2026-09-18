@@ -68,6 +68,11 @@ option(USE_CUDA "Use CUDA Toolkit" ON)
 option(CUVSLAM_LOG_ENABLE "Enable root cuvslam::Log." OFF)
 option(CUVSLAM_BUILD_SHARED_LIB "Build shared library version of cuVSLAM" TRUE)
 option(USE_RERUN "Use Rerun for visualization" OFF)
+# Visual place recognition backends. Both pull in a third-party dependency that cuVSLAM core does
+# not otherwise have: DBoW2 needs OpenCV, AnyLoc needs ONNX Runtime. The Simple backend is always
+# built and needs neither.
+option(USE_DBOW2 "Build the DBoW2 visual place recognition backend (requires OpenCV)" OFF)
+option(USE_ONNXRUNTIME "Build the AnyLoc visual place recognition backend (downloads ONNX Runtime)" OFF)
 
 include(cmake/cuVSLAMUtils.cmake)
 setup_cuvslam_settings()
