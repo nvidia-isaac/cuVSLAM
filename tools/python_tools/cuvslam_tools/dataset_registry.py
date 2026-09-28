@@ -61,16 +61,17 @@ FULL_SUITE = "full"
 KPI_METRICS = ("ATE", "ARE", "Kabsch", "TrackingLosts", "FPS")
 KPI_MODES = ("ODOM", "SLAM")
 ODOMETRY_MODE_TYPES = {
-    "multicamera": "STEREO",
+    "multicamera": "MCAM",
     "mono": "MONO",
     "inertial": "VIO",
     "rgbd": "RGBD",
+    "multisensor": "MSF",
 }
 
-# Values cuvslam_app accepts for --odometry_mode. cuvslam_kpi_report.py maps each
-# to a distinct KPI type, and anything unrecognized there falls back to STEREO,
-# so an unknown mode here would silently mislabel a KPI key.
-ODOMETRY_MODES = ("multicamera", "mono", "inertial", "rgbd")
+# Values cuvslam_app accepts for --odometry_mode, which are exactly the modes
+# cuvslam_kpi_report.py can name a KPI type for. It rejects anything else rather
+# than filing the run under another mode's keys.
+ODOMETRY_MODES = tuple(ODOMETRY_MODE_TYPES)
 
 _DATASET_ID = re.compile(r"^[a-z0-9_]+$")
 _KPI_PREFIX = re.compile(r"^[A-Z0-9_]+$")
@@ -111,8 +112,18 @@ class EvalSpec:
 
     @property
     def kpi_type(self) -> str:
-        """Dataset type the KPI collector will derive from the odometry mode."""
-        return ODOMETRY_MODE_TYPES.get(self.odometry_mode, "STEREO")
+        """Dataset type the KPI collector will derive from the odometry mode.
+
+        Raises:
+            RegistryError: when the mode has no type, which ``validate`` also
+                rejects. Falling back to one would name another mode's keys.
+        """
+        try:
+            return ODOMETRY_MODE_TYPES[self.odometry_mode]
+        except KeyError:
+            raise RegistryError(
+                f"eval '{self.config}': no KPI type for odometry mode {self.odometry_mode!r}"
+            ) from None
 
     def kpi_keys(self) -> tuple[str, ...]:
         """KPI keys this record can produce, as `<PREFIX>_<METRIC>_<TYPE>_<MODE>`.
@@ -176,6 +187,16 @@ def _rgbd_args() -> tuple[str, ...]:
     return ("--odometry_mode=rgbd", "--async_sba=false", "--use_segments")
 
 
+def _multisensor_args(*extra: str) -> tuple[str, ...]:
+    """Flags for the unified multi-sensor mode.
+
+    Only registered for rigs the cuNLS solver can model. It projects through a
+    pinhole camera and merely warns on any other model, so EuRoC (fisheye) and
+    M3ED-SPOT (polynomial) would report numbers computed from the wrong geometry.
+    """
+    return ("--odometry_mode=multisensor", *extra, "--async_sba=false", "--use_segments")
+
+
 DATASETS: dict[str, DatasetSpec] = {
     "kitti": DatasetSpec(
         dataset_id="kitti",
@@ -185,6 +206,16 @@ DATASETS: dict[str, DatasetSpec] = {
                 config="kitti-vio_slam_gt.cfg",
                 args=_stereo_args("--rectified_stereo_camera=true"),
                 suites=frozenset(SUITES),
+            ),
+            # Same config, same frames, same ground truth as the record above, so
+            # the two KPI rows compare the cuNLS solver against the default one
+            # directly. The rig carries no depth; multi-sensor qualifies here on
+            # the overlapping stereo pair alone.
+            EvalSpec(
+                config="kitti-vio_slam_gt.cfg",
+                args=_multisensor_args("--rectified_stereo_camera=true", "--multicam_mode=moderate"),
+                suites=frozenset({FULL_SUITE}),
+                gating="informational",
             ),
         ),
     ),
@@ -216,6 +247,12 @@ DATASETS: dict[str, DatasetSpec] = {
                 args=_rgbd_args(),
                 suites=frozenset({FULL_SUITE}),
             ),
+            EvalSpec(
+                config="tum-rgbd_slam.cfg",
+                args=_multisensor_args(),
+                suites=frozenset({FULL_SUITE}),
+                gating="informational",
+            ),
         ),
     ),
     # One config in both suites, not one per suite: a second would derive its own
@@ -228,6 +265,14 @@ DATASETS: dict[str, DatasetSpec] = {
                 config="icl_nuim-rgbd_slam.cfg",
                 args=_rgbd_args(),
                 suites=frozenset(SUITES),
+            ),
+            # Full only while the mode is experimental, even though the dataset
+            # is cheap enough for smoke. Promote once the MSF keys are calibrated.
+            EvalSpec(
+                config="icl_nuim-rgbd_slam.cfg",
+                args=_multisensor_args(),
+                suites=frozenset({FULL_SUITE}),
+                gating="informational",
             ),
         ),
     ),
@@ -312,7 +357,7 @@ def _validate_eval(spec: DatasetSpec, record: EvalSpec) -> None:
     if modes[0] not in ODOMETRY_MODES:
         raise RegistryError(
             f"{where}: --odometry_mode must be one of {', '.join(ODOMETRY_MODES)}; "
-            "an unrecognized mode silently becomes a STEREO KPI type"
+            "the KPI collector has no type for anything else"
         )
     if not record.suites:
         raise RegistryError(f"{where}: must belong to at least one suite")

@@ -49,7 +49,6 @@ macro(setup_cuvslam_settings)
         $<$<BOOL:${USE_LMDB}>:USE_LMDB>
         $<$<BOOL:${USE_NVTX}>:USE_NVTX>
         $<$<BOOL:${USE_CUDA}>:USE_CUDA>
-        $<$<BOOL:${ENFORCE_GPU}>:ENFORCE_GPU>
         $<$<BOOL:${USE_RERUN}>:USE_RERUN>
         $<$<BOOL:${USE_CUNLS}>:USE_CUNLS>
     )

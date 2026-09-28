@@ -15,14 +15,12 @@
 set(MODULE_NAME "utils")
 
 set(HEADERS
-    cuvslam_yaml_config.h
     image_io.h
     image_loader.h
     image_transform.h
     )
 
 set(SOURCES
-    cuvslam_yaml_config.cpp
     image_io.cpp
     image_loader.cpp
     )
@@ -38,7 +36,6 @@ setup_staticlib_project(
             jpeg::jpeg
             jsoncpp::jsoncpp
             PNG::PNG
-            yaml-cpp::yaml-cpp
 )
 
 add_subdirectory(test)

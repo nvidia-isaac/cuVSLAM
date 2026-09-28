@@ -14,7 +14,6 @@
 
 # Source files
 set(SOURCES
-    cuvslam_yaml_config_test.cpp
     image_transform_test.cpp
     depth_loader_test.cpp
 )
