@@ -294,6 +294,12 @@ DATASETS: dict[str, DatasetSpec] = {
         dataset_id="tartan",
         prepare_module="cuvslam_tools.dataset_preparation.tartan.prepare",
     ),
+    # Provisionable only until its tarball is uploaded: an eval record for a
+    # dataset no runner can stage fails the whole suite.
+    "tartanair_v1": DatasetSpec(
+        dataset_id="tartanair_v1",
+        prepare_module="cuvslam_tools.dataset_preparation.tartanair_v1.prepare",
+    ),
     # CODa is license-gated: preparation converts archives the user downloaded by
     # hand, so provisioning only runs against a pre-seeded raw directory.
     "coda": DatasetSpec(
