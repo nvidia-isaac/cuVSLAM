@@ -91,6 +91,26 @@
         "ICL_NUIM_ARE_MSF_SLAM": {"expected": null, "tol_pct": 10},
         "ICL_NUIM_Kabsch_MSF_SLAM": {"expected": null, "tol_pct": 10},
         "ICL_NUIM_TrackingLosts_MSF_SLAM": {"expected": null, "tol_abs": 1},
-        "ICL_NUIM_FPS_MSF_SLAM": {"expected": null, "tol_pct": 15}
+        "ICL_NUIM_FPS_MSF_SLAM": {"expected": null, "tol_pct": 15},
+        "TARTAN_STABLE_ATE_MCAM_ODOM": {"expected": null, "tol_pct": 10},
+        "TARTAN_STABLE_ARE_MCAM_ODOM": {"expected": null, "tol_pct": 10},
+        "TARTAN_STABLE_Kabsch_MCAM_ODOM": {"expected": null, "tol_pct": 10},
+        "TARTAN_STABLE_TrackingLosts_MCAM_ODOM": {"expected": null, "tol_abs": 1},
+        "TARTAN_STABLE_FPS_MCAM_ODOM": {"expected": null, "tol_pct": 15},
+        "TARTAN_STABLE_ATE_MCAM_SLAM": {"expected": null, "tol_pct": 10},
+        "TARTAN_STABLE_ARE_MCAM_SLAM": {"expected": null, "tol_pct": 10},
+        "TARTAN_STABLE_Kabsch_MCAM_SLAM": {"expected": null, "tol_pct": 10},
+        "TARTAN_STABLE_TrackingLosts_MCAM_SLAM": {"expected": null, "tol_abs": 1},
+        "TARTAN_STABLE_FPS_MCAM_SLAM": {"expected": null, "tol_pct": 15},
+        "TARTAN_FLAKY_ATE_MCAM_ODOM": {"expected": null, "tol_pct": 10},
+        "TARTAN_FLAKY_ARE_MCAM_ODOM": {"expected": null, "tol_pct": 10},
+        "TARTAN_FLAKY_Kabsch_MCAM_ODOM": {"expected": null, "tol_pct": 10},
+        "TARTAN_FLAKY_TrackingLosts_MCAM_ODOM": {"expected": null, "tol_abs": 1},
+        "TARTAN_FLAKY_FPS_MCAM_ODOM": {"expected": null, "tol_pct": 15},
+        "TARTAN_FLAKY_ATE_MCAM_SLAM": {"expected": null, "tol_pct": 10},
+        "TARTAN_FLAKY_ARE_MCAM_SLAM": {"expected": null, "tol_pct": 10},
+        "TARTAN_FLAKY_Kabsch_MCAM_SLAM": {"expected": null, "tol_pct": 10},
+        "TARTAN_FLAKY_TrackingLosts_MCAM_SLAM": {"expected": null, "tol_abs": 1},
+        "TARTAN_FLAKY_FPS_MCAM_SLAM": {"expected": null, "tol_pct": 15}
     }
 }
