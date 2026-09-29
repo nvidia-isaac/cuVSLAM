@@ -54,6 +54,7 @@ class ISFMSolver {
 public:
   virtual ~ISFMSolver() = default;
 
+  // set parameters of the camera rig
   virtual const camera::Rig& getRig() const = 0;
 
   // IN:  time_ns, frameState,
@@ -62,7 +63,7 @@ public:
   //                       Start pose is Identity.
   //      static_info_exp - information matrix for static frame in exponential mapping form
   //      tracks2d        - optional output 2d track coordinates in pixels
-  //      tracks3d        - in camera space
+  //      tracks3d        - in rig space
   // return true if accurate solution was found
   virtual bool solveNextFrame(int64_t time_ns, const sof::FrameState& frameState,
                               const MulticamObservations& observations, Isometry3T& world_from_rig,

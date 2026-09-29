@@ -738,7 +738,7 @@ NB_MODULE(pycuvslam, m) {
       .def(
           "get_last_landmarks", [](Odometry& self) -> std::vector<Landmark> { return self.GetLastLandmarks(); },
           "Get an array of landmarks from the last VO frame.\n\n"
-          "Landmarks are 3D points in the last camera frame.\n"
+          "Landmarks are 3D points in the rig frame of the last VO frame.\n"
           "Requires `enable_landmarks_export=True` in :class:`Odometry.Config`.")
       .def(
           "get_last_gravity",

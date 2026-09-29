@@ -659,7 +659,7 @@ public:
    * @brief Get Last Landmarks
    *
    * Get an array of landmarks from the last VO frame;
-   * Landmarks are 3D points in the last camera frame.
+   * Landmarks are 3D points in the rig frame of the last VO frame.
    * @return Array of landmarks
    * @throws std::invalid_argument if stats export is disabled
    * @see Landmark

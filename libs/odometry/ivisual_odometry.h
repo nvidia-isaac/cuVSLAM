@@ -49,7 +49,7 @@ public:
     bool keyframe;
     bool heating;
     std::vector<Track2D> tracks2d;  // in pixels coordinates
-    Tracks3DMap tracks3d;           // coordinates in tha camera spaces
+    Tracks3DMap tracks3d;           // coordinates in rig space
   };
 
   virtual void enable_stat(bool enable) = 0;
