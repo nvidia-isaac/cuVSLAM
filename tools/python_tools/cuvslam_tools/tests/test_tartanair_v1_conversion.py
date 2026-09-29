@@ -19,8 +19,8 @@ import unittest
 import zipfile
 from pathlib import Path
 
-import cv2
 import numpy as np
+from PIL import Image
 
 from cuvslam_tools.dataset_preparation.tartanair_v1 import convert_tartanair_v1 as convert
 
@@ -32,7 +32,9 @@ SKY_M = 13000.0
 
 
 def _png(width, height):
-    return cv2.imencode(".png", np.zeros((height, width, 3), np.uint8))[1].tobytes()
+    buffer = io.BytesIO()
+    Image.new("RGB", (width, height)).save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 def _depth():
@@ -109,7 +111,7 @@ class TestSequence(_Converted):
         self.assertEqual(len(first), 12)
 
     def test_depth_is_left_only_in_millimetres_with_no_return_as_zero(self):
-        depth = cv2.imread(str(self.sequence / "depth_00" / "000001.png"), cv2.IMREAD_UNCHANGED)
+        depth = np.array(Image.open(self.sequence / "depth_00" / "000001.png"))
 
         self.assertFalse((self.sequence / "depth_01").exists())
         self.assertEqual(depth.dtype, np.uint16)

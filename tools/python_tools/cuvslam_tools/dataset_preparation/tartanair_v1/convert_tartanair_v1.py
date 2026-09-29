@@ -48,8 +48,8 @@ from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
-import cv2
 import numpy as np
+from PIL import Image
 from scipy.spatial.transform import Rotation
 
 from cuvslam_tools.dataset_preparation import rgbd
@@ -279,9 +279,12 @@ def convert_trajectory(raw_dir: str, env: str, trajectory: str, output_dir: str)
                 except KeyError:
                     raise ConversionError(f"{zip_filename(env, kind)} is missing {member}") from None
                 if frame == 0:
-                    image = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_UNCHANGED)
-                    if image is None or (image.shape[1], image.shape[0]) != IMAGE_SIZE:
-                        raise ConversionError(f"{member}: expected a {IMAGE_SIZE} image")
+                    try:
+                        size = Image.open(io.BytesIO(data)).size
+                    except OSError:
+                        size = None
+                    if size != IMAGE_SIZE:
+                        raise ConversionError(f"{member}: expected a {IMAGE_SIZE} image, got {size}")
                 target.write_bytes(data)
 
             member = f"{source}/depth_left/{name}_left_depth.npy"
@@ -289,8 +292,7 @@ def convert_trajectory(raw_dir: str, env: str, trajectory: str, output_dir: str)
                 depth, invalid = convert_depth(archives["depth_left"].read(member), member)
             except KeyError:
                 raise ConversionError(f"{zip_filename(env, 'depth_left')} is missing {member}") from None
-            if not cv2.imwrite(str(staging / "depth_00" / f"{name}.png"), depth):
-                raise ConversionError(f"cannot write depth for {member}")
+            Image.fromarray(depth).save(staging / "depth_00" / f"{name}.png", format="PNG")
             invalid_fractions.append(invalid)
     finally:
         for archive in archives.values():
