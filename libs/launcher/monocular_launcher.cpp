@@ -26,6 +26,10 @@ MonocularLauncher::MonocularLauncher(ICameraRig& cameraRig, const odom::Settings
 }
 
 void MonocularLauncher::SetupTracker(const odom::Settings& svo_settings, bool use_gpu) {
+  // Mono tracks camera 0 as the rig, so a rig origin elsewhere would offset every pose and landmark it reports.
+  if (!rig.camera_from_rig[0].isApprox(Isometry3T::Identity())) {
+    throw std::runtime_error("Mono mode tracks camera 0 as the rig, so camera 0 must be at the rig origin");
+  }
   tracker = std::make_unique<odom::MonoVisualOdometry>(rig, svo_settings, use_gpu);
   tracker->enable_stat(true);
 }

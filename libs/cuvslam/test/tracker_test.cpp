@@ -68,6 +68,22 @@ testing::AssertionResult RejectedWith(const Rig& rig, std::string_view field) {
   return testing::AssertionFailure() << "rig was accepted";
 }
 
+/// Checks that Mono turns the rig away naming camera 0's extrinsic, rather than for some unrelated
+/// calibration failure - the frustum graph check runs first and also throws std::invalid_argument.
+testing::AssertionResult MonoRejects(const Rig& rig) {
+  Odometry::Config cfg;
+  cfg.odometry_mode = Odometry::OdometryMode::Mono;
+  try {
+    Tracker{rig, Mode::OdometryOnlyRealtime, cfg};
+  } catch (const std::invalid_argument& e) {
+    if (std::string_view{e.what()}.find("rig_from_camera") != std::string_view::npos) {
+      return testing::AssertionSuccess();
+    }
+    return testing::AssertionFailure() << "rejected with \"" << e.what() << "\", which does not name rig_from_camera";
+  }
+  return testing::AssertionFailure() << "rig was accepted";
+}
+
 /// The configs an offline mode demands: bundler and SLAM in the calling thread, so the tests do not
 /// depend on background workers. Tracker checks these rather than setting them, so every offline
 /// test has to spell them out.
@@ -169,6 +185,24 @@ TEST_F(TrackerTest, RejectsSlamConfigInOdometryOnlyMode) {
   Odometry::Config realtime;
   Slam::Config slam;
   EXPECT_THROW(Tracker(rig, Mode::OdometryOnlyRealtime, realtime, &slam), std::invalid_argument);
+}
+
+TEST_F(TrackerTest, MonoModeRequiresCameraZeroAtTheRigOrigin) {
+  // Mono estimates camera 0's pose and reports its landmarks in camera 0's frame, so it can only treat camera 0 as
+  // the rig. Any other mount silently turns and offsets every pose and landmark the tracker reports.
+  Odometry::Config cfg;
+  cfg.odometry_mode = Odometry::OdometryMode::Mono;
+  EXPECT_NO_THROW(Tracker(rig, Mode::OdometryOnlyRealtime, cfg));
+
+  Rig offset_camera{rig};
+  offset_camera.cameras[0].rig_from_camera.translation = {0.5f, 0.f, 0.f};
+  EXPECT_TRUE(MonoRejects(offset_camera));
+
+  // A rotated mount has no lever arm at all, but still reports its landmark coordinates in the wrong axes.
+  // 10 degrees about y, small enough that the cameras keep the frustum overlap the earlier check wants.
+  Rig rotated_camera{rig};
+  rotated_camera.cameras[0].rig_from_camera.rotation = {0.f, 0.0871557f, 0.f, 0.9961947f};
+  EXPECT_TRUE(MonoRejects(rotated_camera));
 }
 
 TEST_F(TrackerTest, RgbdModeChecksDepthCameraId) {
