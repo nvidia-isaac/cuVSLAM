@@ -418,7 +418,7 @@ def summarize_mode(stats, dataset_type, checks):
 
     def mean(field, subset):
         values = [value for value in (safe_float(s.get(field)) for s in subset) if value is not None]
-        return fmean(values) if values else float("nan")
+        return fmean(values) if values else None
 
     kpis = {
         "ATE": mean("gt_av_translation_error", accuracy_stats),
@@ -538,7 +538,12 @@ def organize_data(data, required_metrics=REQUIRED_METRICS, prev_data=None):
             continue
         dataset_key, metric = parsed
         metrics = organized_data.setdefault(dataset_key, {})
-        value = data[key]
+        value = safe_float(data[key])
+        if value is None:
+            metrics[metric] = "NA"
+            if metric not in NO_DIFF_METRICS:
+                metrics["diff " + metric] = "NA"
+            continue
 
         if metric == "TrackingLosts":
             metrics[metric] = int(value)
@@ -551,8 +556,8 @@ def organize_data(data, required_metrics=REQUIRED_METRICS, prev_data=None):
             continue
         if "MONO" in dataset_key and metric == "ATE":
             metrics["diff " + metric] = "NA"
-        elif prev_data is not None and key in prev_data:
-            difference = value - prev_data[key]
+        elif prev_data is not None and safe_float(prev_data.get(key)) is not None:
+            difference = value - safe_float(prev_data[key])
             metrics["diff " + metric] = int(difference) if metric == "TrackingLosts" else round(difference, 4)
         else:
             metrics["diff " + metric] = "NA"
@@ -958,6 +963,12 @@ def aggregate_reports(config_reports):
             metrics["diff " + metric] = "NA"
             continue
 
+        # null means the run had no valid measurement for this KPI.
+        if any(report["current"][key] is None for _, report in config_reports):
+            metrics[metric] = "NA"
+            if metric not in NO_DIFF_METRICS:
+                metrics["diff " + metric] = "NA"
+            continue
         current_values = [
             require_numeric(report["current"][key], key, config) for config, report in config_reports
         ]
@@ -966,7 +977,8 @@ def aggregate_reports(config_reports):
         if metric in NO_DIFF_METRICS:
             continue
         previous_complete = all(
-            report["previous"] is not None and key in report["previous"] for _, report in config_reports
+            report["previous"] is not None and report["previous"].get(key) is not None
+            for _, report in config_reports
         )
         if previous_complete:
             previous_values = [
