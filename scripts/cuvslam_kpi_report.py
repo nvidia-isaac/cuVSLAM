@@ -210,7 +210,7 @@ def load_kpi_config(path):
     try:
         with open(path, "r", encoding="utf-8") as file:
             data = json.load(file)
-    except Exception as e:
+    except OSError as e:
         print(f"Warning: failed to load KPI config {path}: {e}; using built-in sequence checks")
         return config
     if not isinstance(data, dict):
@@ -239,21 +239,23 @@ def resolve_baseline_settings(kpi_config, dataset_name):
 
 
 def load_history(history_dir, run_id, count):
-    """The last count kpi_<run>.json history files as [(run, {key: value})], oldest first.
+    """The last count readable kpi_<run>.json history files as [(run, {key: value})], oldest first.
 
     The file for run_id itself is skipped, so a rerun does not compare against itself.
     """
     paths = sorted(glob.glob(os.path.join(history_dir, "kpi_[0-9]*.json")))
-    paths = [p for p in paths if os.path.basename(p) != f"kpi_{run_id}.json"][-count:]
+    paths = [p for p in paths if os.path.basename(p) != f"kpi_{run_id}.json"]
     history = []
-    for path in paths:
+    for path in reversed(paths):
+        if len(history) == count:
+            break
         try:
             data = load_json_object(path, "KPI history")
-        except Exception as e:
+        except (OSError, ValueError) as e:
             print(f"Warning: skipping unreadable KPI history {path}: {e}")
             continue
         history.append((os.path.basename(path)[len("kpi_"):-len(".json")], data))
-    return history
+    return history[::-1]
 
 
 def build_baseline(current, history, kpi_config):
@@ -415,7 +417,8 @@ def summarize_mode(stats, dataset_type, checks):
             excluded = [run["sequence"] for run in runs if run["failure"] is not None]
 
     def mean(field, subset):
-        return sum(s.get(field, 0) for s in subset) / len(subset)
+        values = [value for value in (safe_float(s.get(field)) for s in subset) if value is not None]
+        return fmean(values) if values else float("nan")
 
     kpis = {
         "ATE": mean("gt_av_translation_error", accuracy_stats),
@@ -1037,8 +1040,7 @@ def collect_command(args):
         history = load_history(args.history, args.run_id, max(windows))
         print(f"Rolling baseline: {len(history)} KPI history run(s) from {args.history}")
         baseline = build_baseline(current, history, kpi_config)
-    report = build_report(args.run_id, current, previous, kpi_config if args.baseline_ranges else None,
-                          sequences, expected_keys, baseline)
+    report = build_report(args.run_id, current, previous, kpi_config, sequences, expected_keys, baseline)
     write_json(args.out_kpi_json, current)
     write_json(args.out_report_json, report)
     print(f"Raw KPI JSON saved at {args.out_kpi_json}")
