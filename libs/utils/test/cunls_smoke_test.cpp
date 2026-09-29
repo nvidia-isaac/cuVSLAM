@@ -21,7 +21,7 @@
 
 #include <cunls/common/cuda_stream.h>
 #include <cunls/common/types.h>
-#include <cunls/factor/prior_vector_factor_batch.h>
+#include <cunls/factor/prior/prior_vector_factor_batch.h>
 #include <cunls/minimizer/gauss_newton_minimizer.h>
 #include <cunls/minimizer/levenberg_marquardt_minimizer.h>
 #include <cunls/minimizer/problem.h>

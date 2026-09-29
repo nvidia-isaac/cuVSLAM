@@ -30,7 +30,7 @@ if(CUDAToolkit_VERSION VERSION_LESS "12.6")
                         "Either install CUDA 12.6+ or set -DUSE_CUNLS=OFF.")
 endif()
 
-set(CUNLS_VERSION "a4f7d645788b3d20a5850f2328d0caa32ef8cd7e")
+set(CUNLS_VERSION "41ec7fc616d983e60fe66e7cd71cacbd883e035c")
 
 # Control cuNLS's generic BUILD_TESTING option without changing it for the rest of cuVSLAM.
 if(DEFINED BUILD_TESTING)
