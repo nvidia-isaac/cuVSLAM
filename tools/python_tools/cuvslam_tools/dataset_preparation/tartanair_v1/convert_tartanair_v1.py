@@ -24,11 +24,13 @@ Reads the downloaded zips directly, with no extracted copy, and writes per seque
     <env>/<traj>/pose_right.txt
     <env>/<traj>/stereo.edex            rig, intrinsics, depth scale, frame rate
 
-plus ``tartan-vo_slam.cfg`` and ``tartan_flaky-vo_slam.cfg`` at the root. Their
-names keep the KPI prefixes ``TARTAN`` and ``TARTAN_FLAKY`` the OSMO history
-reports under, and the sequence folders and titles match that pipeline's, so a
-per-sequence comparison lines up. Ground truth is written by the same code the
-OSMO dataset was built with, which reproduces its ``gt.txt`` on every sequence.
+plus three reporter configs at the root: ``tartan-vo_slam.cfg`` (KPI prefix
+``TARTAN``) with every trajectory, and the OSMO split into
+``tartan_stable-vo_slam.cfg`` (``TARTAN_STABLE``, OSMO's ``TARTAN``) and
+``tartan_flaky-vo_slam.cfg`` (``TARTAN_FLAKY``). The sequence folders and titles
+match that pipeline's, so a per-sequence comparison lines up. Ground truth is
+written by the same code the OSMO dataset was built with, which reproduces its
+``gt.txt`` on every sequence.
 
 The selection is every Hard trajectory of 16 environments. The OSMO dataset also
 omitted ``abandonedfactory_night`` and ``gascola``; of what it kept, two
@@ -118,15 +120,22 @@ FLAKY: Dict[str, Tuple[str, ...]] = {
     "westerndesert": ("P001", "P005",),
 }
 
-# Reporter config -> the trajectories it evaluates. The KPI prefix is the name
-# before the first hyphen, and an underscore keeps TARTAN_FLAKY from colliding
-# with TARTAN.
-CONFIGS: Dict[str, Dict[str, Tuple[str, ...]]] = {
-    "tartan-vo_slam.cfg": STABLE,
-    "tartan_flaky-vo_slam.cfg": FLAKY,
+ENVIRONMENTS: Tuple[str, ...] = tuple(sorted(set(STABLE) | set(FLAKY)))
+
+ALL: Dict[str, Tuple[str, ...]] = {
+    env: tuple(sorted(STABLE.get(env, ()) + FLAKY.get(env, ()))) for env in ENVIRONMENTS
 }
 
-ENVIRONMENTS: Tuple[str, ...] = tuple(sorted(set(STABLE) | set(FLAKY)))
+# Reporter config -> the trajectories it evaluates. The KPI prefix is the name
+# before the first hyphen, and an underscore keeps TARTAN_STABLE and
+# TARTAN_FLAKY from colliding with TARTAN. The configs ship inside the dataset
+# tarball, so all three are written whichever ones eval runs: switching between
+# the full set and the split is then a registry change, not a reprovisioning.
+CONFIGS: Dict[str, Dict[str, Tuple[str, ...]]] = {
+    "tartan-vo_slam.cfg": ALL,
+    "tartan_stable-vo_slam.cfg": STABLE,
+    "tartan_flaky-vo_slam.cfg": FLAKY,
+}
 
 EDEX_FILE = rgbd.EDEX_FILE
 GROUND_TRUTH_FILE = rgbd.GROUND_TRUTH_FILE
@@ -158,7 +167,7 @@ def selected(envs: Optional[Sequence[str]] = None) -> Dict[str, Tuple[str, ...]]
         if unknown:
             raise ConversionError(f"unknown environments {unknown}; known: {', '.join(ENVIRONMENTS)}")
     chosen = envs or ENVIRONMENTS
-    return {env: tuple(sorted(STABLE.get(env, ()) + FLAKY.get(env, ()))) for env in ENVIRONMENTS if env in chosen}
+    return {env: ALL[env] for env in ENVIRONMENTS if env in chosen}
 
 
 def config_subsets(chosen: Dict[str, Tuple[str, ...]]) -> Dict[str, Dict[str, Tuple[str, ...]]]:

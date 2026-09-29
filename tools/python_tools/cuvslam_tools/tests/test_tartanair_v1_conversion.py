@@ -135,14 +135,22 @@ class TestConfigs(_Converted):
     def _config(self, name):
         return json.loads((self.output / name).read_text())
 
-    def test_each_trajectory_is_in_exactly_one_config_with_both_modes(self):
-        stable = self._config("tartan-vo_slam.cfg")["sequence_cfgs"]
+    def test_each_trajectory_is_in_exactly_one_split_config_with_both_modes(self):
+        stable = self._config("tartan_stable-vo_slam.cfg")["sequence_cfgs"]
         flaky = self._config("tartan_flaky-vo_slam.cfg")["sequence_cfgs"]
         folders = lambda entries: sorted({entry["sequence_folder"] for entry in entries})
 
         self.assertEqual(folders(flaky), [f"{ENV}/P003"])
         self.assertEqual(folders(stable), [f"{ENV}/{t}" for t in ("P000", "P001", "P002", "P004")])
         self.assertEqual(len(stable), 2 * len(folders(stable)))
+
+    def test_the_full_config_is_the_stable_and_flaky_entries_together(self):
+        key = lambda entry: entry["sequence_title"]
+        split = (self._config("tartan_stable-vo_slam.cfg")["sequence_cfgs"]
+                 + self._config("tartan_flaky-vo_slam.cfg")["sequence_cfgs"])
+        full = self._config("tartan-vo_slam.cfg")["sequence_cfgs"]
+
+        self.assertEqual(sorted(full, key=key), sorted(split, key=key))
 
     def test_entries_keep_the_osmo_titles_and_link_ground_truth(self):
         entries = self._config("tartan-vo_slam.cfg")["sequence_cfgs"]
@@ -152,13 +160,14 @@ class TestConfigs(_Converted):
         self.assertEqual({e["gt_file_path"] for e in entries}, {"gt.txt"})
         self.assertEqual([e.get("use_slam", False) for e in entries[:2]], [False, True])
 
-    def test_configs_keep_the_osmo_kpi_prefixes_and_segments(self):
+    def test_configs_have_distinct_kpi_prefixes_and_the_osmo_segments(self):
         for name in convert.CONFIGS:
             with self.subTest(config=name):
                 config = self._config(name)
                 self.assertEqual(config["dataset_folder"], f"{convert.DATASET_ID}/")
                 self.assertEqual(config["segment_lengths"], list(convert.SEGMENT_LENGTHS))
-        self.assertEqual({name.split("-")[0].upper() for name in convert.CONFIGS}, {"TARTAN", "TARTAN_FLAKY"})
+        self.assertEqual({name.split("-")[0].upper() for name in convert.CONFIGS},
+                         {"TARTAN", "TARTAN_STABLE", "TARTAN_FLAKY"})
 
 
 class TestSelection(unittest.TestCase):
@@ -188,7 +197,7 @@ class TestSelection(unittest.TestCase):
     def test_a_partial_run_writes_only_configs_it_can_fill(self):
         chosen = convert.selected(["carwelding"])
 
-        self.assertEqual(list(convert.config_subsets(chosen)), ["tartan-vo_slam.cfg"])
+        self.assertEqual(list(convert.config_subsets(chosen)), ["tartan-vo_slam.cfg", "tartan_stable-vo_slam.cfg"])
 
     def test_an_unknown_environment_is_rejected(self):
         with self.assertRaisesRegex(convert.ConversionError, "unknown environments"):
