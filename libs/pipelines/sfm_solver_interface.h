@@ -54,7 +54,7 @@ class ISFMSolver {
 public:
   virtual ~ISFMSolver() = default;
 
-  // set parameters of the camera rig
+  // returns the camera rig
   virtual const camera::Rig& getRig() const = 0;
 
   // IN:  time_ns, frameState,

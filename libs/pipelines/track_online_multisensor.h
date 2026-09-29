@@ -95,7 +95,7 @@ private:
                         const pnp::RGBDInfos& depth_infos, const map::State& state,
                         const sba_imu::IMUPreintegration& preint);
 
-  // Exports observations along with corresponding 3d points
+  // Exports per-camera observations along with corresponding 3d points
   // out_tracks2d - output 2d track coordinates in pixels
   // out_tracks3d - in rig space
   void exportTracks(const std::vector<camera::Observation>& observations, std::vector<Track2D>& out_tracks2d,

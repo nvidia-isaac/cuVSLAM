@@ -330,11 +330,11 @@ struct Observation {
 /**
  * @brief Landmark
  *
- * 3D point with coordinates in meters in world frame
+ * 3D point with coordinates in meters in the rig frame of the VO frame it comes from
  */
 struct Landmark {
   uint64_t id;      ///< landmark id
-  Vector3f coords;  ///< x, y, z in meters in world frame
+  Vector3f coords;  ///< x, y, z in meters in the rig frame
 };
 
 /**
