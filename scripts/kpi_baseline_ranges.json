@@ -1,45 +1,42 @@
 {
     "_comment": [
-        "Static, human-maintained guardrails for cuVSLAM eval, distinct from the rolling",
-        "nightly baseline in KPI_HISTORY (which changes every night).",
-        "cuvslam_kpi_report.py collect reads this via -b/--baseline_ranges."
+        "Static, human-maintained KPI guardrails for cuVSLAM eval, distinct from the rolling",
+        "nightly baseline in KPI_HISTORY (which changes every night). cuvslam_kpi_report.py",
+        "collect reads this via -b/--baseline_ranges. Nothing here fails the job.",
+        "",
+        "'defaults' applies to every dataset; 'datasets' overrides it per KPI prefix (the",
+        "<DATASET> part of a <DATASET>_<METRIC>_<TYPE>_<MODE> key). Settings:",
+        "- max_ate_pct, max_lost_frame_pct: a sequence run fails if it tracked no frames,",
+        "  lost more than max_lost_frame_pct of its frames, has no ATE, or its ATE exceeds",
+        "  max_ate_pct. Failures are counted in the KPI tables (broken = fails in every",
+        "  configuration, flaky = in some).",
+        "- exclude_failed: also drop failed sequences from the ATE, ARE and Kabsch means;",
+        "  Losts and FPS always cover every sequence.",
+        "- tolerances: soft drift check, one per metric, 'tol_pct' (percent of expected) or",
+        "  'tol_abs' (absolute). A dataset's entry replaces the default for that metric.",
+        "- expected (datasets only): calibrated values keyed <METRIC>_<TYPE>_<MODE>, e.g.",
+        "  \"ATE_MCAM_ODOM\": 0.82, or {\"value\": 0.82, \"tol_pct\": 5} to override the",
+        "  tolerance. Uncalibrated KPIs are SKIPPED. Copy steady-state values from a trusted",
+        "  nightly kpi_<date>.json. The drift check covers the keys the dataset registry says",
+        "  the suite produces (run_eval.sh passes kpi-keys via -e), so a new dataset needs no",
+        "  entry here."
     ],
-    "drift": {
-        "_comment": [
-            "SOFT drift check (WITHIN/DRIFT/SKIPPED/MISSING) stored in the report JSON. It never",
-            "fails the job. The keys checked are the ones the dataset registry says the suite",
-            "produces (run_eval.sh passes kpi-keys via -e/--expected_keys), so a new dataset",
-            "needs no entry here. 'tolerances' gives one tolerance per metric: 'tol_pct'",
-            "(percent of expected) or 'tol_abs' (absolute). A key without an 'expected' entry",
-            "is uncalibrated and SKIPPED. To calibrate, copy the steady-state value from a",
-            "trusted nightly kpi_<date>.json, e.g. \"KITTI_ATE_MCAM_ODOM\": 0.82, or give",
-            "{\"value\": 0.82, \"tol_pct\": 5} to override the metric's tolerance."
-        ],
+    "defaults": {
+        "max_ate_pct": 10,
+        "max_lost_frame_pct": 1,
+        "exclude_failed": false,
         "tolerances": {
             "ATE": {"tol_pct": 10},
             "ARE": {"tol_pct": 10},
             "Kabsch": {"tol_pct": 10},
             "TrackingLosts": {"tol_abs": 1},
             "FPS": {"tol_pct": 15}
-        },
-        "expected": {}
-    },
-    "sequence_checks": {
-        "_comment": [
-            "Per-sequence failure checks, applied by cuvslam_kpi_report.py collect.",
-            "A sequence run fails if it tracked no frames, lost more than max_lost_frame_pct",
-            "of its frames, has no ATE, or its ATE exceeds max_ate_pct. Failures are counted",
-            "in the KPI tables (broken = fails in every configuration, flaky = in some) and",
-            "never fail the job. exclude_failed also drops failed sequences from the ATE, ARE",
-            "and Kabsch means; Losts and FPS always cover every sequence.",
-            "'datasets' overrides 'defaults' per KPI prefix (the <DATASET> part of a key)."
-        ],
-        "defaults": {"max_ate_pct": 10, "max_lost_frame_pct": 1, "exclude_failed": false},
-        "datasets": {
-            "TUM": {"max_ate_pct": 20, "exclude_failed": true},
-            "ICL_NUIM": {"max_ate_pct": 20},
-            "TARTAN": {"exclude_failed": true},
-            "TARTAN_FLAKY": {"exclude_failed": true}
         }
+    },
+    "datasets": {
+        "TUM": {"max_ate_pct": 20, "exclude_failed": true},
+        "ICL_NUIM": {"max_ate_pct": 20},
+        "TARTAN": {"exclude_failed": true},
+        "TARTAN_FLAKY": {"exclude_failed": true}
     }
 }

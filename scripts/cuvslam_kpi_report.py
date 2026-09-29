@@ -35,8 +35,8 @@ NO_DIFF_METRICS = {"FPS"}
 REQUIRED_METRICS = ["ATE", "ARE", "Kabsch", "TrackingLosts", "FPS"]
 REPORT_SCHEMA_VERSION = 2
 
-# Per-sequence failure checks, overridable per dataset prefix in the
-# "sequence_checks" block of the baseline ranges file. A failed sequence is
+# Per-sequence failure checks, overridable in the KPI config's "defaults" and
+# per dataset prefix under "datasets". A failed sequence is
 # counted in the report; with exclude_failed it is also left out of the
 # accuracy metrics, so a few divergent trajectories cannot swing the means.
 DEFAULT_SEQUENCE_CHECKS = {"max_ate_pct": 10.0, "max_lost_frame_pct": 1.0, "exclude_failed": False}
@@ -125,95 +125,112 @@ def odometry_mode_to_type(odometry_mode):
     )
 
 
-def load_drift_spec(path):
-    """Load the "drift" block of the baseline ranges file.
-
-    Returns {"tolerances": {metric: spec}, "expected": {key: value or spec}},
-    with empty dicts on any error. Never raises: the drift check is soft.
-    """
-    empty = {"tolerances": {}, "expected": {}}
-    try:
-        with open(path, 'r') as f:
-            data = json.load(f)
-    except Exception as e:
-        print(f"Warning: failed to load baseline ranges {path}: {e}")
-        return empty
-    block = data.get("drift") if isinstance(data, dict) else None
-    if not isinstance(block, dict):
-        print(f"Warning: baseline ranges {path} has no drift object; skipping drift check")
-        return empty
-    spec = {}
-    for name in ("tolerances", "expected"):
-        value = block.get(name, {})
-        if not isinstance(value, dict):
-            print(f"Warning: drift.{name} in {path} is not a json object; ignoring it")
-            value = {}
-        spec[name] = value
-    return spec
-
-
 def load_expected_keys(path):
     """KPI keys a run is expected to produce, one per line (dataset_registry kpi-keys)."""
     with open(path, "r", encoding="utf-8") as file:
         return [line.strip() for line in file if line.strip()]
 
 
-def _validated_checks(spec, where):
+def _non_negative(value, where):
+    if isinstance(value, bool) or safe_float(value) is None or float(value) < 0:
+        raise ValueError(f"{where} must be a non-negative number")
+    return float(value)
+
+
+def _validated_tolerance(spec, where):
+    if not isinstance(spec, dict) or len(set(spec) & {"tol_pct", "tol_abs"}) != 1 or set(spec) - {"tol_pct", "tol_abs"}:
+        raise ValueError(f"{where} must be an object with exactly one of tol_pct or tol_abs")
+    return {name: _non_negative(value, f"{where}.{name}") for name, value in spec.items()}
+
+
+def _validated_expected(entry, where):
+    if not isinstance(entry, dict):
+        return {"value": _non_negative(entry, where)}
+    if "value" not in entry:
+        raise ValueError(f"{where} must be a number or an object with a value")
+    tolerance = {name: value for name, value in entry.items() if name != "value"}
+    validated = {"value": _non_negative(entry["value"], f"{where}.value")}
+    if tolerance:
+        validated.update(_validated_tolerance(tolerance, where))
+    return validated
+
+
+def _validated_settings(spec, where, *, is_defaults):
+    """Validate one "defaults" or per-dataset settings object."""
     if not isinstance(spec, dict):
         raise ValueError(f"{where} must be a JSON object")
-    unknown = sorted(set(spec) - set(DEFAULT_SEQUENCE_CHECKS))
+    allowed = set(DEFAULT_SEQUENCE_CHECKS) | {"tolerances"} | (set() if is_defaults else {"expected"})
+    unknown = sorted(set(spec) - allowed - {"_comment"})
     if unknown:
         raise ValueError(f"{where} has unknown keys: {', '.join(unknown)}")
-    checks = {}
+    settings = {}
     for key, value in spec.items():
+        if key == "_comment":
+            continue
         if key == "exclude_failed":
             if not isinstance(value, bool):
                 raise ValueError(f"{where}.{key} must be a boolean")
-        elif isinstance(value, bool) or safe_float(value) is None or float(value) < 0:
-            raise ValueError(f"{where}.{key} must be a non-negative number")
+            settings[key] = value
+        elif key in DEFAULT_SEQUENCE_CHECKS:
+            settings[key] = _non_negative(value, f"{where}.{key}")
         else:
-            value = float(value)
-        checks[key] = value
-    return checks
+            if not isinstance(value, dict):
+                raise ValueError(f"{where}.{key} must be a JSON object")
+            validate = _validated_tolerance if key == "tolerances" else _validated_expected
+            settings[key] = {name: validate(item, f"{where}.{key}.{name}") for name, item in value.items()}
+    return settings
 
 
-def load_sequence_checks(path):
-    """Load the "sequence_checks" block of the baseline ranges file.
+def load_kpi_config(path):
+    """Load the KPI config file: {"defaults": {...}, "datasets": {PREFIX: {...}}}.
 
-    Returns {"defaults": {...}, "datasets": {PREFIX: {...}}} with defaults fully
-    populated. An absent file or block yields the built-in defaults. A malformed
-    block raises: unlike the soft drift ranges, these checks change KPI values.
+    Both levels hold the sequence checks (max_ate_pct, max_lost_frame_pct,
+    exclude_failed) and per-metric drift "tolerances"; a dataset also holds
+    calibrated "expected" values keyed <METRIC>_<TYPE>_<MODE>. An empty path or
+    an unreadable file yields the built-in sequence checks and no drift data.
+    A malformed file raises, because the sequence checks change KPI values.
     """
-    defaults = dict(DEFAULT_SEQUENCE_CHECKS)
+    config = {"defaults": dict(DEFAULT_SEQUENCE_CHECKS, tolerances={}), "datasets": {}}
     if not path:
-        return {"defaults": defaults, "datasets": {}}
+        return config
     try:
         with open(path, "r", encoding="utf-8") as file:
             data = json.load(file)
     except Exception as e:
-        print(f"Warning: failed to load sequence checks {path}: {e}; using defaults")
-        return {"defaults": defaults, "datasets": {}}
-    block = data.get("sequence_checks") if isinstance(data, dict) else None
-    if block is None:
-        return {"defaults": defaults, "datasets": {}}
-    if not isinstance(block, dict):
-        raise ValueError(f"sequence_checks in {path} must be a JSON object")
-    defaults.update(_validated_checks(block.get("defaults", {}), "sequence_checks.defaults"))
-    datasets = block.get("datasets", {})
+        print(f"Warning: failed to load KPI config {path}: {e}; using built-in sequence checks")
+        return config
+    if not isinstance(data, dict):
+        raise ValueError(f"KPI config {path} must be a JSON object")
+    unknown = sorted(set(data) - {"_comment", "defaults", "datasets"})
+    if unknown:
+        raise ValueError(f"KPI config {path} has unknown keys: {', '.join(unknown)}")
+    config["defaults"].update(_validated_settings(data.get("defaults", {}), "defaults", is_defaults=True))
+    datasets = data.get("datasets", {})
     if not isinstance(datasets, dict):
-        raise ValueError(f"sequence_checks.datasets in {path} must be a JSON object")
-    return {
-        "defaults": defaults,
-        "datasets": {
-            name: _validated_checks(spec, f"sequence_checks.datasets.{name}") for name, spec in datasets.items()
-        },
+        raise ValueError(f"datasets in {path} must be a JSON object")
+    config["datasets"] = {
+        name: _validated_settings(spec, f"datasets.{name}", is_defaults=False) for name, spec in datasets.items()
     }
+    return config
 
 
-def resolve_sequence_checks(sequence_checks, dataset_name):
-    checks = dict(sequence_checks["defaults"])
-    checks.update(sequence_checks["datasets"].get(dataset_name, {}))
-    return checks
+def resolve_sequence_checks(kpi_config, dataset_name):
+    overrides = kpi_config["datasets"].get(dataset_name, {})
+    return {key: overrides.get(key, kpi_config["defaults"][key]) for key in DEFAULT_SEQUENCE_CHECKS}
+
+
+def resolve_tolerance(kpi_config, dataset_name, metric):
+    overrides = kpi_config["datasets"].get(dataset_name, {}).get("tolerances", {})
+    return overrides.get(metric, kpi_config["defaults"]["tolerances"].get(metric, {}))
+
+
+def calibrated_values(kpi_config):
+    """{full KPI key: {"value": ..., optional tolerance}} across all datasets."""
+    return {
+        f"{name}_{suffix}": entry
+        for name, settings in kpi_config["datasets"].items()
+        for suffix, entry in settings.get("expected", {}).items()
+    }
 
 
 def sequence_failure(stat, checks, *, check_ate=True):
@@ -249,21 +266,19 @@ def safe_float(value):
     return None if result != result else result  # drop NaN
 
 
-def evaluate_drift(kpis_dict, drift_spec, expected_keys=None):
+def evaluate_drift(kpis_dict, kpi_config, expected_keys=None):
     """Compare each KPI against its expected value +/- tolerance.
 
     Checks every key in expected_keys (the keys a run should produce; the keys
     this run produced if None) and every calibrated key. The tolerance is the
-    metric's from drift_spec["tolerances"], unless a calibrated entry is an
-    object carrying its own tol_pct or tol_abs.
+    calibrated entry's own, else the dataset's for that metric, else the
+    default's.
 
     Soft check only: returns a list of (key, status, detail) rows and never
-    raises, even on malformed baseline entries. Statuses: WITHIN (in range),
-    DRIFT (out of range), SKIPPED (uncalibrated/malformed), MISSING (no value
-    this run).
+    raises. Statuses: WITHIN (in range), DRIFT (out of range), SKIPPED
+    (uncalibrated/malformed), MISSING (no value this run).
     """
-    tolerances = drift_spec.get("tolerances", {})
-    calibrated = drift_spec.get("expected", {})
+    calibrated = calibrated_values(kpi_config)
     keys = set(kpis_dict if expected_keys is None else expected_keys) | set(calibrated)
     rows = []
     for key in sorted(keys):
@@ -275,11 +290,11 @@ def evaluate_drift(kpis_dict, drift_spec, expected_keys=None):
             if actual is None:
                 rows.append((key, "SKIPPED", f"non-numeric actual value: {kpis_dict[key]!r}"))
                 continue
-            entry = calibrated.get(key)
-            raw_expected = entry.get("value") if isinstance(entry, dict) else entry
+            entry = calibrated.get(key, {})
+            raw_expected = entry.get("value")
             parsed = parse_kpi_key(key)
-            spec = dict(tolerances.get(parsed[1], {})) if parsed else {}
-            if isinstance(entry, dict) and ("tol_pct" in entry or "tol_abs" in entry):
+            spec = resolve_tolerance(kpi_config, parsed[0].split("-")[0], parsed[1]) if parsed else {}
+            if "tol_pct" in entry or "tol_abs" in entry:
                 spec = {name: entry[name] for name in ("tol_pct", "tol_abs") if name in entry}
             expected = safe_float(raw_expected)
             if expected is None:
@@ -343,18 +358,18 @@ def summarize_mode(stats, dataset_type, checks):
     return kpis, {"checks": checks, "excluded": excluded, "runs": runs}
 
 
-def process_dataset_folder(dataset_folder_path, sequence_checks=None):
+def process_dataset_folder(dataset_folder_path, kpi_config=None):
     """Process a dataset folder to extract metrics for ODOM and SLAM.
 
     Args:
         dataset_folder_path: Path to dataset folder (e.g., kitti-vio_slam_gt)
-        sequence_checks: Result of load_sequence_checks; built-in defaults if None.
+        kpi_config: Result of load_kpi_config; built-in sequence checks if None.
 
     Returns:
         tuple: (flat KPI dict, {row key: sequence check block}), or None.
     """
-    if sequence_checks is None:
-        sequence_checks = load_sequence_checks("")
+    if kpi_config is None:
+        kpi_config = load_kpi_config("")
     dataset_name = os.path.basename(dataset_folder_path).split('-')[0].upper()
 
     timestamped_folders = glob.glob(os.path.join(dataset_folder_path, '*'))
@@ -397,7 +412,7 @@ def process_dataset_folder(dataset_folder_path, sequence_checks=None):
         return None
     print(f'  Detected dataset type: {dataset_type} (from odometry_mode: {all_stats[0]["odometry_mode"]})')
 
-    checks = resolve_sequence_checks(sequence_checks, dataset_name)
+    checks = resolve_sequence_checks(kpi_config, dataset_name)
     sequences = {}
     for mode in ("ODOM", "SLAM"):
         mode_stats = [s for s in all_stats if mode in s.get('sequence_title', '').upper()]
@@ -622,7 +637,7 @@ def dataset_sort_key(folder):
     return (4, name)
 
 
-def collect_kpis(stat_folder, sequence_checks=None):
+def collect_kpis(stat_folder, kpi_config=None):
     """Compute a flat KPI dictionary and per-row sequence checks from a cuvslam_app stats directory."""
     if not os.path.isdir(stat_folder):
         raise ValueError(f"Stat folder does not exist: {stat_folder}")
@@ -644,7 +659,7 @@ def collect_kpis(stat_folder, sequence_checks=None):
     for dataset_folder in dataset_folders:
         folder_name = os.path.basename(dataset_folder)
         print(f"  Processing: {folder_name}")
-        processed = process_dataset_folder(dataset_folder, sequence_checks)
+        processed = process_dataset_folder(dataset_folder, kpi_config)
         if not processed:
             continue
         result, result_sequences = processed
@@ -695,12 +710,12 @@ def write_text(path, text):
         file.write(text)
 
 
-def build_report(run_id, current, previous=None, drift_spec=None, sequences=None, expected_keys=None):
+def build_report(run_id, current, previous=None, kpi_config=None, sequences=None, expected_keys=None):
     drift = []
-    if drift_spec is not None:
+    if kpi_config is not None:
         drift = [
             {"key": key, "status": status, "detail": detail}
-            for key, status, detail in evaluate_drift(current, drift_spec, expected_keys)
+            for key, status, detail in evaluate_drift(current, kpi_config, expected_keys)
         ]
     return {
         "schema_version": REPORT_SCHEMA_VERSION,
@@ -868,12 +883,12 @@ def parse_config_report(value):
 
 def collect_command(args):
     print("=============================\nKPI collector is up!")
-    sequence_checks = load_sequence_checks(args.baseline_ranges)
-    current, sequences = collect_kpis(args.stat_folder, sequence_checks)
+    kpi_config = load_kpi_config(args.baseline_ranges)
+    current, sequences = collect_kpis(args.stat_folder, kpi_config)
     previous = load_json_object(args.prev_kpi, "previous KPI data") if args.prev_kpi else None
-    drift_spec = load_drift_spec(args.baseline_ranges) if args.baseline_ranges else None
     expected_keys = load_expected_keys(args.expected_keys) if args.expected_keys else None
-    report = build_report(args.run_id, current, previous, drift_spec, sequences, expected_keys)
+    report = build_report(args.run_id, current, previous, kpi_config if args.baseline_ranges else None,
+                          sequences, expected_keys)
     write_json(args.out_kpi_json, current)
     write_json(args.out_report_json, report)
     print(f"Raw KPI JSON saved at {args.out_kpi_json}")

@@ -83,15 +83,17 @@ Repository secrets, split read from write so fork-reachable jobs never hold a ke
   `kpi_<run_id>.report.json` contains the current values, previous per-config values, and soft drift results. KPIs are
   ATE, ARE, Kabsch, tracking losts, and FPS, in ODOM and SLAM modes. During migration, `run_eval.sh` also emits the old
   `.table` and `.drift` files; a follow-up script-only change removes those after CI switches to report JSON.
-- Drift check: covers every key the registry's `kpi-keys` lists for the suite, plus any calibrated key. The `drift`
-  block of `kpi_baseline_ranges.json` holds one tolerance per metric and an `expected` map that is empty until KPIs
-  are calibrated; an entry is a number, or `{"value": ..., "tol_pct"|"tol_abs": ...}` to override the tolerance.
+- KPI config: `kpi_baseline_ranges.json` has `defaults` and per-prefix `datasets` overrides, each holding the
+  sequence checks (`max_ate_pct`, `max_lost_frame_pct`, `exclude_failed`) and per-metric drift `tolerances`; a
+  dataset also holds calibrated `expected` values keyed `<METRIC>_<TYPE>_<MODE>`. A malformed file raises, because
+  the sequence checks change KPI values.
+- Drift check: covers every key the registry's `kpi-keys` lists for the suite, plus any calibrated key. The tolerance
+  is the calibrated entry's own (`{"value": ..., "tol_pct"|"tol_abs": ...}`), else the dataset's for that metric,
+  else the default's. Uncalibrated keys are SKIPPED.
 - Sequence checks: `collect` also records each sequence run in the report JSON's `sequences` block and marks it failed
-  if it tracked no frames, lost more than `max_lost_frame_pct` of its frames, has no ATE, or exceeds `max_ate_pct`.
-  The thresholds live in the `sequence_checks` block of `kpi_baseline_ranges.json` (defaults plus per-prefix
-  overrides; RGB-D datasets get a laxer ATE cap). Failures never fail the job. Prefixes with `exclude_failed` leave
-  failed sequences out of the ATE, ARE and Kabsch means (TUM and TartanAir); Losts and FPS always cover every
-  sequence. A malformed block raises, because it changes KPI values.
+  if it tracked no frames, lost more than `max_lost_frame_pct` of its frames, has no ATE, or exceeds `max_ate_pct`
+  (RGB-D datasets get a laxer ATE cap). Failures never fail the job. Prefixes with `exclude_failed` leave failed
+  sequences out of the ATE, ARE and Kabsch means (TUM and TartanAir); Losts and FPS always cover every sequence.
 - Nightly: `cuvslam_kpi_report.py aggregate` publishes one row per dataset/type/mode. KPI cells contain the mean and
   population standard deviation across all four x86 configurations, except Losts, which shows min–max; diff cells
   compare current and previous aggregated means. The last column counts broken sequences (failed in every
