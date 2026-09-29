@@ -125,23 +125,37 @@ def odometry_mode_to_type(odometry_mode):
     )
 
 
-def load_baseline_ranges(path):
-    """Load the committed baseline-ranges json.
+def load_drift_spec(path):
+    """Load the "drift" block of the baseline ranges file.
 
-    Returns the dict of per-KPI range specs (the "kpis" block, or the top-level
-    dict if no "kpis" key), or an empty dict on any error. Never raises.
+    Returns {"tolerances": {metric: spec}, "expected": {key: value or spec}},
+    with empty dicts on any error. Never raises: the drift check is soft.
     """
+    empty = {"tolerances": {}, "expected": {}}
     try:
         with open(path, 'r') as f:
             data = json.load(f)
     except Exception as e:
         print(f"Warning: failed to load baseline ranges {path}: {e}")
-        return {}
-    if not isinstance(data, dict):
-        print(f"Warning: baseline ranges {path} is not a json object; skipping drift check")
-        return {}
-    ranges = data.get("kpis", data)
-    return ranges if isinstance(ranges, dict) else {}
+        return empty
+    block = data.get("drift") if isinstance(data, dict) else None
+    if not isinstance(block, dict):
+        print(f"Warning: baseline ranges {path} has no drift object; skipping drift check")
+        return empty
+    spec = {}
+    for name in ("tolerances", "expected"):
+        value = block.get(name, {})
+        if not isinstance(value, dict):
+            print(f"Warning: drift.{name} in {path} is not a json object; ignoring it")
+            value = {}
+        spec[name] = value
+    return spec
+
+
+def load_expected_keys(path):
+    """KPI keys a run is expected to produce, one per line (dataset_registry kpi-keys)."""
+    with open(path, "r", encoding="utf-8") as file:
+        return [line.strip() for line in file if line.strip()]
 
 
 def _validated_checks(spec, where):
@@ -235,18 +249,25 @@ def safe_float(value):
     return None if result != result else result  # drop NaN
 
 
-def evaluate_drift(kpis_dict, ranges):
-    """Compare each computed KPI against its expected value +/- tolerance.
+def evaluate_drift(kpis_dict, drift_spec, expected_keys=None):
+    """Compare each KPI against its expected value +/- tolerance.
+
+    Checks every key in expected_keys (the keys a run should produce; the keys
+    this run produced if None) and every calibrated key. The tolerance is the
+    metric's from drift_spec["tolerances"], unless a calibrated entry is an
+    object carrying its own tol_pct or tol_abs.
 
     Soft check only: returns a list of (key, status, detail) rows and never
     raises, even on malformed baseline entries. Statuses: WITHIN (in range),
     DRIFT (out of range), SKIPPED (uncalibrated/malformed), MISSING (no value
     this run).
     """
+    tolerances = drift_spec.get("tolerances", {})
+    calibrated = drift_spec.get("expected", {})
+    keys = set(kpis_dict if expected_keys is None else expected_keys) | set(calibrated)
     rows = []
-    for key in sorted(ranges):
+    for key in sorted(keys):
         try:
-            spec = ranges[key] if isinstance(ranges[key], dict) else {}
             if key not in kpis_dict:
                 rows.append((key, "MISSING", "no value produced this run"))
                 continue
@@ -254,7 +275,12 @@ def evaluate_drift(kpis_dict, ranges):
             if actual is None:
                 rows.append((key, "SKIPPED", f"non-numeric actual value: {kpis_dict[key]!r}"))
                 continue
-            raw_expected = spec.get("expected")
+            entry = calibrated.get(key)
+            raw_expected = entry.get("value") if isinstance(entry, dict) else entry
+            parsed = parse_kpi_key(key)
+            spec = dict(tolerances.get(parsed[1], {})) if parsed else {}
+            if isinstance(entry, dict) and ("tol_pct" in entry or "tol_abs" in entry):
+                spec = {name: entry[name] for name in ("tol_pct", "tol_abs") if name in entry}
             expected = safe_float(raw_expected)
             if expected is None:
                 detail = (f"uncalibrated (actual={actual:.4g})" if raw_expected is None
@@ -271,7 +297,7 @@ def evaluate_drift(kpis_dict, ranges):
             status = "WITHIN" if low <= actual <= high else "DRIFT"
             rows.append((key, status, f"actual={actual:.4g} expected={expected:.4g} range=[{low:.4g}, {high:.4g}]"))
         except Exception as exc:
-            rows.append((key, "SKIPPED", f"error evaluating spec {ranges.get(key)!r}: {exc}"))
+            rows.append((key, "SKIPPED", f"error evaluating spec {calibrated.get(key)!r}: {exc}"))
     return rows
 
 
@@ -669,12 +695,12 @@ def write_text(path, text):
         file.write(text)
 
 
-def build_report(run_id, current, previous=None, baseline_ranges=None, sequences=None):
+def build_report(run_id, current, previous=None, drift_spec=None, sequences=None, expected_keys=None):
     drift = []
-    if baseline_ranges:
+    if drift_spec is not None:
         drift = [
             {"key": key, "status": status, "detail": detail}
-            for key, status, detail in evaluate_drift(current, baseline_ranges)
+            for key, status, detail in evaluate_drift(current, drift_spec, expected_keys)
         ]
     return {
         "schema_version": REPORT_SCHEMA_VERSION,
@@ -845,8 +871,9 @@ def collect_command(args):
     sequence_checks = load_sequence_checks(args.baseline_ranges)
     current, sequences = collect_kpis(args.stat_folder, sequence_checks)
     previous = load_json_object(args.prev_kpi, "previous KPI data") if args.prev_kpi else None
-    ranges = load_baseline_ranges(args.baseline_ranges) if args.baseline_ranges else {}
-    report = build_report(args.run_id, current, previous, ranges, sequences)
+    drift_spec = load_drift_spec(args.baseline_ranges) if args.baseline_ranges else None
+    expected_keys = load_expected_keys(args.expected_keys) if args.expected_keys else None
+    report = build_report(args.run_id, current, previous, drift_spec, sequences, expected_keys)
     write_json(args.out_kpi_json, current)
     write_json(args.out_report_json, report)
     print(f"Raw KPI JSON saved at {args.out_kpi_json}")
@@ -880,6 +907,9 @@ def build_argument_parser():
     collect.add_argument("-d", "--run_id", default="")
     collect.add_argument("-k", "--prev_kpi", default="")
     collect.add_argument("-b", "--baseline_ranges", default="")
+    collect.add_argument("-e", "--expected_keys", default="",
+                         help="file listing the KPI keys the run should produce, one per line; "
+                              "keys missing from the run are reported as MISSING")
     collect.set_defaults(func=collect_command)
 
     render = commands.add_parser("render", help="render one configuration report as Markdown")

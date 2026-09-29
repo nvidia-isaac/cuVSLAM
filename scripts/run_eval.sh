@@ -151,6 +151,11 @@ if [ -f "$BASELINE_RANGES" ]; then
   KPI_ARGS+=(-b "$BASELINE_RANGES")
 fi
 
+# The drift check reports a key the suite should produce but did not as MISSING.
+EXPECTED_KPI_KEYS="$OUTPUT_DIR/eval/expected_kpi_keys.txt"
+dataset_registry kpi-keys "${EVAL_SUITE_ARGS[@]}" > "$EXPECTED_KPI_KEYS"
+KPI_ARGS+=(-e "$EXPECTED_KPI_KEYS")
+
 python3 /cuvslam/scripts/cuvslam_kpi_report.py "${KPI_ARGS[@]}"
 
 # Keep the old outputs until CI has switched to the report JSON. A follow-up
