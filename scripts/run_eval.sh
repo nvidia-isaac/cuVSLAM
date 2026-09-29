@@ -144,6 +144,9 @@ if [ -n "$PREV_KPI" ]; then
 else
   echo "No previous KPI history found, starting fresh"
 fi
+if [ -d "$KPI_HISTORY" ]; then
+  KPI_ARGS+=(-H "$KPI_HISTORY")
+fi
 
 BASELINE_RANGES="/cuvslam/scripts/kpi_baseline_ranges.json"
 if [ -f "$BASELINE_RANGES" ]; then

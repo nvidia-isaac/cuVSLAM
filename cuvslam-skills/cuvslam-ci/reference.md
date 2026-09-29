@@ -84,9 +84,16 @@ Repository secrets, split read from write so fork-reachable jobs never hold a ke
   ATE, ARE, Kabsch, tracking losts, and FPS, in ODOM and SLAM modes. During migration, `run_eval.sh` also emits the old
   `.table` and `.drift` files; a follow-up script-only change removes those after CI switches to report JSON.
 - KPI config: `kpi_baseline_ranges.json` has `defaults` and per-prefix `datasets` overrides, each holding the
-  sequence checks (`max_ate_pct`, `max_lost_frame_pct`, `exclude_failed`) and per-metric drift `tolerances`; a
+  sequence checks (`max_ate_pct`, `max_lost_frame_pct`, `exclude_failed`), the rolling-baseline settings, and per-metric drift `tolerances`; a
   dataset also holds calibrated `expected` values keyed `<METRIC>_<TYPE>_<MODE>`. A malformed file raises, because
   the sequence checks change KPI values.
+- Rolling-baseline check: `collect -H` reads the last `baseline_window` `kpi_<run>.json` files from the config's
+  KPI history (skipping the current run's) and stores each key's series in the report's `baseline` block. `render`
+  and `aggregate` list KPIs worse than the series median by more than max(`baseline_mad_k` × MAD,
+  `baseline_min_pct` % of the median), in the worse direction only (FPS down, the rest up), needing at least 3 runs.
+  The nightly aggregate first averages each history run across the configurations, so its band reflects the noise of
+  the aggregated mean. PR runs compare against `main`'s nightly history for `EVAL_CONFIG`. It never fails the job, and
+  a manually dispatched nightly writes into the history like a scheduled one.
 - Drift check: covers every key the registry's `kpi-keys` lists for the suite, plus any calibrated key. The tolerance
   is the calibrated entry's own (`{"value": ..., "tol_pct"|"tol_abs": ...}`), else the dataset's for that metric,
   else the default's. Uncalibrated keys are SKIPPED.

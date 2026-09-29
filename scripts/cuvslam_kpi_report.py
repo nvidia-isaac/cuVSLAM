@@ -29,11 +29,11 @@ from argparse import ArgumentParser
 import glob
 import json
 import os
-from statistics import fmean, pstdev
+from statistics import fmean, median, pstdev
 
 NO_DIFF_METRICS = {"FPS"}
 REQUIRED_METRICS = ["ATE", "ARE", "Kabsch", "TrackingLosts", "FPS"]
-REPORT_SCHEMA_VERSION = 2
+REPORT_SCHEMA_VERSION = 3
 
 # Per-sequence failure checks, overridable in the KPI config's "defaults" and
 # per dataset prefix under "datasets". A failed sequence is
@@ -42,6 +42,15 @@ REPORT_SCHEMA_VERSION = 2
 DEFAULT_SEQUENCE_CHECKS = {"max_ate_pct": 10.0, "max_lost_frame_pct": 1.0, "exclude_failed": False}
 EXCLUDABLE_METRICS = ("ATE", "ARE", "Kabsch")
 FAILURE_MISSING = "missing"
+
+# Rolling-baseline regression check against the KPI history: a KPI regresses
+# when it is worse than the median of the last baseline_window runs by more
+# than max(baseline_mad_k * MAD, baseline_min_pct % of the median). Losts
+# never count a change of a single lost frame.
+DEFAULT_BASELINE = {"baseline_window": 14, "baseline_mad_k": 4.0, "baseline_min_pct": 3.0}
+MIN_BASELINE_RUNS = 3
+LOSTS_MIN_BAND = 1.0
+HIGHER_IS_BETTER = {"FPS"}
 
 DATASET_DISPLAY_ALIASES = {"TARTAN_FLAKY": "TARTAN_F"}
 METRIC_UNITS = {"ATE": "%", "ARE": "º/m", "Kabsch": "", "TrackingLosts": "", "FPS": "Hz"}
@@ -159,7 +168,8 @@ def _validated_settings(spec, where, *, is_defaults):
     """Validate one "defaults" or per-dataset settings object."""
     if not isinstance(spec, dict):
         raise ValueError(f"{where} must be a JSON object")
-    allowed = set(DEFAULT_SEQUENCE_CHECKS) | {"tolerances"} | (set() if is_defaults else {"expected"})
+    allowed = (set(DEFAULT_SEQUENCE_CHECKS) | set(DEFAULT_BASELINE) | {"tolerances"}
+               | (set() if is_defaults else {"expected"}))
     unknown = sorted(set(spec) - allowed - {"_comment"})
     if unknown:
         raise ValueError(f"{where} has unknown keys: {', '.join(unknown)}")
@@ -171,7 +181,11 @@ def _validated_settings(spec, where, *, is_defaults):
             if not isinstance(value, bool):
                 raise ValueError(f"{where}.{key} must be a boolean")
             settings[key] = value
-        elif key in DEFAULT_SEQUENCE_CHECKS:
+        elif key == "baseline_window":
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValueError(f"{where}.{key} must be a positive integer")
+            settings[key] = value
+        elif key in DEFAULT_SEQUENCE_CHECKS or key in DEFAULT_BASELINE:
             settings[key] = _non_negative(value, f"{where}.{key}")
         else:
             if not isinstance(value, dict):
@@ -190,7 +204,7 @@ def load_kpi_config(path):
     an unreadable file yields the built-in sequence checks and no drift data.
     A malformed file raises, because the sequence checks change KPI values.
     """
-    config = {"defaults": dict(DEFAULT_SEQUENCE_CHECKS, tolerances={}), "datasets": {}}
+    config = {"defaults": dict(DEFAULT_SEQUENCE_CHECKS, **DEFAULT_BASELINE, tolerances={}), "datasets": {}}
     if not path:
         return config
     try:
@@ -217,6 +231,63 @@ def load_kpi_config(path):
 def resolve_sequence_checks(kpi_config, dataset_name):
     overrides = kpi_config["datasets"].get(dataset_name, {})
     return {key: overrides.get(key, kpi_config["defaults"][key]) for key in DEFAULT_SEQUENCE_CHECKS}
+
+
+def resolve_baseline_settings(kpi_config, dataset_name):
+    overrides = kpi_config["datasets"].get(dataset_name, {})
+    return {key: overrides.get(key, kpi_config["defaults"][key]) for key in DEFAULT_BASELINE}
+
+
+def load_history(history_dir, run_id, count):
+    """The last count kpi_<run>.json history files as [(run, {key: value})], oldest first.
+
+    The file for run_id itself is skipped, so a rerun does not compare against itself.
+    """
+    paths = sorted(glob.glob(os.path.join(history_dir, "kpi_[0-9]*.json")))
+    paths = [p for p in paths if os.path.basename(p) != f"kpi_{run_id}.json"][-count:]
+    history = []
+    for path in paths:
+        try:
+            data = load_json_object(path, "KPI history")
+        except Exception as e:
+            print(f"Warning: skipping unreadable KPI history {path}: {e}")
+            continue
+        history.append((os.path.basename(path)[len("kpi_"):-len(".json")], data))
+    return history
+
+
+def build_baseline(current, history, kpi_config):
+    """Per-key history series for the rolling-baseline check, stored in the report."""
+    prefixes = {parse_kpi_key(key)[0].split("-")[0] for key in current if parse_kpi_key(key)}
+    return {
+        "runs": [run for run, _ in history],
+        "values": {key: [safe_float(data.get(key)) for _, data in history] for key in sorted(current)},
+        "settings": {prefix: resolve_baseline_settings(kpi_config, prefix) for prefix in sorted(prefixes)},
+    }
+
+
+def evaluate_baseline(key, current_value, series, settings):
+    """Compare one KPI with the median of its recent history.
+
+    Returns None without enough history, else a dict with the median, the
+    band, the number of runs used, and whether the KPI regressed.
+    """
+    parsed = parse_kpi_key(key)
+    current_value = safe_float(current_value)
+    if parsed is None or current_value is None:
+        return None
+    values = [value for value in series[-settings["baseline_window"]:] if value is not None]
+    if len(values) < MIN_BASELINE_RUNS:
+        return None
+    center = median(values)
+    mad = median(abs(value - center) for value in values)
+    band = max(settings["baseline_mad_k"] * mad, settings["baseline_min_pct"] / 100.0 * abs(center))
+    metric = parsed[1]
+    if metric == "TrackingLosts":
+        band = max(band, LOSTS_MIN_BAND)
+    worse = center - current_value if metric in HIGHER_IS_BETTER else current_value - center
+    return {"key": key, "current": current_value, "median": center, "band": band, "runs": len(values),
+            "regressed": worse > band}
 
 
 def resolve_tolerance(kpi_config, dataset_name, metric):
@@ -710,7 +781,8 @@ def write_text(path, text):
         file.write(text)
 
 
-def build_report(run_id, current, previous=None, kpi_config=None, sequences=None, expected_keys=None):
+def build_report(run_id, current, previous=None, kpi_config=None, sequences=None, expected_keys=None,
+                 baseline=None):
     drift = []
     if kpi_config is not None:
         drift = [
@@ -724,6 +796,7 @@ def build_report(run_id, current, previous=None, kpi_config=None, sequences=None
         "previous": previous,
         "drift": drift,
         "sequences": sequences or {},
+        "baseline": baseline or {"runs": [], "values": {}, "settings": {}},
     }
 
 
@@ -742,7 +815,75 @@ def load_report(path):
         raise ValueError(f"KPI report drift field must be an array: {path}")
     if not isinstance(report.get("sequences"), dict):
         raise ValueError(f"KPI report sequences field must be an object: {path}")
+    if not isinstance(report.get("baseline"), dict):
+        raise ValueError(f"KPI report baseline field must be an object: {path}")
     return report
+
+
+def report_baseline_results(report):
+    """Rolling-baseline results for one configuration's report."""
+    baseline = report["baseline"]
+    results = []
+    for key, value in sorted(report["current"].items()):
+        parsed = parse_kpi_key(key)
+        settings = baseline.get("settings", {}).get(parsed[0].split("-")[0]) if parsed else None
+        if settings:
+            result = evaluate_baseline(key, value, baseline.get("values", {}).get(key, []), settings)
+            if result:
+                results.append(result)
+    return results
+
+
+def aggregate_baseline_results(config_reports):
+    """Rolling-baseline results for the mean across configurations.
+
+    Each history run shared by every configuration is averaged across them, so
+    the band reflects the noise of the aggregated mean, not of one configuration.
+    """
+    run_lists = [report["baseline"].get("runs", []) for _, report in config_reports]
+    common = [run for run in run_lists[0] if all(run in runs for runs in run_lists[1:])] if run_lists else []
+    reference = config_reports[0][1]
+    results = []
+    for key in sorted(reference["current"]):
+        parsed = parse_kpi_key(key)
+        settings = reference["baseline"].get("settings", {}).get(parsed[0].split("-")[0]) if parsed else None
+        currents = [safe_float(report["current"].get(key)) for _, report in config_reports]
+        if not settings or any(value is None for value in currents):
+            continue
+        series = []
+        for run in common:
+            values = []
+            for (_, report), runs in zip(config_reports, run_lists):
+                history = report["baseline"].get("values", {}).get(key, [])
+                index = runs.index(run)
+                values.append(history[index] if index < len(history) else None)
+            series.append(fmean(values) if all(value is not None for value in values) else None)
+        result = evaluate_baseline(key, fmean(currents), series, settings)
+        if result:
+            results.append(result)
+    return results
+
+
+def render_regressions(results):
+    """Markdown summary of the rolling-baseline check."""
+    if not results:
+        return "\n_Rolling-baseline check: not enough KPI history yet._\n"
+    regressed = [r for r in results if r["regressed"]]
+    if not regressed:
+        return f"\n_Rolling-baseline check: no regressions in {len(results)} KPIs._\n"
+    lines = [
+        f"\n**Regressions against the rolling baseline** ({len(regressed)} of {len(results)} KPIs worse than "
+        "the median of recent nightlies by more than the band):\n"
+    ]
+    for r in regressed:
+        row, metric = parse_kpi_key(r["key"])
+        change = (100.0 * (r["current"] - r["median"]) / abs(r["median"])) if r["median"] else None
+        change_text = f" ({change:+.1f}%)" if change is not None else ""
+        lines.append(
+            f"- `{display_dataset_key(row)}` {get_display_name(metric)}: {r['current']:.4g} vs median "
+            f"{r['median']:.4g}{change_text}, band ±{r['band']:.3g} over {r['runs']} runs"
+        )
+    return "\n".join(lines) + "\n"
 
 
 def render_report(report, config):
@@ -751,7 +892,7 @@ def render_report(report, config):
     failures = ("Failed", {row: str(len(c["broken"])) for row, c in classified.items()})
     note = sequence_check_note(classified)
     return ((f"_{note.strip()}_\n\n" if note else "") + create_table(organized, config=config, failures=failures)
-            + render_failed_sequences(classified, 1))
+            + render_regressions(report_baseline_results(report)) + render_failed_sequences(classified, 1))
 
 
 def render_drift(report):
@@ -869,6 +1010,7 @@ def render_aggregate_report(config_reports, *, values_only=False):
         {row: f"{len(c['broken'])} / {len(c['flaky'])}" for row, c in classified.items()},
     )
     return (note + create_table(organized, aggregate=True, failures=failures)
+            + render_regressions(aggregate_baseline_results(config_reports))
             + render_failed_sequences(classified, count))
 
 
@@ -887,8 +1029,16 @@ def collect_command(args):
     current, sequences = collect_kpis(args.stat_folder, kpi_config)
     previous = load_json_object(args.prev_kpi, "previous KPI data") if args.prev_kpi else None
     expected_keys = load_expected_keys(args.expected_keys) if args.expected_keys else None
+    baseline = None
+    if args.history and os.path.isdir(args.history):
+        windows = [kpi_config["defaults"]["baseline_window"]] + [
+            settings["baseline_window"] for settings in kpi_config["datasets"].values() if "baseline_window" in settings
+        ]
+        history = load_history(args.history, args.run_id, max(windows))
+        print(f"Rolling baseline: {len(history)} KPI history run(s) from {args.history}")
+        baseline = build_baseline(current, history, kpi_config)
     report = build_report(args.run_id, current, previous, kpi_config if args.baseline_ranges else None,
-                          sequences, expected_keys)
+                          sequences, expected_keys, baseline)
     write_json(args.out_kpi_json, current)
     write_json(args.out_report_json, report)
     print(f"Raw KPI JSON saved at {args.out_kpi_json}")
@@ -922,6 +1072,8 @@ def build_argument_parser():
     collect.add_argument("-d", "--run_id", default="")
     collect.add_argument("-k", "--prev_kpi", default="")
     collect.add_argument("-b", "--baseline_ranges", default="")
+    collect.add_argument("-H", "--history", default="",
+                         help="KPI history directory of kpi_<run>.json files for the rolling-baseline check")
     collect.add_argument("-e", "--expected_keys", default="",
                          help="file listing the KPI keys the run should produce, one per line; "
                               "keys missing from the run are reported as MISSING")
