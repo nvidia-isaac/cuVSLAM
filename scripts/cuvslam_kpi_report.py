@@ -33,7 +33,15 @@ from statistics import fmean, pstdev
 
 NO_DIFF_METRICS = {"FPS"}
 REQUIRED_METRICS = ["ATE", "ARE", "Kabsch", "TrackingLosts", "FPS"]
-REPORT_SCHEMA_VERSION = 1
+REPORT_SCHEMA_VERSION = 2
+
+# Per-sequence failure checks, overridable per dataset prefix in the
+# "sequence_checks" block of the baseline ranges file. A failed sequence is
+# counted in the report; with exclude_failed it is also left out of the
+# accuracy metrics, so a few divergent trajectories cannot swing the means.
+DEFAULT_SEQUENCE_CHECKS = {"max_ate_pct": 10.0, "max_lost_frame_pct": 1.0, "exclude_failed": False}
+EXCLUDABLE_METRICS = ("ATE", "ARE", "Kabsch")
+FAILURE_MISSING = "missing"
 
 DATASET_DISPLAY_ALIASES = {"TARTAN_FLAKY": "TARTAN_F"}
 METRIC_UNITS = {"ATE": "%", "ARE": "º/m", "Kabsch": "", "TrackingLosts": "", "FPS": "Hz"}
@@ -136,6 +144,85 @@ def load_baseline_ranges(path):
     return ranges if isinstance(ranges, dict) else {}
 
 
+def _validated_checks(spec, where):
+    if not isinstance(spec, dict):
+        raise ValueError(f"{where} must be a JSON object")
+    unknown = sorted(set(spec) - set(DEFAULT_SEQUENCE_CHECKS))
+    if unknown:
+        raise ValueError(f"{where} has unknown keys: {', '.join(unknown)}")
+    checks = {}
+    for key, value in spec.items():
+        if key == "exclude_failed":
+            if not isinstance(value, bool):
+                raise ValueError(f"{where}.{key} must be a boolean")
+        elif isinstance(value, bool) or safe_float(value) is None or float(value) < 0:
+            raise ValueError(f"{where}.{key} must be a non-negative number")
+        else:
+            value = float(value)
+        checks[key] = value
+    return checks
+
+
+def load_sequence_checks(path):
+    """Load the "sequence_checks" block of the baseline ranges file.
+
+    Returns {"defaults": {...}, "datasets": {PREFIX: {...}}} with defaults fully
+    populated. An absent file or block yields the built-in defaults. A malformed
+    block raises: unlike the soft drift ranges, these checks change KPI values.
+    """
+    defaults = dict(DEFAULT_SEQUENCE_CHECKS)
+    if not path:
+        return {"defaults": defaults, "datasets": {}}
+    try:
+        with open(path, "r", encoding="utf-8") as file:
+            data = json.load(file)
+    except Exception as e:
+        print(f"Warning: failed to load sequence checks {path}: {e}; using defaults")
+        return {"defaults": defaults, "datasets": {}}
+    block = data.get("sequence_checks") if isinstance(data, dict) else None
+    if block is None:
+        return {"defaults": defaults, "datasets": {}}
+    if not isinstance(block, dict):
+        raise ValueError(f"sequence_checks in {path} must be a JSON object")
+    defaults.update(_validated_checks(block.get("defaults", {}), "sequence_checks.defaults"))
+    datasets = block.get("datasets", {})
+    if not isinstance(datasets, dict):
+        raise ValueError(f"sequence_checks.datasets in {path} must be a JSON object")
+    return {
+        "defaults": defaults,
+        "datasets": {
+            name: _validated_checks(spec, f"sequence_checks.datasets.{name}") for name, spec in datasets.items()
+        },
+    }
+
+
+def resolve_sequence_checks(sequence_checks, dataset_name):
+    checks = dict(sequence_checks["defaults"])
+    checks.update(sequence_checks["datasets"].get(dataset_name, {}))
+    return checks
+
+
+def sequence_failure(stat, checks, *, check_ate=True):
+    """Return the failure kind for one sequence run, or None if it passed.
+
+    Kinds: no_frames, lost_frames, no_ate, ate.
+    """
+    n_frames = safe_float(stat.get("n_frames")) or 0
+    if n_frames <= 0:
+        return "no_frames"
+    losts = max(safe_float(stat.get("num_tracking_losts")) or 0, 0)
+    if 100.0 * losts / n_frames > checks["max_lost_frame_pct"]:
+        return "lost_frames"
+    if not check_ate:
+        return None
+    ate = safe_float(stat.get("gt_av_translation_error"))
+    if ate is None:
+        return "no_ate"
+    if ate > checks["max_ate_pct"]:
+        return "ate"
+    return None
+
+
 def safe_float(value):
     """Best-effort float conversion. Returns None for None, NaN, or non-numeric
     values (e.g. a malformed string in the committed ranges file)."""
@@ -188,15 +275,60 @@ def evaluate_drift(kpis_dict, ranges):
     return rows
 
 
-def process_dataset_folder(dataset_folder_path):
+def summarize_mode(stats, dataset_type, checks):
+    """Compute one mode's KPIs and per-sequence check results.
+
+    Losts and FPS always cover every sequence. With exclude_failed, the
+    accuracy metrics cover only the passing ones, unless none passed.
+    """
+    runs = []
+    for stat in stats:
+        n_frames = int(safe_float(stat.get("n_frames")) or 0)
+        losts = max(int(safe_float(stat.get("num_tracking_losts")) or 0), 0)
+        runs.append({
+            "sequence": stat.get("sequence_title", ""),
+            "n_frames": n_frames,
+            "tracking_losts": losts,
+            "lost_frame_pct": 100.0 * losts / n_frames if n_frames > 0 else None,
+            "ate": safe_float(stat.get("gt_av_translation_error")),
+            "failure": sequence_failure(stat, checks, check_ate=dataset_type != "MONO"),
+        })
+
+    accuracy_stats = stats
+    excluded = []
+    if checks["exclude_failed"]:
+        passing = [stat for stat, run in zip(stats, runs) if run["failure"] is None]
+        if passing:
+            accuracy_stats = passing
+            excluded = [run["sequence"] for run in runs if run["failure"] is not None]
+
+    def mean(field, subset):
+        return sum(s.get(field, 0) for s in subset) / len(subset)
+
+    kpis = {
+        "ATE": mean("gt_av_translation_error", accuracy_stats),
+        "ARE": mean("gt_av_rotation_error", accuracy_stats),
+        "Kabsch": mean("gt_simple_error", accuracy_stats),
+        "FPS": mean("average_fps", stats),
+        "TrackingLosts": sum(
+            s.get("num_tracking_losts", 0) for s in stats if s.get("num_tracking_losts", -1) >= 0
+        ),
+    }
+    return kpis, {"checks": checks, "excluded": excluded, "runs": runs}
+
+
+def process_dataset_folder(dataset_folder_path, sequence_checks=None):
     """Process a dataset folder to extract metrics for ODOM and SLAM.
 
     Args:
         dataset_folder_path: Path to dataset folder (e.g., kitti-vio_slam_gt)
+        sequence_checks: Result of load_sequence_checks; built-in defaults if None.
 
     Returns:
-        dict: Dictionary with dataset metrics
+        tuple: (flat KPI dict, {row key: sequence check block}), or None.
     """
+    if sequence_checks is None:
+        sequence_checks = load_sequence_checks("")
     dataset_name = os.path.basename(dataset_folder_path).split('-')[0].upper()
 
     timestamped_folders = glob.glob(os.path.join(dataset_folder_path, '*'))
@@ -239,36 +371,18 @@ def process_dataset_folder(dataset_folder_path):
         return None
     print(f'  Detected dataset type: {dataset_type} (from odometry_mode: {all_stats[0]["odometry_mode"]})')
 
-    odom_stats = [s for s in all_stats if 'ODOM' in s.get('sequence_title', '').upper()]
-    slam_stats = [s for s in all_stats if 'SLAM' in s.get('sequence_title', '').upper()]
+    checks = resolve_sequence_checks(sequence_checks, dataset_name)
+    sequences = {}
+    for mode in ("ODOM", "SLAM"):
+        mode_stats = [s for s in all_stats if mode in s.get('sequence_title', '').upper()]
+        if not mode_stats:
+            continue
+        kpis, block = summarize_mode(mode_stats, dataset_type, checks)
+        for metric, value in kpis.items():
+            out_dict[f"{dataset_name}_{metric}_{dataset_type}_{mode}"] = value
+        sequences[f"{dataset_name}-{dataset_type}_{mode}"] = block
 
-    if odom_stats:
-        avg_translation_error = sum(s.get('gt_av_translation_error', 0) for s in odom_stats) / len(odom_stats)
-        avg_rotation_error = sum(s.get('gt_av_rotation_error', 0) for s in odom_stats) / len(odom_stats)
-        avg_kabsch = sum(s.get('gt_simple_error', 0) for s in odom_stats) / len(odom_stats)
-        avg_fps = sum(s.get('average_fps', 0) for s in odom_stats) / len(odom_stats)
-        total_tracking_losts = sum(s.get('num_tracking_losts', 0) for s in odom_stats if s.get('num_tracking_losts', -1) >= 0)
-
-        out_dict[f"{dataset_name}_ATE_{dataset_type}_ODOM"] = avg_translation_error
-        out_dict[f"{dataset_name}_ARE_{dataset_type}_ODOM"] = avg_rotation_error
-        out_dict[f"{dataset_name}_Kabsch_{dataset_type}_ODOM"] = avg_kabsch
-        out_dict[f"{dataset_name}_FPS_{dataset_type}_ODOM"] = avg_fps
-        out_dict[f"{dataset_name}_TrackingLosts_{dataset_type}_ODOM"] = total_tracking_losts
-
-    if slam_stats:
-        avg_translation_error = sum(s.get('gt_av_translation_error', 0) for s in slam_stats) / len(slam_stats)
-        avg_rotation_error = sum(s.get('gt_av_rotation_error', 0) for s in slam_stats) / len(slam_stats)
-        avg_kabsch = sum(s.get('gt_simple_error', 0) for s in slam_stats) / len(slam_stats)
-        avg_fps = sum(s.get('average_fps', 0) for s in slam_stats) / len(slam_stats)
-        total_tracking_losts = sum(s.get('num_tracking_losts', 0) for s in slam_stats if s.get('num_tracking_losts', -1) >= 0)
-
-        out_dict[f"{dataset_name}_ATE_{dataset_type}_SLAM"] = avg_translation_error
-        out_dict[f"{dataset_name}_ARE_{dataset_type}_SLAM"] = avg_rotation_error
-        out_dict[f"{dataset_name}_Kabsch_{dataset_type}_SLAM"] = avg_kabsch
-        out_dict[f"{dataset_name}_FPS_{dataset_type}_SLAM"] = avg_fps
-        out_dict[f"{dataset_name}_TrackingLosts_{dataset_type}_SLAM"] = total_tracking_losts
-
-    return out_dict
+    return out_dict, sequences
 
 
 def parse_kpi_key(key):
@@ -337,10 +451,10 @@ def organize_data(data, required_metrics=REQUIRED_METRICS, prev_data=None):
     return organized_data
 
 
-def table_columns(required_metrics=REQUIRED_METRICS):
+def table_columns(required_metrics=REQUIRED_METRICS, *, diffs=True):
     diffable = [metric for metric in required_metrics if metric not in NO_DIFF_METRICS]
     nondiff = [metric for metric in required_metrics if metric in NO_DIFF_METRICS]
-    return diffable + ["diff " + metric for metric in diffable] + nondiff
+    return diffable + (["diff " + metric for metric in diffable] if diffs else []) + nondiff
 
 
 def column_title(metric, *, aggregate=False):
@@ -349,16 +463,25 @@ def column_title(metric, *, aggregate=False):
     if unit:
         title += f", {unit}"
     if aggregate:
-        title += " (mean)" if metric.startswith("diff ") else " (mean ± σ)"
+        if metric.startswith("diff "):
+            title += " (mean)"
+        elif metric == "TrackingLosts":
+            title += " (min–max)"
+        else:
+            title += " (mean ± σ)"
     return title
 
 
-def create_table(organized_data, required_metrics=REQUIRED_METRICS, *, config=None, aggregate=False):
-    """Render an already-organized KPI dictionary as Markdown."""
-    columns = table_columns(required_metrics)
+def create_table(organized_data, required_metrics=REQUIRED_METRICS, *, config=None, aggregate=False,
+                 diffs=True, failures=None):
+    """Render an already-organized KPI dictionary as Markdown.
+
+    failures, if given, is (column title, {dataset row: cell}) appended as the last column.
+    """
+    columns = table_columns(required_metrics, diffs=diffs)
     headers = (["Config"] if config else []) + ["Dataset"] + [
         column_title(metric, aggregate=aggregate) for metric in columns
-    ]
+    ] + ([failures[0]] if failures else [])
     lines = [
         "| " + " | ".join(headers) + " |",
         "|" + "|".join("---" for _ in headers) + "|",
@@ -373,8 +496,91 @@ def create_table(organized_data, required_metrics=REQUIRED_METRICS, *, config=No
         cells.extend(
             str(metrics[metric]) if aggregate else format_metric(metric, metrics[metric]) for metric in columns
         )
+        if failures:
+            cells.append(failures[1].get(dataset, "NA"))
         lines.append("| " + " | ".join(cells) + " |")
     return "\n".join(lines) + "\n"
+
+
+def classify_sequences(config_reports):
+    """Classify each sequence across configurations.
+
+    A sequence that fails, or is missing, in every configuration is broken; one
+    that fails in some is flaky. Returns {dataset row: {"broken": [...],
+    "flaky": [...], "excluded": bool}}, each list entry a dict with the
+    sequence name, the failed count, and the failed runs.
+    """
+    configs = [config for config, _ in config_reports]
+    runs_by_row = {}
+    excluding_rows = set()
+    for config, report in config_reports:
+        for row, block in report["sequences"].items():
+            if block.get("checks", {}).get("exclude_failed"):
+                excluding_rows.add(row)
+            for run in block.get("runs", []):
+                runs_by_row.setdefault(row, {}).setdefault(run["sequence"], {})[config] = run
+
+    classified = {}
+    for row, sequences in runs_by_row.items():
+        result = {"broken": [], "flaky": [], "excluded": row in excluding_rows}
+        for name in sorted(sequences):
+            by_config = sequences[name]
+            failed = []
+            for config in configs:
+                run = by_config.get(config)
+                if run is None:
+                    failed.append({"config": config, "failure": FAILURE_MISSING})
+                elif run.get("failure"):
+                    failed.append(dict(run, config=config))
+            if not failed:
+                continue
+            entry = {"sequence": name, "failed": len(failed), "runs": failed}
+            result["broken" if len(failed) == len(configs) else "flaky"].append(entry)
+        classified[row] = result
+    return classified
+
+
+def describe_failed_runs(runs):
+    """One-line summary of why a sequence's runs failed, e.g. "ATE 41.8–52.9%"."""
+    parts = []
+    kinds = {run["failure"] for run in runs}
+    ates = [run["ate"] for run in runs if run["failure"] == "ate" and run.get("ate") is not None]
+    if ates:
+        low, high = min(ates), max(ates)
+        parts.append(f"ATE {low:.1f}%" if round(low, 1) == round(high, 1) else f"ATE {low:.1f}–{high:.1f}%")
+    lost = [run["lost_frame_pct"] for run in runs
+            if run["failure"] == "lost_frames" and run.get("lost_frame_pct") is not None]
+    if lost:
+        parts.append(f"lost {max(lost):.1f}% of frames")
+    labels = {"no_frames": "no frames", "no_ate": "no ATE", FAILURE_MISSING: "no result"}
+    parts.extend(labels[kind] for kind in sorted(kinds) if kind in labels)
+    return ", ".join(parts)
+
+
+def render_failed_sequences(classified, config_count):
+    """Markdown list of broken and flaky sequences, or "" if there are none."""
+    lines = []
+    for row in sorted(classified):
+        for status in ("broken", "flaky"):
+            for entry in classified[row][status]:
+                label = status if config_count > 1 else "failed"
+                if config_count > 1:
+                    label += f" {entry['failed']}/{config_count}"
+                excluded = " (excluded from accuracy KPIs)" if classified[row]["excluded"] else ""
+                lines.append(
+                    f"- `{display_dataset_key(row)}` {entry['sequence']}: {label}, "
+                    f"{describe_failed_runs(entry['runs'])}{excluded}"
+                )
+    if not lines:
+        return ""
+    return "\n<details><summary>Failed sequences</summary>\n\n" + "\n".join(lines) + "\n\n</details>\n"
+
+
+def sequence_check_note(classified):
+    rows = sorted({display_dataset_key(row).split("-")[0] for row, c in classified.items() if c["excluded"]})
+    if not rows:
+        return ""
+    return f" Failed sequences are excluded from ATE, ARE and Kabsch for {', '.join(rows)}."
 
 
 def dataset_sort_key(folder):
@@ -390,8 +596,8 @@ def dataset_sort_key(folder):
     return (4, name)
 
 
-def collect_kpis(stat_folder):
-    """Compute a flat KPI dictionary from a cuvslam_app stats directory."""
+def collect_kpis(stat_folder, sequence_checks=None):
+    """Compute a flat KPI dictionary and per-row sequence checks from a cuvslam_app stats directory."""
     if not os.path.isdir(stat_folder):
         raise ValueError(f"Stat folder does not exist: {stat_folder}")
     dataset_folders = sorted(
@@ -406,12 +612,16 @@ def collect_kpis(stat_folder):
         raise ValueError(f"No dataset folders found in: {stat_folder}")
 
     kpis = {}
+    sequences = {}
     key_source = {}
     print(f"Processing {len(dataset_folders)} dataset folders...")
     for dataset_folder in dataset_folders:
         folder_name = os.path.basename(dataset_folder)
         print(f"  Processing: {folder_name}")
-        result = process_dataset_folder(dataset_folder)
+        processed = process_dataset_folder(dataset_folder, sequence_checks)
+        if not processed:
+            continue
+        result, result_sequences = processed
         if not result:
             continue
         # The dataset prefix is the first hyphen-delimited token of the reporter
@@ -426,10 +636,11 @@ def collect_kpis(stat_folder):
                 "prefix, keeping underscores inside it (tartan_flaky-... not tartan-flaky-...)."
             )
         kpis.update(result)
+        sequences.update(result_sequences)
         key_source.update(dict.fromkeys(result, folder_name))
     if not kpis:
         raise ValueError("output KPI JSON is empty; check the input stats format")
-    return kpis
+    return kpis, sequences
 
 
 def load_json_object(path, description):
@@ -458,7 +669,7 @@ def write_text(path, text):
         file.write(text)
 
 
-def build_report(run_id, current, previous=None, baseline_ranges=None):
+def build_report(run_id, current, previous=None, baseline_ranges=None, sequences=None):
     drift = []
     if baseline_ranges:
         drift = [
@@ -471,6 +682,7 @@ def build_report(run_id, current, previous=None, baseline_ranges=None):
         "current": current,
         "previous": previous,
         "drift": drift,
+        "sequences": sequences or {},
     }
 
 
@@ -487,12 +699,18 @@ def load_report(path):
         raise ValueError(f"KPI report previous field must be an object or null: {path}")
     if not isinstance(report.get("drift"), list):
         raise ValueError(f"KPI report drift field must be an array: {path}")
+    if not isinstance(report.get("sequences"), dict):
+        raise ValueError(f"KPI report sequences field must be an object: {path}")
     return report
 
 
 def render_report(report, config):
     organized = organize_data(report["current"], prev_data=report["previous"])
-    return create_table(organized, config=config)
+    classified = classify_sequences([(config, report)])
+    failures = ("Failed", {row: str(len(c["broken"])) for row, c in classified.items()})
+    note = sequence_check_note(classified)
+    return ((f"_{note.strip()}_\n\n" if note else "") + create_table(organized, config=config, failures=failures)
+            + render_failed_sequences(classified, 1))
 
 
 def render_drift(report):
@@ -516,10 +734,11 @@ def require_numeric(value, key, config):
 
 
 def format_distribution(metric, values):
+    if metric == "TrackingLosts":
+        low, high = int(min(values)), int(max(values))
+        return str(low) if low == high else f"{low}–{high}"
     mean = fmean(values)
     deviation = pstdev(values)
-    if metric == "TrackingLosts":
-        return f"{mean:.2f} ± {deviation:.2f}"
     if metric == "FPS":
         return f"{mean:.1f} ± {deviation:.1f}"
     return f"{mean:.4f} ± {deviation:.4f}"
@@ -582,14 +801,34 @@ def aggregate_reports(config_reports):
     return organized
 
 
-def render_aggregate_report(config_reports):
+def render_aggregate_report(config_reports, *, values_only=False):
+    """Render the cross-configuration table.
+
+    values_only drops the diff columns and the broken/flaky column and list,
+    for release notes where neither the previous nightly nor per-run health
+    is meaningful.
+    """
     organized = aggregate_reports(config_reports)
+    classified = classify_sequences(config_reports)
     count = len(config_reports)
     note = (
         f"_Aggregated across {count} configuration{'s' if count != 1 else ''}. "
-        "KPI values are mean ± population σ; diffs compare the current and previous aggregated means._\n\n"
+        "KPI values are mean ± population σ, Losts are min–max"
     )
-    return note + create_table(organized, aggregate=True)
+    if not values_only:
+        note += (
+            "; diffs compare the current and previous aggregated means. A broken sequence fails in every "
+            "configuration, a flaky one in some"
+        )
+    note += "." + sequence_check_note(classified) + "_\n\n"
+    if values_only:
+        return note + create_table(organized, aggregate=True, diffs=False)
+    failures = (
+        "Broken / flaky",
+        {row: f"{len(c['broken'])} / {len(c['flaky'])}" for row, c in classified.items()},
+    )
+    return (note + create_table(organized, aggregate=True, failures=failures)
+            + render_failed_sequences(classified, count))
 
 
 def parse_config_report(value):
@@ -603,10 +842,11 @@ def parse_config_report(value):
 
 def collect_command(args):
     print("=============================\nKPI collector is up!")
-    current = collect_kpis(args.stat_folder)
+    sequence_checks = load_sequence_checks(args.baseline_ranges)
+    current, sequences = collect_kpis(args.stat_folder, sequence_checks)
     previous = load_json_object(args.prev_kpi, "previous KPI data") if args.prev_kpi else None
     ranges = load_baseline_ranges(args.baseline_ranges) if args.baseline_ranges else {}
-    report = build_report(args.run_id, current, previous, ranges)
+    report = build_report(args.run_id, current, previous, ranges, sequences)
     write_json(args.out_kpi_json, current)
     write_json(args.out_report_json, report)
     print(f"Raw KPI JSON saved at {args.out_kpi_json}")
@@ -622,7 +862,7 @@ def aggregate_command(args):
     configs = [config for config, _ in config_reports]
     if len(set(configs)) != len(configs):
         raise ValueError(f"configuration names must be unique: {configs}")
-    write_text(args.output, render_aggregate_report(config_reports))
+    write_text(args.output, render_aggregate_report(config_reports, values_only=args.values_only))
 
 
 def drift_command(args):
@@ -651,6 +891,8 @@ def build_argument_parser():
     aggregate = commands.add_parser("aggregate", help="aggregate configuration reports as Markdown")
     aggregate.add_argument("-i", "--input", action="append", required=True, metavar="CONFIG=PATH")
     aggregate.add_argument("-o", "--output", default="-")
+    aggregate.add_argument("--values-only", action="store_true",
+                           help="omit diffs and broken/flaky sequence counts (release notes)")
     aggregate.set_defaults(func=aggregate_command)
 
     drift = commands.add_parser("drift", help="render the soft drift report as text")

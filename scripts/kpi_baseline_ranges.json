@@ -92,5 +92,23 @@
         "ICL_NUIM_Kabsch_MSF_SLAM": {"expected": null, "tol_pct": 10},
         "ICL_NUIM_TrackingLosts_MSF_SLAM": {"expected": null, "tol_abs": 1},
         "ICL_NUIM_FPS_MSF_SLAM": {"expected": null, "tol_pct": 15}
+    },
+    "sequence_checks": {
+        "_comment": [
+            "Per-sequence failure checks, applied by cuvslam_kpi_report.py collect.",
+            "A sequence run fails if it tracked no frames, lost more than max_lost_frame_pct",
+            "of its frames, has no ATE, or its ATE exceeds max_ate_pct. Failures are counted",
+            "in the KPI tables (broken = fails in every configuration, flaky = in some) and",
+            "never fail the job. exclude_failed also drops failed sequences from the ATE, ARE",
+            "and Kabsch means; Losts and FPS always cover every sequence.",
+            "'datasets' overrides 'defaults' per KPI prefix (the <DATASET> part of a key)."
+        ],
+        "defaults": {"max_ate_pct": 10, "max_lost_frame_pct": 1, "exclude_failed": false},
+        "datasets": {
+            "TUM": {"max_ate_pct": 20, "exclude_failed": true},
+            "ICL_NUIM": {"max_ate_pct": 20},
+            "TARTAN": {"exclude_failed": true},
+            "TARTAN_FLAKY": {"exclude_failed": true}
+        }
     }
 }
