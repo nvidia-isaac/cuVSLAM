@@ -79,12 +79,15 @@ download_zip() {
     local dest="${out_dir}/${key//\//_}"
     local partial="${dest}.partial"
 
+    # An existing zip is hashed too: it may predate a pin change, or have been
+    # placed or damaged by hand, and a size match cannot tell.
     if [[ -f "${dest}" && "${force}" -eq 0 ]]; then
-        if [[ "$(stat -c %s -- "${dest}")" == "${size}" ]]; then
+        if [[ "$(stat -c %s -- "${dest}")" == "${size}" \
+              && "$(md5sum -- "${dest}" | cut -d' ' -f1)" == "${md5}" ]]; then
             echo "using existing ${dest}"
             return
         fi
-        echo "discarding ${dest}: size differs from zipfiles.txt"
+        echo "discarding ${dest}: it does not match zipfiles.txt"
         rm -f -- "${dest}"
     fi
 
