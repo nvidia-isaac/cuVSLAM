@@ -72,7 +72,7 @@ Repository secrets, split read from write so fork-reachable jobs never hold a ke
 - The module is standard library only and imports converters lazily, so shell wrappers call it with `PYTHONPATH=tools/python_tools` inside `cuvslam-ci:local` before anything is installed. `datasets_config.sh` wraps it as `dataset_registry`; `run_eval.sh` defines its own shim because the S3 variables `datasets_config.sh` requires are absent in the eval container.
 - Subcommands: `validate [--dataset] [--suite]`, `list [--eval] [--suite]`, `eval-records [--suite]` (tab-separated `id`, KPI prefix, config path, flags), `kpi-keys [--suite]`, `prepare-module`, `prepare --root-file`, `verify-staged --root`.
 - Suites: `EVAL_SUITE` selects records in `stage_eval_datasets.sh`, `check_eval_prerequisites.sh`, and `run_eval.sh`, and `eval_cuvslam_in_docker.sh` forwards it into the container. Unset means every record; validation requires every `EvalSpec` to belong to `full`, so unset and `full` agree. `validate --suite` additionally rejects a suite that would select nothing.
-- `kpi-keys --suite` prints the `<PREFIX>_<METRIC>_<TYPE>_<MODE>` keys a suite can produce, so a consumer can tell a key that is legitimately absent from one that went missing. It lists both `ODOM` and `SLAM` for every record because which of the two a run emits depends on `sequence_title` inside the reporter config, which ships in the tarball. `KPI_METRICS` and `ODOMETRY_MODE_TYPES` in the registry mirror `REQUIRED_METRICS` and `odometry_mode_to_type` in `scripts/cuvslam_kpi_report.py` and have to be edited together; compare them with `python3 -m cuvslam_tools.dataset_registry kpi-keys --suite full` against the keys in `scripts/kpi_baseline_ranges.json` after changing either side.
+- `kpi-keys --suite` prints the `<PREFIX>_<METRIC>_<TYPE>_<MODE>` keys a suite can produce, so a consumer can tell a key that is legitimately absent from one that went missing. It lists both `ODOM` and `SLAM` for every record because which of the two a run emits depends on `sequence_title` inside the reporter config, which ships in the tarball. `KPI_METRICS` and `ODOMETRY_MODE_TYPES` in the registry mirror `REQUIRED_METRICS` and `odometry_mode_to_type` in `scripts/cuvslam_kpi_report.py` and have to be edited together. `run_eval.sh` passes the `kpi-keys` output to `cuvslam_kpi_report.py collect -e`, so a mismatch shows up as MISSING rows in the drift check.
 - Derived, never declared: `<id>.tar`, the staged directory, the `/sequences` mount, and the KPI prefix (first hyphen-delimited token of the config filename, upper-cased). Validation rejects two records that derive the same prefix and `--odometry_mode`.
 - The reporter writes to `$CUVSLAM_OUTPUT/<config stem>-<odometry mode>/<timestamp>/`. The mode is part of the directory because the KPI collector reads only the newest run under each directory, so two records sharing one config would otherwise overwrite each other; the prefix is unaffected because it is the first hyphen-delimited token. KPI types are `MCAM`, `MONO`, `VIO`, `RGBD` and `MSF`, one per odometry mode, and an unrecognized mode is rejected rather than filed under another mode's keys.
 - Tarball: uncompressed `<id>.tar` at `<S3_DATASETS_BUCKET>/<id>.tar`, whose root is the directory `prepare()` returned. Staged to `<RUNNER_LOCAL_DATASETS_ROOT>/datasets/vslam/<id>/` and mounted read-only into the eval container at `/datasets`. An ETag file skips re-download when the cache is current. After extraction, `verify-staged` checks the shipped config's `dataset_folder` equals `<id>/`.
@@ -83,14 +83,35 @@ Repository secrets, split read from write so fork-reachable jobs never hold a ke
   `kpi_<run_id>.report.json` contains the current values, previous per-config values, and soft drift results. KPIs are
   ATE, ARE, Kabsch, tracking losts, and FPS, in ODOM and SLAM modes. During migration, `run_eval.sh` also emits the old
   `.table` and `.drift` files; a follow-up script-only change removes those after CI switches to report JSON.
+- KPI config: `kpi_baseline_ranges.json` has `defaults` and per-prefix `datasets` overrides, each holding the
+  sequence checks (`max_ate_pct`, `max_lost_frame_pct`, `exclude_failed`), the rolling-baseline settings, and per-metric drift `tolerances`; a
+  dataset also holds calibrated `expected` values keyed `<METRIC>_<TYPE>_<MODE>`. A malformed file raises, because
+  the sequence checks change KPI values.
+- Rolling-baseline check: `collect -H` reads the last `baseline_window` `kpi_<run>.json` files from the config's
+  KPI history (skipping the current run's) and stores each key's series in the report's `baseline` block. `render`
+  and `aggregate` list KPIs worse than the series median by more than max(`baseline_mad_k` × MAD,
+  `baseline_min_pct` % of the median), in the worse direction only (FPS down, the rest up), needing at least 3 runs.
+  The nightly aggregate first averages each history run across the configurations, so its band reflects the noise of
+  the aggregated mean. PR runs compare against `main`'s nightly history for `EVAL_CONFIG`. It never fails the job, and
+  a manually dispatched nightly writes into the history like a scheduled one.
+- Drift check: covers every key the registry's `kpi-keys` lists for the suite, plus any calibrated key. The tolerance
+  is the calibrated entry's own (`{"value": ..., "tol_pct"|"tol_abs": ...}`), else the dataset's for that metric,
+  else the default's. Uncalibrated keys are SKIPPED.
+- Sequence checks: `collect` also records each sequence run in the report JSON's `sequences` block and marks it failed
+  if it tracked no frames, lost more than `max_lost_frame_pct` of its frames, has no ATE, or exceeds `max_ate_pct`
+  (RGB-D datasets get a laxer ATE cap). Failures never fail the job. Prefixes with `exclude_failed` leave failed
+  sequences out of the ATE, ARE and Kabsch means (TUM and TartanAir); Losts and FPS always cover every sequence.
 - Nightly: `cuvslam_kpi_report.py aggregate` publishes one row per dataset/type/mode. KPI cells contain the mean and
-  population standard deviation across all four x86 configurations; diff cells compare current and previous
-  aggregated means. Temporary per-config `eval-kpis-staging-<version>-<slug>` and
+  population standard deviation across all four x86 configurations, except Losts, which shows min–max; diff cells
+  compare current and previous aggregated means. The last column counts broken sequences (failed in every
+  configuration) and flaky ones (failed in some), listed under a collapsed "Failed sequences" section.
+  `aggregate --values-only` drops the diffs and the broken/flaky data for release notes. Temporary per-config `eval-kpis-staging-<version>-<slug>` and
   `eval-reports-staging-<version>-<slug>` artifacts, raw per-config JSON, reports, and history remain namespaced by
   `platform-cuda-ubuntu`. `RUN_ID` is the UTC date. After aggregation, staging artifacts are replaced by
   `cuvslam-evaluation-<version>.tar.gz`.
 - Release dispatch: `release/vX.Y[.Z][-suffix]` derives tag `vX.Y[.Z][-suffix]` after validating it against `VERSION`. The draft Release contains the consumer artifacts and `cuvslam-evaluation-<version>.tar.gz` generated by the same run. Existing drafts, published Releases, and tags are never overwritten.
-- PR: `cuvslam_kpi_report.py render` produces a single table labeled with `EVAL_CONFIG`; `RUN_ID=pr-<number>`; the
+- PR: `cuvslam_kpi_report.py render` produces a single table labeled with `EVAL_CONFIG`, with a Failed column counting
+  that run's failed sequences; `RUN_ID=pr-<number>`; the
   matching config's KPI history is mounted read-only, so PR runs never write the baseline.
 
 ## Jetson benchmark outputs
