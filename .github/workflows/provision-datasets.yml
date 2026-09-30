@@ -13,6 +13,7 @@ on:
           - icl_nuim
           - m3ed_spot
           - tartan
+          - tartanair_v1
         default: kitti
       force_download:
         description: Re-download raw archives even when they already exist
