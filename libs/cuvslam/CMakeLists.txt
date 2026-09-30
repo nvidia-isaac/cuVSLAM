@@ -94,6 +94,23 @@ if(USE_CUDA)
     )
 endif()
 
+if(USE_ONNXRUNTIME)
+    # libonnxruntime.so is a prebuilt binary that lives in the FetchContent tree, which does not
+    # survive being shipped. Put a copy next to libcuvslam.so and resolve it from there, so the
+    # python wheel and the release archive can carry the two files together.
+    # libcuvslam.so records DT_NEEDED libonnxruntime.so.1 (the SONAME), so the copy has to carry
+    # that name, not the versioned file name the tarball ships.
+    add_custom_command(TARGET cuvslam POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${ONNXRUNTIME_LIBRARY} ${EXECUTABLE_OUTPUT_PATH}/libonnxruntime.so.1
+        COMMENT "Copying ONNX Runtime next to libcuvslam.so"
+    )
+    set_target_properties(cuvslam PROPERTIES
+        BUILD_RPATH "$ORIGIN"
+        INSTALL_RPATH "$ORIGIN"
+    )
+endif()
+
 # interface target for projects that link cuvslam libraries but not cuvslam top-level target
 add_library(cuvslam_libs INTERFACE)
 target_link_libraries(cuvslam_libs INTERFACE ${LIBS})

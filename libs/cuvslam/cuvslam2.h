@@ -770,13 +770,27 @@ struct Result {
  * Consumes Odometry::State to maintain a pose graph, detect loop closures, save and load maps, and
  * relocalize in an existing map.
  *
- * Thread safety: all methods must be called from a single thread, except LocalizeInMap()
- * and SaveMap() which may be called concurrently with any other method from another thread.
+ * Thread safety: all methods must be called from a single thread, except LocalizeInMap(), SaveMap(),
+ * AddFrameToVprMap() and RecognizePlaceByFrame(), which queue their work for the SLAM thread and may
+ * be called concurrently with any other method from another thread.
  */
 class CUVSLAM_API Slam {
 public:
   /// @brief Image set
   using ImageSet = std::vector<Image>;
+
+  /**
+   * @brief Visual place recognition backend, see `RecognizePlaceByFrame`
+   *
+   * Selecting a backend this build does not have throws from the Slam constructor.
+   */
+  enum class VprMode : uint8_t {
+    Off = 0,     ///< place recognition is off
+    Simple = 1,  ///< grayscale thumbnails, always available
+    DBoW2 = 2,   ///< bag of binary words over ORB features, needs a build with USE_DBOW2
+    AnyLoc = 3,  ///< VLAD over DINOv2 dense features, needs USE_ONNXRUNTIME and `Config::vpr_model_path`
+    Bow = 4,     ///< in-tree ORB and a binary bag of words; no third-party dependency
+  };
 
   /**
    * @brief SLAM configuration parameters
@@ -817,6 +831,20 @@ public:
     /// the poses and loop closures SLAM reports refer to an increasingly old point of the trajectory. The warning
     /// requires verbosity Warning or higher (see SetVerbosity). Default: 10 queued commands.
     uint32_t delay_warning_queue_size = 10;
+    /// Visual place recognition backend. `VprMode::Off` disables it, and the place recognition calls do nothing.
+    /// The map holds one frame per pose graph node, so `max_map_size` bounds it too.
+    VprMode vpr_mode = VprMode::Off;
+    /// If non-empty, the place recognition map `SaveMap` wrote into this folder is loaded at construction and is
+    /// then read only: this session neither adds to it nor writes it back. Must name the same `vpr_mode` the map
+    /// was built with. It brings no landmarks, so a match cannot be verified; `LocalizeInMap` without a guess pose
+    /// is the way to relocalize in that folder metrically.
+    std::string_view vpr_map_path;
+    /// Model file the backend needs. `VprMode::AnyLoc` reads a DINOv2 ONNX model from here, exported by
+    /// `cuvslam_export_dinov2`; the other backends ignore it. An unreadable path throws from the constructor.
+    std::string_view vpr_model_path;
+    /// Minimum similarity in [0, 1] for `RecognizePlaceByFrame` to report a match, trading recall for precision.
+    /// 0 selects the backend default.
+    float vpr_score_threshold = 0.f;
   };
 
   // TODO(vikuznetsov): remove when https://gcc.gnu.org/bugzilla/show_bug.cgi?id=88165 is fixed
@@ -833,6 +861,9 @@ public:
     float horizontal_step;           ///< horizontal step in meters
     float vertical_step;             ///< vertical step in meters
     float angular_step_rads;         ///< angular step around vertical axis in radians
+    /// Places `LocalizeInMap` tries when called without a guess pose, best first; the first one that verifies
+    /// wins. Ignored when a guess pose is given. 0 means "use the default", which is 5.
+    uint32_t vpr_candidates = 0;
   };
 
   /**
@@ -905,6 +936,25 @@ public:
   };
 
   /**
+   * @brief Where a frame was observed from
+   *
+   * @see `RecognizePlaceByFrame`
+   */
+  struct PlaceRecognition {
+    bool found;            ///< false when no mapped place matched; the other fields are then meaningless
+    uint64_t node_id;      ///< pose graph node the matched frame was observed from
+    Pose pose;             ///< current world pose of that node, in the same frame as `GetPose`
+    float score;           ///< similarity in [0, 1]; 1 means the frames are identical
+    int64_t timestamp_ns;  ///< timestamp of the mapped frame that matched
+    /// true when the match came from a map loaded through `Config::vpr_map_path`. `node_id` and `pose` then belong
+    /// to the pose graph of the session that recorded that map, not to this one's.
+    bool imported;
+  };
+
+  /// Callback invoked when place recognition finishes, may be called in a separate thread
+  using RecognizePlaceFinishCB = std::function<void(const Result<PlaceRecognition>& result)>;
+
+  /**
    * Construct a SLAM instance with rig and primary cameras
    * @param[in] rig Camera rig configuration
    * @param[in] primary_cameras Vector of primary camera indices
@@ -953,6 +1003,9 @@ public:
    * Save SLAM database (map) to folder asynchronously.
    * This folder will be created, if it does not exist.
    * Contents of the folder will be overwritten.
+   *
+   * When `Config::vpr_mode` is not `VprMode::Off` the place recognition map is written into the same folder as
+   * part of the map, and `LocalizeInMap` reads both back.
    * @param[in] folder_name Folder name, where SLAM database (map) will be saved
    * @param[in] callback Callback function to be called when save is complete, may be called in a separate thread
    */
@@ -969,16 +1022,22 @@ public:
    * localization finishes (possibly on another thread than the caller). If `Config.sync_mode` is true, localization
    * runs immediately before this call returns.
    * Finds the rig pose in the saved map. If successful, replace current map with saved one.
+   *
+   * `guess_pose` is optional. With a guess, the pose is searched for on a grid around it. Without one, the saved
+   * map's place recognition map proposes up to `LocalizationSettings::vpr_candidates` places that look like
+   * `images` and each is verified in turn until one holds. That needs both the saved map and this session to use
+   * the same `Config::vpr_mode`.
    * @param[in] folder_name Folder containing the saved SLAM map (database)
    * @param[in] timestamp_ns Time in nanoseconds for the localized pose. If all images timestamps are equal, it makes
    *                         sense to use images[0].timestamp_ns.
-   * @param[in] guess_pose Initial guess for rig pose at the images' timestamp
+   * @param[in] guess_pose Initial guess for rig pose at the images' timestamp, or empty to search the map by
+   *                       appearance instead
    * @param[in] images Observed images from multicamera (1 - mono, 2 - stereo, etc.)
    * @param[in] settings Localization settings
    * @param[in] start_cb Called when localization starts, may be called in a separate thread
    * @param[in] finish_cb Called when localization completes, may be called in a separate thread
    */
-  void LocalizeInMap(const std::string_view& folder_name, int64_t timestamp_ns, const Pose& guess_pose,
+  void LocalizeInMap(const std::string_view& folder_name, int64_t timestamp_ns, const std::optional<Pose>& guess_pose,
                      const ImageSet& images, const LocalizationSettings& settings, LocalizeStartCB start_cb,
                      LocalizeFinishCB finish_cb);
 
@@ -1019,6 +1078,32 @@ public:
    * @return Pose graph
    */
   std::shared_ptr<const PoseGraph> ReadPoseGraph();
+
+  /**
+   * Offer the current frame to the place recognition map.
+   *
+   * The map holds one frame per pose graph node, so this stores `images` only when the newest node does not have
+   * a frame yet. Call it on every frame: the calls that land on an already mapped node cost almost nothing.
+   * @param[in] images Observed images from multicamera (1 - mono, 2 - stereo, etc.). Only the first image that
+   *                   belongs to a primary camera is used.
+   * @see `RecognizePlaceByFrame`
+   */
+  void AddFrameToVprMap(const ImageSet& images);
+
+  /**
+   * Recognize where a frame was taken.
+   *
+   * Reports the pose graph node whose mapped frame looks most like `images`, and that node's current world pose.
+   * Unlike `LocalizeInMap` this needs no pose guess and does no geometric verification, so it is cheap enough to
+   * call on every frame, and the pose it reports is a mapped node's rather than the camera's.
+   *
+   * `finish_cb` reports an error only when the backend could not answer at all; a search that found nothing
+   * succeeds with `PlaceRecognition::found` false.
+   * @param[in] images Observed images from multicamera (1 - mono, 2 - stereo, etc.). Only the first image that
+   *                   belongs to a primary camera is used.
+   * @param[in] finish_cb Called when the search completes, may be called in a separate thread
+   */
+  void RecognizePlaceByFrame(const ImageSet& images, RecognizePlaceFinishCB finish_cb);
 
 private:
   class Impl;

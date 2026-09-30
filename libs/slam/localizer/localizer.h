@@ -29,6 +29,7 @@
 #include "slam/slam/slam.h"
 #include "slam/view/view_landmarks.h"
 #include "slam/view/view_manager.h"
+#include "slam/vpr/vpr_types.h"
 #include "sof/gradient_pyramid.h"
 
 namespace cuvslam::slam {
@@ -43,6 +44,13 @@ struct LocalizerOptions {
   float horizontal_step = 0.5f;
   float vertical_step = 0.25f;
   float angle_step_rads = 2 * cuvslam::PI / 36;
+  // Width of the yaw sweep around the guess. A full turn is right when the guess is a position with
+  // no heading attached; a guess that came from place recognition already points the right way, and
+  // sweeping a full turn around each of several candidates costs more probes than searching blind.
+  float angle_search_range_rads = 2 * cuvslam::PI;
+  // Place recognition backend of the map being opened. Must match the one the map was saved with,
+  // and is what lets Localize run without a guess pose.
+  vpr::VprOptions vpr_options;
 };
 
 struct LocalizationResult {
@@ -62,7 +70,22 @@ public:
 
   bool OpenDatabase(const std::string& path);
 
+  // Places in the opened map that look like `images`, best first, as world poses to verify.
+  // Empty when the map carries no place recognition map, or nothing matched.
+  std::vector<Isometry3T> RecognizePlaces(const sof::Images& images, size_t max_results) const;
+
+  // Narrow the probe grid to the neighbourhood of a recognized place. Call before localizing against
+  // poses from RecognizePlaces(): those already point the right way and are only a frame spacing
+  // away, so a full grid and a whole turn of yaw around each of several of them would cost more
+  // probes than one blind search.
+  void UseRecognizedPlaceProbes();
+
   bool Localize(const Isometry3T& guess_pose, const sof::Images& images, LocalizationResult& result);
+
+  // Try each guess in turn and keep the first that verifies. Localizing without a pose guess means
+  // handing this the poses RecognizePlaces() proposed, because a blind search of a building does
+  // not terminate.
+  bool Localize(const std::vector<Isometry3T>& guess_poses, const sof::Images& images, LocalizationResult& result);
 
 private:
   struct LoopClosureStatus {

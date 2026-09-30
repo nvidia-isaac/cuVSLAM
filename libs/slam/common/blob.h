@@ -127,6 +127,12 @@ public:
     return true;
   }
 
+  // Bytes left to read. A deserializer bounds a count word it reads out of the blob against this
+  // before allocating for it: a corrupt or hostile count would otherwise reserve for entries the
+  // file cannot possibly contain, and throw length_error or bad_alloc where the caller expects a
+  // clean false.
+  size_t remaining() const { return size_ - feed_offset_; }
+
   const uint8_t* feed_forward(size_t size) const {
     if (size_ - feed_offset_ < size) {
       return nullptr;

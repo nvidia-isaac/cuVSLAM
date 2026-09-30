@@ -163,6 +163,16 @@ const GradientPyramidT& ImageContext::cpu_gradient_pyramid() const {
   return cpu_gradient_pyramid_;
 }
 
+bool ImageContext::has_cpu_image() const { return cpu_image_pyramid_initialized_; }
+
+bool ImageContext::has_gpu_image() const {
+#ifdef USE_CUDA
+  return gpu_image_pyramid_initialized_;
+#else
+  return false;
+#endif
+}
+
 bool ImageContext::support_depth() const { return support_depth_; }
 
 void ImageContext::reset() {

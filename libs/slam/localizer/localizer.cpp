@@ -16,6 +16,8 @@
 
 #include "slam/localizer/localizer.h"
 
+#include "slam/vpr/vpr_sof_image.h"
+
 #include "common/log_types.h"
 #include "common/types.h"
 #include "common/unaligned_types.h"
@@ -72,6 +74,7 @@ void Localizer::Init(const camera::Rig& rig, const LocalizerOptions& options) {
   rig_ = rig;
   slam_ = std::make_unique<LocalizerAndMapper>(rig_, FeatureDescriptorType::kShiTomasi2, options.use_gpu);
   slam_->SetReproduceMode(options.reproduce_mode);
+  slam_->SetVprOptions(options.vpr_options);
 
   first_lcs_.reset(CreateLoopClosureSolver(LoopClosureSolverType::kSimplePoint, RansacType::kNone, true, rig));
   second_lcs_.reset(CreateLoopClosureSolver(LoopClosureSolverType::kTwoStepsEasy, RansacType::kPnP, true, rig));
@@ -82,12 +85,69 @@ bool Localizer::OpenDatabase(const std::string& path) {
     TraceError("Localizer not initialized. Call Init() before OpenDatabase().");
     return false;
   }
-  return slam_->AttachToExistingReadOnlyDatabase(path);
+  if (!slam_->AttachToExistingReadOnlyDatabase(path)) {
+    return false;
+  }
+
+  // The place recognition map was written into the same folder by SaveMap, and its entries are keyed
+  // by the pose graph node ids this database just restored, so it loads with its ids intact. A map
+  // saved without place recognition simply has no such file, which is not an error: localization
+  // then needs the caller's guess pose, as it always did.
+  if (slam_->IsVprEnabled()) {
+    slam_->LoadVprMap(path, vpr::VprMap::LoadMode::kWithPoseGraph);
+  }
+  return true;
+}
+
+std::vector<Isometry3T> Localizer::RecognizePlaces(const sof::Images& images, size_t max_results) const {
+  std::vector<Isometry3T> poses;
+  if (!slam_ || !slam_->IsVprEnabled() || max_results == 0) {
+    return poses;
+  }
+
+  const vpr::VprImage query = vpr::MakeVprImageFromImages(images);
+  if (query.Empty()) {
+    return poses;
+  }
+
+  const std::vector<vpr::VprPlace> places = slam_->RecognizePlaces(query, max_results);
+  poses.reserve(places.size());
+  for (const vpr::VprPlace& place : places) {
+    poses.push_back(place.pose);
+  }
+  return poses;
+}
+
+void Localizer::UseRecognizedPlaceProbes() {
+  options_.horizontal_search_radius = options_.horizontal_step;
+  options_.vertical_search_radius = options_.vertical_step;
+  options_.angle_search_range_rads = 4 * options_.angle_step_rads;
+  PrepareProbes();
+}
+
+bool Localizer::Localize(const std::vector<Isometry3T>& guess_poses, const sof::Images& images,
+                         LocalizationResult& result) {
+  for (const Isometry3T& guess_pose : guess_poses) {
+    if (Localize(guess_pose, images, result)) {
+      return true;
+    }
+    // Localize() only moves slam_ out on success, so a rejected candidate leaves the map in place
+    // and the next one can be tried against it.
+  }
+  return false;
 }
 
 // TODO: Why do we need current_pose here?
 bool Localizer::Localize(const Isometry3T& guess_pose, const sof::Images& images, LocalizationResult& result) {
   guess_pose_ = guess_pose;
+
+  // Each candidate is a fresh search: the trial counter and the best-so-far both bound the probe
+  // walk (Step() stops as soon as a probe is farther from the hint than the best hit), so carrying
+  // them over from a rejected candidate would cut the next one short.
+  trial_ = 0;
+  max_simple_loop_closure_status_ = LoopClosureStatus{};
+  max_exact_loop_closure_status_ = LoopClosureStatus{};
+  output_queue_ = {};
 
   VOFrameInfo fi;
   fi.images_ = images;
@@ -241,14 +301,23 @@ void Localizer::PrepareProbes() {
   const size_t x_count = static_cast<size_t>((2 * x_radius) / h_step) + 1;
   const size_t y_count = static_cast<size_t>((2 * y_radius) / v_step) + 1;
   const size_t z_count = static_cast<size_t>((2 * z_radius) / h_step) + 1;
-  const size_t angle_count = 2 * PI / a_step;
+  const bool full_turn = options_.angle_search_range_rads >= 2 * PI;
+  const float half_range = options_.angle_search_range_rads / 2;
+  const size_t angle_count = full_turn ? static_cast<size_t>(2 * PI / a_step)
+                                       : static_cast<size_t>(options_.angle_search_range_rads / a_step) + 1;
   shifts_.reserve(x_count * y_count * z_count * angle_count);
   shifts_.clear();
   for (float x = -x_radius; x <= x_radius; x += h_step) {
     for (float y = -y_radius; y <= y_radius; y += v_step) {
       for (float z = -z_radius; z <= z_radius; z += h_step) {
-        for (float angle = 0; angle < 2 * PI; angle += a_step) {
-          shifts_.push_back({x, y, z, angle});
+        if (full_turn) {
+          for (float angle = 0; angle < 2 * PI; angle += a_step) {
+            shifts_.push_back({x, y, z, angle});
+          }
+        } else {
+          for (float angle = -half_range; angle <= half_range; angle += a_step) {
+            shifts_.push_back({x, y, z, angle});
+          }
         }
       }
     }

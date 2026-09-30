@@ -18,6 +18,7 @@
 #include "slam/async_slam/async_slam.h"
 
 #include <algorithm>
+#include <exception>
 
 #include "common/log_types.h"
 #include "common/rerun.h"
@@ -74,7 +75,14 @@ bool AsyncSlam::AddKeyframesAndRunCommands_worker(FrameId& frame_id, uint64_t& t
     // execute command from input_queue_
     if (vo_kf->command) {
       std::shared_ptr<ICommand>& cmd = vo_kf->command;
-      cmd->Execute(*this, end_frame_id, vo_pose_at_that_frame);
+      // A command runs third-party code - a place recognition backend loads a model and runs a
+      // neural network - and this is a std::thread entry point, where an escaping exception is
+      // std::terminate. One failed command must not take the process down with it.
+      try {
+        cmd->Execute(*this, end_frame_id, vo_pose_at_that_frame);
+      } catch (const std::exception& e) {
+        TraceError("SLAM command failed: %s\n", e.what());
+      }
       continue;
     }
 
@@ -91,8 +99,16 @@ bool AsyncSlam::AddKeyframesAndRunCommands_worker(FrameId& frame_id, uint64_t& t
           track_data.timestamp_ns < static_cast<uint64_t>(last_keyframe_ts)) {
         continue;  // no need to add keyframe in past if slam in a future
       }
-      slam_->AddKeyframe(track_data.from_keyframe, frame_data, is_valid_image ? current_images : Images());
+      try {
+        slam_->AddKeyframe(track_data.from_keyframe, frame_data, is_valid_image ? current_images : Images());
+      } catch (const std::exception& e) {
+        // Mapping a keyframe reaches the place recognition backend, which loads a model and runs a
+        // neural network. This is a std::thread entry point, so letting that escape is
+        // std::terminate; dropping the keyframe costs one node and keeps the session alive.
+        TraceError("SLAM failed to add a keyframe: %s\n", e.what());
+      }
       pose_estimate_slam = slam_->GetCurrentPose();
+      vpr_wants_frame_ = slam_->VprHeadNeedsImage();
     }
     SlamStdout("'");
 
@@ -273,6 +289,12 @@ bool AsyncSlam::CopyToDatabase_worker(const std::string& path) {
   {
     std::lock_guard slam_guard(slam_mutex_);
     status = slam_->AttachToNewDatabaseSaveMapAndDetach(path);
+    // The place recognition map is part of the map, not something beside it: its entries are keyed
+    // by pose graph node, so they are only meaningful next to the pose graph being written here.
+    // A map that was itself loaded is read only and declines, which is not a failure of this save.
+    if (status && slam_->IsVprEnabled()) {
+      slam_->SaveVprMap(path);
+    }
   }
   if (copy_to_database_callback_) {
     copy_to_database_callback_(status);
