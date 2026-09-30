@@ -208,7 +208,10 @@ jobs:
 
       - name: Resolve local datasets root
         if: matrix.eval
-        run: echo "RUNNER_LOCAL_DATASETS_ROOT=${{ vars.RUNNER_LOCAL_DATASETS_ROOT || '$HOME/.cache/cuvslam' }}" >> "$GITHUB_ENV"
+        # A runner can set its own cache location in its environment (for example a
+        # Jetson pointing at a data partition); otherwise the repository variable or
+        # the home-directory default applies.
+        run: echo "RUNNER_LOCAL_DATASETS_ROOT=${RUNNER_LOCAL_DATASETS_ROOT:-${{ vars.RUNNER_LOCAL_DATASETS_ROOT || '$HOME/.cache/cuvslam' }}}" >> "$GITHUB_ENV"
 
       - name: Build CI tools image
         if: matrix.eval
