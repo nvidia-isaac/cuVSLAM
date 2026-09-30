@@ -275,6 +275,7 @@ jobs:
           timeout_minutes: ${{ matrix.build_timeout || 120 }}
           retry_wait_seconds: 30
           command: |
+            CUVSLAM_REQUIRE_CLEAN_SOURCE=1 \
             CUDA_VERSION=${{ matrix.cuda }} \
             UBUNTU_VERSION=${{ matrix.ubuntu }} \
             BASE_IMAGE="${{ matrix.base_image }}" \
@@ -451,11 +452,43 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-      - name: Upload Python wheel
+      - name: Upload Python backend wheel
         if: matrix.wheel && !matrix.skip_artifacts
         uses: actions/upload-artifact@v7
         with:
-          path: output/wheel/*.whl
+          path: output/wheel/cuvslam_cu*.whl
+          archive: false
+          overwrite: true
+          retention-days: 30
+          if-no-files-found: error
+
+      # Common Python files and the default metapackage are configuration-independent.
+      # Publish the canonical artifacts from one matrix row only.
+      - name: Upload common Python wheel
+        if: >-
+          matrix.wheel &&
+          !matrix.skip_artifacts &&
+          matrix.platform == 'x86_64' &&
+          matrix.cuda == '13.2.0' &&
+          matrix.ubuntu == '24.04'
+        uses: actions/upload-artifact@v7
+        with:
+          path: output/wheel/cuvslam_common-*.whl
+          archive: false
+          overwrite: true
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload default Python metapackage wheel
+        if: >-
+          matrix.wheel &&
+          !matrix.skip_artifacts &&
+          matrix.platform == 'x86_64' &&
+          matrix.cuda == '13.2.0' &&
+          matrix.ubuntu == '24.04'
+        uses: actions/upload-artifact@v7
+        with:
+          path: output/wheel/cuvslam-[0-9]*.whl
           archive: false
           overwrite: true
           retention-days: 30
@@ -792,7 +825,8 @@ jobs:
                 && artifact.name.endsWith('.tar.gz'),
             ).length;
             const wheelCount = artifacts.filter(
-              artifact => artifact.name.startsWith('cuvslam-') && artifact.name.endsWith('.whl'),
+              artifact => (artifact.name.startsWith('cuvslam-') || artifact.name.startsWith('cuvslam_'))
+                && artifact.name.endsWith('.whl'),
             ).length;
             core.setOutput('cpp_count', cppCount.toString());
             core.setOutput('wheel_count', wheelCount.toString());
@@ -856,6 +890,10 @@ jobs:
       actions: read
       contents: write  # Required by gh release create below.
     steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
       # Recheck after the matrix to catch a release or tag created since preflight.
       - name: Recheck release target is available
         env:
@@ -884,7 +922,7 @@ jobs:
       - name: Download release artifacts
         uses: actions/download-artifact@v8
         with:
-          pattern: cuvslam-*
+          pattern: cuvslam*
           path: release-assets
           merge-multiple: true
 
@@ -893,21 +931,13 @@ jobs:
           PACKAGE_VERSION: ${{ needs.check-changes.outputs.package_version }}
           EXPECTED_CPP_COUNT: ${{ needs.nightly-summary.outputs.release_cpp_count }}
           EXPECTED_WHEEL_COUNT: ${{ needs.nightly-summary.outputs.release_wheel_count }}
+          PYPI_CUVSLAM_CU12_FILE_SIZE_LIMIT: ${{ vars.PYPI_CUVSLAM_CU12_FILE_SIZE_LIMIT }}
+          PYPI_CUVSLAM_CU13_FILE_SIZE_LIMIT: ${{ vars.PYPI_CUVSLAM_CU13_FILE_SIZE_LIMIT }}
         run: |
           set -euo pipefail
           shopt -s nullglob
-          WHEEL_VERSION=$(
-            python3 -c '
-          import sys
-          try:
-              from packaging.version import Version
-          except ModuleNotFoundError:
-              from pip._vendor.packaging.version import Version
-          print(Version(sys.argv[1]))
-          ' "$PACKAGE_VERSION"
-          )
           cpp_assets=(release-assets/cuvslam-cpp-"${PACKAGE_VERSION}"-*.tar.gz)
-          wheel_assets=(release-assets/cuvslam-"${WHEEL_VERSION}"+cu*.whl)
+          wheel_assets=(release-assets/*.whl)
           docs_asset="release-assets/cuvslam-docs-${PACKAGE_VERSION}.tar.gz"
           evaluation_asset="release-assets/cuvslam-evaluation-${PACKAGE_VERSION}.tar.gz"
 
@@ -922,18 +952,31 @@ jobs:
             exit 1
           fi
 
+          size_args=()
+          if [ -n "${PYPI_CUVSLAM_CU12_FILE_SIZE_LIMIT:-}" ]; then
+            size_args+=(--size-limit "cuvslam-cu12=$PYPI_CUVSLAM_CU12_FILE_SIZE_LIMIT")
+          fi
+          if [ -n "${PYPI_CUVSLAM_CU13_FILE_SIZE_LIMIT:-}" ]; then
+            size_args+=(--size-limit "cuvslam-cu13=$PYPI_CUVSLAM_CU13_FILE_SIZE_LIMIT")
+          fi
+          python3 python/packaging/build_packages.py release-manifest \
+            --output "release-assets/cuvslam-python-${PACKAGE_VERSION}-manifest.json" \
+            --expected-version "$PACKAGE_VERSION" \
+            --expected-distribution cuvslam=1 \
+            --expected-distribution cuvslam-common=1 \
+            --expected-distribution cuvslam-cu12=3 \
+            --expected-distribution cuvslam-cu13=3 \
+            "${size_args[@]}" \
+            "${wheel_assets[@]}"
+
           assets=(release-assets/*)
           if [ "${#assets[@]}" -eq 0 ]; then
             echo "::error::No release assets were downloaded."
             exit 1
           fi
           for asset in "${assets[@]}"; do
-            expected_version=$PACKAGE_VERSION
-            if [[ "$asset" == *.whl ]]; then
-              expected_version=$WHEEL_VERSION
-            fi
-            if [[ "$(basename "$asset")" != *"$expected_version"* ]]; then
-              echo "::error::Release asset does not contain version $expected_version: $asset"
+            if [[ "$(basename "$asset")" != *"$PACKAGE_VERSION"* ]]; then
+              echo "::error::Release asset does not contain version $PACKAGE_VERSION: $asset"
               exit 1
             fi
           done
@@ -961,6 +1004,9 @@ jobs:
             echo "## Draft release created"
             echo ""
             echo "[$TAG]($draft_url)"
+            echo ""
+            echo "The release contains a SHA-256 manifest for downstream Python package publication."
+            echo "Promote the exact attached bytes through the approved release infrastructure; do not rebuild them."
             echo ""
             echo "To rebuild this release candidate, delete the draft explicitly and dispatch the updated release branch again."
           } >> "$GITHUB_STEP_SUMMARY"
