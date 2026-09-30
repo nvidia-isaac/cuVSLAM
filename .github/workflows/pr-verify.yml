@@ -69,7 +69,7 @@ jobs:
     runs-on: [gpu]
     timeout-minutes: 120
     env:
-      EXTRA_CMAKE_ARGS: "-DCMAKE_CUDA_ARCHITECTURES=native"
+      EXTRA_CMAKE_ARGS: "-DCMAKE_CUDA_ARCHITECTURES=native -DCUVSLAM_BUILD_CUNLS_TESTS=ON"
     steps:
       - name: Verify GPU
         run: nvidia-smi
@@ -254,7 +254,7 @@ jobs:
     env:
       BASE_IMAGE: "nvcr.io/nvidia/12.6.11-devel:12.6.11-devel-aarch64-ubuntu22.04"
       UBUNTU_VERSION: "22.04"
-      EXTRA_CMAKE_ARGS: "-DCMAKE_CUDA_ARCHITECTURES=87"
+      EXTRA_CMAKE_ARGS: "-DCMAKE_CUDA_ARCHITECTURES=87 -DCUVSLAM_BUILD_CUNLS_TESTS=ON"
     steps:
       - name: System info
         run: |
@@ -331,7 +331,7 @@ jobs:
     env:
       CUDA_VERSION: "13.0.1"
       UBUNTU_VERSION: "24.04"
-      EXTRA_CMAKE_ARGS: "-DCMAKE_CUDA_ARCHITECTURES=110"
+      EXTRA_CMAKE_ARGS: "-DCMAKE_CUDA_ARCHITECTURES=110 -DCUVSLAM_BUILD_CUNLS_TESTS=ON"
     steps:
       - name: System info
         run: |

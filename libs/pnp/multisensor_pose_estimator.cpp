@@ -21,8 +21,8 @@
 
 #include <cunls/common/device_vector.h>
 #include <cunls/common/log.h>
+#include <cunls/factor/between/se3_between_factor_batch.h>
 #include <cunls/factor/pnp_factor_batch.h>
-#include <cunls/factor/se3_between_factor_batch.h>
 #include <cunls/minimizer/levenberg_marquardt_minimizer.h>
 #include <cunls/minimizer/problem.h>
 #include <cunls/robustifier/cauchy_loss_function_batch.h>

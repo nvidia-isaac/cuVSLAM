@@ -60,6 +60,7 @@ set(CUDAToolkit_ROOT /usr/local/cuda CACHE PATH "Path to installed CUDA toolkit"
 set(CMAKE_CUDA_COMPILER ${CUDAToolkit_ROOT}/bin/nvcc CACHE PATH "Path to installed CUDA compiler")
 
 option(USE_CUNLS "Build with cunls support." ON)
+option(CUVSLAM_BUILD_CUNLS_TESTS "Build upstream cuNLS tests." OFF)
 option(USE_CERES "Build with ceres support." OFF)
 option(USE_NVTX "Build with nvtx tracing support." OFF)
 option(USE_SLAM_OUTPUT "Build with option to enable debug output of SLAM" OFF)
