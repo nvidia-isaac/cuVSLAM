@@ -24,6 +24,7 @@
 #include "slam/map/database/lmdb_slam_database.h"
 #include "slam/map/spatial_index/lsi_grid.h"
 #include "slam/slam/slam_check_hypothesis.h"
+#include "slam/vpr/vpr_sof_image.h"
 
 namespace cuvslam::slam {
 
@@ -188,6 +189,32 @@ std::vector<vpr::VprPlace> LocalizerAndMapper::RecognizePlaces(const vpr::VprIma
     ++it;
   }
   return places;
+}
+
+std::vector<vpr::VprPlace> LocalizerAndMapper::RecognizeLoopClosurePlaces(const vpr::VprImage& image) {
+  KeyFrameId head = InvalidKeyFrameId;
+  if (!IsVprEnabled() || !map_.pose_graph_.GetHeadKeyframe(head) || head == InvalidKeyFrameId) {
+    return {};
+  }
+  const int64_t head_timestamp_ns = map_.pose_graph_.GetKeyframe(head).keyframe_info.timestamp_ns;
+
+  // Every place is ranked rather than the best few: the recent past takes the top of the ranking, so a short list
+  // would be empty once it is left out.
+  std::vector<vpr::VprPlace> candidates;
+  for (const vpr::VprPlace& place : RecognizePlaces(image, GetVprMapSize())) {
+    // An imported place, or one stamped after the newest node, which only a map LocalizeInMap loaded can hold, was
+    // mapped by another session and is never the recent past. A place such a map stamped within the window of this
+    // session's clock is still left out, because the map does not record which session mapped a place.
+    const int64_t age_ns = head_timestamp_ns - place.timestamp_ns;
+    if (!place.imported && age_ns >= 0 && age_ns < kLoopClosureVprMinAgeNs) {
+      continue;
+    }
+    candidates.push_back(place);
+    if (candidates.size() == kLoopClosureVprCandidates) {
+      break;
+    }
+  }
+  return candidates;
 }
 
 bool LocalizerAndMapper::SaveVprMap(const std::string& folder) {
@@ -370,7 +397,7 @@ bool LocalizerAndMapper::AttachToNewDatabaseSaveMapAndDetach(const std::string& 
 void LocalizerAndMapper::DetachDatabase() { map_.DetachDatabase(false); }
 
 void LocalizerAndMapper::DetectLoopClosure(const ILoopClosureSolver& loop_closure_solver, const Images& images,
-                                           const Isometry3T& world_from_rig_guess, LoopClosureStatus& status) const {
+                                           const Isometry3T& world_from_rig_guess, LoopClosureStatus& status) {
   TRACE_EVENT ev = profiler_domain_.trace_event("LC()", profiler_color_);
 
   status = LoopClosureStatus();
@@ -381,6 +408,20 @@ void LocalizerAndMapper::DetectLoopClosure(const ILoopClosureSolver& loop_closur
   task.loop_closure_task.pose_graph_hypothesis = map_.pose_graph_hypothesis_.MakeCopy();
   task.loop_closure_task.guess_world_from_rig = world_from_rig_guess;
   map_.pose_graph_.GetHeadKeyframe(task.loop_closure_task.pose_graph_head);
+
+  if (loop_closure_solver.WantsVprCandidates() && IsVprEnabled()) {
+    // Place recognition may read the image back from the GPU and run a neural network, here on the SLAM thread,
+    // where an exception that escapes is std::terminate. Losing the candidates costs this one loop closure attempt.
+    try {
+      const vpr::VprImage vpr_image = vpr::MakeVprImageFromImages(images);
+      if (!vpr_image.Empty()) {
+        task.loop_closure_task.vpr_candidates = RecognizeLoopClosurePlaces(vpr_image);
+      }
+    } catch (const std::exception& e) {
+      TraceError("SLAM failed to recognize places for loop closure: %s\n", e.what());
+    }
+  }
+
   const LSIGrid& lsi = *map_.landmarks_spatial_index_;
   SlamCheckHypothesis(lsi, &loop_closure_solver, rig_, map_.feature_descriptor_ops_.get(), task);
 

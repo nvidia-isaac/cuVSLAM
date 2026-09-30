@@ -836,9 +836,16 @@ NB_MODULE(pycuvslam, m) {
              "VLAD over DINOv2 dense features, needs USE_ONNXRUNTIME and `Slam.Config.vpr_model_path`")
       .value("Bow", Slam::VprMode::Bow, "In-tree ORB and a binary bag of words; no third-party dependency");
 
+  nb::enum_<Slam::LoopClosureMode>(slam_cls, "LoopClosureMode",
+                                   "Where loop closure looks for a place it has been before, see "
+                                   "`Slam.Config.loop_closure_mode`.")
+      .value("Default", Slam::LoopClosureMode::Default, "In the landmark map around the current pose estimate")
+      .value("Vpr", Slam::LoopClosureMode::Vpr,
+             "Only at the places visual place recognition proposes; needs `vpr_mode` other than `Off`");
+
   nb::class_<Slam::Config>(slam_cls, "Config", "SLAM configuration parameters")
       .def(nb::init<std::string_view, bool, bool, bool, bool, bool, float, float, uint32_t, uint32_t, uint32_t,
-                    uint32_t, Slam::VprMode, std::string_view, std::string_view, float>(),
+                    uint32_t, Slam::VprMode, std::string_view, std::string_view, float, Slam::LoopClosureMode>(),
            nb::kw_only(), nb::arg("map_cache_path") = Slam::Config{}.map_cache_path,
            nb::arg("use_gpu") = Slam::Config{}.use_gpu, nb::arg("sync_mode") = Slam::Config{}.sync_mode,
            nb::arg("enable_reading_internals") = true,  // enable by default; in Python convenience is a priority
@@ -852,7 +859,8 @@ NB_MODULE(pycuvslam, m) {
            nb::arg("delay_warning_queue_size") = Slam::Config{}.delay_warning_queue_size,
            nb::arg("vpr_mode") = Slam::Config{}.vpr_mode, nb::arg("vpr_map_path") = Slam::Config{}.vpr_map_path,
            nb::arg("vpr_model_path") = Slam::Config{}.vpr_model_path,
-           nb::arg("vpr_score_threshold") = Slam::Config{}.vpr_score_threshold)
+           nb::arg("vpr_score_threshold") = Slam::Config{}.vpr_score_threshold,
+           nb::arg("loop_closure_mode") = Slam::Config{}.loop_closure_mode)
       .def_rw("map_cache_path", &Slam::Config::map_cache_path,
               "If empty, map is kept in memory only. Else, map is synced to disk (LMDB) at this path, allowing "
               "large-scale maps; if the path already exists it will be overwritten. To load an existing map, use "
@@ -895,16 +903,26 @@ NB_MODULE(pycuvslam, m) {
       .def_rw("vpr_score_threshold", &Slam::Config::vpr_score_threshold,
               "Minimum similarity in [0, 1] for `recognize_place_by_frame` to report a match, trading recall for "
               "precision. 0 selects the backend default.")
+      .def_rw("loop_closure_mode", &Slam::Config::loop_closure_mode,
+              "Where loop closure looks for a place it has been before. `LoopClosureMode.Vpr` verifies, instead of "
+              "the surroundings of the current pose estimate, the places the `vpr_mode` backend finds most similar to "
+              "the current frame. It leaves out the last 20 seconds of the trajectory, and rejects a loop closure that "
+              "would move the pose estimate by more than 10 m or 10 degrees or that verification from the estimate "
+              "itself contradicts, so that a look-alike place cannot tear the map apart. It needs `vpr_mode` other "
+              "than `Off`, an empty `vpr_map_path` and `gt_align_mode` off, or constructing Slam raises ValueError. "
+              "It queries place recognition on every keyframe, which costs far more than the default search; `DBoW2` "
+              "also retrains its vocabulary after every keyframe, so prefer `Bow` or `AnyLoc`.")
       .def("__repr__", [](const Slam::Config& cfg) {
         return nb::str(
                    "cuvslam.Slam.Config(map_cache_path={}, use_gpu={}, sync_mode={}, enable_reading_internals={}, "
                    "planar_constraints={}, gt_align_mode={}, map_cell_size={}, max_landmarks_distance={}, "
                    "max_map_size={}, throttling_time_ms={}, retention_time_ms={}, delay_warning_queue_size={}, "
-                   "vpr_mode={}, vpr_map_path={}, vpr_model_path={}, vpr_score_threshold={})")
+                   "vpr_mode={}, vpr_map_path={}, vpr_model_path={}, vpr_score_threshold={}, "
+                   "loop_closure_mode={})")
             .format(cfg.map_cache_path, cfg.use_gpu, cfg.sync_mode, cfg.enable_reading_internals,
                     cfg.planar_constraints, cfg.gt_align_mode, cfg.map_cell_size, cfg.max_landmarks_distance,
                     cfg.max_map_size, cfg.throttling_time_ms, cfg.retention_time_ms, cfg.delay_warning_queue_size,
-                    cfg.vpr_mode, cfg.vpr_map_path, cfg.vpr_model_path, cfg.vpr_score_threshold);
+                    cfg.vpr_mode, cfg.vpr_map_path, cfg.vpr_model_path, cfg.vpr_score_threshold, cfg.loop_closure_mode);
       });
 
   nb::class_<Slam::LocalizationSettings>(slam_cls, "LocalizationSettings", "Localization settings")

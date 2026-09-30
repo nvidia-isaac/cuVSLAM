@@ -82,6 +82,27 @@ def str2odometry_mode(value: str) -> vslam.Odometry.OdometryMode:
     return str2odometry_mode_map[value]
 
 
+def str2vpr_mode(value: str) -> vslam.Slam.VprMode:
+    """Convert string to visual place recognition backend enum."""
+    str2vpr_mode_map = {
+        'off': vslam.Slam.VprMode.Off,
+        'simple': vslam.Slam.VprMode.Simple,
+        'bow': vslam.Slam.VprMode.Bow,
+        'dbow2': vslam.Slam.VprMode.DBoW2,
+        'anyloc': vslam.Slam.VprMode.AnyLoc,
+    }
+    return str2vpr_mode_map[value]
+
+
+def str2loop_closure_mode(value: str) -> vslam.Slam.LoopClosureMode:
+    """Convert string to loop closure mode enum."""
+    str2loop_closure_mode_map = {
+        'default': vslam.Slam.LoopClosureMode.Default,
+        'vpr': vslam.Slam.LoopClosureMode.Vpr,
+    }
+    return str2loop_closure_mode_map[value]
+
+
 def to_distortion_model(distortion: str) -> vslam.Distortion.Model:
     """Convert string to distortion model enum."""
     distortion = distortion.lower()

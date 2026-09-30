@@ -12,7 +12,11 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
+import contextlib
+import io
+import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -25,6 +29,37 @@ from cuvslam_tools.reporter import cli
 from cuvslam_tools.reporter import generate_report
 
 
+def _stat(**fields) -> types.SimpleNamespace:
+    """Stand in for tracker.runner.Stat, which cannot be imported without the cuVSLAM binding."""
+    values = dict(sequence_title="07", n_frames=1101, tracking_time=55.0, average_fps=20.0,
+                  bird_view_with_errors_path="", gt_av_translation_error=0.0, gt_av_rotation_error=0.0,
+                  gt_n_error_segments=0, gt_simple_error=0.0, num_tracking_losts=0, odometry_mode="",
+                  num_loop_closures=0, loop_closure_mode="", seg_err_points=[])
+    values.update(fields)
+    return types.SimpleNamespace(**values)
+
+
+def _render_reports(stats: list) -> dict:
+    """Render the HTML report and the page the PDF is printed from, keyed "html" and "pdf"."""
+    rendered = {}
+
+    class CapturingHtml:
+        def __init__(self, **kwargs):
+            rendered["pdf"] = kwargs["string"]
+
+        def write_pdf(self, path):
+            Path(path).write_bytes(b"")
+
+    weasyprint = types.ModuleType("weasyprint")
+    weasyprint.HTML = CapturingHtml
+    with tempfile.TemporaryDirectory() as output_dir:
+        with mock.patch.dict(sys.modules, {"weasyprint": weasyprint}), \
+                mock.patch.object(generate_report, "_git_source_metadata", return_value=("sha", "branch", "ts", "")):
+            generate_report.generate_report(output_dir, [], stats, generate_pdf=True)
+        rendered["html"] = (Path(output_dir) / "report.html").read_text(encoding="utf-8")
+    return rendered
+
+
 class TestReporterCli(unittest.TestCase):
     def test_resolve_config_path_uses_datasets_root_for_relative_config(self):
         with tempfile.TemporaryDirectory() as datasets_root:
@@ -35,6 +70,60 @@ class TestReporterCli(unittest.TestCase):
             resolved = cli._resolve_config_path("kitti/kitti-vio_slam_gt.cfg", datasets_root)
 
         self.assertEqual(resolved, config_path)
+
+    def test_vpr_loop_closure_with_a_backend_reaches_the_report(self):
+        # No --use_slam: the reporter takes it from each sequence of the config.
+        with mock.patch.object(cli, "run_report") as run_report:
+            exit_code = cli.main(["--test_config", "kitti.cfg", "--loop_closure_mode", "vpr", "--vpr_mode", "bow"])
+
+        self.assertEqual(exit_code, 0)
+        args = run_report.call_args.args[0]
+        self.assertEqual(args.loop_closure_mode, "vpr")
+        self.assertEqual(args.vpr_mode, "bow")
+
+    def test_vpr_loop_closure_without_a_backend_fails_before_the_report(self):
+        stderr = io.StringIO()
+        with mock.patch.object(cli, "run_report") as run_report, contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as cm:
+                cli.main(["--test_config", "kitti.cfg", "--loop_closure_mode", "vpr"])
+
+        self.assertEqual(cm.exception.code, 2)
+        self.assertIn("--vpr_mode", stderr.getvalue())
+        run_report.assert_not_called()
+
+
+class TestLoopClosureStats(unittest.TestCase):
+    """Default and VPR loop closure runs are compared through the reporter outputs."""
+
+    def test_stats_json_records_the_loop_closures(self):
+        with tempfile.TemporaryDirectory() as output_dir:
+            generate_report.save_stats_to_json([_stat(num_loop_closures=4, loop_closure_mode="vpr")], output_dir)
+            saved = json.loads((Path(output_dir) / "stats" / "all_stats.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(saved[0]["num_loop_closures"], 4)
+        self.assertEqual(saved[0]["loop_closure_mode"], "vpr")
+
+    def _loop_closure_cell(self, html: str, sequence_title: str) -> str:
+        """Return the loop closure cell, the last one, of a sequence's row in the summary table."""
+        rows = re.findall(rf"<tr>\s*<td>{re.escape(sequence_title)}</td>(.*?)</tr>", html, re.S)
+        self.assertEqual(len(rows), 1, f"expected one summary row for {sequence_title}")
+        return re.findall(r"<td>(.*?)</td>", rows[0], re.S)[-1].strip()
+
+    def test_reports_show_the_loop_closures_of_slam_sequences_only(self):
+        stats = [_stat(sequence_title="07-ODOM"),
+                 _stat(sequence_title="07-SLAM-DEFAULT", loop_closure_mode="default"),
+                 _stat(sequence_title="07-SLAM-VPR", num_loop_closures=4, loop_closure_mode="vpr")]
+
+        rendered = _render_reports(stats)
+        for report in ("html", "pdf"):
+            with self.subTest(report=report):
+                html = rendered[report]
+                self.assertIn("<th>Loop closures</th>", html)
+                self.assertEqual(self._loop_closure_cell(html, "07-SLAM-VPR"), "4 (vpr)")
+                # A SLAM run that closed no loop is a result to compare, so it still shows its count.
+                self.assertEqual(self._loop_closure_cell(html, "07-SLAM-DEFAULT"), "0 (default)")
+                # Odometry has no loop closure mode, so its cell stays blank instead of reading "0 ()".
+                self.assertEqual(self._loop_closure_cell(html, "07-ODOM"), "")
 
 
 class TestGitSourceMetadata(unittest.TestCase):

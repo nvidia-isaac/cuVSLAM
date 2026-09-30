@@ -66,6 +66,9 @@ class Stat:
     gt_simple_error: float = 0
     num_tracking_losts: int = 0
     odometry_mode: str = ""
+    # Set by SLAM runs only: distinct loop closures collected, and the --loop_closure_mode used ("default" or "vpr").
+    num_loop_closures: int = 0
+    loop_closure_mode: str = ""
     # per-instance list of dicts {length, t_pct, r_deg_per_m}, populated by
     # metrics.calculate_sequence_errors in the segment branch.
     seg_err_points: list = field(default_factory=list)
@@ -109,8 +112,16 @@ class Tracker:
             self.slam_cfg = vslam.Slam.Config()
             self.slam_cfg.use_gpu = self.odom_cfg.use_gpu
             self.slam_cfg.sync_mode = args.sync_slam
+            self.slam_cfg.vpr_mode = getattr(args, 'vpr_mode', vslam.Slam.VprMode.Off)
+            self.slam_cfg.vpr_model_path = getattr(args, 'vpr_model_path', '')
+            self.slam_cfg.loop_closure_mode = getattr(args, 'loop_closure_mode', vslam.Slam.LoopClosureMode.Default)
+            if getattr(args, 'max_map_size', None) is not None:
+                self.slam_cfg.max_map_size = args.max_map_size
             if args.visualize_rerun:
                 self.slam_cfg.enable_reading_internals = True
+            # Frames are deliberately not offered with add_frame_to_vpr_map(): synchronous SLAM already gives every
+            # keyframe its place recognition picture, and the offers make asynchronous SLAM fall behind a replay
+            # that runs faster than real time, which leaves the poses read at the end stale.
 
         self.mode = self._tracker_mode(self.slam_cfg is not None, self.odom_cfg.async_sba)
 
@@ -331,6 +342,9 @@ class Tracker:
                 for pose in slam_poses:
                     frame_id = self.frame_id_from_ts[pose.timestamp_ns]
                     self.world_from_rig[frame_id] = pose.pose
+            self.stat.loop_closure_mode = self.slam_cfg.loop_closure_mode.name.lower()
+            # Keyed by timestamp, so a loop closure reported on several frames counts once.
+            self.stat.num_loop_closures = len(self.loop_closures)
 
         self.stat.n_frames = self.processed_frame_count
         self.stat.average_fps = get_fps(self.stat.tracking_time, self.stat.n_frames)
@@ -459,6 +473,10 @@ def track(args: argparse.Namespace,
         args.multicam_mode = conv.str2multicam_mode(args.multicam_mode)
     if isinstance(args.odometry_mode, str):
         args.odometry_mode = conv.str2odometry_mode(args.odometry_mode)
+    if isinstance(getattr(args, 'vpr_mode', None), str):
+        args.vpr_mode = conv.str2vpr_mode(args.vpr_mode)
+    if isinstance(getattr(args, 'loop_closure_mode', None), str):
+        args.loop_closure_mode = conv.str2loop_closure_mode(args.loop_closure_mode)
 
     # Normalize and apply backward-compat default: bare --num_loops without
     # --repeat_type now means Repeat; implicit Shuttle is deprecated.

@@ -793,6 +793,14 @@ public:
   };
 
   /**
+   * @brief Where loop closure looks for a place it has been before, see `Config::loop_closure_mode`.
+   */
+  enum class LoopClosureMode : uint8_t {
+    Default = 0,  ///< in the landmark map around the current pose estimate
+    Vpr = 1,      ///< only at the places visual place recognition proposes; needs `vpr_mode` other than `Off`
+  };
+
+  /**
    * @brief SLAM configuration parameters
    */
   struct Config {
@@ -845,6 +853,15 @@ public:
     /// Minimum similarity in [0, 1] for `RecognizePlaceByFrame` to report a match, trading recall for precision.
     /// 0 selects the backend default.
     float vpr_score_threshold = 0.f;
+    /// Where loop closure looks for a place it has been before. `LoopClosureMode::Vpr` verifies, instead of the
+    /// surroundings of the current pose estimate, the places the `vpr_mode` backend finds most similar to the current
+    /// frame. It leaves out the last 20 seconds of the trajectory, and rejects a loop closure that would move the pose
+    /// estimate by more than 10 m or 10 degrees or that verification from the estimate itself contradicts, so that a
+    /// look-alike place cannot tear the map apart. It needs `vpr_mode` other than `Off`, an empty `vpr_map_path` and
+    /// `gt_align_mode` off, or the constructor throws std::invalid_argument. It queries place recognition on every
+    /// keyframe, which costs far more than the default search; `DBoW2` also retrains its vocabulary after every
+    /// keyframe, so prefer `Bow` or `AnyLoc`.
+    LoopClosureMode loop_closure_mode = LoopClosureMode::Default;
   };
 
   // TODO(vikuznetsov): remove when https://gcc.gnu.org/bugzilla/show_bug.cgi?id=88165 is fixed

@@ -24,6 +24,11 @@
   place recognition map proposes, which is what lets a robot that has no idea where it is relocalize at all;
   `LocalizationSettings::vpr_candidates` bounds how many it tries
 - `Slam::Config::vpr_map_path`: loads a place recognition map on its own, for recognition without landmarks
+- `Slam::Config::loop_closure_mode`: `LoopClosureMode::Vpr` closes loops at the places visual place recognition
+  proposes instead of around the current pose estimate. It leaves out the last 20 seconds of the trajectory, rejects
+  a loop closure that would move the pose estimate by more than 10 m or 10 degrees or that verification from the
+  estimate contradicts, and needs `vpr_mode` other than `Off`. `cuvslam_tracker` and `cuvslam_reporter` select it with `--loop_closure_mode vpr --vpr_mode
+  <backend>`, cap the pose graph with `--max_map_size`, and record the number of loop closures in their stats
 - `cuvslam_vpr_reporter`: scores a place recognition backend on two recordings of the same route and reports the
   recognition and false positive rates with an HTML and PDF report
 - `cuvslam_export_dinov2`: exports the DINOv2 value-facet ONNX model that the AnyLoc backend reads

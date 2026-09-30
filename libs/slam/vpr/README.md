@@ -91,6 +91,83 @@ Implement `IVpr`, add the type to `VprType` and `Slam::VprMode` (they are kept n
 vocabulary builds it in `Finalize()`, which `VprMap` calls before the first query and before serializing; the
 interface is written that way so a backend never has to train anything while a frame is being mapped.
 
+## Closing loops
+
+`Slam::Config::loop_closure_mode = LoopClosureMode::Vpr` makes place recognition the only source of loop closure
+candidates. `LocalizerAndMapper::DetectLoopClosure` asks `RecognizeLoopClosurePlaces` for up to
+`kLoopClosureVprCandidates` (5) places, and `LoopClosureSolverVpr` runs the default mode's own verification
+(`LoopClosureSolverTwoStepsEasy`) re-centered on each candidate's pose in turn, keeping the first that passes. Each
+of the decisions below was forced by a measurement on KITTI 00-10:
+
+**The recent past is left out.** `AddKeyframe` puts the current frame into the map just before `DetectLoopClosure`
+queries it, so the best match is the newest node itself, at exactly the pose the default search starts from, and the
+runners-up are its neighbors: with `Bow`, on KITTI-07 the best match is within 10 s of the query for 99% of frames. Without a
+filter the mode verified the default search's own hypothesis plus near duplicates, and reproduced the default mode's
+trajectory bit for bit. `RecognizeLoopClosurePlaces` ranks the whole map and drops live nodes mapped less than
+`kLoopClosureVprMinAgeNs` (20 s) before the newest one. It is a time window rather than a node count because a
+10-node guard (about 5 s on KITTI) let a look-alike stretch of the same pass through: a road 145 m back verified on
+KITTI-02.
+
+**A loop closure has to be plausible, not just verifiable.** Verification around a candidate's pose checks that the
+current frame fits the landmarks there, not that the robot can be there. On KITTI-01, a highway with no loop at all,
+`Bow` and verification together closed 129 false loops and the translation error went from 1.5% to 38%. `LoopClosureSolverVpr`
+therefore rejects a result that would move the pose estimate by more than `kMaxCorrectionM` (10 m) or
+`kMaxCorrectionDeg` (10 degrees). The default search never corrected by more than 7.4 m and 2 degrees on KITTI 00-10
+(median 0.04 m), because it only searches around the estimate. A 5 m bound rejected KITTI-09's genuine loop
+closure, a 10 m correction; a 20 m bound let KITTI-02's false ones through. A loop whose drift exceeds the bound is
+not closed. Both bounds, and the 20 s window, were chosen on the same eleven sequences the comparison below is
+measured on, and KITTI-09's loop closure sits right at the translation bound, so they are fitted to KITTI rather than
+validated on it; a bound that grows with the distance travelled since the candidate was mapped is the obvious next
+step. `AnyLoc` proposes the right place far more often (at 87% of KITTI-00's revisits it has one among its five
+candidates), and the bound still rejected two to four verified loop closures per long sequence, 14 to 47 m away.
+
+**Two verifications have to agree.** Started from a candidate's pose, verification can settle on the candidate's own
+node, a few meters from the camera, instead of on the camera. With `AnyLoc` on KITTI-00 one loop closure moved the
+estimate 8.2 m onto a node that ground truth put 8.3 m from the camera, four frames after another to the same place
+had moved it 3.5 cm; the 10 m bound lets that through. So the first time a candidate verifies, `LoopClosureSolverVpr`
+also runs the verification from the estimate itself, and when that succeeds as well, the two results have to agree
+within `kMaxDisagreementM` (1 m) and `kMaxDisagreementDeg` (2 degrees). When it fails, drift has carried the
+estimate too far for a search around it, which is the loop this mode is for, and the candidate's result stands.
+
+**Only the accepted attempt reports.** The landmark probes a loop closure attempt reports feed
+`LSIGrid::MakeLandmarkQualityFunc`, which decides what a full cell drops. A rejected candidate is usually a place the
+camera is not at, so what its attempt failed to find says nothing about the landmarks there, and it is not reported.
+
+With `AnyLoc`, over three runs of each mode on KITTI 00-10 with `max_map_size` 0, the mean translation error is
+0.756% against 0.745% for the default mode and the mean absolute trajectory error 1.93 m against 1.95 m. Neither mode
+is deterministic from run to run (KITTI-02's translation error ranged from 0.77% to 0.83% in the default mode alone),
+and eight of the eleven sequences are within that noise, KITTI-01 among them with no loop closed. KITTI-09's final
+loop, which the default search misses, is closed (ATE 1.70 m against 2.77 m, at a higher segment error, 0.91%
+against 0.82%); KITTI-00 does slightly worse (0.82% against 0.79%, ATE 1.73 m against 1.63 m); KITTI-02's ATE varies
+too much between runs in both modes to call (2.4 to 5.3 m with `AnyLoc`, 2.6 to 3.5 m without). Two costs come
+with it:
+
+- **Speed.** A place recognition query and up to five verifications per keyframe, on the SLAM thread. `AnyLoc` runs
+  DINOv2 on the CPU through ONNX Runtime, twice per keyframe, once to map the frame and once to query it: tracking ran
+  at 2.7 frames per second against 79 with the default mode, eight runs sharing 28 cores.
+- **Backend choice.** `DBoW2` trains its vocabulary from the map and retrains it whenever the map changed since the
+  last query, which in this mode is every keyframe, so its cost grows with the square of the map. `AnyLoc` fits its
+  vocabulary once, to the first 8 keyframes; fitting it to the first 100 instead changed nothing on KITTI-00 and 02.
+  `Bow` fits its vocabulary once, to the first 50 frames.
+
+### Still open
+
+- **A bounded map forgets the places it would close loops to.** When the pose graph exceeds
+  `Slam::Config::max_map_size`, merged-away nodes take their pictures with them, while their landmarks move to the
+  surviving node. Long sequences therefore keep fewer places to recognize than landmarks to verify against; set
+  `max_map_size` to 0 when comparing the two modes.
+- **Each candidate is verified from its node's pose only.** `LocalizeInMap` probes a small grid around the same kind of
+  candidate (`Localizer::UseRecognizedPlaceProbes`), because a node is a keyframe spacing away from the camera; doing
+  that here would cost several verifications per candidate, on top of a mode that is already the slow one.
+- **When both verifications agree, the candidate's result is kept.** The estimate's own result, which is what the
+  default mode would have used, may be the better pose to close the loop with; that is untested, and a candidate for
+  KITTI-00's small deficit.
+- **`AnyLoc` describes every keyframe twice.** The query is the frame `AddKeyframe` has just mapped, so querying by
+  the newest node's stored descriptor would halve the DINOv2 cost of this mode.
+- **`LoopClosureSolverTwoStepsEasy`'s "first to second beats current to second" check compares rotation matrix norms**,
+  which are the same for every rotation, so rounding noise decides the rotation half of it. It predates this mode,
+  which leans on it more than the default one does.
+
 ## Relocalizing a kidnapped robot
 
 Recognition on its own does not relocalize anything. A match is the pose of some other keyframe, accurate only to
