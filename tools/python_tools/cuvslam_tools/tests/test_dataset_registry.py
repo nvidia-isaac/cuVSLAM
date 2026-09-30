@@ -52,6 +52,13 @@ class TestShippedRegistry(unittest.TestCase):
                 "--async_sba=false --multicam_mode=moderate --use_segments",
             ),
             (
+                "kitti",
+                "KITTI",
+                "kitti/kitti-vio_slam_gt.cfg",
+                "--odometry_mode=multisensor --rectified_stereo_camera=true "
+                "--multicam_mode=moderate --async_sba=false --use_segments",
+            ),
+            (
                 "euroc",
                 "EUROC",
                 "euroc/euroc-vio_slam.cfg",
@@ -65,10 +72,22 @@ class TestShippedRegistry(unittest.TestCase):
                 "--odometry_mode=rgbd --async_sba=false --use_segments",
             ),
             (
+                "tum",
+                "TUM",
+                "tum/tum-rgbd_slam.cfg",
+                "--odometry_mode=multisensor --async_sba=false --use_segments",
+            ),
+            (
                 "icl_nuim",
                 "ICL_NUIM",
                 "icl_nuim/icl_nuim-rgbd_slam.cfg",
                 "--odometry_mode=rgbd --async_sba=false --use_segments",
+            ),
+            (
+                "icl_nuim",
+                "ICL_NUIM",
+                "icl_nuim/icl_nuim-rgbd_slam.cfg",
+                "--odometry_mode=multisensor --async_sba=false --use_segments",
             ),
             (
                 "m3ed_spot",
@@ -121,7 +140,8 @@ class TestShippedRegistry(unittest.TestCase):
         )
         rows = [line.split("\t") for line in completed.stdout.strip().splitlines()]
         self.assertEqual(
-            [row[0] for row in rows], ["kitti", "euroc", "tum", "icl_nuim", "m3ed_spot"]
+            [row[0] for row in rows],
+            ["kitti", "kitti", "euroc", "tum", "tum", "icl_nuim", "icl_nuim", "m3ed_spot"],
         )
         self.assertTrue(all(len(row) == 4 for row in rows), rows)
 
@@ -323,7 +343,7 @@ class TestSuiteSelection(unittest.TestCase):
             for spec in dataset_registry.eval_datasets("smoke")
             for record in dataset_registry.eval_records(spec, "smoke")
         }
-        self.assertEqual(modes, {"STEREO", "VIO", "RGBD"})
+        self.assertEqual(modes, {"MCAM", "VIO", "RGBD"})
 
     def test_omitted_suite_matches_full(self):
         self.assertEqual(
@@ -358,6 +378,13 @@ class TestKpiKeys(unittest.TestCase):
                 for mode in dataset_registry.KPI_MODES
             },
         )
+
+    def test_every_accepted_mode_names_a_type_that_survives_key_parsing(self):
+        # cuvslam_kpi_report.parse_kpi_key splits a key on "_" and reads the type
+        # from a fixed position, so a type carrying one would shift every field.
+        for mode in dataset_registry.ODOMETRY_MODES:
+            with self.subTest(mode=mode):
+                self.assertNotIn("_", dataset_registry.ODOMETRY_MODE_TYPES[mode])
 
     def test_kpi_keys_are_runnable_as_a_module(self):
         completed = subprocess.run(

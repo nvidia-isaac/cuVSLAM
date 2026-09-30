@@ -139,9 +139,10 @@ def add_tracker_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--odometry_mode",
         type=str,
-        choices=["mono", "multicamera", "inertial", "rgbd"],
+        choices=["mono", "multicamera", "inertial", "rgbd", "multisensor"],
         default="multicamera",
-        help="Odometry mode: mono, multicamera, inertial, rgbd.",
+        help="Odometry mode: mono, multicamera, inertial, rgbd, multisensor. "
+             "multisensor is experimental and requires a cuNLS-enabled build.",
     )
     parser.add_argument(
         "--use_gpu",

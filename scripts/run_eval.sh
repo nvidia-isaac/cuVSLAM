@@ -144,12 +144,20 @@ if [ -n "$PREV_KPI" ]; then
 else
   echo "No previous KPI history found, starting fresh"
 fi
+if [ -d "$KPI_HISTORY" ]; then
+  KPI_ARGS+=(-H "$KPI_HISTORY")
+fi
 
 BASELINE_RANGES="/cuvslam/scripts/kpi_baseline_ranges.json"
 if [ -f "$BASELINE_RANGES" ]; then
   echo "Using baseline ranges for drift check: $BASELINE_RANGES"
   KPI_ARGS+=(-b "$BASELINE_RANGES")
 fi
+
+# The drift check reports a key the suite should produce but did not as MISSING.
+EXPECTED_KPI_KEYS="$OUTPUT_DIR/eval/expected_kpi_keys.txt"
+dataset_registry kpi-keys "${EVAL_SUITE_ARGS[@]}" > "$EXPECTED_KPI_KEYS"
+KPI_ARGS+=(-e "$EXPECTED_KPI_KEYS")
 
 python3 /cuvslam/scripts/cuvslam_kpi_report.py "${KPI_ARGS[@]}"
 
