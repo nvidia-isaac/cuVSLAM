@@ -402,7 +402,8 @@ NB_MODULE(pycuvslam, m) {
   nb::class_<Landmark>(m, "Landmark", "3D landmark point")
       .def(nb::init<>())
       .def_rw("id", &Landmark::id, "Unique ID of the landmark")
-      .def_rw("coords", &Landmark::coords, "3D coordinates of the landmark in the world coordinate frame")
+      .def_rw("coords", &Landmark::coords,
+              "3D coordinates of the landmark in the rig coordinate frame of the VO frame it comes from")
       .def("__repr__",
            [](const Landmark& l) { return nb::str("cuvslam.Landmark(id={}, coords={})").format(l.id, l.coords); });
 
@@ -738,7 +739,7 @@ NB_MODULE(pycuvslam, m) {
       .def(
           "get_last_landmarks", [](Odometry& self) -> std::vector<Landmark> { return self.GetLastLandmarks(); },
           "Get an array of landmarks from the last VO frame.\n\n"
-          "Landmarks are 3D points in the last camera frame.\n"
+          "Landmarks are 3D points in the rig frame of the last VO frame.\n"
           "Requires `enable_landmarks_export=True` in :class:`Odometry.Config`.")
       .def(
           "get_last_gravity",

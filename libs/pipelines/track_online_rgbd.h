@@ -46,7 +46,7 @@ class SolverSfMRGBD {
 public:
   SolverSfMRGBD(map::UnifiedMap& map, const camera::Rig& rig, const sba::Settings& sba_settings);
 
-  // set parameters of the camera rig
+  // returns the camera rig
   virtual const camera::Rig& getRig() const;
 
   // @see base class for comment
@@ -72,6 +72,9 @@ private:
   std::vector<camera::Observation> obs_vector_;
   map::Map<TrackId, Vector3T> recent_landmarks_;
 
+  // Exports per-camera observations along with corresponding 3d points
+  // out_tracks2d - output 2d track coordinates in pixels
+  // out_tracks3d - in rig space
   void exportTracks(const std::vector<camera::Observation>& observations, std::vector<Track2D>& out_tracks2d,
                     Tracks3DMap& out_tracks3d, const Isometry3T& camera_from_world) const;
 

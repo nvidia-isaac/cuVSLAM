@@ -330,11 +330,11 @@ struct Observation {
 /**
  * @brief Landmark
  *
- * 3D point with coordinates in meters in world frame
+ * 3D point with coordinates in meters in the rig frame of the VO frame it comes from
  */
 struct Landmark {
   uint64_t id;      ///< landmark id
-  Vector3f coords;  ///< x, y, z in meters in world frame
+  Vector3f coords;  ///< x, y, z in meters in the rig frame
 };
 
 /**
@@ -659,7 +659,7 @@ public:
    * @brief Get Last Landmarks
    *
    * Get an array of landmarks from the last VO frame;
-   * Landmarks are 3D points in the last camera frame.
+   * Landmarks are 3D points in the rig frame of the last VO frame.
    * @return Array of landmarks
    * @throws std::invalid_argument if stats export is disabled
    * @see Landmark

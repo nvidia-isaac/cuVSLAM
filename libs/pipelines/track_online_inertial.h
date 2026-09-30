@@ -53,7 +53,6 @@ public:
                     const imu::ImuCalibration& calib, bool debug_imu_mode, bool disable_fusion_except_gravity);
   ~SolverSfMInertial() override = default;
 
-  // set parameters of the camera rig
   const camera::Rig& getRig() const override;
 
   void reset() override;
@@ -125,6 +124,9 @@ private:
   std::unordered_map<TrackId, Track> pnp_landmarks_;
   map::Map<TrackId, Vector3T> landmark_buffer_;
 
+  // Exports per-camera observations along with corresponding 3d points
+  // out_tracks2d - output 2d track coordinates in pixels
+  // out_tracks3d - in rig space
   void exportTracks(const std::vector<camera::Observation>& observations, std::vector<Track2D>& out_tracks2d,
                     Tracks3DMap& out_tracks3d, const Isometry3T& camera_from_world) const;
 
