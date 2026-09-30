@@ -73,7 +73,7 @@ jobs:
               const result = latest ? latest.conclusion || 'unknown' : 'missing';
               const url = latest ? (latest.details_url || '').replace(/\/job\/\d+$/, '') : '';
 
-              core.setOutput('result', result);
+              core.setOutput('conclusion', result);
               core.setOutput('url', url);
               if (latest) {
                 core.info(`Latest full nightly result for ${context.sha}: ${result} (${url})`);
@@ -82,7 +82,7 @@ jobs:
               }
             } catch (error) {
               core.warning(`Unable to inspect previous full nightly results; defaulting to a build: ${error}`);
-              core.setOutput('result', 'unknown');
+              core.setOutput('conclusion', 'unknown');
               core.setOutput('url', '');
             }
 
@@ -92,7 +92,7 @@ jobs:
         shell: bash
         env:
           FORCE_BUILD: ${{ github.event.inputs.force_build }}
-          PREVIOUS_FULL_RESULT: ${{ steps.previous-full-run.outputs.result }}
+          PREVIOUS_FULL_RESULT: ${{ steps.previous-full-run.outputs.conclusion }}
           PREVIOUS_FULL_URL: ${{ steps.previous-full-run.outputs.url }}
         run: |
           set -euo pipefail
