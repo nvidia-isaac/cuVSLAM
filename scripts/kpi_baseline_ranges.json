@@ -45,7 +45,6 @@
     "datasets": {
         "TUM": {"max_ate_pct": 20, "exclude_failed": true},
         "ICL_NUIM": {"max_ate_pct": 20},
-        "TARTAN": {"exclude_failed": true},
-        "TARTAN_FLAKY": {"exclude_failed": true}
+        "TARTAN": {"exclude_failed": true}
     }
 }
