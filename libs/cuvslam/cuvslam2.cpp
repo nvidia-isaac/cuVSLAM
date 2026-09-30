@@ -1096,11 +1096,23 @@ public:
     options.vpr_options.model_path = std::string{config.vpr_model_path};
     options.vpr_options.score_threshold = config.vpr_score_threshold;
     options.vpr_map_path = std::string{config.vpr_map_path};
+    if (config.loop_closure_mode == LoopClosureMode::Vpr) {
+      THROW_INVALID_ARG_IF(
+          config.vpr_mode == VprMode::Off,
+          "loop_closure_mode is Vpr but vpr_mode is Off; VPR-driven loop closure needs a VPR backend.");
+      // A loaded place recognition map is read only, so this session's keyframes would never enter it.
+      THROW_INVALID_ARG_IF(!config.vpr_map_path.empty(),
+                           "loop_closure_mode is Vpr but vpr_map_path is set; a loaded place recognition map is read "
+                           "only, so it would never hold a place of this session to close a loop to.");
+      options.loop_closure_solver_type = slam::LoopClosureSolverType::kVpr;
+    }
     use_gpu_ = config.use_gpu;
     gt_align_mode_ = config.gt_align_mode;
     if (config.gt_align_mode) {
       THROW_INVALID_ARG_IF(!config.sync_mode, "sync_mode should be enabled for gt_align_mode.");
       THROW_INVALID_ARG_IF(config.planar_constraints, "planar_constraints should be disabled for gt_align_mode.");
+      THROW_INVALID_ARG_IF(config.loop_closure_mode != LoopClosureMode::Default,
+                           "loop_closure_mode should be Default for gt_align_mode.");
       options.loop_closure_solver_type = slam::LoopClosureSolverType::kDummy;
       options.pgo_options.type = slam::PoseGraphOptimizerType::Dummy;
     } else {

@@ -54,6 +54,10 @@ def _normalize_tracker_binding_args(args: argparse.Namespace) -> None:
         args.multicam_mode = conv.str2multicam_mode(args.multicam_mode)
     if isinstance(args.odometry_mode, str):
         args.odometry_mode = conv.str2odometry_mode(args.odometry_mode)
+    if isinstance(getattr(args, 'vpr_mode', None), str):
+        args.vpr_mode = conv.str2vpr_mode(args.vpr_mode)
+    if isinstance(getattr(args, 'loop_closure_mode', None), str):
+        args.loop_closure_mode = conv.str2loop_closure_mode(args.loop_closure_mode)
 
 
 def add_tracker_arguments(parser: argparse.ArgumentParser) -> None:
@@ -235,6 +239,64 @@ def add_tracker_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def add_loop_closure_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add SLAM loop closure and place recognition arguments to a parser.
+
+    Separate from add_tracker_arguments() because cuvslam_vpr_reporter calls that too but owns its own place
+    recognition flags, and configures SLAM for each backend it evaluates itself.
+    """
+    parser.add_argument(
+        "--loop_closure_mode",
+        type=str.lower,
+        choices=["default", "vpr"],
+        default="default",
+        help="Loop closure backend: default (spatial search) or vpr (visual place recognition candidates). "
+             "Case insensitive.",
+    )
+    parser.add_argument(
+        "--vpr_mode",
+        type=str.lower,
+        choices=["off", "simple", "bow", "dbow2", "anyloc"],
+        default="off",
+        help="Visual place recognition backend. Required (non-off) when --loop_closure_mode=vpr. Case insensitive.",
+    )
+    parser.add_argument(
+        "--vpr_model_path",
+        type=str,
+        default="",
+        help="Model file the VPR backend needs; --vpr_mode=anyloc reads a DINOv2 ONNX model from here.",
+    )
+    parser.add_argument(
+        "--max_map_size",
+        type=int,
+        default=None,
+        help="Maximum number of pose graph nodes SLAM keeps, 0 for no limit; by default the SLAM default. A node "
+             "merged away also leaves the place recognition map, so compare --loop_closure_mode vpr with 0.",
+    )
+
+
+def validate_loop_closure_arguments(parser: argparse.ArgumentParser, args: argparse.Namespace,
+                                    require_use_slam: bool = True) -> None:
+    """Exit through parser.error() on loop closure flags that cannot work, before any tracking starts.
+
+    Args:
+        parser: Parser that defined the arguments with add_loop_closure_arguments().
+        args: The parsed arguments.
+        require_use_slam: Also reject a non-default --loop_closure_mode or --vpr_mode without --use_slam true.
+            cuvslam_reporter passes False: it takes use_slam from each sequence of its config.
+    """
+    if args.loop_closure_mode == "vpr" and args.vpr_mode == "off":
+        parser.error("--loop_closure_mode vpr needs a place recognition backend; "
+                     "set --vpr_mode to simple, bow, dbow2 or anyloc")
+    if require_use_slam and not args.use_slam and (args.loop_closure_mode != "default" or args.vpr_mode != "off"):
+        parser.error("--loop_closure_mode and --vpr_mode only affect SLAM; add --use_slam true")
+    if args.vpr_mode == "anyloc" and not os.path.isfile(args.vpr_model_path):
+        parser.error("--vpr_mode anyloc needs a DINOv2 ONNX model; set --vpr_model_path to one exported by "
+                     "cuvslam_export_dinov2")
+    if args.max_map_size is not None and args.max_map_size < 0:
+        parser.error("--max_map_size must be 0 (no limit) or a positive number of pose graph nodes")
+
+
 def stat_to_dict(stat: Any) -> dict:
     """Convert a tracker Stat object to a JSON-serializable dictionary."""
     return {
@@ -249,6 +311,8 @@ def stat_to_dict(stat: Any) -> dict:
         "gt_simple_error": stat.gt_simple_error,
         "num_tracking_losts": stat.num_tracking_losts,
         "odometry_mode": stat.odometry_mode,
+        "num_loop_closures": stat.num_loop_closures,
+        "loop_closure_mode": stat.loop_closure_mode,
         "seg_err_points": getattr(stat, "seg_err_points", []),
     }
 
@@ -267,7 +331,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     """Parse tracker CLI arguments, run tracking, and print or save stats."""
     parser = argparse.ArgumentParser(prog="cuvslam_tracker")
     add_tracker_arguments(parser)
+    add_loop_closure_arguments(parser)
     args = parser.parse_args(argv)
+    validate_loop_closure_arguments(parser, args)
 
     if args.edex:
         if args.dataset and _normalized_path(args.dataset) != _normalized_path(args.edex):
@@ -289,7 +355,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     try:
         _normalize_tracker_binding_args(args)
         tracker_results = track(args)
-    except (FileNotFoundError, ValueError) as exc:
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
         parser.error(str(exc))
     if args.output_dir:
         save_tracker_stats(tracker_results.stat, args.output_dir)

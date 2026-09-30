@@ -59,8 +59,8 @@ The current implementation supports pinhole cameras only.
 
 # Visual place recognition
 
-Loop closure answers "have I drifted?" and needs a pose to search around. Visual place recognition answers "where
-am I?" from a single image and no pose at all. That is what a **kidnapped robot** needs: a robot switched on inside
+Loop closure answers "have I drifted?" and, by default, needs a pose to search around. Visual place recognition
+answers "where am I?" from a single image and no pose at all. That is what a **kidnapped robot** needs: a robot switched on inside
 a map it has never localized in, or picked up mid-run and put down elsewhere, has no prior to search around.
 
 `Slam` keeps a place recognition map alongside the pose graph: one frame per pose graph node, written into the SLAM
@@ -105,6 +105,28 @@ for timestamp, images in sequence:
 `save_map` and `recognize_place_by_frame` are asynchronous: they queue the work for the SLAM thread and their
 callbacks run when it finishes, possibly on that thread. `sync_mode=True` above, which `Tracker.Mode`'s offline
 modes require anyway, runs the work before the call returns, so the callback has already fired by the time it does.
+
+## Closing loops with it
+
+By default loop closure searches the landmark map around the current pose estimate, so it closes a loop only when
+drift has not carried the estimate away from the landmarks of the place it is back at.
+`Slam::Config::loop_closure_mode = LoopClosureMode::Vpr` (Python: `Slam.LoopClosureMode.Vpr`) searches instead at
+the places the `vpr_mode` backend finds most similar to the current frame, and verifies each against the landmarks
+there the same way. Appearance alone is not trusted: the last 20 seconds of the trajectory are never a candidate,
+since they always look most like the current frame, and a loop closure is rejected when it would move the pose
+estimate by more than 10 m or 10 degrees, or when verification started from the estimate itself succeeds and
+disagrees with it, since a look-alike stretch of road can pass the geometric check.
+
+It queries place recognition on every keyframe, so it is much slower than the default search. To compare the two on
+a KITTI sequence, with the pose graph unbounded so that no place is merged out of the place recognition map:
+
+```bash
+cuvslam_tracker --edex <kitti>/00 --use_slam true --max_map_size 0 --loop_closure_mode default ...
+cuvslam_tracker --edex <kitti>/00 --use_slam true --max_map_size 0 --loop_closure_mode vpr \
+    --vpr_mode anyloc --vpr_model_path <dinov2.onnx> ...
+```
+
+`cuvslam_reporter` takes the same flags, and both record `num_loop_closures` in their stats.
 
 ## Backends
 

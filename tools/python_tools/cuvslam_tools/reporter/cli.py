@@ -22,7 +22,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from cuvslam_tools.tracker.cli import add_tracker_arguments
+from cuvslam_tools.tracker.cli import (
+    add_loop_closure_arguments,
+    add_tracker_arguments,
+    validate_loop_closure_arguments,
+)
 
 
 def _resolve_config_path(test_config: str, datasets_root: str):
@@ -90,8 +94,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--max_workers", type=int, default=None, help="Maximum number of sequence workers.")
     parser.add_argument("--pdf", action="store_true", help="Generate PDF report in addition to HTML.")
     add_tracker_arguments(parser)
+    add_loop_closure_arguments(parser)
 
     args = parser.parse_args(argv)
+    # use_slam comes from each sequence of the config, so odometry and SLAM sequences can share one run.
+    validate_loop_closure_arguments(parser, args, require_use_slam=False)
     args.report_comments = sys.argv[1:] if argv is None else argv
     try:
         run_report(args)

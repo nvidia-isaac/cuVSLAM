@@ -143,6 +143,18 @@ class TestVprBindings(unittest.TestCase):
             self.assertIn(field, text)
         self.assertIn('Simple', text)
 
+    def test_loop_closure_mode_enum(self):
+        self.assertEqual(set(vslam.Slam.LoopClosureMode.__members__), {'Default', 'Vpr'})
+        self.assertEqual(vslam.Slam.Config().loop_closure_mode, vslam.Slam.LoopClosureMode.Default)
+
+    def test_config_loop_closure_mode(self):
+        cfg = vslam.Slam.Config(loop_closure_mode=vslam.Slam.LoopClosureMode.Vpr)
+        self.assertEqual(cfg.loop_closure_mode, vslam.Slam.LoopClosureMode.Vpr)
+        self.assertIn('loop_closure_mode=LoopClosureMode.Vpr', repr(cfg))
+
+        cfg.loop_closure_mode = vslam.Slam.LoopClosureMode.Default
+        self.assertEqual(cfg.loop_closure_mode, vslam.Slam.LoopClosureMode.Default)
+
     def test_place_recognition_fields(self):
         place = vslam.Slam.PlaceRecognition()
         self.assertFalse(place.found)
@@ -240,6 +252,59 @@ class TestVprFrameSelection(unittest.TestCase):
 
         self.assertIsNone(result)
         self.assertIn("primary camera", error)
+
+
+class TestVprLoopClosureModeConfig(unittest.TestCase):
+    """Slam.LoopClosureMode.Vpr end to end on a synthetic sequence, and the configurations it rejects."""
+
+    def setUp(self):
+        self.rig, self.cameras = make_rig()
+
+    def make_tracker(self, slam_cfg):
+        odom_cfg, _ = make_configs(vslam.Slam.VprMode.Off)
+        return vslam.Tracker(self.rig, vslam.Tracker.Mode.OdometryWithSlamOffline, odom_cfg, slam_cfg)
+
+    def vpr_loop_closure_config(self, vpr_mode=vslam.Slam.VprMode.Simple):
+        _, slam_cfg = make_configs(vpr_mode)
+        slam_cfg.loop_closure_mode = vslam.Slam.LoopClosureMode.Vpr
+        return slam_cfg
+
+    def assert_slam_rejects(self, slam_cfg, field):
+        # Slam itself, not a Tracker: Tracker rejects some of these configurations on its own before Slam ever sees them.
+        with self.assertRaises(ValueError) as caught:
+            vslam.Slam(self.rig, [0, 1], slam_cfg)
+        self.assertIn("loop_closure_mode", str(caught.exception))
+        self.assertIn(field, str(caught.exception))
+
+    def test_needs_a_place_recognition_backend(self):
+        self.assert_slam_rejects(self.vpr_loop_closure_config(vslam.Slam.VprMode.Off), "vpr_mode")
+
+    def test_rejects_a_loaded_place_recognition_map(self):
+        # A loaded map is read only, so this session's keyframes would never be in it to close a loop to. The check
+        # comes before the map is loaded, which is why this path does not have to exist.
+        slam_cfg = self.vpr_loop_closure_config()
+        vpr_map_path = "/nonexistent/vpr_map"
+        slam_cfg.vpr_map_path = vpr_map_path
+        self.assert_slam_rejects(slam_cfg, "vpr_map_path")
+
+    def test_rejects_gt_align_mode(self):
+        slam_cfg = self.vpr_loop_closure_config()
+        slam_cfg.gt_align_mode = True
+        self.assert_slam_rejects(slam_cfg, "gt_align_mode")
+
+    def test_tracks_a_synthetic_sequence(self):
+        tracker = self.make_tracker(self.vpr_loop_closure_config())
+        generator = data.ImageGenerator(self.cameras, STEPS)
+
+        tracked = 0
+        for i in range(STEPS):
+            images, _ = generator.generate_zoomed_images(i)
+            odom_pose, _ = tracker.track(i * FRAME_PERIOD_NS, images)
+            tracked += odom_pose.world_from_rig is not None
+
+        self.assertGreater(tracked, 0, "the synthetic sequence did not track")
+        # The sequence is a few frames long, all of them within the recent past loop closure leaves out.
+        self.assertEqual(len(tracker.slam.get_loop_closure_poses()), 0)
 
 
 class TestVprSimple(unittest.TestCase):
@@ -533,6 +598,72 @@ class TestVprFollowsPoseGraph(unittest.TestCase):
             f"or a sequence where the optimization actually moves a node.")
 
 
+@unittest.skipUnless(os.path.isdir(KITTI_07_DIR), f"needs a loop-closing sequence at {KITTI_07_DIR}")
+class TestVprLoopClosureMode(unittest.TestCase):
+    """Slam.LoopClosureMode.Vpr closes loops from place recognition candidates, on a real sequence.
+
+    TestVprFollowsPoseGraph already proves place recognition tracks the pose graph under the default
+    loop closure solver. This proves the other direction: with loop_closure_mode set to Vpr, place
+    recognition candidates are themselves what triggers a loop closure, and only where the car really
+    is back at a place it passed before. Which candidate a loop closure came from, and that the recent
+    past is never one, is covered by the C++ tests; from here only the loop closures are visible.
+    """
+
+    # A loop closure has to be this close, in ground truth, to where the car was at least this long before.
+    REVISIT_RADIUS_M = 15.0
+    REVISIT_MIN_AGE_NS = 20_000_000_000
+
+    def setUp(self):
+        try:
+            from cuvslam_tools.tracker.edex_reader import EdexReader
+        except ImportError as exc:
+            self.skipTest(f"needs cuvslam_tools to read the sequence: {exc}")
+
+        self.reader = EdexReader(KITTI_07_DIR, stereo_edex=os.path.join(KITTI_07_DIR, "stereo.edex"))
+        self.assertTrue(self.reader.validate_rig(), f"invalid rig in {KITTI_07_DIR}")
+
+        odom_cfg = vslam.Odometry.Config()
+        odom_cfg.odometry_mode = vslam.Odometry.OdometryMode.Multicamera
+        odom_cfg.rectified_stereo_camera = True
+        odom_cfg.async_sba = False
+        odom_cfg.enable_observations_export = True
+        odom_cfg.enable_landmarks_export = True
+
+        slam_cfg = vslam.Slam.Config()
+        slam_cfg.sync_mode = True
+        slam_cfg.enable_reading_internals = True
+        slam_cfg.max_map_size = 0
+        slam_cfg.vpr_mode = vslam.Slam.VprMode.Bow
+        slam_cfg.loop_closure_mode = vslam.Slam.LoopClosureMode.Vpr
+
+        self.tracker = vslam.Tracker(
+            self.reader.rig, vslam.Tracker.Mode.OdometryWithSlamOffline, odom_cfg, slam_cfg)
+        self.tracker.slam.get_pose_graph()  # enables the layer, so the graph is published from now on
+
+    def test_vpr_driven_loop_closure_closes_a_loop(self):
+        replay = _VprReplay(self, self.tracker)
+        self.reader.replay(replay)
+        self.assertGreater(replay.n_frames, 0, f"no frames replayed from {KITTI_07_DIR}")
+
+        loop_closures = self.tracker.slam.get_loop_closure_poses()
+        self.assertGreater(
+            len(loop_closures), 0,
+            f"loop_closure_mode=Vpr closed no loop on {KITTI_07_DIR}, which the default solver does close")
+
+        # KITTI ground truth has one row per frame, in replay order.
+        gt_positions = np.loadtxt(os.path.join(KITTI_07_DIR, "gt.txt")).reshape(-1, 3, 4)[:, :, 3]
+        self.assertEqual(len(gt_positions), len(replay.timestamps))
+        frame_of = {timestamp: frame for frame, timestamp in enumerate(replay.timestamps)}
+        for loop_closure in loop_closures:
+            frame = frame_of[loop_closure.timestamp_ns]
+            earlier = [f for f, timestamp in enumerate(replay.timestamps)
+                       if loop_closure.timestamp_ns - timestamp >= self.REVISIT_MIN_AGE_NS]
+            self.assertTrue(earlier, f"loop closure at frame {frame} has no earlier past to be back at")
+            distance = np.min(np.linalg.norm(gt_positions[earlier] - gt_positions[frame], axis=1))
+            self.assertLess(distance, self.REVISIT_RADIUS_M,
+                            f"loop closure at frame {frame} is {distance:.1f} m from anywhere the car had been")
+
+
 class _VprReplay:
     """EdexReader processor: tracks the sequence, maps every frame, and keeps a few for querying."""
 
@@ -541,12 +672,14 @@ class _VprReplay:
         self.tracker = tracker
         self.kept_frames = {}     # frame_id -> (timestamp, images, pose), queried after tracking ends
         self.early_results = {}   # frame_id -> (timestamp, images, the place found mid-sequence)
+        self.timestamps = []      # of every frame, in replay order
         self.n_frames = 0
 
     def process_images(self, frame_id, timestamps, images, masks, depths=None):
         timestamp = max(timestamps)
         self.tracker.track(timestamp, images, masks, depths)
         self.tracker.slam.add_frame_to_vpr_map(images, timestamp)
+        self.timestamps.append(timestamp)
         self.n_frames += 1
 
         # The reader reuses its image buffers between frames, so a kept frame has to be copied.

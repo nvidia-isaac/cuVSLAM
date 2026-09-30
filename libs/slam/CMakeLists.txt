@@ -42,6 +42,7 @@ set(HEADERS
     slam/loop_closure_solver/lcs_simple.h
     slam/loop_closure_solver/lcs_simple_single_kf.h
     slam/loop_closure_solver/lcs_two_steps_easy.h
+    slam/loop_closure_solver/lcs_vpr.h
     slam/loop_closure_solver/pnp_ransac_hypothesis.h
     vpr/ivpr.h
     vpr/vpr_bow.h
@@ -80,6 +81,7 @@ set(SOURCES
     slam/loop_closure_solver/lcs_simple.cpp
     slam/loop_closure_solver/lcs_simple_single_kf.cpp
     slam/loop_closure_solver/lcs_two_steps_easy.cpp
+    slam/loop_closure_solver/lcs_vpr.cpp
     slam/slam_check_hypothesis.cpp
     vpr/ivpr.cpp
     vpr/vpr_bow.cpp

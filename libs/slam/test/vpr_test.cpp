@@ -1482,23 +1482,23 @@ protected:
     return mapper;
   }
 
-  /// Append one pose graph node `step_x` meters along X from the last, with no picture attached.
-  /// Returns its timestamp.
-  int64_t AppendKeyframe(int index, float step_x) {
+  /// Append one pose graph node `step_x` meters along X from the last, with no picture attached,
+  /// `frame_delta_ns` after the previous one. Returns its timestamp.
+  int64_t AppendKeyframe(int index, float step_x, int64_t frame_delta_ns = kFrameDeltaNs) {
     Isometry3T step = Isometry3T::Identity();
     step.translation().x() = step_x;
 
     VOFrameData frame_data;
     frame_data.frame_id = index;
-    frame_data.timestamp_ns = static_cast<uint64_t>(index) * kFrameDeltaNs;
+    frame_data.timestamp_ns = static_cast<uint64_t>(index) * frame_delta_ns;
     mapper_->AddKeyframe(step, frame_data, Images());
     return static_cast<int64_t>(frame_data.timestamp_ns);
   }
 
-  /// Walk `count` steps along X, mapping one picture per keyframe.
-  void BuildChain(int count, float step_x) {
+  /// Walk `count` steps along X, `frame_delta_ns` apart, mapping one picture per keyframe.
+  void BuildChain(int count, float step_x, int64_t frame_delta_ns = kFrameDeltaNs) {
     for (int i = 0; i < count; ++i) {
-      const int64_t timestamp_ns = AppendKeyframe(i, step_x);
+      const int64_t timestamp_ns = AppendKeyframe(i, step_x, frame_delta_ns);
       images_.push_back(MakeBlockyImage(64, 64, 8, static_cast<uint32_t>(800 + i)));
       ASSERT_TRUE(mapper_->AddVprFrame(images_.back(), timestamp_ns)) << "keyframe " << i;
     }
@@ -1629,6 +1629,182 @@ TEST_F(VprPoseGraph, RecognizedPoseFollowsPoseGraphOptimization) {
   EXPECT_GT(moved, 1e-3f) << "the optimization moved no node, so this test proved nothing";
 }
 
+namespace {
+
+/// Records the LoopClosureTask it was handed and always fails, so a test can inspect exactly what
+/// DetectLoopClosure() assembled without needing a synthetic PnP-solvable scene to succeed.
+class RecordingLoopClosureSolver : public ILoopClosureSolver {
+public:
+  explicit RecordingLoopClosureSolver(bool wants_vpr_candidates = true) : wants_vpr_candidates_(wants_vpr_candidates) {}
+
+  bool WantsVprCandidates() const override { return wants_vpr_candidates_; }
+
+  bool Solve(const LoopClosureTask& task, const LSIGrid&, const IFeatureDescriptorOps*, Isometry3T&, Matrix6T&,
+             std::vector<LandmarkInSolver>*, DiscardLandmarkCB*, KeyframeInSightCB*) const override {
+    ++solve_calls;
+    captured_candidates = task.vpr_candidates;
+    return false;
+  }
+
+  mutable int solve_calls = 0;
+  mutable std::vector<VprPlace> captured_candidates;
+
+private:
+  bool wants_vpr_candidates_;
+};
+
+/// Keyframes this far apart put a place four keyframes back just out of the recent past that loop closure leaves out.
+constexpr int64_t kLoopClosureSpacingNs = LocalizerAndMapper::kLoopClosureVprMinAgeNs / 4;
+
+}  // namespace
+
+TEST_F(VprPoseGraph, DetectLoopClosureFeedsTheSolverPoseGraphCorrectedCandidates) {
+  constexpr int kKeyframes = 12;
+  constexpr float kStep = 1.f;
+  BuildChain(kKeyframes, kStep, kLoopClosureSpacingNs);
+
+  // An old node, but not the first one: the first node anchors the optimization and never moves.
+  const VprImage& query = images_[2];
+  const VprPlace before = mapper_->RecognizePlace(query);
+  const VprPlace first = mapper_->RecognizePlace(images_.front());
+  const VprPlace head = mapper_->RecognizePlace(images_.back());
+  ASSERT_TRUE(before.found && first.found && head.found);
+
+  // Same drift-correcting loop closure edge as RecognizedPoseFollowsPoseGraphOptimization, so the
+  // nodes along the chain move: a solver fed the pre-optimization (stale) pose would be caught below.
+  Map& map = MutableMap();
+  const Isometry3T loop_from_head = MakePose(-(kKeyframes - 1) * kStep + 0.2f, 0.f, 0.f);
+  map.pose_graph_.AddEdge(map.pose_graph_hypothesis_, head.node_id, first.node_id, loop_from_head,
+                          Matrix6T::Identity());
+  ASSERT_TRUE(mapper_->OptimizePoseGraph(false));
+
+  // Independent oracle: RecognizePlace() resolves through the live, now-optimized pose graph.
+  const VprPlace expected = mapper_->RecognizePlace(query);
+  ASSERT_TRUE(expected.found);
+  ASSERT_EQ(expected.node_id, before.node_id);
+  ASSERT_GT((expected.pose.translation() - before.pose.translation()).norm(), 1e-3f)
+      << "the optimization did not move the queried node, so this test would prove nothing";
+
+  RecordingLoopClosureSolver solver;
+  LocalizerAndMapper::LoopClosureStatus status;
+  mapper_->DetectLoopClosure(solver, Images{MakeCpuContext(query)}, Isometry3T::Identity(), status);
+
+  EXPECT_FALSE(status.success);
+  ASSERT_EQ(solver.solve_calls, 1);
+  ASSERT_FALSE(solver.captured_candidates.empty());
+  const VprPlace& best_candidate = solver.captured_candidates.front();
+  EXPECT_EQ(best_candidate.node_id, expected.node_id);
+  EXPECT_LT((best_candidate.pose.translation() - expected.pose.translation()).norm(), 1e-5f)
+      << "DetectLoopClosure must feed the solver pose graph corrected candidates (via RecognizePlaces), "
+      << "not the stale pose VprMap::QueryTopK stores";
+}
+
+TEST_F(VprPoseGraph, DetectLoopClosureLeavesOutTheRecentPast) {
+  constexpr int kKeyframes = 12;
+  BuildChain(kKeyframes, 1.f, kLoopClosureSpacingNs);
+
+  // The newest keyframe's own picture, which it and the rest of the recent past look most like.
+  RecordingLoopClosureSolver solver;
+  LocalizerAndMapper::LoopClosureStatus status;
+  mapper_->DetectLoopClosure(solver, Images{MakeCpuContext(images_.back())}, Isometry3T::Identity(), status);
+
+  const int64_t head_timestamp_ns = (kKeyframes - 1) * kLoopClosureSpacingNs;
+  const std::vector<VprPlace>& candidates = solver.captured_candidates;
+  ASSERT_FALSE(candidates.empty()) << "the chain has places old enough to close a loop to";
+  EXPECT_EQ(candidates.size(), LocalizerAndMapper::kLoopClosureVprCandidates);
+  for (size_t i = 0; i < candidates.size(); ++i) {
+    EXPECT_GE(head_timestamp_ns - candidates[i].timestamp_ns, LocalizerAndMapper::kLoopClosureVprMinAgeNs)
+        << "candidate " << i << " is node " << candidates[i].node_id;
+    if (i > 0) {
+      EXPECT_GE(candidates[i - 1].score, candidates[i].score) << "candidates are handed over best first";
+    }
+  }
+}
+
+TEST_F(VprPoseGraph, DetectLoopClosureKeepsPlacesAnotherSessionMappedLater) {
+  // LocalizeInMap loads a saved map together with its pose graph, so its places keep the clock of the session that
+  // mapped them, which can run ahead of this one. Such a place is not the recent past, however its timestamp compares.
+  constexpr int kKeyframes = 4;
+  BuildChain(kKeyframes, 1.f, kLoopClosureSpacingNs);
+  ASSERT_TRUE(mapper_->SaveVprMap(Folder()));
+
+  mapper_ = MakeMapper(SimpleOptions());
+  for (int i = 0; i < kKeyframes; ++i) {
+    AppendKeyframe(i, 1.f, /*frame_delta_ns=*/1);
+  }
+  ASSERT_TRUE(mapper_->LoadVprMap(Folder(), VprMap::LoadMode::kWithPoseGraph));
+  // This session maps on, still early by the clock of the one that saved the map.
+  const int64_t head_timestamp_ns = AppendKeyframe(kKeyframes, 1.f, /*frame_delta_ns=*/1);
+  ASSERT_TRUE(mapper_->AddVprFrame(MakeBlockyImage(64, 64, 8, 990), head_timestamp_ns));
+
+  RecordingLoopClosureSolver solver;
+  LocalizerAndMapper::LoopClosureStatus status;
+  mapper_->DetectLoopClosure(solver, Images{MakeCpuContext(images_[1])}, Isometry3T::Identity(), status);
+
+  ASSERT_FALSE(solver.captured_candidates.empty());
+  EXPECT_EQ(solver.captured_candidates.front().node_id, 1u);
+}
+
+TEST_F(VprPoseGraph, DetectLoopClosureRecognizesPlacesOnlyForASolverThatWantsThem) {
+  BuildChain(12, 1.f, kLoopClosureSpacingNs);
+
+  RecordingLoopClosureSolver solver(/*wants_vpr_candidates=*/false);
+  LocalizerAndMapper::LoopClosureStatus status;
+  mapper_->DetectLoopClosure(solver, Images{MakeCpuContext(images_.front())}, Isometry3T::Identity(), status);
+
+  EXPECT_EQ(solver.solve_calls, 1);
+  EXPECT_TRUE(solver.captured_candidates.empty());
+}
+
+TEST_F(VprPoseGraph, DetectLoopClosureHasNoCandidatesWithPlaceRecognitionOff) {
+  mapper_ = MakeMapper(VprOptions{});
+  for (int i = 0; i < 12; ++i) {
+    AppendKeyframe(i, 1.f, kLoopClosureSpacingNs);
+  }
+
+  RecordingLoopClosureSolver solver;
+  LocalizerAndMapper::LoopClosureStatus status;
+  const VprImage query = MakeBlockyImage(64, 64, 8, 800);
+  mapper_->DetectLoopClosure(solver, Images{MakeCpuContext(query)}, Isometry3T::Identity(), status);
+
+  EXPECT_EQ(solver.solve_calls, 1);
+  EXPECT_TRUE(solver.captured_candidates.empty());
+}
+
+#ifdef USE_ONNXRUNTIME
+
+TEST_F(VprPoseGraph, DetectLoopClosureWithAnyLocHandsOverOldPlacesBestFirst) {
+  const std::string model = AnyLocModelPath();
+  if (model.empty()) {
+    GTEST_SKIP() << "set CUVSLAM_ANYLOC_MODEL to a DINOv2 ONNX model exported by cuvslam_export_dinov2";
+  }
+  mapper_ = MakeMapper(AnyLocOptions(model));
+  // Enough keyframes for AnyLoc to fit its vocabulary, with pictures of the size the other AnyLoc tests use.
+  constexpr int kKeyframes = 12;
+  for (int i = 0; i < kKeyframes; ++i) {
+    const int64_t timestamp_ns = AppendKeyframe(i, 1.f, kLoopClosureSpacingNs);
+    images_.push_back(MakeBlockyImage(256, 256, 8, static_cast<uint32_t>(1200 + i)));
+    ASSERT_TRUE(mapper_->AddVprFrame(images_.back(), timestamp_ns)) << "keyframe " << i;
+  }
+
+  // An old node's own picture: it looks most like that node, which is old enough to close a loop to.
+  RecordingLoopClosureSolver solver;
+  LocalizerAndMapper::LoopClosureStatus status;
+  mapper_->DetectLoopClosure(solver, Images{MakeCpuContext(images_[2])}, Isometry3T::Identity(), status);
+
+  const std::vector<VprPlace>& candidates = solver.captured_candidates;
+  ASSERT_FALSE(candidates.empty());
+  EXPECT_LE(candidates.size(), LocalizerAndMapper::kLoopClosureVprCandidates);
+  EXPECT_EQ(candidates.front().node_id, mapper_->RecognizePlace(images_[2]).node_id);
+  const int64_t head_timestamp_ns = (kKeyframes - 1) * kLoopClosureSpacingNs;
+  for (const VprPlace& candidate : candidates) {
+    EXPECT_GE(head_timestamp_ns - candidate.timestamp_ns, LocalizerAndMapper::kLoopClosureVprMinAgeNs)
+        << "node " << candidate.node_id;
+  }
+}
+
+#endif  // USE_ONNXRUNTIME
+
 TEST_F(VprPoseGraph, TheHeadNodeNeedsAPictureUntilItHasOne) {
   EXPECT_TRUE(mapper_->IsVprEnabled());
   // Nothing has been mapped yet, so there is no node for a picture to belong to. The frame is
@@ -1757,6 +1933,7 @@ TEST_F(VprPoseGraph, TurningVprOffLeavesEveryEntryPointInert) {
   EXPECT_FALSE(mapper_->AddVprFrame(images_.front(), 0));
   EXPECT_FALSE(mapper_->RecognizePlace(images_.front()).found);
   EXPECT_TRUE(mapper_->RecognizePlaces(images_.front(), 3).empty());
+  EXPECT_TRUE(mapper_->RecognizeLoopClosurePlaces(images_.front()).empty());
   EXPECT_FALSE(mapper_->SaveVprMap(Folder()));
   EXPECT_FALSE(mapper_->LoadVprMap(Folder()));
 }

@@ -190,6 +190,9 @@ public:
   // - Computes pose using landmarks through PnP and RANSAC
   // - Collects statistics about landmark matching quality
   //
+  // When the solver WantsVprCandidates() and place recognition is on, the places RecognizeLoopClosurePlaces()
+  // finds for `images` are handed to it as well, which is why this is not const.
+  //
   // Parameters:
   //   loop_closure_solver - Solver implementation for loop closure detection
   //   images - Current camera images
@@ -199,7 +202,7 @@ public:
   // Returns:
   //   true if loop closure detected, false otherwise
   void DetectLoopClosure(const ILoopClosureSolver& loop_closure_solver, const Images& images,
-                         const Isometry3T& world_from_rig_guess, LoopClosureStatus& status) const;
+                         const Isometry3T& world_from_rig_guess, LoopClosureStatus& status);
 
   // ----- Loop closure result processing -----
 
@@ -311,6 +314,17 @@ public:
 
   // The `max_results` best places for `image`, best first, for a relocalizer to verify in turn.
   std::vector<vpr::VprPlace> RecognizePlaces(const vpr::VprImage& image, size_t max_results);
+
+  // How many places RecognizeLoopClosurePlaces() returns at most.
+  static constexpr size_t kLoopClosureVprCandidates = 5;
+  // How long before the newest pose graph node a place has to have been mapped to be a loop closure candidate. The
+  // recent past of the trajectory always looks most like the current frame, and a loop closure to it corrects no
+  // drift; on a road that repeats itself it can also look like a place a hundred meters back.
+  static constexpr int64_t kLoopClosureVprMinAgeNs = 20'000'000'000;
+
+  // The best places for a loop closure from `image`, best first: at most kLoopClosureVprCandidates of them, none
+  // mapped in the kLoopClosureVprMinAgeNs up to the newest pose graph node. Empty before the first keyframe.
+  std::vector<vpr::VprPlace> RecognizeLoopClosurePlaces(const vpr::VprImage& image);
 
   // Write the place recognition map into `folder` alongside the SLAM map, refreshing the stored node
   // poses first so a session that has no pose graph for these nodes can still use it.
