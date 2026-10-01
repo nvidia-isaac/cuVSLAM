@@ -58,7 +58,7 @@ FULL_SUITE = "full"
 # Keep them in step with REQUIRED_METRICS and odometry_mode_to_type in
 # scripts/cuvslam_kpi_report.py: a mismatch makes kpi-keys name keys no run
 # produces, which reads as a missing KPI rather than a registry fault.
-KPI_METRICS = ("ATE", "ARE", "Kabsch", "TrackingLosts", "FPS")
+KPI_METRICS = ("ATE", "ARE", "Kabsch", "TrackingLosts", "Failed", "FPS")
 KPI_MODES = ("ODOM", "SLAM")
 ODOMETRY_MODE_TYPES = {
     "multicamera": "MCAM",
