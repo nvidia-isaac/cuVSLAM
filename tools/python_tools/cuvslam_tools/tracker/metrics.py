@@ -18,6 +18,7 @@ import numpy as np
 from typing import Dict, List
 import cuvslam as vslam
 from cuvslam_tools.tracker import conversions as conv
+from cuvslam_tools.tracker.alignment import absolute_trajectory_errors
 
 
 def translation_error(pose_error: np.ndarray) -> float:
@@ -44,80 +45,6 @@ def rotation_error(pose_error: np.ndarray) -> float:
     a = (np.trace(pose_error[:3, :3]) - 1) / 2
     a = min(max(a, -1), 1)
     return np.degrees(np.arccos(a))
-
-
-def transform_between_pointclouds(A: np.ndarray, B: np.ndarray) -> np.ndarray:
-    """Find rigid transform between two point clouds using Kabsch algorithm.
-    https://en.wikipedia.org/wiki/Kabsch_algorithm
-    Args:
-        A: First point cloud as Nx3 array of points
-        B: Second point cloud as Nx3 array of points
-
-    Returns:
-        4x4 rigid transformation matrix that transforms points in A to align with B
-
-    Raises:
-        ValueError: If point clouds have different shapes
-    """
-    if A.shape != B.shape:
-        raise ValueError("Point clouds must have same shape")
-
-    # Calculate centroids
-    A_mean = np.mean(A, axis=0)
-    B_mean = np.mean(B, axis=0)
-
-    # Center point clouds
-    Am = A - A_mean
-    Bm = B - B_mean
-
-    # Calculate optimal rotation using SVD
-    H = Am.T @ Bm
-    U, _, Vt = np.linalg.svd(H)
-    R = Vt.T @ U.T
-
-    # Calculate translation
-    t = -R @ A_mean + B_mean
-
-    # Build transformation matrix
-    transform = np.eye(4)
-    transform[:3, :3] = R
-    transform[:3, 3] = t
-
-    return transform
-
-
-def calc_kabsch_rms_metric(gt_transforms: List[np.ndarray],
-                           result_transforms: List[np.ndarray]) -> float:
-    """Calculate Kabsch (RMS) metric between ground truth and result trajectories."""
-    # Extract translation points from transforms
-    points_gt = np.array([transform[:3, 3] for transform in gt_transforms])
-    points_result = np.array([transform[:3, 3] for transform in result_transforms])
-
-    # Find optimal transform between point clouds
-    transform = transform_between_pointclouds(points_result, points_gt)
-
-    # Calculate RMS error
-    sum_squared_error = 0.0
-    count = 0
-    for i in range(len(gt_transforms)):
-        if i >= len(result_transforms):
-            break
-
-        # Transform result point using alignment transform
-        vo = transform @ np.append(result_transforms[i][:3, 3], 1)  # Make homogeneous
-        gt = gt_transforms[i][:3, 3]
-
-        # Calculate squared error
-        error = vo[:3] - gt  # Only take x,y,z components
-        sum_squared_error += np.dot(error, error)  # squared norm
-        count += 1
-
-    if count:
-        rms = np.sqrt(sum_squared_error / count)
-    else:
-        rms = 0.0
-
-    return rms
 
 
 def get_frame_mapping(total_frames: int,
@@ -194,7 +121,8 @@ def calculate_sequence_errors(
     use_segments: bool = False,
     segment_lengths: List[int] = [],
     num_loops: int = 0,
-    repeat_type: str = "none"
+    repeat_type: str = "none",
+    with_scale: bool = False
 ) -> None:
     """Calculate tracking errors compared to ground truth.
 
@@ -206,6 +134,7 @@ def calculate_sequence_errors(
         use_segments: Whether to use segment-based error calculation
         segment_lengths: List of segment lengths for error calculation
         num_loops: Number of tracking loops
+        with_scale: Align with Sim(3) for the absolute errors (scale-ambiguous mono tracking)
     """
     gt_transforms_filtered = []
     pose_transforms = []
@@ -228,7 +157,7 @@ def calculate_sequence_errors(
         gt_transforms_filtered.append(gt_transform)
         pose_transforms.append(conv.pose_to_transform(pose))
 
-    kabsch_rms_metric = calc_kabsch_rms_metric(gt_transforms_filtered, pose_transforms)  # m
+    ate_rmse, are_rmse = absolute_trajectory_errors(gt_transforms_filtered, pose_transforms, with_scale)  # m, deg
     total_frames = len(gt_transforms_filtered)
 
     # Ensure stat owns a fresh list so non-segment runs don't share the Stat class default.
@@ -309,4 +238,5 @@ def calculate_sequence_errors(
     stat.gt_av_translation_error = t_avg
     stat.gt_av_rotation_error = r_avg
     stat.gt_n_error_segments = n_error_segments
-    stat.gt_simple_error = kabsch_rms_metric
+    stat.gt_simple_error = ate_rmse
+    stat.gt_simple_rotation_error = are_rmse
