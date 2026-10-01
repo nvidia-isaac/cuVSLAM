@@ -157,7 +157,8 @@ def calculate_sequence_errors(
         gt_transforms_filtered.append(gt_transform)
         pose_transforms.append(conv.pose_to_transform(pose))
 
-    ate_rmse, are_rmse = absolute_trajectory_errors(gt_transforms_filtered, pose_transforms, with_scale)  # m, deg
+    stat.gt_simple_error, stat.gt_simple_rotation_error = absolute_trajectory_errors(  # m, deg
+        gt_transforms_filtered, pose_transforms, with_scale)
     total_frames = len(gt_transforms_filtered)
 
     # Ensure stat owns a fresh list so non-segment runs don't share the Stat class default.
@@ -238,5 +239,3 @@ def calculate_sequence_errors(
     stat.gt_av_translation_error = t_avg
     stat.gt_av_rotation_error = r_avg
     stat.gt_n_error_segments = n_error_segments
-    stat.gt_simple_error = ate_rmse
-    stat.gt_simple_rotation_error = are_rmse
