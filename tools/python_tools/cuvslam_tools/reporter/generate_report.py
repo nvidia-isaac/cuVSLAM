@@ -17,6 +17,7 @@
 import os
 import json
 import base64
+import math
 import subprocess
 from collections import defaultdict
 from datetime import datetime
@@ -112,7 +113,8 @@ def calc_summary(title, stats):
         total_gt_av_rotation_error += s.gt_av_rotation_error
         total_gt_n_error_segments += s.gt_n_error_segments
         total_gt_simple_error += s.gt_simple_error
-        total_gt_simple_rotation_error += s.gt_simple_rotation_error
+        if not math.isnan(s.gt_simple_rotation_error):
+            total_gt_simple_rotation_error += s.gt_simple_rotation_error
         total_tracking_losts += s.num_tracking_losts
         if s.gt_av_translation_error > 0:
             num_stats_with_gt += 1

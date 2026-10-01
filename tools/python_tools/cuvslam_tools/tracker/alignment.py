@@ -82,7 +82,8 @@ def absolute_trajectory_errors(gt_transforms: Sequence[np.ndarray], est_transfor
         with_scale: Align with Sim(3) instead of SE(3), for scale-ambiguous (monocular) tracking
 
     Returns:
-        (ate_rmse, are_rmse), or (0.0, 0.0) for an empty trajectory
+        (ate_rmse, are_rmse), or (0.0, 0.0) for an empty trajectory. are_rmse is NaN when the
+        positions are stationary or collinear, since rotation about them is unobservable.
     """
     if len(gt_transforms) != len(est_transforms):
         raise ValueError(f"Trajectories differ in length: {len(gt_transforms)} vs {len(est_transforms)}")
@@ -91,11 +92,15 @@ def absolute_trajectory_errors(gt_transforms: Sequence[np.ndarray], est_transfor
 
     gt = np.asarray(gt_transforms)
     est = np.asarray(est_transforms)
-    R, t, scale = umeyama_alignment(est[:, :3, 3], gt[:, :3, 3], with_scale)
+    gt_positions, est_positions = gt[:, :3, 3], est[:, :3, 3]
+    R, t, scale = umeyama_alignment(est_positions, gt_positions, with_scale)
 
-    position_errors = gt[:, :3, 3] - (scale * est[:, :3, 3] @ R.T + t)
+    position_errors = gt_positions - (scale * est_positions @ R.T + t)
     ate_rmse = np.sqrt(np.mean(np.sum(position_errors ** 2, axis=1)))
 
+    covariance = (gt_positions - gt_positions.mean(axis=0)).T @ (est_positions - est_positions.mean(axis=0))
+    if np.linalg.matrix_rank(covariance) < 2:
+        return float(ate_rmse), float("nan")
     rotation_errors = gt[:, :3, :3].transpose(0, 2, 1) @ R @ est[:, :3, :3]
     are_rmse = np.sqrt(np.mean(rotation_angles_deg(rotation_errors) ** 2))
     return float(ate_rmse), float(are_rmse)

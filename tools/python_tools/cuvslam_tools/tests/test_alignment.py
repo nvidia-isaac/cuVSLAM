@@ -75,6 +75,16 @@ class TestAbsoluteTrajectoryErrors(unittest.TestCase):
         self.assertAlmostEqual(ate, 0.0, places=9)
         self.assertAlmostEqual(are, 5.0, places=6)
 
+    def test_rotation_error_is_unavailable_for_a_straight_line(self):
+        R_offset = rotation([0, 0, 1], 40)
+        gt = [pose(np.eye(3), [x, 0, 0]) for x in np.linspace(0, 10, 20)]
+        est = [pose(R_offset @ T[:3, :3], R_offset @ T[:3, 3]) for T in gt]
+
+        ate, are = absolute_trajectory_errors(gt, est)
+
+        self.assertAlmostEqual(ate, 0.0, places=9)
+        self.assertTrue(np.isnan(are))
+
 
 if __name__ == "__main__":
     unittest.main()
