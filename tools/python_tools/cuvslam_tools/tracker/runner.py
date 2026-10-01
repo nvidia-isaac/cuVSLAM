@@ -72,6 +72,7 @@ class Stat:
     gt_av_rotation_error: float = 0
     gt_n_error_segments: int = 0
     gt_simple_error: float = 0
+    gt_simple_rotation_error: float = 0
     num_tracking_losts: int = 0
     odometry_mode: str = ""
     # per-instance list of dicts {length, t_pct, r_deg_per_m}, populated by
@@ -584,7 +585,8 @@ def track(args: argparse.Namespace,
     if dataset.gt_transforms:
         calculate_sequence_errors(tracker.world_from_rig, dataset.gt_transforms, tracker.stat,
                                   tracker.frame_metadata, args.use_segments, args.segment_lengths,
-                                  args.num_loops, args.repeat_type)
+                                  args.num_loops, args.repeat_type,
+                                  with_scale=args.odometry_mode == vslam.Odometry.OdometryMode.Mono)
 
     suffix = "_refined" if refined_focal is not None and refined_principal is not None else ""
     plot_trajectory_path = None

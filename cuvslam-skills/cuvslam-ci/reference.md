@@ -81,7 +81,10 @@ Repository secrets, split read from write so fork-reachable jobs never hold a ke
 
 - Per run: `kpi_<run_id>.json` contains the flat current values used for rolling history;
   `kpi_<run_id>.report.json` contains the current values, previous per-config values, and soft drift results. KPIs are
-  ATE, ARE, Kabsch, tracking losts, failed sequences (`Failed`), and FPS, in ODOM and SLAM modes. During migration, `run_eval.sh` also emits the old
+  ATE, ARE, Kabsch, KabschRot, tracking losts, failed sequences (`Failed`), and FPS, in ODOM and SLAM modes. ATE (%)
+  and ARE (º/m) are KITTI-style segment drift. Kabsch and KabschRot, shown in tables as ATE RMSE (m) and ARE RMSE (º),
+  are absolute errors after one Umeyama alignment of the whole trajectory (Sim(3) for mono), matching
+  `evo_ape --align`. During migration, `run_eval.sh` also emits the old
   `.table` and `.drift` files; a follow-up script-only change removes those after CI switches to report JSON.
 - KPI config: `kpi_baseline_ranges.json` has `defaults` and per-prefix `datasets` overrides, each holding the
   sequence checks (`max_ate_pct`, `max_lost_frame_pct`, `exclude_failed`), the rolling-baseline settings, and per-metric drift `tolerances`; a
@@ -100,7 +103,7 @@ Repository secrets, split read from write so fork-reachable jobs never hold a ke
 - Sequence checks: `collect` also records each sequence run in the report JSON's `sequences` block and marks it failed
   if it tracked no frames, lost more than `max_lost_frame_pct` of its frames, has no ATE, or exceeds `max_ate_pct`
   (RGB-D datasets get a laxer ATE cap). Failures never fail the job. Prefixes with `exclude_failed` leave failed
-  sequences out of the ATE, ARE and Kabsch means (TUM and TartanAir); Losts and FPS always cover every sequence.
+  sequences out of the ATE, ARE, Kabsch and KabschRot means (TUM and TartanAir); Losts and FPS always cover every sequence.
 - Nightly: `cuvslam_kpi_report.py aggregate` publishes one row per evaluation (dataset, type, mode). KPI cells contain
   the mean and population standard deviation across all four x86 configurations, except the counts Losts and Failed,
   which show min–max. Each cell's second line (`<br><sub>Δ …</sub>`) is the change from the previous nightly: of the
