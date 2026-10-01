@@ -26,7 +26,6 @@
 #include "cuda_modules/cuda_kernels/cuda_matrix.h"
 #include "cuda_modules/cuda_kernels/cuda_sba_common.h"
 #include "cuda_modules/cuda_kernels/cuda_sba_v1.h"
-#include "epipolar/near_plane.h"
 
 namespace cuvslam::cuda::sba_imu {
 
@@ -707,7 +706,8 @@ __global__ void evaluate_cost_stage_2_kernel(
     cuvslam::cuda::Vecf3 p_c;
     mul_add(problem_rig_camera_from_rig_linear, v2, problem_rig_camera_from_rig_translation, p_c);
 
-    if (cuvslam::epipolar::IsDepthInFront(p_c.d_[2])) {
+    // Same near plane as the CPU IMU bundler, see imu_sba_fixed_vel.cpp.
+    if (p_c.d_[2] > 0.f) {
       cuvslam::cuda::Vecf2 r;
       r.d_[0] = p_c.d_[0] / p_c.d_[2] - problem_observation_xys.d_[0];
       r.d_[1] = p_c.d_[1] / p_c.d_[2] - problem_observation_xys.d_[1];
@@ -940,7 +940,8 @@ __global__ void update_model_stage_1_kernel(
   cuvslam::cuda::Matf23 model_repr_jacobians_jt{0.f, 0.f, 0.f, 0.f, 0.f, 0.f};
   cuvslam::cuda::Matf23 model_repr_jacobians_jr{0.f, 0.f, 0.f, 0.f, 0.f, 0.f};
   cuvslam::cuda::Matf23 model_repr_jacobians_jp{0.f, 0.f, 0.f, 0.f, 0.f, 0.f};
-  if (cuvslam::epipolar::IsDepthInFront(p_c.d_[2])) {
+  // Same near plane as the CPU IMU bundler, see imu_sba_fixed_vel.cpp.
+  if (p_c.d_[2] > 0.f) {
     cuvslam::cuda::Matf33 Rimu_from_w = imu_from_w_linear;
     cuvslam::cuda::Matf33 Rcam_from_imu = cam_from_imu_linear;
 
