@@ -11,6 +11,11 @@ FORCE_RESTAGE="${FORCE_RESTAGE:-false}"
 # Space left free after staging, for the build, the eval outputs, and the runner
 # agent itself: filling the disk kills the runner mid-job, not just this step.
 STAGING_MIN_FREE_GIB="${STAGING_MIN_FREE_GIB:-10}"
+if ! [[ "$STAGING_MIN_FREE_GIB" =~ ^[0-9]{1,6}$ ]]; then
+  echo "Error: STAGING_MIN_FREE_GIB must be a non-negative whole number of GiB, got '$STAGING_MIN_FREE_GIB'." >&2
+  exit 1
+fi
+STAGING_MIN_FREE_GIB=$((10#$STAGING_MIN_FREE_GIB))
 
 S3_BUCKET="$(s3_dataset_bucket)"
 
@@ -92,8 +97,9 @@ cache_is_current() {
   return 1
 }
 
-# Fails before any download when the datasets still to stage do not fit. The
-# tarballs are uncompressed, so their size is what extraction writes, and a
+# Fails before any download when the datasets still to stage do not fit, or
+# when the size of one cannot be read: staging it unchecked could fill the disk.
+# The tarballs are uncompressed, so their size is what extraction writes, and a
 # replaced dataset needs its full new size because the old copy is removed only
 # after the new one is in place.
 check_free_space() {
@@ -115,7 +121,8 @@ check_free_space() {
   echo "Free space: $((available / 1073741824)) GiB available under $LOCAL_DATASETS_DIR;" \
     "$((required / 1073741824)) GiB to stage plus ${STAGING_MIN_FREE_GIB} GiB headroom"
   if [ "${#unknown[@]}" -gt 0 ]; then
-    echo "Warning: size unknown for ${unknown[*]}; not counted in the free-space check." >&2
+    echo "Error: could not read the S3 object size of ${unknown[*]}; not staging without a free-space check." >&2
+    exit 1
   fi
   if [ $((required + headroom)) -gt "$available" ]; then
     echo "Error: not enough free space under $LOCAL_DATASETS_DIR to stage the datasets." >&2
