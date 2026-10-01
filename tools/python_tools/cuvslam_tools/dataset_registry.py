@@ -295,24 +295,19 @@ DATASETS: dict[str, DatasetSpec] = {
         prepare_module="cuvslam_tools.dataset_preparation.tartan.prepare",
     ),
     # The OSMO TartanAir evaluation, rebuilt from public data. Full only, as it
-    # was there, with its stable/flaky split. The flaky config holds
-    # trajectories known to fail intermittently, so it reports without gating.
-    # The tarball also ships tartan-vo_slam.cfg with both sets, for running
-    # without the split.
+    # was there. It runs every trajectory in one config instead of OSMO's
+    # stable/flaky split: the KPI config excludes failed sequences from the
+    # TARTAN accuracy means, so intermittent failures no longer swing them.
+    # The tarball still ships the split configs, tartan_stable-vo_slam.cfg and
+    # tartan_flaky-vo_slam.cfg.
     "tartanair_v1": DatasetSpec(
         dataset_id="tartanair_v1",
         prepare_module="cuvslam_tools.dataset_preparation.tartanair_v1.prepare",
         evals=(
             EvalSpec(
-                config="tartan_stable-vo_slam.cfg",
+                config="tartan-vo_slam.cfg",
                 args=_stereo_args("--rectified_stereo_camera=true"),
                 suites=frozenset({FULL_SUITE}),
-            ),
-            EvalSpec(
-                config="tartan_flaky-vo_slam.cfg",
-                args=_stereo_args("--rectified_stereo_camera=true"),
-                suites=frozenset({FULL_SUITE}),
-                gating="informational",
             ),
         ),
     ),
