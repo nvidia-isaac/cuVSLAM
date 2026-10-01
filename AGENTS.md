@@ -12,7 +12,9 @@ tools/           # C++ analysis and visualization tools (tracker, reporter, visu
 test_data/       # Small reference datasets (edex, sof, navsim)
 cmake/ext/       # FetchContent dependency configs (Eigen, GTest, spdlog, yaml-cpp, …)
 docker/          # Dockerfile for containerized builds
-cuvslam-skills/  # Claude Code skills (cuvslam-onboard, cuvslam-troubleshoot, cuvslam-ci)
+skills/         # Canonical customer-facing agent skills
+.agents/skills/  # Symlink to ../skills for Codex discovery
+.agents/contributor-skills/  # Contributor workflows for repository development
 ```
 
 Key files:
@@ -72,7 +74,7 @@ Before making code changes or designing new features, read **[DESIGN_CONCEPTS.md
 
 ## CI/CD pipelines
 
-The GitHub Actions CI/CD (build, test, lint, dataset evaluation, nightly release, and dataset provisioning) is documented in the `cuvslam-ci` skill at [cuvslam-skills/cuvslam-ci/SKILL.md](cuvslam-skills/cuvslam-ci/SKILL.md). Read it before changing any `.github/workflows/**`, CI script under `scripts/`, dataset preparation code under `tools/python_tools/cuvslam_tools/dataset_preparation/`, or the test matrix.
+The GitHub Actions CI/CD (build, test, lint, dataset evaluation, nightly release, and dataset provisioning) is documented in the `cuvslam-ci` skill at [.agents/contributor-skills/cuvslam-ci/SKILL.md](.agents/contributor-skills/cuvslam-ci/SKILL.md). Read it before changing any `.github/workflows/**`, CI script under `scripts/`, dataset preparation code under `tools/python_tools/cuvslam_tools/dataset_preparation/`, or the test matrix.
 
 Load-bearing rules:
 
@@ -156,14 +158,34 @@ When creating a git branch, use `<user-name>/<branch-name>`, with `<branch-name>
 - Deleting or overwriting build artifacts or test data
 - Changing versions of FetchContent dependencies in `cmake/ext/`
 
-## Claude Code Skills
+## Agent Skills
 
-Project-specific skills in `cuvslam-skills/` — see `README.md` for descriptions. Install into Claude Code:
+Customer-facing skills live in `skills/` and are discovered automatically by Codex through the `.agents/skills`
+symlink. See [skills/README.md](skills/README.md) for descriptions and other agent installations.
+
+For CI/CD, dataset provisioning, evaluation pipelines, or repository infrastructure work, read
+[.agents/contributor-skills/cuvslam-ci/SKILL.md](.agents/contributor-skills/cuvslam-ci/SKILL.md) directly.
+That contributor skill is outside Codex's customer-skill discovery directory.
+
+### Claude Code
+
+Skills are auto-discovered from `.claude/skills/` (project-level) when you work in this directory. Invoke them with:
 
 ```bash
-cp -r cuvslam-skills/cuvslam-onboard ~/.claude/skills/
-cp -r cuvslam-skills/cuvslam-troubleshoot ~/.claude/skills/
-cp -r cuvslam-skills/cuvslam-ci ~/.claude/skills/
+/cuvslam-onboard
+/cuvslam-troubleshoot
+/cuvslam-trajectory
+/cuvslam-ci
+```
+
+To use the same skills globally across other projects, install them into `~/.claude/skills/`:
+
+```bash
+mkdir -p ~/.claude/skills
+cp -r skills/cuvslam-onboard ~/.claude/skills/
+cp -r skills/cuvslam-troubleshoot ~/.claude/skills/
+cp -r skills/cuvslam-trajectory ~/.claude/skills/
+cp -r .agents/contributor-skills/cuvslam-ci ~/.claude/skills/
 ```
 
 `cuvslam-ci` covers the CI/CD pipelines (see the CI/CD pipelines section above).

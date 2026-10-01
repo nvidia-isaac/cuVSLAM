@@ -1,0 +1,81 @@
+{
+  "skill_name": "cuvslam-troubleshoot",
+  "evals": [
+    {
+      "id": "troubleshoot-cuda-mismatch",
+      "prompt": "Use cuvslam-troubleshoot to diagnose an existing PyCuVSLAM import failure: I installed a cu13 wheel on Ubuntu 22.04 with Python 3.10 and x86_64, but only CUDA Toolkit 12 is installed. Explain the likely mismatch and a minimal fix without changing this machine.",
+      "expected_output": "The installed CUDA major must match the wheel tag. Select a supported cp310 x86_64 cu12 wheel or deliberately install a matching CUDA 13 toolkit; prefer replacing the mismatched wheel for the stated machine. Verify the import after repair rather than changing camera calibration.",
+      "assertions": [
+        "Read cuvslam-troubleshoot/SKILL.md.",
+        "Identify the cu13 versus CUDA 12 mismatch.",
+        "Recommend a matching wheel/runtime and import verification without performing installation."
+      ],
+      "expected_skill": "cuvslam-troubleshoot",
+      "expected_script": null,
+      "files": []
+    },
+    {
+      "id": "troubleshoot-stereo-calibration",
+      "prompt": "cuVSLAM stereo odometry drifts badly. Each camera tracks rotations well in mono mode, the camera timestamps are synchronized, and images are sharp. Which calibration check should I perform next? Explain the diagnosis only.",
+      "expected_output": "Focus on stereo extrinsic calibration and the left_from_right transform convention, including direction, coordinate frames, baseline, and units. Successful mono tracking makes stereo extrinsics a leading hypothesis, not a proven root cause.",
+      "assertions": [
+        "Read cuvslam-troubleshoot/SKILL.md.",
+        "Prioritize the stereo extrinsic transform after the supplied mono and synchronization evidence.",
+        "Recommend a verification step rather than claiming calibration is conclusively wrong."
+      ],
+      "expected_skill": "cuvslam-troubleshoot",
+      "expected_script": null,
+      "files": []
+    },
+    {
+      "id": "troubleshoot-ros-rate",
+      "prompt": "My Isaac ROS cuVSLAM bag has pose jumps at normal speed. Replaying the same bag at rate 0.05 with visualization disabled removes them. What should I investigate next? Explain only; I am not asking for a new replay.",
+      "expected_output": "Prioritize real-time processing and timing: CPU/GPU utilization, dropped frames, jitter, and processing overruns. Compare visualization overhead and image throughput. The slow-rate result points to a load/timing problem; it does not establish an intrinsic calibration defect.",
+      "assertions": [
+        "Read cuvslam-troubleshoot/SKILL.md.",
+        "Use the supplied slow-rate comparison to prioritize performance and timing.",
+        "Do not demand a duplicate slow replay before answering."
+      ],
+      "expected_skill": "cuvslam-troubleshoot",
+      "expected_script": null,
+      "files": []
+    },
+    {
+      "id": "troubleshoot-imu-isolation",
+      "prompt": "A cuVSLAM stereo-inertial run has large pose jumps. On the same EDEX sequence, VO-only multicamera tracking is substantially better. What should I check in the IMU integration next? Give a diagnostic plan, not commands to run now.",
+      "expected_output": "Isolate the IMU configuration and timing: IMU-to-camera extrinsics, axis alignment and gravity direction, synchronization, rate, and noise values. Use debug_imu_mode where supported to validate alignment and preserve the VO comparison as evidence.",
+      "assertions": [
+        "Read cuvslam-troubleshoot/SKILL.md.",
+        "Use the VO-versus-VIO comparison to focus on IMU integration.",
+        "Include extrinsics, alignment or gravity, and timing checks before further fusion tuning."
+      ],
+      "expected_skill": "cuvslam-troubleshoot",
+      "expected_script": null,
+      "files": []
+    },
+    {
+      "id": "troubleshoot-negative-setup",
+      "prompt": "I am installing PyCuVSLAM for the first time on a new workstation. Nothing has failed yet. Help me choose between wheels and building from source.",
+      "expected_output": "Do not activate cuvslam-troubleshoot. Route to cuvslam-onboard if available for first-time installation.",
+      "assertions": [
+        "Do not read cuvslam-troubleshoot/SKILL.md.",
+        "Treat this as installation planning rather than failure diagnosis."
+      ],
+      "expected_skill": null,
+      "expected_script": null,
+      "files": []
+    },
+    {
+      "id": "troubleshoot-negative-export",
+      "prompt": "My EuRoC recording already tracks well in cuVSLAM. I only need to replay it headlessly and save the camera poses as trajectory.txt.",
+      "expected_output": "Do not activate cuvslam-troubleshoot. Route to cuvslam-trajectory if available for recorded pose export, with no drift investigation.",
+      "assertions": [
+        "Do not read cuvslam-troubleshoot/SKILL.md.",
+        "Recognize a trajectory deliverable without inventing a tracking failure."
+      ],
+      "expected_skill": null,
+      "expected_script": null,
+      "files": []
+    }
+  ]
+}
