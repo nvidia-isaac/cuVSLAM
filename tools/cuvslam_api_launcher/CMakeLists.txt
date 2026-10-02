@@ -19,6 +19,7 @@ set(LIBS
     camera_rig_edex
     edex
     utils
+    profiler
     gflags::gflags
 )
 
