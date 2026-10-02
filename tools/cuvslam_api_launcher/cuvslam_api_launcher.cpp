@@ -664,7 +664,9 @@ bool trackEdexDataSet(const std::string& edex_name, const Odometry::Config& odom
             for (auto&& im : dummy_images) {
               im.timestamp_ns += 1000;
             }
+            TRACE_EVENT ev_odom_wait = profiler_domain.trace_event("Odometry::Track", 0x76B900);
             odom->Track(dummy_images, /*masks=*/{}, /*depths=*/{});
+            ev_odom_wait.Pop();
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
           }
           next_loc_frame = frame + FLAGS_loc_skip_frames + 1;
