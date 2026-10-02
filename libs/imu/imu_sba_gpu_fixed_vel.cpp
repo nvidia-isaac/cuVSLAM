@@ -191,6 +191,11 @@ bool IMUBundlerGpuFixedVel::solve(ImuBAProblem& problem) {
     }
 
     CUDA_CHECK(cudaStreamSynchronize(stream.get_stream()));
+    if ((*working_buffer_solver_info)[0] != 0) {
+      // Damped reduced system is not positive definite: reject the step instead of propagating NaNs.
+      (*lambda)[0] *= 5.f;
+      continue;
+    }
     float cost = ((*working_cost)[0].num_skipped == num_observations) ? std::numeric_limits<float>::infinity()
                                                                       : (*working_cost)[0].cost;
     float predicted_relative_reduction = (*working_cost)[0].predicted_reduction / current_cost;
@@ -386,8 +391,8 @@ void IMUBundlerGpuFixedVel::EvaluateCost(cudaStream_t s) {
       problem_observation_xys->ptr(), problem_observation_infos->ptr(), working_imu_from_w_linear->ptr(),
       working_imu_from_w_translation->ptr(), &(working_cost->ptr()->cost), &(working_cost->ptr()->num_skipped),
       working_partial_costs->ptr(), threshold, num_poses, num_observations, num_fixed_key_frames, prior_gyro, prior_acc,
-      gravity, imu_penalty, boundary_imu_penalty, acc_rw_penalty, robustifier_scale_pose, robustifier_scale,
-      calib_left_from_imu_linear, calib_left_from_imu_translation, s));
+      gravity, imu_penalty, boundary_imu_penalty, acc_rw_penalty, robustifier_scale, calib_left_from_imu_linear,
+      calib_left_from_imu_translation, s));
 }
 
 void IMUBundlerGpuFixedVel::ComputeUpdate(cudaStream_t s) {
@@ -397,6 +402,8 @@ void IMUBundlerGpuFixedVel::ComputeUpdate(cudaStream_t s) {
   CUSOLVER_CHECK(cusolverDnSpotrf(cusolver_handle_, CUBLAS_FILL_MODE_LOWER, 15 * num_poses_opt,
                                   reduced_system_pose_block->ptr(), 15 * num_poses_opt, working_buffer_solver->ptr(),
                                   working_buffer_solver->size(), working_buffer_solver_info->ptr()));
+  // potrs below overwrites the info value, so fetch the factorization status now.
+  working_buffer_solver_info->copy(cuvslam::cuda::GPUCopyDirection::ToCPU, s);
 
   CUSOLVER_CHECK(cusolverDnSpotrs(cusolver_handle_, CUBLAS_FILL_MODE_LOWER, 15 * num_poses_opt, 1,
                                   reduced_system_pose_block->ptr(), 15 * num_poses_opt,
@@ -478,8 +485,8 @@ void IMUBundlerGpuFixedVel::BuildFullSystem(cudaStream_t s) {
       model_random_walk_gyro_residuals->ptr(), model_random_walk_acc_residuals->ptr(), problem_rig_poses_other->ptr(),
       full_system_point_block->ptr(), full_system_point_rhs->ptr(), full_system_point_pose_block_transposed->ptr(),
       3 * num_points * sizeof(float), full_system_pose_block->ptr(), 15 * num_poses_opt * sizeof(float),
-      full_system_pose_rhs->ptr(), num_observations, num_points, num_poses, num_fixed_key_frames,
-      robustifier_scale_pose, imu_penalty, boundary_imu_penalty, acc_rw_penalty, prior_gyro, prior_acc, s));
+      full_system_pose_rhs->ptr(), num_observations, num_points, num_poses, num_fixed_key_frames, imu_penalty,
+      boundary_imu_penalty, acc_rw_penalty, prior_gyro, prior_acc, s));
 }
 
 void IMUBundlerGpuFixedVel::BuildReducedSystem(cudaStream_t s) {
@@ -504,7 +511,6 @@ void IMUBundlerGpuFixedVel::SetValues(const ImuBAProblem& problem) {
   num_fixed_key_frames = problem.num_fixed_key_frames;
   num_poses_opt = num_poses - num_fixed_key_frames;
   gravity = float3{problem.gravity[0], problem.gravity[1], problem.gravity[2]};
-  robustifier_scale_pose = problem.robustifier_scale_pose;
   robustifier_scale = problem.robustifier_scale;
   prior_gyro = problem.prior_gyro;
   prior_acc = problem.prior_acc;
@@ -658,7 +664,7 @@ void IMUBundlerGpuFixedVel::AllocateBuffers() {
   }
 
   if (!working_buffer_solver_info) {
-    working_buffer_solver_info = std::make_unique<cuvslam::cuda::GPUOnlyArray<int>>(1);
+    working_buffer_solver_info = std::make_unique<cuvslam::cuda::GPUArrayPinned<int>>(1);
   }
 
   {
