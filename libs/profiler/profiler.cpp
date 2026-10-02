@@ -26,8 +26,19 @@
 #endif
 
 #ifdef __linux__
+#include <sys/syscall.h>
 #include <unistd.h>
-#define NameOsThread() nvtxNameOsThreadA(getpid(), ("Thread_" + std::to_string(getpid())).c_str())
+// Each thread names itself once: naming another thread's id from a worker emits out-of-order events
+// that Nsight Systems rejects on import.
+#define NameOsThread()                                                   \
+  do {                                                                   \
+    thread_local bool named = false;                                     \
+    if (!named) {                                                        \
+      const auto tid = static_cast<uint32_t>(syscall(SYS_gettid));       \
+      nvtxNameOsThreadA(tid, ("Thread_" + std::to_string(tid)).c_str()); \
+      named = true;                                                      \
+    }                                                                    \
+  } while (0)
 #endif
 
 #include "profiler/profiler.h"
