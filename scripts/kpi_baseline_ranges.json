@@ -39,6 +39,7 @@
             "ARE": {"tol_pct": 10},
             "Kabsch": {"tol_pct": 10},
             "TrackingLosts": {"tol_abs": 1},
+            "Failed": {"tol_abs": 1},
             "FPS": {"tol_pct": 15}
         }
     },

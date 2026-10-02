@@ -67,7 +67,7 @@ Repository secrets, split read from write so fork-reachable jobs never hold a ke
 
 ## Dataset registry and layout
 
-- `DATASETS` in `tools/python_tools/cuvslam_tools/dataset_registry.py` is the single source of truth. A `DatasetSpec` holds the ID, the preparation module, and its `EvalSpec` records; an `EvalSpec` holds the reporter config filename, the `cuvslam_app` flags, suite membership, and gating. Provisionable means the dataset is present; eval-enabled means it has at least one `EvalSpec`. KITTI, EuRoC, TUM, ICL-NUIM, M3ED-SPOT and TartanAir V1 are eval-enabled; `tartan` and `coda` are provisionable only. `tartanair_v1` rebuilds the OSMO TartanAir evaluation from the public V1 Hard release: `download_tartanair_v1.sh` fetches left and right images and left depth for 16 environments and accepts each zip only if it matches the size and MD5 pinned in `zipfiles.txt`, and the converter ships three reporter configs: `tartan-vo_slam.cfg` (`TARTAN`) with every trajectory, and the OSMO split into `tartan_stable-vo_slam.cfg` (`TARTAN_STABLE`, OSMO's `TARTAN`) and `tartan_flaky-vo_slam.cfg` (`TARTAN_FLAKY`). All three ship in the tarball, so choosing between them is a registry change; eval runs the split pair for now. Smoke runs KITTI, EuRoC and ICL-NUIM, which covers stereo, stereo-inertial and RGB-D; TUM is full-only because it is the larger RGB-D corpus and ICL-NUIM already covers the modality pre-merge, and M3ED-SPOT is full-only because at 56 GiB and 57k frames in two modes it is the most expensive record in the suite. TartanAir V1 is full-only, as it was on OSMO: its stable config gates like the others, and its flaky config, which holds trajectories known to fail intermittently, is informational.
+- `DATASETS` in `tools/python_tools/cuvslam_tools/dataset_registry.py` is the single source of truth. A `DatasetSpec` holds the ID, the preparation module, and its `EvalSpec` records; an `EvalSpec` holds the reporter config filename, the `cuvslam_app` flags, suite membership, and gating. Provisionable means the dataset is present; eval-enabled means it has at least one `EvalSpec`. KITTI, EuRoC, TUM, ICL-NUIM, M3ED-SPOT and TartanAir V1 are eval-enabled; `tartan` and `coda` are provisionable only. `tartanair_v1` rebuilds the OSMO TartanAir evaluation from the public V1 Hard release: `download_tartanair_v1.sh` fetches left and right images and left depth for 16 environments and accepts each zip only if it matches the size and MD5 pinned in `zipfiles.txt`, and the converter ships three reporter configs: `tartan-vo_slam.cfg` (`TARTAN`) with every trajectory, and the OSMO split into `tartan_stable-vo_slam.cfg` (`TARTAN_STABLE`, OSMO's `TARTAN`) and `tartan_flaky-vo_slam.cfg` (`TARTAN_FLAKY`). All three ship in the tarball, so choosing between them is a registry change; eval runs the full config, with failed sequences excluded from the `TARTAN` accuracy means. Smoke runs KITTI, EuRoC and ICL-NUIM, which covers stereo, stereo-inertial and RGB-D; TUM is full-only because it is the larger RGB-D corpus and ICL-NUIM already covers the modality pre-merge, and M3ED-SPOT is full-only because at 56 GiB and 57k frames in two modes it is the most expensive record in the suite. TartanAir V1 is full-only, as it was on OSMO.
 - One dataset can carry several records. KITTI, TUM and ICL-NUIM each have a second, full-only `informational` record that replays the same reporter config in `multisensor` mode, so the `MSF` KPI rows compare the cuNLS solver against the default one on identical frames. EuRoC and M3ED-SPOT have none: the cuNLS solver projects through a pinhole camera and only warns on the fisheye and polynomial models those two use, so a record there would report numbers computed from the wrong geometry. `multisensor` needs `USE_CUNLS=ON`, which every CI configuration has.
 - The module is standard library only and imports converters lazily, so shell wrappers call it with `PYTHONPATH=tools/python_tools` inside `cuvslam-ci:local` before anything is installed. `datasets_config.sh` wraps it as `dataset_registry`; `run_eval.sh` defines its own shim because the S3 variables `datasets_config.sh` requires are absent in the eval container.
 - Subcommands: `validate [--dataset] [--suite]`, `list [--eval] [--suite]`, `eval-records [--suite]` (tab-separated `id`, KPI prefix, config path, flags), `kpi-keys [--suite]`, `prepare-module`, `prepare --root-file`, `verify-staged --root`.
@@ -81,7 +81,7 @@ Repository secrets, split read from write so fork-reachable jobs never hold a ke
 
 - Per run: `kpi_<run_id>.json` contains the flat current values used for rolling history;
   `kpi_<run_id>.report.json` contains the current values, previous per-config values, and soft drift results. KPIs are
-  ATE, ARE, Kabsch, tracking losts, and FPS, in ODOM and SLAM modes. During migration, `run_eval.sh` also emits the old
+  ATE, ARE, Kabsch, tracking losts, failed sequences (`Failed`), and FPS, in ODOM and SLAM modes. During migration, `run_eval.sh` also emits the old
   `.table` and `.drift` files; a follow-up script-only change removes those after CI switches to report JSON.
 - KPI config: `kpi_baseline_ranges.json` has `defaults` and per-prefix `datasets` overrides, each holding the
   sequence checks (`max_ate_pct`, `max_lost_frame_pct`, `exclude_failed`), the rolling-baseline settings, and per-metric drift `tolerances`; a
@@ -101,17 +101,18 @@ Repository secrets, split read from write so fork-reachable jobs never hold a ke
   if it tracked no frames, lost more than `max_lost_frame_pct` of its frames, has no ATE, or exceeds `max_ate_pct`
   (RGB-D datasets get a laxer ATE cap). Failures never fail the job. Prefixes with `exclude_failed` leave failed
   sequences out of the ATE, ARE and Kabsch means (TUM and TartanAir); Losts and FPS always cover every sequence.
-- Nightly: `cuvslam_kpi_report.py aggregate` publishes one row per dataset/type/mode. KPI cells contain the mean and
-  population standard deviation across all four x86 configurations, except Losts, which shows min–max; diff cells
-  compare current and previous aggregated means. The last column counts broken sequences (failed in every
-  configuration) and flaky ones (failed in some), listed under a collapsed "Failed sequences" section.
-  `aggregate --values-only` drops the diffs and the broken/flaky data for release notes. Temporary per-config `eval-kpis-staging-<version>-<slug>` and
+- Nightly: `cuvslam_kpi_report.py aggregate` publishes one row per evaluation (dataset, type, mode). KPI cells contain
+  the mean and population standard deviation across all four x86 configurations, except the counts Losts and Failed,
+  which show min–max. Each cell's second line (`<br><sub>Δ …</sub>`) is the change from the previous nightly: of the
+  mean, or of min/max. The last column counts broken sequences (failed in every configuration) and flaky ones (failed
+  in some), and a collapsed "Failed sequences" section lists them. `aggregate --values-only` drops the changes, the
+  Broken / flaky column, the regression check, and the failed-sequence list for release notes. Temporary per-config `eval-kpis-staging-<version>-<slug>` and
   `eval-reports-staging-<version>-<slug>` artifacts, raw per-config JSON, reports, and history remain namespaced by
   `platform-cuda-ubuntu`. `RUN_ID` is the UTC date. After aggregation, staging artifacts are replaced by
   `cuvslam-evaluation-<version>.tar.gz`.
 - Release dispatch: `release/vX.Y[.Z][-suffix]` derives tag `vX.Y[.Z][-suffix]` after validating it against `VERSION`. The draft Release contains the consumer artifacts and `cuvslam-evaluation-<version>.tar.gz` generated by the same run. Existing drafts, published Releases, and tags are never overwritten.
-- PR: `cuvslam_kpi_report.py render` produces a single table labeled with `EVAL_CONFIG`, with a Failed column counting
-  that run's failed sequences; `RUN_ID=pr-<number>`; the
+- PR: `cuvslam_kpi_report.py render` produces a single table labeled with `EVAL_CONFIG`, with the same stacked
+  changes, against `main`'s latest nightly; `RUN_ID=pr-<number>`; the
   matching config's KPI history is mounted read-only, so PR runs never write the baseline.
 
 ## Jetson benchmark outputs

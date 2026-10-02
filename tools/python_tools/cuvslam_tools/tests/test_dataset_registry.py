@@ -98,15 +98,8 @@ class TestShippedRegistry(unittest.TestCase):
             ),
             (
                 "tartanair_v1",
-                "TARTAN_STABLE",
-                "tartanair_v1/tartan_stable-vo_slam.cfg",
-                "--odometry_mode=multicamera --rectified_stereo_camera=true "
-                "--async_sba=false --multicam_mode=moderate --use_segments",
-            ),
-            (
-                "tartanair_v1",
-                "TARTAN_FLAKY",
-                "tartanair_v1/tartan_flaky-vo_slam.cfg",
+                "TARTAN",
+                "tartanair_v1/tartan-vo_slam.cfg",
                 "--odometry_mode=multicamera --rectified_stereo_camera=true "
                 "--async_sba=false --multicam_mode=moderate --use_segments",
             ),
@@ -155,8 +148,7 @@ class TestShippedRegistry(unittest.TestCase):
         rows = [line.split("\t") for line in completed.stdout.strip().splitlines()]
         self.assertEqual(
             [row[0] for row in rows],
-            ["kitti", "kitti", "euroc", "tum", "tum", "icl_nuim", "icl_nuim", "m3ed_spot",
-             "tartanair_v1", "tartanair_v1"],
+            ["kitti", "kitti", "euroc", "tum", "tum", "icl_nuim", "icl_nuim", "m3ed_spot", "tartanair_v1"],
         )
         self.assertTrue(all(len(row) == 4 for row in rows), rows)
 
