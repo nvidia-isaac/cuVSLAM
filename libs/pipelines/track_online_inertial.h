@@ -30,6 +30,7 @@
 #include "common/unaligned_types.h"
 #include "common/vector_2t.h"
 #include "common/vector_3t.h"
+#include "imu/imu_bundler.h"
 #include "imu/imu_sba.h"
 #include "imu/imu_sba_problem.h"
 #include "imu/inertial_optimization.h"
@@ -96,7 +97,7 @@ private:
   std::unique_ptr<map::ServiceBase> sba_service_;
 
   sba_imu::InertialOptimizer optimizer_;
-  sba_imu::IMUBundlerCpuFixedVel imu_init_bundler_;
+  sba_imu::IMUBundler imu_init_bundler_;
 
   InertialPnP inertial_pnp_;
   pnp::PNPSolver stereo_pnp_;

@@ -24,10 +24,6 @@
 #include "sba/sba_config.h"
 #include "sba/schur_complement_bundler_cpu.h"
 
-#ifdef USE_CUDA
-#include "sba/schur_complement_bundler_gpu.h"
-#endif
-
 #include "imu/imu_sba.h"
 #include "map/service.h"
 
@@ -391,10 +387,6 @@ private:
   profiler::SBAProfiler::DomainHelper profiler_domain_ = profiler::SBAProfiler::DomainHelper("Inertial SBA Service");
 };
 
-#ifdef USE_CUDA
-using ImuSbaCPUService = ImuSbaService<sba::SchurComplementBundlerGpu, sba_imu::IMUBundlerCpuFixedVel>;
-#else
 using ImuSbaCPUService = ImuSbaService<sba::SchurComplementBundlerCpu, sba_imu::IMUBundlerCpuFixedVel>;
-#endif
 
 }  // namespace cuvslam::pipelines

@@ -473,7 +473,7 @@ public:
     MulticameraMode multicam_mode = MulticameraMode::Precision;
     /// Odometry mode. Default: OdometryMode::Multicamera
     OdometryMode odometry_mode = OdometryMode::Multicamera;
-    /// Enable tracking using GPU. Default: true.
+    /// Run tracking and bundle adjustment on the GPU. Default: true.
     bool use_gpu = true;
     /// Enable SBA asynchronous mode. Default: true.
     bool async_sba = true;
