@@ -164,3 +164,17 @@ def remap_depth_camera_ids(
             )
         remapped.append(camera_id_map[camera_id])
     return remapped
+
+
+def select_depth_camera_ids(
+    camera_ids: Sequence[int],
+    camera_id_map: Optional[Mapping[int, int]],
+) -> list[int]:
+    """Keep the depth cameras a filtered rig still contains, in its contiguous camera-id space.
+
+    Multisensor fuses any subset of the rig's depth cameras, so a depth camera filtered
+    out of the rig is left out rather than rejected.
+    """
+    if camera_id_map is None:
+        return list(camera_ids)
+    return [camera_id_map[camera_id] for camera_id in camera_ids if camera_id in camera_id_map]

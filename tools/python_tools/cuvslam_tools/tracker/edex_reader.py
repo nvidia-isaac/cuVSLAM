@@ -530,8 +530,8 @@ class EdexReader(DatasetReader):
             ) from e
 
         multisensor_settings = vslam.Odometry.MultisensorSettings()
-        multisensor_settings.depth_camera_ids = depth_config.remap_depth_camera_ids(
-            description.camera_ids, self.camera_id_map, self.camera_ids
+        multisensor_settings.depth_camera_ids = depth_config.select_depth_camera_ids(
+            description.camera_ids, self.camera_id_map
         )
         multisensor_settings.depth_scale_factor = description.scale_factor
         # enable_depth_stereo_tracking keeps the binding default of True, matching
