@@ -90,23 +90,36 @@ void ExpectConsistentProblem(const Bundler& bundler) {
   }
 }
 
-// Gives every landmark a pose in reverse order, the way the tracking thread triangulates landmarks
-// (UnifiedMap::add_keyframe) while the SBA worker builds its problem from a submap that shares them.
+// Triangulates landmarks from another thread, the way the tracking thread does (UnifiedMap::add_keyframe) while the
+// SBA worker builds its problem from a submap that shares them. Until destroyed, it keeps clearing every pose and
+// then setting them again in reverse order, so it is still running whenever the SBA passes are, and landmarks keep
+// gaining a pose after the first pass skipped them.
 class ConcurrentTriangulator {
 public:
   explicit ConcurrentTriangulator(const std::vector<LandmarkPtr>& landmarks)
       : thread_([this, &landmarks] {
-          while (!go_.load(std::memory_order_acquire)) {
+          running_.store(true, std::memory_order_release);
+          while (!stop_.load(std::memory_order_acquire)) {
+            for (const auto& landmark : landmarks) {
+              landmark->reset();
+            }
+            for (auto it = landmarks.rbegin(); it != landmarks.rend(); ++it) {
+              (*it)->set_pose(Vector3T(0, 0, 1));
+            }
           }
-          for (auto it = landmarks.rbegin(); it != landmarks.rend(); ++it) {
-            (*it)->set_pose(Vector3T(0, 0, 1));
-          }
-        }) {}
-  void start() { go_.store(true, std::memory_order_release); }
-  ~ConcurrentTriangulator() { thread_.join(); }
+        }) {
+    while (!running_.load(std::memory_order_acquire)) {
+    }
+  }
+
+  ~ConcurrentTriangulator() {
+    stop_.store(true, std::memory_order_release);
+    thread_.join();
+  }
 
 private:
-  std::atomic<bool> go_{false};
+  std::atomic<bool> running_{false};
+  std::atomic<bool> stop_{false};
   std::thread thread_;
 };
 
@@ -135,8 +148,9 @@ TEST(ServiceSbaTest, ImuSbaSkipsLandmarksWithoutPose) {
 }
 
 // Each trial races problem construction against triangulation; a landmark that gains its pose between the two
-// passes over the submap must not be looked up in the first pass's index.
-constexpr int kRaceTrials = 200;
+// passes over the submap must not be looked up in the first pass's index. The schedule is up to the OS, so a single
+// trial can miss the window between the passes; many trials make missing it in all of them negligible.
+constexpr int kRaceTrials = 1000;
 
 TEST(ServiceSbaTest, SbaToleratesConcurrentTriangulation) {
   for (int trial = 0; trial < kRaceTrials; trial++) {
@@ -144,7 +158,6 @@ TEST(ServiceSbaTest, SbaToleratesConcurrentTriangulation) {
     RecordingSbaBundler bundler;
     {
       ConcurrentTriangulator triangulator(f.landmarks);
-      triangulator.start();
       ASSERT_NO_THROW(run_sba(f.submap, camera::Rig{}, sba::Settings{}, bundler)) << "trial " << trial;
     }
     ExpectConsistentProblem(bundler);
@@ -157,7 +170,6 @@ TEST(ServiceSbaTest, ImuSbaToleratesConcurrentTriangulation) {
     RecordingImuBundler bundler;
     {
       ConcurrentTriangulator triangulator(f.landmarks);
-      triangulator.start();
       ASSERT_NO_THROW(
           run_imu_sba(f.submap, Vector3T(0, 0, -9.81f), camera::Rig{}, imu::ImuCalibration{}, sba::Settings{}, bundler))
           << "trial " << trial;
