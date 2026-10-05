@@ -519,7 +519,7 @@ NB_MODULE(pycuvslam, m) {
            nb::arg("min_depth") = Odometry::Config{}.min_depth, nb::arg("max_depth") = Odometry::Config{}.max_depth)
       .def_rw("multicam_mode", &Odometry::Config::multicam_mode, "See :class:`Odometry.MulticameraMode`")
       .def_rw("odometry_mode", &Odometry::Config::odometry_mode, "See :class:`Odometry.OdometryMode`")
-      .def_rw("use_gpu", &Odometry::Config::use_gpu, "Run tracking and bundle adjustment on the GPU")
+      .def_rw("use_gpu", &Odometry::Config::use_gpu, "Enable to use GPU acceleration")
       .def_rw("async_sba", &Odometry::Config::async_sba, "Enable to run bundle adjustment asynchronously")
       .def_rw("use_motion_model", &Odometry::Config::use_motion_model, "Enable to use motion model for pose prediction")
       .def_rw("use_denoising", &Odometry::Config::use_denoising, "Enable to apply denoising to input images")
