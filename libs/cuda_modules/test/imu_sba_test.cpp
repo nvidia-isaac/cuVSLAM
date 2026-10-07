@@ -14,7 +14,9 @@
  * of the software or derivative works thereof, you agree to be bound by this License.
  */
 
+#include <chrono>
 #include <cmath>
+#include <iostream>
 #include <random>
 #include <vector>
 
@@ -22,6 +24,8 @@
 #include "common/imu_measurement.h"
 #include "common/include_gtest.h"
 #include "math/twist.h"
+
+#include "benchmark_utils.h"
 
 #include "imu/imu_sba.h"
 #include "imu/imu_sba_gpu.h"
@@ -37,6 +41,11 @@ Matrix3T ExpSO3(const Vector3T& w) {
   Matrix3T r;
   math::Exp(r, w);
   return r;
+}
+
+// ~sqrt(2) * angle for small rotations; unlike acos of the trace it stays accurate near identity in float.
+float RotationDistance(const Matrix3T& a, const Matrix3T& b) {
+  return (a.transpose() * b - Matrix3T::Identity()).norm();
 }
 
 struct Shape {
@@ -188,6 +197,33 @@ Scenario MakeScenario(uint32_t seed, const Shape& shape = kParityShape) {
   return s;
 }
 
+TEST(ImuSbaGpu, MatchesCpuBundler) {
+  for (uint32_t seed : {1u, 2u, 3u}) {
+    SCOPED_TRACE(seed);
+    const Scenario s = MakeScenario(seed);
+
+    ImuBAProblem cpu_problem = s.problem;
+    ImuBAProblem gpu_problem = s.problem;
+
+    IMUBundlerCpuFixedVel cpu(s.calib);
+    IMUBundlerGpuFixedVel gpu(s.calib);
+    ASSERT_TRUE(cpu.solve(cpu_problem));
+    ASSERT_TRUE(gpu.solve(gpu_problem));
+    EXPECT_NEAR(cpu_problem.initial_cost, gpu_problem.initial_cost, 1e-4f * cpu_problem.initial_cost);
+
+    for (int k = kParityShape.num_fixed; k < kParityShape.num_poses; ++k) {
+      SCOPED_TRACE(k);
+      const Pose& c = cpu_problem.rig_poses[k];
+      const Pose& g = gpu_problem.rig_poses[k];
+      EXPECT_LT(RotationDistance(c.w_from_imu.linear(), g.w_from_imu.linear()), 1e-3f);
+      EXPECT_LT((c.w_from_imu.translation() - g.w_from_imu.translation()).norm(), 2e-3f);
+      EXPECT_LT((c.velocity - g.velocity).norm(), 5e-3f);
+      EXPECT_LT((c.gyro_bias - g.gyro_bias).norm(), 1e-3f);
+      EXPECT_LT((c.acc_bias - g.acc_bias).norm(), 1e-2f);
+    }
+  }
+}
+
 TEST(ImuSbaGpu, EmptyProblemFailsLikeCpu) {
   Scenario s = MakeScenario(1);
   s.problem.points.clear();
@@ -203,6 +239,53 @@ TEST(ImuSbaGpu, EmptyProblemFailsLikeCpu) {
   IMUBundlerGpuFixedVel gpu(s.calib);
   EXPECT_FALSE(cpu.solve(cpu_problem));
   EXPECT_FALSE(gpu.solve(gpu_problem));
+}
+
+// Whole IMUBundlerGpuFixedVel::solve() vs IMUBundlerCpuFixedVel::solve(), including host<->device copies and
+// preintegration packing. Shapes follow run_imu_sba() on EuRoC VIO: 10 keyframes, 1 fixed, and roughly the 10th
+// percentile, median and maximum observation counts seen there (~3.6k, ~6.4k, ~8k).
+TEST(Cuda, ImuSbaSolveSpeedup) {
+  constexpr int kRepeats = 20;
+  const Shape shapes[] = {{10, 1, 450, 4}, {10, 1, 800, 4}, {10, 1, 1000, 4}};
+
+  std::chrono::nanoseconds cpu_total{0}, gpu_total{0};
+  int total_solves = 0;
+  for (const Shape& shape : shapes) {
+    const Scenario s = MakeScenario(7, shape);
+    IMUBundlerCpuFixedVel cpu(s.calib);
+    IMUBundlerGpuFixedVel gpu(s.calib);
+
+    // Production keeps one bundler alive across calls, so buffers are allocated before the timed region.
+    ImuBAProblem warmup = s.problem;
+    ASSERT_TRUE(gpu.solve(warmup));
+
+    std::vector<ImuBAProblem> cpu_problems(kRepeats, s.problem);
+    std::vector<ImuBAProblem> gpu_problems(kRepeats, s.problem);
+
+    const auto cpu_start = std::chrono::steady_clock::now();
+    for (auto& q : cpu_problems) {
+      ASSERT_TRUE(cpu.solve(q));
+    }
+    const auto cpu_time = std::chrono::steady_clock::now() - cpu_start;
+
+    const auto gpu_start = std::chrono::steady_clock::now();
+    for (auto& q : gpu_problems) {
+      ASSERT_TRUE(gpu.solve(q));
+    }
+    const auto gpu_time = std::chrono::steady_clock::now() - gpu_start;
+
+    const double cpu_ms = std::chrono::duration<double, std::milli>(cpu_time).count() / kRepeats;
+    const double gpu_ms = std::chrono::duration<double, std::milli>(gpu_time).count() / kRepeats;
+    std::cout << "points " << shape.num_points << ", observations " << s.problem.observation_xys.size()
+              << ", LM iterations cpu/gpu " << cpu_problems[0].iterations << "/" << gpu_problems[0].iterations
+              << ": cpu " << cpu_ms << " ms, gpu " << gpu_ms << " ms, speedup " << cpu_ms / gpu_ms << std::endl;
+
+    cpu_total += cpu_time;
+    gpu_total += gpu_time;
+    total_solves += kRepeats;
+  }
+  ::test::ReportSpeedBenchmark(cpu_total, gpu_total, total_solves);
+  ASSERT_TRUE(cpu_total >= gpu_total);
 }
 
 }  // namespace

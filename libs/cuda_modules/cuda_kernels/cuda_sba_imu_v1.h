@@ -61,8 +61,8 @@ cudaError_t evaluate_cost(
     const cuvslam::cuda::Matf22* problem_observation_infos, cuvslam::cuda::Matf33* imu_from_w_linear,
     float* imu_from_w_translation, float* cost, int* num_skipped, float* partial_costs, float threshold, int num_poses,
     int num_observations, int num_fixed_key_frames, float prior_gyro, float prior_acc, float3 gravity,
-    float imu_penalty, float boundary_imu_penalty, float acc_rw_penalty, float robustifier_scale_pose,
-    float robustifier_scale, const cuvslam::cuda::Matf33& calib_left_from_imu_linear,
+    float imu_penalty, float boundary_imu_penalty, float acc_rw_penalty, float robustifier_scale,
+    const cuvslam::cuda::Matf33& calib_left_from_imu_linear,
     const cuvslam::cuda::Vecf3& calib_left_from_imu_translation, cudaStream_t s);
 
 cudaError_t compute_predicted_reduction(cuvslam::cuda::Matf33* full_system_point_blocks, const float* update_point_step,
@@ -128,8 +128,8 @@ cudaError_t build_full_system(
     cuvslam::cuda::Matf33* full_system_point_block, float* full_system_point_rhs,
     float* full_system_point_pose_block_transposed, int full_system_point_pose_block_transposed_pitch,
     float* full_system_pose_block, int full_system_pose_block_pitch, float* full_system_pose_rhs, int num_observations,
-    int num_points, int num_poses, int num_fixed_key_frames, float robustifier_scale_pose, float imu_penalty,
-    float boundary_imu_penalty, float acc_rw_penalty, float prior_gyro, float prior_acc, cudaStream_t s);
+    int num_points, int num_poses, int num_fixed_key_frames, float imu_penalty, float boundary_imu_penalty,
+    float acc_rw_penalty, float prior_gyro, float prior_acc, cudaStream_t s);
 
 cudaError_t init_update(cuvslam::cuda::Matf33* update_pose_w_from_imu_linear, float* update_pose_other,
                         float* update_point, int num_poses_opt, int num_points, cudaStream_t s);
