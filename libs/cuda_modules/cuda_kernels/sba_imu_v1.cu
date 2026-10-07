@@ -1228,9 +1228,9 @@ __global__ void __launch_bounds__(THREADBLOCK_SIZE)
   float model_inertial_jacobians_jb_gyro_left_val;
   if (row93 < 3) {
     cuvslam::cuda::Vecf3 problem_rig_poses_preint_JRg_col;
-    problem_rig_poses_preint_JRg_col.d_[0] = problem_rig_poses_preint_JRg_s.d_[col33][0];
-    problem_rig_poses_preint_JRg_col.d_[1] = problem_rig_poses_preint_JRg_s.d_[col33][1];
-    problem_rig_poses_preint_JRg_col.d_[2] = problem_rig_poses_preint_JRg_s.d_[col33][2];
+    problem_rig_poses_preint_JRg_col.d_[0] = problem_rig_poses_preint_JRg_s.d_[0][col33];
+    problem_rig_poses_preint_JRg_col.d_[1] = problem_rig_poses_preint_JRg_s.d_[1][col33];
+    problem_rig_poses_preint_JRg_col.d_[2] = problem_rig_poses_preint_JRg_s.d_[2][col33];
     float m1_val = dot(to_vector(transp(twist_left_inverse_jacobian_row(rot_error, row33) *
                                         twist_right_jacobian(problem_rig_poses_preint_JRg *
                                                              problem_rig_poses_preint_gyro_bias_diff_))),
@@ -1474,15 +1474,17 @@ __global__ void build_full_system_stage_2_kernel(
   __syncthreads();
 
   if (threadIdx.x < 27) {
+    // Only lanes 0..26 reach these shuffles, so the mask must not name lanes 27..31.
+    constexpr unsigned kMask27 = (1u << 27) - 1u;
     int k = lane_id / 9;
     int elem_id = lane_id - 9 * k;
     int i = elem_id / 3;
     int j = elem_id - 3 * i;
     float hcc = 0.f;
     for (int w = 0; w < WARP_COUNT; ++w) hcc += shared_hcc[w][k].d_[i][j];
-    float hcc1 = __shfl_down_sync(0xffffffff, hcc, 9);
-    float hcc1a = __shfl_sync(0xffffffff, hcc, 9 + j * 3 + i);
-    float hcc2 = __shfl_down_sync(0xffffffff, hcc, 18);
+    float hcc1 = __shfl_down_sync(kMask27, hcc, 9);
+    float hcc1a = __shfl_sync(kMask27, hcc, 9 + j * 3 + i);
+    float hcc2 = __shfl_down_sync(kMask27, hcc, 18);
     if (lane_id < 9) {
       *GET_ELEMENT(full_system_pose_block, full_system_pose_block_pitch, 15 * id + i, 15 * id + j) = hcc;
       *GET_ELEMENT(full_system_pose_block, full_system_pose_block_pitch, 15 * id + i, 15 * id + j + 3) = hcc1;
@@ -2052,8 +2054,8 @@ cudaError_t build_full_system(
     const float* model_inertial_residuals, const cuvslam::cuda::Matf93* model_inertial_jacobians_jr_left,
     const cuvslam::cuda::Matf93* model_inertial_jacobians_jt_left,
     const cuvslam::cuda::Matf93* model_inertial_jacobians_jv_left,
-    const cuvslam::cuda::Matf93* model_inertial_jacobians_jb_acc_left,
     const cuvslam::cuda::Matf93* model_inertial_jacobians_jb_gyro_left,
+    const cuvslam::cuda::Matf93* model_inertial_jacobians_jb_acc_left,
     const cuvslam::cuda::Matf93* model_inertial_jacobians_jr_right,
     const cuvslam::cuda::Matf93* model_inertial_jacobians_jt_right,
     const cuvslam::cuda::Matf93* model_inertial_jacobians_jv_right, const float* model_random_walk_gyro_residuals,
