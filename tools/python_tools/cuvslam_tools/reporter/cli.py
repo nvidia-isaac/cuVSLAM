@@ -58,6 +58,11 @@ def run_report(args: argparse.Namespace) -> str:
         reporter_config = json.load(f)
 
     config_name = Path(config_path.name).stem
+    # One reporter config can be evaluated in several odometry modes. The KPI
+    # collector reads only the newest run under each directory, so without the
+    # mode in the name the last run would replace every earlier one. The KPI
+    # prefix is the first hyphen-delimited token, so the suffix cannot change it.
+    run_name = f"{config_name}-{args.odometry_mode}"
     output_root = args.output_root or os.environ.get("CUVSLAM_OUTPUT")
     if args.output_dir:
         args.output_dir = os.path.abspath(args.output_dir)
@@ -66,7 +71,7 @@ def run_report(args: argparse.Namespace) -> str:
             raise ValueError("Provide --output_root, --output_dir, or set CUVSLAM_OUTPUT")
         args.output_dir = os.path.join(
             output_root,
-            config_name,
+            run_name,
             datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
         )
 
@@ -77,7 +82,7 @@ def run_report(args: argparse.Namespace) -> str:
     stats = run_parallel_tracking(reporter_config, args, datasets_root, max_workers=args.max_workers)
     save_stats_to_json(stats, args.output_dir)
     report_comments = getattr(args, "report_comments", sys.argv[1:])
-    generate_report(args.output_dir, report_comments, stats, generate_pdf=args.pdf, config_name=config_name)
+    generate_report(args.output_dir, report_comments, stats, generate_pdf=args.pdf, config_name=run_name)
     return args.output_dir
 
 

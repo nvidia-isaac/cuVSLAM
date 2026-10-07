@@ -11,18 +11,3 @@
 # in future releases without notice or attribution.
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
-
-set(MODULE_NAME "cuvslam_api_launcher")
-
-set(LIBS
-    cuvslam
-    camera_rig_edex
-    edex
-    utils
-    profiler
-    gflags::gflags
-)
-
-setup_app(MODULE_NAME ${MODULE_NAME}
-          LIBRARIES ${LIBS}
-          SOURCES cuvslam_api_launcher.cpp)

@@ -36,7 +36,7 @@ CI scripts (`scripts/`):
   machine-readable KPI JSON.
 - `cuvslam_kpi_report.py` - owns KPI collection, rolling diffs, cross-config aggregation, soft drift data, and all
   KPI Markdown rendering. `collect` writes raw and report JSON; `render` and `aggregate` produce publication Markdown.
-- `kpi_baseline_ranges.json` - committed static drift ranges.
+- `kpi_baseline_ranges.json` - committed KPI config: defaults and per-dataset overrides for sequence failure checks, drift tolerances, and calibrated expected values.
 - `package_cpp_dist.sh` - creates and validates the curated, versioned C++ SDK archive used by Actions and Releases.
 - `Dockerfile` / `build_cuvslam_in_docker.sh` - product build image and wrapper; preserve Git/LFS metadata used by
   `get_version()`.
@@ -52,7 +52,7 @@ The dataset ID is the only name: it is the preparation module, the `<id>.tar` ob
 3. Add the ID to the `dataset` choice input in `provision-datasets.yml`. A registry test asserts every choice resolves.
 4. Run Provision dataset (`workflow_dispatch`) on the default branch. It writes `<S3_DATASETS_BUCKET>/<id>.tar`.
 5. Enable evaluation by adding one or more `EvalSpec` records to that `DatasetSpec`: the reporter config filename, the `cuvslam_app` flags, and suite membership. Nothing else needs editing; staging and eval both read the registry.
-6. Add expected KPI ranges to `scripts/kpi_baseline_ranges.json`. The key prefix is derived from the config filename (first hyphen-delimited token, upper-cased), so name configs with underscores inside the prefix and a hyphen only as its terminator: `tartan_flaky-vo_slam.cfg` gives `TARTAN_FLAKY`, whereas `tartan-flaky-vo_slam.cfg` would collide with `TARTAN`.
+6. `scripts/kpi_baseline_ranges.json` needs no entry: the drift check takes the suite's KPI keys from the registry, and every key starts uncalibrated. Add a `datasets.<PREFIX>` entry only if the dataset needs its own ATE cap, `exclude_failed`, or drift tolerances. The key prefix is derived from the config filename (first hyphen-delimited token, upper-cased), so name configs with underscores inside the prefix and a hyphen only as its terminator: `tartan_flaky-vo_slam.cfg` gives `TARTAN_FLAKY`, whereas `tartan-flaky-vo_slam.cfg` would collide with `TARTAN`.
 
 ## Task: change dataset format or packing
 

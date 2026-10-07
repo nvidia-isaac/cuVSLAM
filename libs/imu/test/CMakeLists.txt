@@ -14,6 +14,7 @@
 
 set(SOURCES
         imu_pnp_test.cpp
+        imu_sba_test.cpp
         )
 set(LIBS
         imu
