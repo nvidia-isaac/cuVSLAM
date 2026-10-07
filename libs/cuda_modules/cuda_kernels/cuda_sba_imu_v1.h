@@ -134,4 +134,9 @@ cudaError_t build_full_system(
 cudaError_t init_update(cuvslam::cuda::Matf33* update_pose_w_from_imu_linear, float* update_pose_other,
                         float* update_point, int num_poses_opt, int num_points, cudaStream_t s);
 
+// SO(3) logarithm of each rotation, as used for the inertial rotation residuals. svd_based selects the SVD-based
+// formulation, which the residuals use only near pi.
+cudaError_t so3_log(const cuvslam::cuda::Matf33* rotations, cuvslam::cuda::Vecf3* logs, int count, bool svd_based,
+                    cudaStream_t s);
+
 }  // namespace cuvslam::cuda::sba_imu
