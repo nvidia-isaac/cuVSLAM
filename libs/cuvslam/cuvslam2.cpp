@@ -1092,6 +1092,8 @@ public:
     options.throttling_time_ms = config.throttling_time_ms;
     options.retention_time_ms = config.retention_time_ms;
     options.delay_warning_queue_size = config.delay_warning_queue_size;
+    THROW_INVALID_ARG_IF(config.vpr_mode == VprMode::AnyLoc && !config.use_gpu,
+                         "vpr_mode AnyLoc runs DINOv2 as a TensorRT engine on the GPU, so it needs use_gpu.");
     options.vpr_options.type = static_cast<slam::vpr::VprType>(config.vpr_mode);
     options.vpr_options.model_path = std::string{config.vpr_model_path};
     options.vpr_options.score_threshold = config.vpr_score_threshold;

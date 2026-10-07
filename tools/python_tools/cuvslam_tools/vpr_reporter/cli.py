@@ -126,8 +126,9 @@ def main(argv: Optional[list[str]] = None) -> int:
                              "(default: the config's success_radius_m, else 10.0).")
     parser.add_argument("--vpr_score_threshold", type=float, default=0.0,
                         help="Minimum similarity for a match; 0 selects the backend default.")
-    parser.add_argument("--vpr_model_path", type=str, default="",
-                        help="Model file the backend needs; AnyLoc reads a DINOv2 ONNX model from here.")
+    parser.add_argument("--vpr_model_path", type=str, default=os.environ.get("CUVSLAM_ANYLOC_ENGINE", ""),
+                        help="Model file the backend needs; AnyLoc reads the DINOv2 TensorRT engine the anyloc_engine "
+                             "CMake target builds from here (default: $CUVSLAM_ANYLOC_ENGINE).")
     parser.add_argument("--frame_limit", type=int, default=0,
                         help="Stop each sequence after this many frames; 0 replays all of them.")
     parser.add_argument("--query_stride", type=int, default=1,

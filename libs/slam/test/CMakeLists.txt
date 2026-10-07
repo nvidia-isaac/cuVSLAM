@@ -47,9 +47,23 @@ if(USE_RERUN)
     set(LIBS ${LIBS} visualizer)
 endif()
 
+if(USE_TENSORRT)
+    set(LIBS ${LIBS} TensorRT::nvinfer cnpy::cnpy)
+endif()
+
 setup_test_project(
     MODULE_NAME ${MODULE_NAME}
     HEADERS ${HEADERS}
     SOURCES ${SOURCES}
     LIBRARIES ${LIBS}
     )
+
+if(CUVSLAM_ANYLOC_ENGINE)
+    # The AnyLoc tests also run the engine tools/anyloc_model builds, against the reference arrays its export saved.
+    target_compile_definitions(${MODULE_NAME}_test PRIVATE
+        CUVSLAM_ANYLOC_ENGINE_PATH="${CUVSLAM_ANYLOC_ENGINE}"
+        CUVSLAM_ANYLOC_REFERENCE_INPUT="${CUVSLAM_ANYLOC_REFERENCE_INPUT}"
+        CUVSLAM_ANYLOC_REFERENCE_OUTPUT="${CUVSLAM_ANYLOC_REFERENCE_OUTPUT}"
+        )
+    add_dependencies(${MODULE_NAME}_test anyloc_engine)
+endif()

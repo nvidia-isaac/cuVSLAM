@@ -21,6 +21,10 @@ add_subdirectory(gravity_calc)
 add_subdirectory(map_extractor)
 add_subdirectory(tracker)
 
+if(USE_TENSORRT)
+    add_subdirectory(anyloc_model)
+endif()
+
 find_package(OpenCV QUIET)
 
 if(OpenCV_FOUND)

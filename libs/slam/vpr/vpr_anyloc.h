@@ -25,6 +25,8 @@
 
 namespace cuvslam::slam::vpr {
 
+class AnyLocNetwork;
+
 /// AnyLoc place recognition: VLAD aggregation of DINOv2 dense patch features, after Keetha et al.
 /// (2023), "AnyLoc: Towards Universal Visual Place Recognition". The value projection of one
 /// intermediate attention block gives one unit norm descriptor per image patch, and VLAD pools those
@@ -32,8 +34,9 @@ namespace cuvslam::slam::vpr {
 ///
 /// The strongest and the most expensive of the three backends: DINOv2 features are semantic rather
 /// than photometric, so a place still matches under weather, season or illumination change that
-/// defeats thumbnails and ORB corners. The price is a model file (`Slam::Config::vpr_model_path`),
-/// tens of milliseconds of CPU per frame, and `vocabulary_size * 384` floats per map entry.
+/// defeats thumbnails and ORB corners. The price is a TensorRT engine of DINOv2 built for this GPU
+/// (`Slam::Config::vpr_model_path`, made by the `anyloc_engine` CMake target, see AnyLocNetwork), a
+/// few milliseconds of GPU per frame, and `vocabulary_size * 384` floats per map entry.
 ///
 /// The vocabulary is fitted to the session's own frames rather than read from one of AnyLoc's domain
 /// specific ones, so the saved map is self contained and always matches the domain being driven - at
@@ -45,7 +48,10 @@ public:
   /// Measured on KITTI 07 with the ViT-S/14 layer 9 value facet model at 322x322, a 64 node map of
   /// frames 0..299 and 68 queries scored against the ground truth: every query within 2 m of the node
   /// it matched scored 0.703 and up, while a query more than 90 m away from everything in the map
-  /// never passed 0.655. 0.68 is the middle of that gap.
+  /// never passed 0.655. 0.68 is the middle of that gap. Re-measured the same way on the TensorRT
+  /// engines: 0.784 and 0.643 with FP16, 0.759 to 0.776 and 0.658 to 0.662 over two runs with FP32.
+  /// FP16 moves a query's score by a median 0.009, about what rebuilding the map moves it by, so the
+  /// threshold holds for both.
   ///
   /// It costs recall on the genuine second pass, where a correct match scores 0.62 to 0.82 and only
   /// the better half clears 0.68; the weak half scores in the same range as the wrong matches, so no
@@ -78,6 +84,8 @@ public:
   /// frame. The same guard exists in the DBoW2 backend for the same reason.
   static constexpr size_t kMinTrainingFrames = 8;
 
+  /// Loads the engine `options.model_path` names.
+  /// @throws std::runtime_error when the path is unset, or does not name an engine AnyLocNetwork can run.
   explicit VprAnyLoc(const VprOptions& options);
   ~VprAnyLoc() override;
 
@@ -95,20 +103,11 @@ public:
   bool Deserialize(const BlobReader& reader) override;
 
 private:
-  /// The ONNX Runtime environment and session. Held behind a pointer so onnxruntime_cxx_api.h stays
-  /// out of this header, which ivpr.cpp includes, and so the model is only loaded on first use.
-  struct Network;
-
   struct Entry {
     KeyFrameId node_id = InvalidKeyFrameId;
     std::vector<float> vlad;     ///< pooled descriptor, cluster_count_ * descriptor_dim_ floats
     std::vector<float> patches;  ///< raw per-patch descriptors, only until Finalize() pools them
   };
-
-  /// Load the model. Deferred to the first frame so a session that never hands VPR an image pays
-  /// neither the 69 MB of model nor the failure of a missing file.
-  /// @throws std::runtime_error when the model path is unset or does not name a readable file.
-  void EnsureNetwork();
 
   /// Run the network on `image`. Returns the per-patch descriptors, `descriptor_dim_` floats each.
   bool Describe(const VprImage& image, std::vector<float>& patches);
@@ -125,9 +124,10 @@ private:
   float ratio_threshold_ = 0.f;
   uint32_t max_entries_ = 0;
 
-  std::unique_ptr<Network> network_;
+  /// Held behind a pointer so the TensorRT headers stay out of this one, which ivpr.cpp includes.
+  std::unique_ptr<AnyLocNetwork> network_;
 
-  /// Width of one patch descriptor, read from the model output (384 for ViT-S/14).
+  /// Width of one patch descriptor, read from the engine's output (384 for ViT-S/14).
   int descriptor_dim_ = 0;
   /// Cluster centers, cluster_count_ rows of descriptor_dim_ unit norm floats. Empty until trained.
   std::vector<float> centers_;

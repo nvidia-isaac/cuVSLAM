@@ -128,7 +128,15 @@ void AsyncSlam::LocalizeInMapCmd::Execute(AsyncSlam& async_slam, FrameId, const 
 
   // TODO: keep localizer to safe memory
   const auto localizer = std::make_unique<Localizer>();  // only for the duration of the localization
-  localizer->Init(async_slam.rig_, options);
+  // Init builds a place recognition backend of its own, and AnyLoc's loads a TensorRT engine, which
+  // can fail. The worker would catch the exception, but the caller would never hear back.
+  std::string init_error;
+  try {
+    localizer->Init(async_slam.rig_, options);
+  } catch (const std::exception& e) {
+    init_error = e.what();
+  }
+  CALLBACK_AND_RETURN_IF(!init_error.empty(), finish_cb_, Pose, "Failed to set up localization: " + init_error);
   CALLBACK_AND_RETURN_IF(!localizer->OpenDatabase(std::string{folder_name_}), finish_cb_, Pose,
                          "Failed to open database.");
 

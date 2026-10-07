@@ -16,6 +16,7 @@ import argparse
 import builtins
 import contextlib
 import io
+import os
 import sys
 import tempfile
 import types
@@ -34,6 +35,13 @@ def _tracker_parser() -> argparse.ArgumentParser:
 
 
 class TestTrackerCli(unittest.TestCase):
+    def setUp(self):
+        # --vpr_model_path defaults to the engine a sourced cuvslam_vars.sh names; the tests must not see the caller's.
+        environment = mock.patch.dict(os.environ)
+        environment.start()
+        self.addCleanup(environment.stop)
+        os.environ.pop("CUVSLAM_ANYLOC_ENGINE", None)
+
     def test_help_parser_does_not_import_cuvslam_bindings(self):
         original_import = builtins.__import__
 
@@ -69,13 +77,13 @@ class TestTrackerCli(unittest.TestCase):
         args = parser.parse_args([
             "--loop_closure_mode", "vpr",
             "--vpr_mode", "bow",
-            "--vpr_model_path", "/tmp/dinov2.onnx",
+            "--vpr_model_path", "/tmp/dinov2.engine",
             "--max_map_size", "0",
         ])
 
         self.assertEqual(args.loop_closure_mode, "vpr")
         self.assertEqual(args.vpr_mode, "bow")
-        self.assertEqual(args.vpr_model_path, "/tmp/dinov2.onnx")
+        self.assertEqual(args.vpr_model_path, "/tmp/dinov2.engine")
         self.assertEqual(args.max_map_size, 0)
 
     def test_loop_closure_and_vpr_modes_are_case_insensitive(self):
@@ -135,14 +143,21 @@ class TestTrackerCli(unittest.TestCase):
         self.assertIn("--max_map_size", error)
 
     def test_anyloc_without_a_model_file_fails_before_tracking(self):
-        for flags in (["--vpr_mode", "anyloc"], ["--vpr_mode", "AnyLoc", "--vpr_model_path", "/nonexistent/dinov2.onnx"]):
+        for flags in (["--vpr_mode", "anyloc"], ["--vpr_mode", "AnyLoc", "--vpr_model_path", "/nonexistent/dinov2.engine"]):
             with self.subTest(flags=flags):
                 error = self._main_usage_error(["--dataset", "seq", "--use_slam", "true", *flags])
 
                 self.assertIn("--vpr_model_path", error)
+                self.assertIn("anyloc_engine", error)
+
+    def test_vpr_model_path_defaults_to_the_engine_cuvslam_vars_names(self):
+        with mock.patch.dict(os.environ, {"CUVSLAM_ANYLOC_ENGINE": "/build/bin/dinov2.engine"}):
+            args = _tracker_parser().parse_args([])
+
+        self.assertEqual(args.vpr_model_path, "/build/bin/dinov2.engine")
 
     def test_anyloc_with_a_model_file_passes_validation(self):
-        with tempfile.NamedTemporaryFile(suffix=".onnx") as model:
+        with tempfile.NamedTemporaryFile(suffix=".engine") as model:
             parser = _tracker_parser()
             args = parser.parse_args(["--use_slam", "true", "--loop_closure_mode", "vpr", "--vpr_mode", "anyloc",
                                       "--vpr_model_path", model.name])

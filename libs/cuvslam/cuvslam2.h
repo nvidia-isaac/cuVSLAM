@@ -788,7 +788,7 @@ public:
     Off = 0,     ///< place recognition is off
     Simple = 1,  ///< grayscale thumbnails, always available
     DBoW2 = 2,   ///< bag of binary words over ORB features, needs a build with USE_DBOW2
-    AnyLoc = 3,  ///< VLAD over DINOv2 dense features, needs USE_ONNXRUNTIME and `Config::vpr_model_path`
+    AnyLoc = 3,  ///< VLAD over DINOv2 dense features, needs USE_TENSORRT, use_gpu and `Config::vpr_model_path`
     Bow = 4,     ///< in-tree ORB and a binary bag of words; no third-party dependency
   };
 
@@ -847,8 +847,9 @@ public:
     /// was built with. It brings no landmarks, so a match cannot be verified; `LocalizeInMap` without a guess pose
     /// is the way to relocalize in that folder metrically.
     std::string_view vpr_map_path;
-    /// Model file the backend needs. `VprMode::AnyLoc` reads a DINOv2 ONNX model from here, exported by
-    /// `cuvslam_export_dinov2`; the other backends ignore it. An unreadable path throws from the constructor.
+    /// Model file the backend needs. `VprMode::AnyLoc` reads a DINOv2 TensorRT engine from here, the one the
+    /// `anyloc_engine` CMake target builds; it is valid only on the GPU and TensorRT version that built it. The other
+    /// backends ignore it. A path that does not name an engine this machine can run throws from the constructor.
     std::string_view vpr_model_path;
     /// Minimum similarity in [0, 1] for `RecognizePlaceByFrame` to report a match, trading recall for precision.
     /// 0 selects the backend default.
