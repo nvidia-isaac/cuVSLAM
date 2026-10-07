@@ -204,7 +204,9 @@ bool IMUBundlerGpuFixedVel::solve(ImuBAProblem& problem) {
     bool max_pose_update_significant = (*working_cost)[0].point_and_pose_step_update_significant[1];
 
     if ((std::isnan(cost)) || (cost == std::numeric_limits<float>::infinity())) {
-      return false;
+      // A non-finite trial cost is a bad step, not a bad problem: reject it and keep the progress made so far.
+      (*lambda)[0] *= 5.f;
+      continue;
     }
 
     if ((current_cost < initial_cost * std::numeric_limits<float>::epsilon()) ||

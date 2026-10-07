@@ -67,7 +67,10 @@ __device__ __forceinline__ cuvslam::cuda::Matf33 Exp(const cuvslam::cuda::Vecf3&
   return res;
 }
 
-__device__ __forceinline__ void Log(cuvslam::cuda::Vecf3& result, const cuvslam::cuda::Matf33& m, float threshold) {
+// Axis from the SVD of (m - I). Accurate near pi, but the closed-form SVD of (m - I) underflows to inf/NaN in float
+// once the angle drops below ~1e-6 rad.
+__device__ __forceinline__ void LogFromSvd(cuvslam::cuda::Vecf3& result, const cuvslam::cuda::Matf33& m,
+                                           float threshold) {
   cuvslam::cuda::Matf33 a = m;
   a.d_[0][0] -= 1.f;
   a.d_[1][1] -= 1.f;
@@ -86,6 +89,25 @@ __device__ __forceinline__ void Log(cuvslam::cuda::Vecf3& result, const cuvslam:
 
   float wmag = atan2f(dot(rvec, wvec), trace(a) + 2.f);
   mul(wmag, wvec, result);
+}
+
+// Axis from the skew part of m, which is exact near the identity, where converged inertial residuals live. The skew
+// part vanishes near pi, so the axis error grows as ~1e-7 / (pi - angle) there and LogFromSvd() takes over.
+__device__ __forceinline__ void Log(cuvslam::cuda::Vecf3& result, const cuvslam::cuda::Matf33& m, float threshold) {
+  cuvslam::cuda::Vecf3 rvec;  // 2 * sin(theta) * axis
+  rvec.d_[0] = m.d_[2][1] - m.d_[1][2];
+  rvec.d_[1] = m.d_[0][2] - m.d_[2][0];
+  rvec.d_[2] = m.d_[1][0] - m.d_[0][1];
+  const float two_sin = sqrtf(dot(rvec, rvec));
+  const float two_cos = trace(m) - 1.f;
+  if (two_cos < -1.9f) {
+    LogFromSvd(result, m, threshold);
+    return;
+  }
+  const float theta = atan2f(two_sin, two_cos);
+  // theta / (2 sin(theta)), with its Taylor expansion where the division loses precision.
+  const float scale = (theta < 1e-3f) ? 0.5f * (1.f + theta * theta * (1.f / 6.f)) : theta / two_sin;
+  mul(scale, rvec, result);
 }
 
 __device__ __forceinline__ cuvslam::cuda::Vecf3 Log(const cuvslam::cuda::Matf33& m, float threshold) {
@@ -1782,6 +1804,21 @@ __global__ void build_full_system_stage_3_kernel(
   }
 }
 
+__global__ void so3_log_kernel(const cuvslam::cuda::Matf33* __restrict__ rotations,
+                               cuvslam::cuda::Vecf3* __restrict__ logs, int count, bool svd_based) {
+  const int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= count) {
+    return;
+  }
+  // Same threshold as the residual kernels.
+  const float threshold = 1e-4f;
+  if (svd_based) {
+    LogFromSvd(logs[i], rotations[i], threshold);
+  } else {
+    Log(logs[i], rotations[i], threshold);
+  }
+}
+
 __global__ void init_update_kernel(cuvslam::cuda::Matf33* __restrict__ update_pose_w_from_imu_linear,
                                    int num_poses_opt) {
   int x = threadIdx.x;
@@ -2157,6 +2194,17 @@ cudaError_t init_update(cuvslam::cuda::Matf33* update_pose_w_from_imu_linear, fl
   }
 
   return cudaSuccess;
+}
+
+cudaError_t so3_log(const cuvslam::cuda::Matf33* rotations, cuvslam::cuda::Vecf3* logs, int count, bool svd_based,
+                    cudaStream_t s) {
+  if (count <= 0) {
+    return cudaSuccess;
+  }
+  const int THREADBLOCK_SIZE = 32;
+  const int blocks = (count + THREADBLOCK_SIZE - 1) / THREADBLOCK_SIZE;
+  so3_log_kernel<<<blocks, THREADBLOCK_SIZE, 0, s>>>(rotations, logs, count, svd_based);
+  return cudaGetLastError();
 }
 
 }  // namespace cuvslam::cuda::sba_imu
