@@ -18,8 +18,8 @@
   pose, with no pose guess. `Slam::AddFrameToVprMap` fills the map while mapping and `Slam::SaveMap` writes it as
   part of the SLAM map. `Slam::Config::vpr_mode` picks the backend: `Simple` (thumbnails) and `Bow`
   (in-tree ORB and a binary bag of words), neither with a third-party dependency, `DBoW2` (build with
-  `USE_DBOW2`, needs OpenCV) or `AnyLoc` (build with `USE_ONNXRUNTIME`, needs a DINOv2 ONNX model in
-  `Slam::Config::vpr_model_path`). All of it is available from Python; see the README
+  `USE_DBOW2`, needs OpenCV) or `AnyLoc` (build with `USE_TENSORRT`, runs DINOv2 on the GPU as the TensorRT engine
+  the build makes, named by `Slam::Config::vpr_model_path`). All of it is available from Python; see the README
 - `Slam::LocalizeInMap` now takes an optional `guess_pose`. Without one it verifies the places the saved map's own
   place recognition map proposes, which is what lets a robot that has no idea where it is relocalize at all;
   `LocalizationSettings::vpr_candidates` bounds how many it tries
@@ -31,7 +31,10 @@
   <backend>`, cap the pose graph with `--max_map_size`, and record the number of loop closures in their stats
 - `cuvslam_vpr_reporter`: scores a place recognition backend on two recordings of the same route and reports the
   recognition and false positive rates with an HTML and PDF report
-- `cuvslam_export_dinov2`: exports the DINOv2 value-facet ONNX model that the AnyLoc backend reads
+- The AnyLoc model is built with cuVSLAM (`USE_TENSORRT`, `tools/anyloc_model`), in two CMake steps from a pinned
+  DINOv2 commit and checkpoint: `anyloc_onnx` exports to ONNX only the part of DINOv2 AnyLoc reads (16.6M of its
+  22M parameters), and `anyloc_engine` builds an FP16 TensorRT engine of it for the build machine's GPU. Both check
+  their output against AnyLoc's fp32 descriptors of a reference image. `cuvslam_export_dinov2` runs the export by hand
 - `Slam::Config::delay_warning_queue_size`: warns in verbose mode when more than the configured number of commands
   are queued to the SLAM thread, meaning SLAM falls behind odometry
 

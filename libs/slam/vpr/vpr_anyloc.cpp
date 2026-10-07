@@ -22,9 +22,8 @@
 #include <filesystem>
 #include <stdexcept>
 
-#include <onnxruntime_cxx_api.h>
-
 #include "common/log.h"
+#include "slam/vpr/anyloc_network.h"
 #include "slam/vpr/vpr_image.h"
 
 namespace cuvslam::slam::vpr {
@@ -76,86 +75,38 @@ int NearestCenter(const float* descriptor, const std::vector<float>& centers, in
 
 }  // namespace
 
-struct VprAnyLoc::Network {
-  explicit Network(const std::string& path)
-      : env(ORT_LOGGING_LEVEL_WARNING, "cuvslam_vpr_anyloc"),
-        // A default constructed SessionOptions leaves the intra-op thread count at the ONNX Runtime
-        // default, which is one thread per core. Nothing here runs concurrently with the rest of
-        // SLAM anyway: the caller holds the SLAM lock across the whole query.
-        session(env, path.c_str(), Ort::SessionOptions{}),
-        memory_info(Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault)) {
-    Ort::AllocatorWithDefaultOptions allocator;
-    input_name = session.GetInputNameAllocated(0, allocator).get();
-    output_name = session.GetOutputNameAllocated(0, allocator).get();
-
-    const std::vector<int64_t> shape = session.GetInputTypeInfo(0).GetTensorTypeAndShapeInfo().GetShape();
-    if (shape.size() != 4 || shape[2] <= 0 || shape[3] <= 0) {
-      // DINOv2 bakes the interpolated position encoding into constants at trace time, so a model
-      // exported with a dynamic input size builds but fails at run time. Every model file is
-      // therefore tied to one resolution, and that resolution is read from the file rather than
-      // assumed, so swapping in a 224 model costs nothing but the path.
-      throw std::runtime_error("VPR AnyLoc: " + path +
-                               " does not declare a fixed [1, 3, H, W] input; DINOv2 must be exported per "
-                               "resolution, see cuvslam_export_dinov2.");
-    }
-    input_height = static_cast<int>(shape[2]);
-    input_width = static_cast<int>(shape[3]);
-  }
-
-  Ort::Env env;
-  Ort::Session session;
-  Ort::MemoryInfo memory_info;
-  std::string input_name;
-  std::string output_name;
-  int input_width = 0;
-  int input_height = 0;
-};
-
 VprAnyLoc::VprAnyLoc(const VprOptions& options)
     : model_path_(options.model_path),
       cluster_count_(options.vocabulary_size > 0 ? options.vocabulary_size : kDefaultVocabularySize),
       score_threshold_(options.score_threshold > 0.f ? options.score_threshold : kDefaultScoreThreshold),
       ratio_threshold_(options.ratio_threshold),
       max_entries_(options.max_entries) {
-  // Reading the model is deferred to the first frame, because it costs 69 MB that a session which
-  // never queries should not pay. Its *existence* is not deferred: this constructor runs on the
-  // caller's thread inside Slam's, where a throw is a catchable error, while the first frame is
-  // mapped on the SLAM worker, where one would be std::terminate.
+  // The engine is loaded here rather than on the first frame, so that a wrong file, or an engine
+  // built for another TensorRT version or GPU, fails Slam's constructor on the caller's thread
+  // instead of every keyframe on the SLAM worker, which could only log it. LocalizeInMap builds a
+  // backend of its own on the worker, and reports a failure here through its callback.
   std::error_code ec;
   if (model_path_.empty() || !std::filesystem::is_regular_file(model_path_, ec)) {
     throw std::runtime_error(
-        "VPR backend AnyLoc needs a DINOv2 ONNX model: set Slam::Config::vpr_model_path to one exported by "
-        "cuvslam_export_dinov2. Tried \"" +
+        "VPR backend AnyLoc needs a DINOv2 TensorRT engine: set Slam::Config::vpr_model_path to the one the "
+        "anyloc_engine CMake target builds. Tried \"" +
         model_path_ + "\".");
   }
+  network_ = std::make_unique<AnyLocNetwork>(model_path_);
+  descriptor_dim_ = network_->descriptor_dim();
+  TraceMessage("VPR AnyLoc: loaded %s, input %dx%d, %d patches of %d\n", model_path_.c_str(), network_->input_width(),
+               network_->input_height(), network_->patch_count(), descriptor_dim_);
 }
 
 VprAnyLoc::~VprAnyLoc() = default;
-
-void VprAnyLoc::EnsureNetwork() {
-  if (network_) {
-    return;
-  }
-  std::error_code ec;
-  if (model_path_.empty() || !std::filesystem::is_regular_file(model_path_, ec)) {
-    throw std::runtime_error(
-        "VPR backend AnyLoc needs a DINOv2 ONNX model: set Slam::Config::vpr_model_path to one exported by "
-        "cuvslam_export_dinov2. Tried \"" +
-        model_path_ + "\".");
-  }
-  network_ = std::make_unique<Network>(model_path_);
-  TraceMessage("VPR AnyLoc: loaded %s, input %dx%d\n", model_path_.c_str(), network_->input_width,
-               network_->input_height);
-}
 
 bool VprAnyLoc::Describe(const VprImage& image, std::vector<float>& patches) {
   patches.clear();
   if (image.Empty()) {
     return false;
   }
-  EnsureNetwork();
 
-  const VprImage resized = Resize(image, network_->input_width, network_->input_height);
+  const VprImage resized = Resize(image, network_->input_width(), network_->input_height());
   if (resized.Empty()) {
     return false;
   }
@@ -166,48 +117,27 @@ bool VprAnyLoc::Describe(const VprImage& image, std::vector<float>& patches) {
   // B is a deliberate simplification rather than a color path that does not exist. It costs some
   // absolute descriptor quality, but not retrieval quality, because the mapped frames and the query
   // go through exactly the same transform and are therefore compared on equal terms.
+  // Written straight into the network's pinned input buffer, planar RGB.
   const size_t plane = resized.row.size();
-  std::vector<float> input(3 * plane);
+  float* input = network_->input();
   for (int c = 0; c < 3; ++c) {
     const float scale = 1.f / (255.f * kPixelStd[c]);
     const float bias = -kPixelMean[c] / kPixelStd[c];
-    float* dst = input.data() + static_cast<size_t>(c) * plane;
+    float* dst = input + static_cast<size_t>(c) * plane;
     for (size_t i = 0; i < plane; ++i) {
       dst[i] = static_cast<float>(resized.row[i]) * scale + bias;
     }
   }
-
-  const std::array<int64_t, 4> shape = {1, 3, resized.height, resized.width};
-  Ort::Value input_tensor =
-      Ort::Value::CreateTensor<float>(network_->memory_info, input.data(), input.size(), shape.data(), shape.size());
-  const char* input_names[] = {network_->input_name.c_str()};
-  const char* output_names[] = {network_->output_name.c_str()};
-  const std::vector<Ort::Value> outputs =
-      network_->session.Run(Ort::RunOptions{nullptr}, input_names, &input_tensor, 1, output_names, 1);
-  if (outputs.size() != 1 || !outputs[0].IsTensor()) {
+  if (!network_->Run(patches)) {
+    patches.clear();
     return false;
   }
 
-  const std::vector<int64_t> out_shape = outputs[0].GetTensorTypeAndShapeInfo().GetShape();
-  if (out_shape.size() != 3 || out_shape[1] <= 0 || out_shape[2] <= 0) {
-    return false;
-  }
-  const int count = static_cast<int>(out_shape[1]);
-  const int dim = static_cast<int>(out_shape[2]);
-  if (descriptor_dim_ == 0) {
-    descriptor_dim_ = dim;
-  } else if (dim != descriptor_dim_) {
-    TraceError("VPR AnyLoc: model emits %d dimensional patches but the map holds %d dimensional ones\n", dim,
-               descriptor_dim_);
-    return false;
-  }
-
-  const float* data = outputs[0].GetTensorData<float>();
-  patches.assign(data, data + static_cast<size_t>(count) * dim);
-  // The exporter already L2 normalizes each patch, but the VLAD residual is only the AnyLoc
-  // residual if the descriptors are unit norm, so do not depend on a property of the model file.
+  // The network already L2 normalizes each patch, but the VLAD residual is only the AnyLoc residual
+  // if the descriptors are unit norm, and the FP16 engine is only close to that.
+  const int count = network_->patch_count();
   for (int i = 0; i < count; ++i) {
-    Normalize(patches.data() + static_cast<size_t>(i) * dim, dim);
+    Normalize(patches.data() + static_cast<size_t>(i) * descriptor_dim_, descriptor_dim_);
   }
   return true;
 }
@@ -527,8 +457,18 @@ bool VprAnyLoc::Deserialize(const BlobReader& reader) {
   if (!reader.read(cluster_count) || !reader.read(descriptor_dim) || !reader.read(center_count)) {
     return false;
   }
+  // No centers is a map saved before its vocabulary was fitted, which is legitimate; any centers
+  // have to be the full cluster_count x descriptor_dim set.
   if (cluster_count < 0 || descriptor_dim < 0 ||
-      center_count != static_cast<uint64_t>(cluster_count) * static_cast<uint64_t>(descriptor_dim)) {
+      (center_count != 0 &&
+       center_count != static_cast<uint64_t>(cluster_count) * static_cast<uint64_t>(descriptor_dim))) {
+    return false;
+  }
+  // A map saved before its first frame was described records no width; any other has to match the
+  // engine's, or its vocabulary and descriptors live in another space than the queries.
+  if (descriptor_dim != 0 && descriptor_dim != descriptor_dim_) {
+    TraceError("VPR AnyLoc: the map holds %d dimensional descriptors but the engine produces %d dimensional ones\n",
+               descriptor_dim, descriptor_dim_);
     return false;
   }
 
@@ -574,7 +514,6 @@ bool VprAnyLoc::Deserialize(const BlobReader& reader) {
   }
 
   cluster_count_ = cluster_count;
-  descriptor_dim_ = descriptor_dim;
   centers_ = std::move(centers);
   entries_ = std::move(entries);
   index_by_node_ = std::move(index_by_node);

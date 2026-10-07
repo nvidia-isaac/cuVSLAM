@@ -117,24 +117,24 @@ class TestVprBindings(unittest.TestCase):
         cfg = vslam.Slam.Config(
             vpr_mode=vslam.Slam.VprMode.Simple,
             vpr_map_path="/tmp/vpr_map",
-            vpr_model_path="/tmp/dinov2.onnx",
+            vpr_model_path="/tmp/dinov2.engine",
             vpr_score_threshold=0.75)
 
         self.assertEqual(cfg.vpr_mode, vslam.Slam.VprMode.Simple)
         self.assertEqual(cfg.vpr_map_path, "/tmp/vpr_map")
-        self.assertEqual(cfg.vpr_model_path, "/tmp/dinov2.onnx")
+        self.assertEqual(cfg.vpr_model_path, "/tmp/dinov2.engine")
         self.assertAlmostEqual(cfg.vpr_score_threshold, 0.75, places=5)
 
     def test_config_vpr_modifiers(self):
         cfg = vslam.Slam.Config()
         cfg.vpr_mode = vslam.Slam.VprMode.AnyLoc
         cfg.vpr_map_path = "/tmp/other_map"
-        cfg.vpr_model_path = "/tmp/other.onnx"
+        cfg.vpr_model_path = "/tmp/other.engine"
         cfg.vpr_score_threshold = 0.25
 
         self.assertEqual(cfg.vpr_mode, vslam.Slam.VprMode.AnyLoc)
         self.assertEqual(cfg.vpr_map_path, "/tmp/other_map")
-        self.assertEqual(cfg.vpr_model_path, "/tmp/other.onnx")
+        self.assertEqual(cfg.vpr_model_path, "/tmp/other.engine")
         self.assertAlmostEqual(cfg.vpr_score_threshold, 0.25, places=5)
 
     def test_config_repr_mentions_vpr(self):
@@ -305,6 +305,20 @@ class TestVprLoopClosureModeConfig(unittest.TestCase):
         self.assertGreater(tracked, 0, "the synthetic sequence did not track")
         # The sequence is a few frames long, all of them within the recent past loop closure leaves out.
         self.assertEqual(len(tracker.slam.get_loop_closure_poses()), 0)
+
+
+class TestVprAnyLocConfig(unittest.TestCase):
+    """The configurations the AnyLoc backend rejects before it loads anything."""
+
+    def test_needs_the_gpu(self):
+        # AnyLoc runs DINOv2 as a TensorRT engine. The check comes before the engine is loaded, so the path does not
+        # have to exist, and before the backend is created, so it holds in a build without USE_TENSORRT too.
+        _, slam_cfg = make_configs(vslam.Slam.VprMode.AnyLoc)
+        slam_cfg.use_gpu = False
+        slam_cfg.vpr_model_path = "/nonexistent/dinov2.engine"
+        with self.assertRaises(ValueError) as caught:
+            vslam.Slam(make_rig()[0], [0, 1], slam_cfg)
+        self.assertIn("use_gpu", str(caught.exception))
 
 
 class TestVprSimple(unittest.TestCase):

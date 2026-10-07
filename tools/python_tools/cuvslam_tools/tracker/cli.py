@@ -263,8 +263,9 @@ def add_loop_closure_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--vpr_model_path",
         type=str,
-        default="",
-        help="Model file the VPR backend needs; --vpr_mode=anyloc reads a DINOv2 ONNX model from here.",
+        default=os.environ.get("CUVSLAM_ANYLOC_ENGINE", ""),
+        help="Model file the VPR backend needs; --vpr_mode=anyloc reads the DINOv2 TensorRT engine the anyloc_engine "
+             "CMake target builds from here (default: $CUVSLAM_ANYLOC_ENGINE, which cuvslam_vars.sh sets).",
     )
     parser.add_argument(
         "--max_map_size",
@@ -291,8 +292,8 @@ def validate_loop_closure_arguments(parser: argparse.ArgumentParser, args: argpa
     if require_use_slam and not args.use_slam and (args.loop_closure_mode != "default" or args.vpr_mode != "off"):
         parser.error("--loop_closure_mode and --vpr_mode only affect SLAM; add --use_slam true")
     if args.vpr_mode == "anyloc" and not os.path.isfile(args.vpr_model_path):
-        parser.error("--vpr_mode anyloc needs a DINOv2 ONNX model; set --vpr_model_path to one exported by "
-                     "cuvslam_export_dinov2")
+        parser.error("--vpr_mode anyloc needs a DINOv2 TensorRT engine; set --vpr_model_path to the one the "
+                     "anyloc_engine CMake target builds, or source cuvslam_vars.sh of that build")
     if args.max_map_size is not None and args.max_map_size < 0:
         parser.error("--max_map_size must be 0 (no limit) or a positive number of pose graph nodes")
 

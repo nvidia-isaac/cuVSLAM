@@ -1,0 +1,19 @@
+# The Python environment the AnyLoc ONNX export runs in (tools/python_tools/cuvslam_tools/vpr/export_dinov2_onnx.py).
+# CMake creates a venv from this file in the build tree and recreates it whenever the file changes; every package is
+# pinned, dependencies included, so the export is reproducible. The CPU build of torch is all the export needs.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.6.0+cpu
+onnx==1.17.0
+numpy==1.26.4
+pillow==11.0.0
+
+# Dependencies of the packages above.
+filelock==4.0.12
+fsspec==2026.9.0
+Jinja2==3.1.6
+MarkupSafe==3.0.4
+mpmath==1.3.0
+networkx==3.4.2
+protobuf==7.36.2
+sympy==1.13.1
+typing_extensions==4.16.0

@@ -833,7 +833,7 @@ NB_MODULE(pycuvslam, m) {
       .value("Simple", Slam::VprMode::Simple, "Grayscale thumbnails, always available")
       .value("DBoW2", Slam::VprMode::DBoW2, "Bag of binary words over ORB features, needs a build with USE_DBOW2")
       .value("AnyLoc", Slam::VprMode::AnyLoc,
-             "VLAD over DINOv2 dense features, needs USE_ONNXRUNTIME and `Slam.Config.vpr_model_path`")
+             "VLAD over DINOv2 dense features, needs USE_TENSORRT, use_gpu and `Slam.Config.vpr_model_path`")
       .value("Bow", Slam::VprMode::Bow, "In-tree ORB and a binary bag of words; no third-party dependency");
 
   nb::enum_<Slam::LoopClosureMode>(slam_cls, "LoopClosureMode",
@@ -898,8 +898,10 @@ NB_MODULE(pycuvslam, m) {
               "`vpr_mode` the map was built with. It brings no landmarks, so a match cannot be verified; pass the "
               "same folder to `localize_in_map` with guess_pose=None to relocalize metrically.")
       .def_rw("vpr_model_path", &Slam::Config::vpr_model_path,
-              "Model file the backend needs. `VprMode.AnyLoc` reads a DINOv2 ONNX model from here; the other "
-              "backends ignore it.")
+              "Model file the backend needs. `VprMode.AnyLoc` reads a DINOv2 TensorRT engine from here, the one "
+              "the `anyloc_engine` CMake target builds; it is valid only on the GPU and TensorRT version that built "
+              "it. The other backends ignore it. A path that does not name an engine this machine can run raises "
+              "when Slam is constructed.")
       .def_rw("vpr_score_threshold", &Slam::Config::vpr_score_threshold,
               "Minimum similarity in [0, 1] for `recognize_place_by_frame` to report a match, trading recall for "
               "precision. 0 selects the backend default.")

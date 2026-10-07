@@ -52,7 +52,7 @@ macro(setup_cuvslam_settings)
         $<$<BOOL:${USE_RERUN}>:USE_RERUN>
         $<$<BOOL:${USE_CUNLS}>:USE_CUNLS>
         $<$<BOOL:${USE_DBOW2}>:USE_DBOW2>
-        $<$<BOOL:${USE_ONNXRUNTIME}>:USE_ONNXRUNTIME>
+        $<$<BOOL:${USE_TENSORRT}>:USE_TENSORRT>
     )
 
     # Add 'libs/' as the root directory for all cuvslam includes

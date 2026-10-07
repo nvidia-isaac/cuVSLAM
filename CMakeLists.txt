@@ -69,15 +69,22 @@ option(CUVSLAM_LOG_ENABLE "Enable root cuvslam::Log." OFF)
 option(CUVSLAM_BUILD_SHARED_LIB "Build shared library version of cuVSLAM" TRUE)
 option(USE_RERUN "Use Rerun for visualization" OFF)
 # Visual place recognition backends. Both pull in a third-party dependency that cuVSLAM core does
-# not otherwise have: DBoW2 needs OpenCV, AnyLoc needs ONNX Runtime. The Simple backend is always
+# not otherwise have: DBoW2 needs OpenCV, AnyLoc needs TensorRT. The Simple backend is always
 # built and needs neither.
 option(USE_DBOW2 "Build the DBoW2 visual place recognition backend (requires OpenCV)" OFF)
-option(USE_ONNXRUNTIME "Build the AnyLoc visual place recognition backend (downloads ONNX Runtime)" OFF)
+option(USE_TENSORRT "Build the AnyLoc visual place recognition backend (requires USE_CUDA and TensorRT 8.6+)" OFF)
+# AnyLoc runs a TensorRT engine of DINOv2 that the build makes in two steps, an ONNX export in a
+# Python venv and a TensorRT build of that export (see tools/anyloc_model). Turn this off to build
+# the backend alone, e.g. on a machine without network access or without a GPU.
+include(CMakeDependentOption)
+cmake_dependent_option(CUVSLAM_BUILD_ANYLOC_ENGINE
+    "Build the AnyLoc DINOv2 TensorRT engine (needs Python 3.10+, network access and a GPU)" ON "USE_TENSORRT" OFF)
 
 include(cmake/cuVSLAMUtils.cmake)
 setup_cuvslam_settings()
 
 include(cmake/FindExt.cmake)
+include(cmake/AnyLocModel.cmake)
 
 # Add testing functionalities so that we can take advantage of GTest and CTest
 enable_testing()
@@ -108,3 +115,6 @@ file(WRITE ${SET_ENV_BAT}   "#!/bin/bash\n"
                             "export CUVSLAM_BUILD_DIR=${CMAKE_BINARY_DIR}/\n"
                             "export CUVSLAM_DATASETS=${CUVSLAM_DATASETS}/\n"
                             "export CUVSLAM_OUTPUT=${CUVSLAM_OUTPUT}/\n")
+if(CUVSLAM_ANYLOC_ENGINE)
+    file(APPEND ${SET_ENV_BAT} "export CUVSLAM_ANYLOC_ENGINE=${CUVSLAM_ANYLOC_ENGINE}\n")
+endif()

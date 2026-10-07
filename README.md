@@ -117,13 +117,14 @@ since they always look most like the current frame, and a loop closure is reject
 estimate by more than 10 m or 10 degrees, or when verification started from the estimate itself succeeds and
 disagrees with it, since a look-alike stretch of road can pass the geometric check.
 
-It queries place recognition on every keyframe, so it is much slower than the default search. To compare the two on
-a KITTI sequence, with the pose graph unbounded so that no place is merged out of the place recognition map:
+It queries place recognition and verifies up to five candidates on every keyframe, so it is slower than the default
+search: on KITTI-00 with an RTX 4090, 52 frames per second with `AnyLoc` against 232. To compare the two on a KITTI
+sequence, with the pose graph unbounded so that no place is merged out of the place recognition map:
 
 ```bash
 cuvslam_tracker --edex <kitti>/00 --use_slam true --max_map_size 0 --loop_closure_mode default ...
 cuvslam_tracker --edex <kitti>/00 --use_slam true --max_map_size 0 --loop_closure_mode vpr \
-    --vpr_mode anyloc --vpr_model_path <dinov2.onnx> ...
+    --vpr_mode anyloc --vpr_model_path <build>/bin/dinov2_vits14_l9_322_fp16_trt<version>_sm<gpu>.engine ...
 ```
 
 `cuvslam_reporter` takes the same flags, and both record `num_loop_closures` in their stats.
@@ -139,7 +140,7 @@ the map exhaustively.
 | `Simple` | an 8x downscaled grayscale thumbnail | — | zero dependencies; compares thumbnails by zero-mean normalized cross correlation, so it tolerates exposure changes but has no viewpoint invariance |
 | `Bow` | a bag of binary words over in-tree ORB features | — | zero dependencies: it brings its own ORB extractor and fits a 1024 word binary vocabulary to the first 50 mapped frames. DBoW2's algorithm without OpenCV, at the cost of a flat vocabulary instead of a tree |
 | `DBoW2` | a bag of binary words over ORB features | `USE_DBOW2` | [DBoW2](https://github.com/dorian3d/DBoW2); needs OpenCV. The vocabulary is trained from the mapped frames themselves the first time the map is queried |
-| `AnyLoc` | a VLAD aggregation of DINOv2 dense features | `USE_ONNXRUNTIME` | [AnyLoc](https://anyloc.github.io/); needs a DINOv2 ONNX model in `Slam::Config::vpr_model_path`, exported by `cuvslam_export_dinov2` |
+| `AnyLoc` | a VLAD aggregation of DINOv2 dense features | `USE_TENSORRT` | [AnyLoc](https://anyloc.github.io/); runs DINOv2 on the GPU (`use_gpu`) as a TensorRT engine that the build makes for this GPU, which `Slam::Config::vpr_model_path` names; see [tools/anyloc_model](tools/anyloc_model/README.md) |
 
 ## Evaluating it
 
@@ -308,7 +309,8 @@ All flags have defaults; override with `-DFLAG=VALUE`.
 | `USE_RERUN` | OFF | Rerun SDK visualization |
 | `USE_NVTX` | OFF | NVIDIA NVTX profiling |
 | `USE_DBOW2` | OFF | DBoW2 place recognition backend; requires OpenCV |
-| `USE_ONNXRUNTIME` | OFF | AnyLoc place recognition backend; downloads a prebuilt ONNX Runtime |
+| `USE_TENSORRT` | OFF | AnyLoc place recognition backend; requires `USE_CUDA` and TensorRT 8.6+ |
+| `CUVSLAM_BUILD_ANYLOC_ENGINE` | ON with `USE_TENSORRT` | builds AnyLoc's DINOv2 TensorRT engine for this GPU: an ONNX export in a Python venv, then a TensorRT build (needs network access); see [tools/anyloc_model](tools/anyloc_model/README.md) |
 
 Build types: `Release` (default), `Debug`, `RelWithDebInfo`, `MinSizeRel`. Do not mix types in the same build directory.
 

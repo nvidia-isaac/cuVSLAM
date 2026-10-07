@@ -25,7 +25,7 @@
 #include "slam/vpr/vpr_dbow2.h"
 #endif
 
-#ifdef USE_ONNXRUNTIME
+#ifdef USE_TENSORRT
 #include "slam/vpr/vpr_anyloc.h"
 #endif
 
@@ -64,10 +64,10 @@ std::unique_ptr<IVpr> CreateVpr(const VprOptions& options) {
     case VprType::kBow:
       return std::make_unique<VprBow>(options);
     case VprType::kAnyLoc:
-#ifdef USE_ONNXRUNTIME
+#ifdef USE_TENSORRT
       return std::make_unique<VprAnyLoc>(options);
 #else
-      throw std::runtime_error("VPR backend AnyLoc is not available: cuVSLAM was built with USE_ONNXRUNTIME=OFF.");
+      throw std::runtime_error("VPR backend AnyLoc is not available: cuVSLAM was built with USE_TENSORRT=OFF.");
 #endif
   }
   throw std::runtime_error("Unknown VPR backend");

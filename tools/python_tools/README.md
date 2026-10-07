@@ -435,13 +435,13 @@ Every sequence in a reporter config names its reference explicitly, and a sequen
 `--loop_closure_mode` picks how SLAM sequences (`--use_slam true` for `cuvslam_tracker`, `"use_slam": true` in a reporter config) find loop closures:
 
 - `default` — a spatial search around the current pose estimate.
-- `vpr` — geometric verification of visual place recognition candidates. Needs a `--vpr_mode` backend other than `off`: `bow` and `simple` are always built and need no model, `dbow2` needs a build with `USE_DBOW2`, and `anyloc` needs a build with `USE_ONNXRUNTIME` and a DINOv2 ONNX model in `--vpr_model_path` (export one with `cuvslam_export_dinov2`).
+- `vpr` — geometric verification of visual place recognition candidates. Needs a `--vpr_mode` backend other than `off`: `bow` and `simple` are always built and need no model, `dbow2` needs a build with `USE_DBOW2`, and `anyloc` needs a build with `USE_TENSORRT` and the DINOv2 TensorRT engine that build makes in `--vpr_model_path`, which defaults to it once the build's `cuvslam_vars.sh` is sourced (see `tools/anyloc_model/README.md`).
 
 Both flags accept any case, and `cuvslam_tracker` rejects a non-default value of either without `--use_slam true`. The stats JSON of both tools records `loop_closure_mode` and `num_loop_closures`, and the report shows the number of loop closures of each SLAM sequence.
 
 `--max_map_size` caps the pose graph (0 for no limit; without the flag SLAM keeps its default of 300 nodes). A node merged away also leaves the place recognition map, so a long sequence keeps fewer places to close a loop to in `vpr` mode than landmarks in `default` mode; compare the two with `--max_map_size 0`. Run the comparison with synchronous SLAM (the default `--sync_slam true`): place recognition slows the SLAM thread down enough that an asynchronous replay, which runs faster than real time, finishes before SLAM catches up.
 
-`anyloc` runs DINOv2 on the CPU through ONNX Runtime, with a thread per core in every tracker process, so give `cuvslam_reporter` a small `--max_workers` for it rather than its default of 12.
+`anyloc` runs DINOv2 on the GPU, about half a millisecond per keyframe on an RTX 4090, and every tracker process loads its own copy of the engine.
 
 ## Visual Place Recognition
 

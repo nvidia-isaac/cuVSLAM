@@ -16,12 +16,15 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <map>
 #include <memory>
 #include <random>
 #include <stdexcept>
@@ -49,7 +52,11 @@
 #include "slam/vpr/vpr_dbow2.h"
 #endif
 
-#ifdef USE_ONNXRUNTIME
+#ifdef USE_TENSORRT
+#include <NvInfer.h>
+
+#include "cnpy.h"
+#include "slam/vpr/anyloc_network.h"
 #include "slam/vpr/vpr_anyloc.h"
 #endif
 
@@ -964,118 +971,414 @@ TEST(VprDBoW2Backend, DeserializeRejectsTruncatedBlobs) {
 
 #endif  // USE_DBOW2
 
-#ifdef USE_ONNXRUNTIME
+#ifdef USE_TENSORRT
 
 namespace {
 
-/// The DINOv2 ONNX model AnyLoc needs, or empty when this machine has none. The file is a 69 MB
-/// artifact produced by cuvslam_export_dinov2 and is not in the repository, so the tests that need
-/// it skip instead of failing; point CUVSLAM_ANYLOC_MODEL at one to run them.
-std::string AnyLocModelPath() {
-  const char* path = std::getenv("CUVSLAM_ANYLOC_MODEL");
-  if (path == nullptr) {
-    return {};
-  }
+/// The AnyLoc engine the anyloc_engine target of this build makes, or empty when there is none.
+/// CUVSLAM_TEST_ANYLOC_ENGINE overrides it, to run these tests against an engine built elsewhere.
+/// It is not CUVSLAM_ANYLOC_ENGINE, which any build's cuvslam_vars.sh exports for its own engine.
+std::string AnyLocEnginePath() {
+  const char* variable = std::getenv("CUVSLAM_TEST_ANYLOC_ENGINE");
+#ifdef CUVSLAM_ANYLOC_ENGINE_PATH
+  const std::string path = variable != nullptr ? variable : CUVSLAM_ANYLOC_ENGINE_PATH;
+#else
+  const std::string path = variable != nullptr ? variable : "";
+#endif
   std::error_code ec;
-  return std::filesystem::is_regular_file(path, ec) ? std::string(path) : std::string{};
+  return !path.empty() && std::filesystem::is_regular_file(path, ec) ? path : std::string{};
 }
 
-VprOptions AnyLocOptions(const std::string& model_path) {
+VprOptions AnyLocOptions(const std::string& engine_path) {
   VprOptions options;
   options.type = VprType::kAnyLoc;
-  options.model_path = model_path;
+  options.model_path = engine_path;
   return options;
+}
+
+/// A folder of this test process's own for the files these tests write, removed when it exits, so
+/// that two test runs on one machine, say of two builds, cannot read each other's half-written files.
+const std::filesystem::path& ScratchFolder() {
+  struct Folder {
+    Folder()
+        : path(std::filesystem::temp_directory_path() /
+               ("cuvslam_vpr_anyloc_test_" + std::to_string(std::random_device{}()))) {
+      std::filesystem::create_directories(path);
+    }
+    ~Folder() {
+      std::error_code ec;
+      std::filesystem::remove_all(path, ec);
+    }
+    std::filesystem::path path;
+  };
+  static const Folder folder;
+  return folder.path;
+}
+
+/// What a stand-in engine looks like from the outside.
+struct StandInSpec {
+  const char* input_name = "image";
+  nvinfer1::DataType input_type = nvinfer1::DataType::kFLOAT;
+  bool dynamic_batch = false;
+  int size = 28;  ///< of the square input
+  int tile = 7;   ///< side of the tiles the input is cut into, one descriptor each
+};
+
+class StandInLogger : public nvinfer1::ILogger {
+public:
+  void log(Severity severity, const char* message) noexcept override {
+    if (severity <= Severity::kERROR) {
+      std::fprintf(stderr, "TensorRT: %s\n", message);
+    }
+  }
+};
+
+/// Build a tiny engine with AnyLoc's interface and none of its weights: it cuts the image into
+/// tiles and hands each tile's pixels back as that patch's descriptor. Raw pixels are a poor place
+/// descriptor, but a faithful one for an identical picture, which is what these tests query with,
+/// and the engine builds in a second rather than the half minute DINOv2 takes. Returns its path.
+std::string BuildStandInEngine(const StandInSpec& spec, const std::string& name) {
+  // One builder for all of them: TensorRT sets up its builder resources again for every new one,
+  // which costs seconds, where building one of these networks takes milliseconds.
+  static StandInLogger logger;
+  static const std::unique_ptr<nvinfer1::IBuilder> builder(nvinfer1::createInferBuilder(logger));
+  if (!builder) {
+    return {};  // no CUDA device to build for
+  }
+#if NV_TENSORRT_MAJOR >= 10
+  const nvinfer1::NetworkDefinitionCreationFlags flags = 0;
+#else
+  const nvinfer1::NetworkDefinitionCreationFlags flags =
+      1U << static_cast<uint32_t>(nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH);
+#endif
+  std::unique_ptr<nvinfer1::INetworkDefinition> network(builder->createNetworkV2(flags));
+  const int grid = spec.size / spec.tile;
+  const int batch = spec.dynamic_batch ? -1 : 1;
+  nvinfer1::ITensor* image =
+      network->addInput(spec.input_name, spec.input_type, nvinfer1::Dims{4, {batch, 3, spec.size, spec.size}});
+  // [B, 3, size, size] -> [B, 3, grid, tile, grid, tile] -> [B, grid, grid, 3, tile, tile] -> [B, N, 3 * tile^2],
+  // where a 0 copies the batch dimension through.
+  nvinfer1::IShuffleLayer* tiles = network->addShuffle(*image);
+  tiles->setReshapeDimensions(nvinfer1::Dims{6, {0, 3, grid, spec.tile, grid, spec.tile}});
+  tiles->setSecondTranspose(nvinfer1::Permutation{{0, 2, 4, 1, 3, 5}});
+  nvinfer1::IShuffleLayer* rows = network->addShuffle(*tiles->getOutput(0));
+  rows->setReshapeDimensions(nvinfer1::Dims{3, {0, grid * grid, 3 * spec.tile * spec.tile}});
+  rows->getOutput(0)->setName("patch_descriptors");
+  network->markOutput(*rows->getOutput(0));
+
+  std::unique_ptr<nvinfer1::IBuilderConfig> config(builder->createBuilderConfig());
+  config->setBuilderOptimizationLevel(0);  // nothing here is worth timing tactics for
+  if (spec.input_type == nvinfer1::DataType::kHALF) {
+    config->setFlag(nvinfer1::BuilderFlag::kFP16);
+  }
+  if (spec.dynamic_batch) {
+    // A range: a profile whose minimum equals its maximum makes TensorRT treat the dimension as static.
+    nvinfer1::IOptimizationProfile* profile = builder->createOptimizationProfile();
+    profile->setDimensions(spec.input_name, nvinfer1::OptProfileSelector::kMIN,
+                           nvinfer1::Dims{4, {1, 3, spec.size, spec.size}});
+    profile->setDimensions(spec.input_name, nvinfer1::OptProfileSelector::kOPT,
+                           nvinfer1::Dims{4, {1, 3, spec.size, spec.size}});
+    profile->setDimensions(spec.input_name, nvinfer1::OptProfileSelector::kMAX,
+                           nvinfer1::Dims{4, {2, 3, spec.size, spec.size}});
+    config->addOptimizationProfile(profile);
+  }
+  const std::unique_ptr<nvinfer1::IHostMemory> plan(builder->buildSerializedNetwork(*network, *config));
+  if (!plan) {
+    return {};
+  }
+  const std::filesystem::path path = ScratchFolder() / (name + ".engine");
+  std::ofstream file(path, std::ios::binary | std::ios::trunc);
+  file.write(static_cast<const char*>(plan->data()), static_cast<std::streamsize>(plan->size()));
+  return file ? path.string() : std::string{};
+}
+
+/// The stand-in engines these tests use, built once per test run, or empty where TensorRT cannot
+/// build one, which is a machine without a CUDA device:
+///   valid    28 x 28 input, 16 patches of 147, the interface AnyLoc expects
+///   wide     the same interface with 4 patches of 588
+///   renamed  input named "input" rather than "image"
+///   dynamic  batch size left to run time
+///   half     fp16 input
+const std::string& StandInEngine(const std::string& name) {
+  static std::map<std::string, std::string> engines;
+  auto it = engines.find(name);
+  if (it == engines.end()) {
+    StandInSpec spec;
+    if (name == "wide") {
+      spec.tile = 14;
+    } else if (name == "renamed") {
+      spec.input_name = "input";
+    } else if (name == "dynamic") {
+      spec.dynamic_batch = true;
+    } else if (name == "half") {
+      spec.input_type = nvinfer1::DataType::kHALF;
+    }
+    it = engines.emplace(name, BuildStandInEngine(spec, name)).first;
+  }
+  return it->second;
+}
+
+/// The stand-in engine, and the real one when this build has it.
+std::vector<std::string> AnyLocEngines() {
+  std::vector<std::string> engines = {StandInEngine("valid")};
+  const std::string dinov2 = AnyLocEnginePath();
+  if (!dinov2.empty()) {
+    engines.push_back(dinov2);
+  }
+  return engines;
+}
+
+constexpr char kNoStandIns[] = "TensorRT could not build the stand-in engines, which needs a CUDA device";
+
+/// What constructing the AnyLoc backend on `path` throws, or empty when it does not.
+std::string ConstructionError(const std::string& path) {
+  try {
+    CreateVpr(AnyLocOptions(path));
+  } catch (const std::runtime_error& error) {
+    return error.what();
+  }
+  return {};
 }
 
 }  // namespace
 
-TEST(VprAnyLocFactory, RefusesToConstructWithoutAModelFile) {
-  // The path is checked while constructing, on the caller's thread, where a throw is an error the
-  // caller can catch. The model itself is only read on the first frame, which happens on the SLAM
-  // worker where a throw would be std::terminate.
-  EXPECT_THROW(CreateVpr(AnyLocOptions("")), std::runtime_error);
-  EXPECT_THROW(CreateVpr(AnyLocOptions("/nonexistent/dinov2.onnx")), std::runtime_error);
+TEST(VprAnyLocFactory, RefusesToConstructWithoutAnEngine) {
+  // The engine is loaded while constructing, on the caller's thread, where a throw is an error the
+  // caller can catch, rather than on the first frame on the SLAM worker, which could only log it.
+  EXPECT_NE(ConstructionError(""), "");
+  EXPECT_NE(ConstructionError("/nonexistent/dinov2.engine"), "");
+  EXPECT_NE(ConstructionError(ScratchFolder().string()), "");
 
-  const std::filesystem::path folder = std::filesystem::temp_directory_path() / "cuvslam_vpr_anyloc_not_a_file";
-  std::filesystem::create_directories(folder);
-  EXPECT_THROW(CreateVpr(AnyLocOptions(folder.string())), std::runtime_error);
-  std::filesystem::remove_all(folder);
+  if (StandInEngine("valid").empty()) {
+    GTEST_SKIP() << kNoStandIns;  // reading the file below needs the GPU the engine would run on
+  }
+  // The likeliest wrong file is the ONNX model the engine is built from, which is not an engine.
+  const std::filesystem::path model = ScratchFolder() / "model.onnx";
+  {
+    std::ofstream file(model, std::ios::binary | std::ios::trunc);
+    file << "an ONNX model, not a TensorRT engine";
+  }
+  const std::string error = ConstructionError(model.string());
+  EXPECT_NE(error.find("anyloc_engine"), std::string::npos) << error;
+}
+
+TEST(VprAnyLocNetwork, RunsAnEngineWithTheExpectedInterface) {
+  const std::string& engine = StandInEngine("valid");
+  if (engine.empty()) {
+    GTEST_SKIP() << kNoStandIns;
+  }
+  AnyLocNetwork network(engine);
+  EXPECT_EQ(network.input_width(), 28);
+  EXPECT_EQ(network.input_height(), 28);
+  EXPECT_EQ(network.patch_count(), 16);
+  EXPECT_EQ(network.descriptor_dim(), 147);
+
+  float* input = network.input();
+  for (int i = 0; i < 3 * 28 * 28; ++i) {
+    input[i] = static_cast<float>(i);
+  }
+  std::vector<float> patches;
+  ASSERT_TRUE(network.Run(patches));
+  ASSERT_EQ(patches.size(), 16u * 147u);
+  // The stand-in hands back tiles of its input, so the output is the input, rearranged: patch 1 is
+  // the tile in grid row 0, column 1, which starts at row 0, column 7 of the red plane, and the
+  // 50th value of patch 0 is the first pixel of the green plane.
+  EXPECT_EQ(patches[147], 7.f);
+  EXPECT_EQ(patches[49], 28.f * 28.f);
+}
+
+TEST(VprAnyLocNetwork, ReportsAnOutputThatIsNotFiniteAsAFailure) {
+  if (StandInEngine("valid").empty()) {
+    GTEST_SKIP() << kNoStandIns;
+  }
+  AnyLocNetwork network(StandInEngine("valid"));
+  std::fill_n(network.input(), 3 * 28 * 28, 0.f);
+  network.input()[5] = std::numeric_limits<float>::quiet_NaN();
+  std::vector<float> patches;
+  EXPECT_FALSE(network.Run(patches));
+
+  network.input()[5] = 0.f;
+  EXPECT_TRUE(network.Run(patches));
+}
+
+TEST(VprAnyLocNetwork, RefusesAnEngineWithAnotherInterface) {
+  if (StandInEngine("valid").empty()) {
+    GTEST_SKIP() << kNoStandIns;
+  }
+  for (const char* name : {"renamed", "dynamic", "half"}) {
+    SCOPED_TRACE(name);
+    const std::string& engine = StandInEngine(name);
+    ASSERT_FALSE(engine.empty());
+    // The message spells out the interface the backend needs next to the one the engine has.
+    const std::string error = ConstructionError(engine);
+    EXPECT_NE(error.find("patch_descriptors fp32 [1, N, D]"), std::string::npos) << error;
+  }
+}
+
+TEST(VprAnyLocNetwork, ReproducesTheFp32ReferenceDescriptors) {
+  const std::string engine = AnyLocEnginePath();
+  if (engine.empty()) {
+    GTEST_SKIP() << "no AnyLoc engine: build the anyloc_engine target or set CUVSLAM_TEST_ANYLOC_ENGINE";
+  }
+#if defined(CUVSLAM_ANYLOC_REFERENCE_INPUT) && defined(CUVSLAM_ANYLOC_REFERENCE_OUTPUT)
+  // The network input and AnyLoc's fp32 descriptors of test_data/sof/left.png that the export
+  // saved, which the engine build was validated on too. This checks the runtime's own path.
+  const cnpy::NpyArray input = cnpy::npy_load(CUVSLAM_ANYLOC_REFERENCE_INPUT);
+  const cnpy::NpyArray expected = cnpy::npy_load(CUVSLAM_ANYLOC_REFERENCE_OUTPUT);
+  AnyLocNetwork network(engine);
+  const size_t dim = static_cast<size_t>(network.descriptor_dim());
+  if (input.num_vals != 3u * network.input_width() * network.input_height() ||
+      expected.num_vals != network.patch_count() * dim) {
+    GTEST_SKIP() << engine << " is not the engine this build's reference arrays belong to";
+  }
+  std::copy_n(input.data<float>(), input.num_vals, network.input());
+  std::vector<float> patches;
+  ASSERT_TRUE(network.Run(patches));
+
+  double cosine_sum = 0.;
+  double cosine_min = 1.;
+  for (int p = 0; p < network.patch_count(); ++p) {
+    const float* a = patches.data() + p * dim;
+    const float* b = expected.data<float>() + p * dim;
+    double dot = 0.;
+    double norm_a = 0.;
+    double norm_b = 0.;
+    for (size_t k = 0; k < dim; ++k) {
+      dot += static_cast<double>(a[k]) * b[k];
+      norm_a += static_cast<double>(a[k]) * a[k];
+      norm_b += static_cast<double>(b[k]) * b[k];
+    }
+    const double cosine = dot / std::sqrt(norm_a * norm_b);
+    cosine_sum += cosine;
+    cosine_min = std::min(cosine_min, cosine);
+  }
+  // FP16 against fp32: the same thresholds anyloc_engine_builder holds the engine to.
+  EXPECT_GE(cosine_sum / network.patch_count(), 0.999);
+  EXPECT_GE(cosine_min, 0.99);
+#else
+  GTEST_SKIP() << "this build has no AnyLoc reference arrays (CUVSLAM_BUILD_ANYLOC_ENGINE is off)";
+#endif
 }
 
 TEST(VprAnyLocBackend, VocabularyIsNotFittedBelowTheTrainingMinimum) {
-  const std::string model = AnyLocModelPath();
-  if (model.empty()) {
-    GTEST_SKIP() << "set CUVSLAM_ANYLOC_MODEL to a DINOv2 ONNX model exported by cuvslam_export_dinov2";
+  if (StandInEngine("valid").empty()) {
+    GTEST_SKIP() << kNoStandIns;
   }
+  for (const std::string& engine : AnyLocEngines()) {
+    SCOPED_TRACE(engine);
+    std::unique_ptr<IVpr> vpr = CreateVpr(AnyLocOptions(engine));
+    ASSERT_NE(vpr, nullptr);
+    EXPECT_STREQ(vpr->Name(), "AnyLoc");
 
-  std::unique_ptr<IVpr> vpr = CreateVpr(AnyLocOptions(model));
-  ASSERT_NE(vpr, nullptr);
-  EXPECT_STREQ(vpr->Name(), "AnyLoc");
+    std::vector<VprImage> images;
+    for (size_t i = 0; i + 1 < VprAnyLoc::kMinTrainingFrames; ++i) {
+      images.push_back(MakeBlockyImage(256, 256, 8, static_cast<uint32_t>(1200 + i)));
+      vpr->AddFrame(i, images.back());
+    }
+    ASSERT_EQ(vpr->Size(), VprAnyLoc::kMinTrainingFrames - 1);
 
-  std::vector<VprImage> images;
-  for (size_t i = 0; i + 1 < VprAnyLoc::kMinTrainingFrames; ++i) {
-    images.push_back(MakeBlockyImage(256, 256, 8, static_cast<uint32_t>(1200 + i)));
-    vpr->AddFrame(i, images.back());
+    // The cluster centers are fitted once and then frozen, because re-fitting them would change the
+    // meaning of every descriptor already stored. Fitting them on one or two frames would pin the
+    // whole session's vocabulary to those, so below the minimum the backend answers nothing at all.
+    vpr->Finalize();
+    EXPECT_FALSE(vpr->Query(images.front()).found);
+
+    // One more frame reaches the minimum, and then a mapped frame recognizes itself.
+    images.push_back(MakeBlockyImage(256, 256, 8, 1300));
+    vpr->AddFrame(VprAnyLoc::kMinTrainingFrames - 1, images.back());
+    vpr->Finalize();
+    const VprMatch match = vpr->Query(images.front());
+    EXPECT_TRUE(match.found) << "score " << match.score;
+    EXPECT_EQ(match.node_id, 0u);
   }
-  ASSERT_EQ(vpr->Size(), VprAnyLoc::kMinTrainingFrames - 1);
-
-  // The cluster centers are fitted once and then frozen, because re-fitting them would change the
-  // meaning of every descriptor already stored. Fitting them on one or two frames would pin the
-  // whole session's vocabulary to those, so below the minimum the backend answers nothing at all.
-  vpr->Finalize();
-  EXPECT_FALSE(vpr->Query(images.front()).found);
-
-  // One more frame reaches the minimum, and then a mapped frame recognizes itself.
-  images.push_back(MakeBlockyImage(256, 256, 8, 1300));
-  vpr->AddFrame(VprAnyLoc::kMinTrainingFrames - 1, images.back());
-  vpr->Finalize();
-  const VprMatch match = vpr->Query(images.front());
-  EXPECT_TRUE(match.found) << "score " << match.score;
-  EXPECT_EQ(match.node_id, 0u);
 }
 
 TEST(VprAnyLocBackend, SerializeDeserializeKeepsAnswers) {
-  const std::string model = AnyLocModelPath();
-  if (model.empty()) {
-    GTEST_SKIP() << "set CUVSLAM_ANYLOC_MODEL to a DINOv2 ONNX model exported by cuvslam_export_dinov2";
+  if (StandInEngine("valid").empty()) {
+    GTEST_SKIP() << kNoStandIns;
   }
+  for (const std::string& engine : AnyLocEngines()) {
+    SCOPED_TRACE(engine);
+    constexpr size_t kFrames = VprAnyLoc::kMinTrainingFrames;
+    std::vector<VprImage> images;
+    std::unique_ptr<IVpr> vpr = CreateVpr(AnyLocOptions(engine));
+    ASSERT_NE(vpr, nullptr);
+    for (size_t i = 0; i < kFrames; ++i) {
+      images.push_back(MakeBlockyImage(256, 256, 8, static_cast<uint32_t>(1400 + i)));
+      vpr->AddFrame(i, images.back());
+    }
 
-  constexpr size_t kFrames = VprAnyLoc::kMinTrainingFrames;
-  std::vector<VprImage> images;
-  std::unique_ptr<IVpr> vpr = CreateVpr(AnyLocOptions(model));
-  ASSERT_NE(vpr, nullptr);
-  for (size_t i = 0; i < kFrames; ++i) {
-    images.push_back(MakeBlockyImage(256, 256, 8, static_cast<uint32_t>(1400 + i)));
-    vpr->AddFrame(i, images.back());
+    Blob blob;
+    vpr->Serialize(blob);
+    ASSERT_FALSE(blob.empty());
+
+    // The blob carries the fitted cluster centers as well as the pooled descriptors, so the restored
+    // index is queryable without the vocabulary being re-fitted.
+    std::unique_ptr<IVpr> restored = CreateVpr(AnyLocOptions(engine));
+    ASSERT_NE(restored, nullptr);
+    ASSERT_TRUE(restored->Deserialize(BlobReader(blob)));
+    EXPECT_EQ(restored->Size(), kFrames);
+
+    for (size_t i = 0; i < kFrames; ++i) {
+      EXPECT_TRUE(restored->HasNode(i));
+      const VprMatch match = restored->Query(images[i]);
+      EXPECT_TRUE(match.found) << "frame " << i;
+      EXPECT_EQ(match.node_id, i);
+      EXPECT_NEAR(match.score, vpr->Query(images[i]).score, 1e-5f);
+    }
+
+    const Blob garbage(64, 0x5A);
+    std::unique_ptr<IVpr> rejecting = CreateVpr(AnyLocOptions(engine));
+    ASSERT_NE(rejecting, nullptr);
+    EXPECT_FALSE(rejecting->Deserialize(BlobReader(garbage)));
+    EXPECT_EQ(rejecting->Size(), 0u);
   }
-
-  Blob blob;
-  vpr->Serialize(blob);
-  ASSERT_FALSE(blob.empty());
-
-  // The blob carries the fitted cluster centers as well as the pooled descriptors, so the restored
-  // index is queryable without the model having to be loaded or the vocabulary re-fitted.
-  std::unique_ptr<IVpr> restored = CreateVpr(AnyLocOptions(model));
-  ASSERT_NE(restored, nullptr);
-  ASSERT_TRUE(restored->Deserialize(BlobReader(blob)));
-  EXPECT_EQ(restored->Size(), kFrames);
-
-  for (size_t i = 0; i < kFrames; ++i) {
-    EXPECT_TRUE(restored->HasNode(i));
-    const VprMatch match = restored->Query(images[i]);
-    EXPECT_TRUE(match.found) << "frame " << i;
-    EXPECT_EQ(match.node_id, i);
-    EXPECT_NEAR(match.score, vpr->Query(images[i]).score, 1e-5f);
-  }
-
-  const Blob garbage(64, 0x5A);
-  std::unique_ptr<IVpr> rejecting = CreateVpr(AnyLocOptions(model));
-  ASSERT_NE(rejecting, nullptr);
-  EXPECT_FALSE(rejecting->Deserialize(BlobReader(garbage)));
-  EXPECT_EQ(rejecting->Size(), 0u);
 }
 
-#endif  // USE_ONNXRUNTIME
+TEST(VprAnyLocBackend, MapsSavedBeforeTheVocabularyWasFittedLoad) {
+  if (StandInEngine("valid").empty()) {
+    GTEST_SKIP() << kNoStandIns;
+  }
+  // Saved with no frame at all, and with fewer frames than the vocabulary is fitted on: neither has
+  // cluster centers to save, and both have to load.
+  for (const size_t frames : {size_t{0}, VprAnyLoc::kMinTrainingFrames - 1}) {
+    SCOPED_TRACE(frames);
+    std::unique_ptr<IVpr> vpr = CreateVpr(AnyLocOptions(StandInEngine("valid")));
+    ASSERT_NE(vpr, nullptr);
+    for (size_t i = 0; i < frames; ++i) {
+      vpr->AddFrame(i, MakeBlockyImage(256, 256, 8, static_cast<uint32_t>(1600 + i)));
+    }
+    Blob blob;
+    vpr->Serialize(blob);
+
+    std::unique_ptr<IVpr> restored = CreateVpr(AnyLocOptions(StandInEngine("valid")));
+    ASSERT_NE(restored, nullptr);
+    EXPECT_TRUE(restored->Deserialize(BlobReader(blob)));
+    EXPECT_EQ(restored->Size(), frames);
+    EXPECT_FALSE(restored->Query(MakeBlockyImage(256, 256, 8, 1600)).found);
+  }
+}
+
+TEST(VprAnyLocBackend, DeserializeRefusesAMapOfAnotherDescriptorWidth) {
+  if (StandInEngine("valid").empty()) {
+    GTEST_SKIP() << kNoStandIns;
+  }
+  // Descriptors of another width come from another network, whose vocabulary means nothing to this one.
+  std::unique_ptr<IVpr> narrow = CreateVpr(AnyLocOptions(StandInEngine("valid")));
+  ASSERT_NE(narrow, nullptr);
+  for (size_t i = 0; i < VprAnyLoc::kMinTrainingFrames; ++i) {
+    narrow->AddFrame(i, MakeBlockyImage(256, 256, 8, static_cast<uint32_t>(1500 + i)));
+  }
+  Blob blob;
+  narrow->Serialize(blob);
+
+  std::unique_ptr<IVpr> wide = CreateVpr(AnyLocOptions(StandInEngine("wide")));
+  ASSERT_NE(wide, nullptr);
+  EXPECT_FALSE(wide->Deserialize(BlobReader(blob)));
+  EXPECT_EQ(wide->Size(), 0u);
+}
+
+#endif  // USE_TENSORRT
 
 class VprMapStorage : public ::testing::Test {
 protected:
@@ -1771,39 +2074,42 @@ TEST_F(VprPoseGraph, DetectLoopClosureHasNoCandidatesWithPlaceRecognitionOff) {
   EXPECT_TRUE(solver.captured_candidates.empty());
 }
 
-#ifdef USE_ONNXRUNTIME
+#ifdef USE_TENSORRT
 
 TEST_F(VprPoseGraph, DetectLoopClosureWithAnyLocHandsOverOldPlacesBestFirst) {
-  const std::string model = AnyLocModelPath();
-  if (model.empty()) {
-    GTEST_SKIP() << "set CUVSLAM_ANYLOC_MODEL to a DINOv2 ONNX model exported by cuvslam_export_dinov2";
+  if (StandInEngine("valid").empty()) {
+    GTEST_SKIP() << kNoStandIns;
   }
-  mapper_ = MakeMapper(AnyLocOptions(model));
-  // Enough keyframes for AnyLoc to fit its vocabulary, with pictures of the size the other AnyLoc tests use.
-  constexpr int kKeyframes = 12;
-  for (int i = 0; i < kKeyframes; ++i) {
-    const int64_t timestamp_ns = AppendKeyframe(i, 1.f, kLoopClosureSpacingNs);
-    images_.push_back(MakeBlockyImage(256, 256, 8, static_cast<uint32_t>(1200 + i)));
-    ASSERT_TRUE(mapper_->AddVprFrame(images_.back(), timestamp_ns)) << "keyframe " << i;
-  }
+  for (const std::string& engine : AnyLocEngines()) {
+    SCOPED_TRACE(engine);
+    mapper_ = MakeMapper(AnyLocOptions(engine));
+    images_.clear();
+    // Enough keyframes for AnyLoc to fit its vocabulary, with pictures of the size the other AnyLoc tests use.
+    constexpr int kKeyframes = 12;
+    for (int i = 0; i < kKeyframes; ++i) {
+      const int64_t timestamp_ns = AppendKeyframe(i, 1.f, kLoopClosureSpacingNs);
+      images_.push_back(MakeBlockyImage(256, 256, 8, static_cast<uint32_t>(1200 + i)));
+      ASSERT_TRUE(mapper_->AddVprFrame(images_.back(), timestamp_ns)) << "keyframe " << i;
+    }
 
-  // An old node's own picture: it looks most like that node, which is old enough to close a loop to.
-  RecordingLoopClosureSolver solver;
-  LocalizerAndMapper::LoopClosureStatus status;
-  mapper_->DetectLoopClosure(solver, Images{MakeCpuContext(images_[2])}, Isometry3T::Identity(), status);
+    // An old node's own picture: it looks most like that node, which is old enough to close a loop to.
+    RecordingLoopClosureSolver solver;
+    LocalizerAndMapper::LoopClosureStatus status;
+    mapper_->DetectLoopClosure(solver, Images{MakeCpuContext(images_[2])}, Isometry3T::Identity(), status);
 
-  const std::vector<VprPlace>& candidates = solver.captured_candidates;
-  ASSERT_FALSE(candidates.empty());
-  EXPECT_LE(candidates.size(), LocalizerAndMapper::kLoopClosureVprCandidates);
-  EXPECT_EQ(candidates.front().node_id, mapper_->RecognizePlace(images_[2]).node_id);
-  const int64_t head_timestamp_ns = (kKeyframes - 1) * kLoopClosureSpacingNs;
-  for (const VprPlace& candidate : candidates) {
-    EXPECT_GE(head_timestamp_ns - candidate.timestamp_ns, LocalizerAndMapper::kLoopClosureVprMinAgeNs)
-        << "node " << candidate.node_id;
+    const std::vector<VprPlace>& candidates = solver.captured_candidates;
+    ASSERT_FALSE(candidates.empty());
+    EXPECT_LE(candidates.size(), LocalizerAndMapper::kLoopClosureVprCandidates);
+    EXPECT_EQ(candidates.front().node_id, mapper_->RecognizePlace(images_[2]).node_id);
+    const int64_t head_timestamp_ns = (kKeyframes - 1) * kLoopClosureSpacingNs;
+    for (const VprPlace& candidate : candidates) {
+      EXPECT_GE(head_timestamp_ns - candidate.timestamp_ns, LocalizerAndMapper::kLoopClosureVprMinAgeNs)
+          << "node " << candidate.node_id;
+    }
   }
 }
 
-#endif  // USE_ONNXRUNTIME
+#endif  // USE_TENSORRT
 
 TEST_F(VprPoseGraph, TheHeadNodeNeedsAPictureUntilItHasOne) {
   EXPECT_TRUE(mapper_->IsVprEnabled());

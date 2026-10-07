@@ -14,7 +14,8 @@ vpr_simple.*    Simple backend, always built
 vpr_orb.*       in-tree ORB: FAST-9, Harris ranking, rotated BRIEF, standard library only
 vpr_bow.*       Bow backend over vpr_orb, always built
 vpr_dbow2.*     DBoW2 backend, built when USE_DBOW2 is ON (needs OpenCV)
-vpr_anyloc.*    AnyLoc backend, built when USE_ONNXRUNTIME is ON (needs a model file)
+vpr_anyloc.*    AnyLoc backend, built when USE_TENSORRT is ON (needs the engine tools/anyloc_model builds)
+anyloc_network.* the DINOv2 TensorRT engine AnyLoc runs, on the GPU
 vpr_map.*       VprMap: owns a backend and the node bookkeeping; the only type the rest of SLAM touches
 vpr_sof_image.* bridge from the tracker's sof::ImageContext to a VprImage
 ```
@@ -133,18 +134,21 @@ estimate too far for a search around it, which is the loop this mode is for, and
 `LSIGrid::MakeLandmarkQualityFunc`, which decides what a full cell drops. A rejected candidate is usually a place the
 camera is not at, so what its attempt failed to find says nothing about the landmarks there, and it is not reported.
 
-With `AnyLoc`, over three runs of each mode on KITTI 00-10 with `max_map_size` 0, the mean translation error is
-0.756% against 0.745% for the default mode and the mean absolute trajectory error 1.93 m against 1.95 m. Neither mode
-is deterministic from run to run (KITTI-02's translation error ranged from 0.77% to 0.83% in the default mode alone),
-and eight of the eleven sequences are within that noise, KITTI-01 among them with no loop closed. KITTI-09's final
-loop, which the default search misses, is closed (ATE 1.70 m against 2.77 m, at a higher segment error, 0.91%
-against 0.82%); KITTI-00 does slightly worse (0.82% against 0.79%, ATE 1.73 m against 1.63 m); KITTI-02's ATE varies
-too much between runs in both modes to call (2.4 to 5.3 m with `AnyLoc`, 2.6 to 3.5 m without). Two costs come
-with it:
+With `AnyLoc` on its FP16 TensorRT engine, over three runs of each mode on KITTI 00-10 with `max_map_size` 0, the
+mean translation error is 0.759% against 0.747% for the default mode and the mean absolute trajectory error 1.92 m
+against 1.98 m, as it was when DINOv2 ran in fp32 on ONNX Runtime (0.756% and 1.93 m). Neither mode is deterministic
+from run to run (KITTI-02's ATE ranged from 2.3 to 5.2 m in the default mode alone, and from 2.4 to 5.3 m with
+`AnyLoc`), and most sequences are within that noise, KITTI-01 among them with no loop closed. KITTI-09's final loop
+is closed in every run (ATE 1.72 m against 2.45 m, at a higher segment error, 0.92% against 0.80%), where the default
+search closed it in one run of three; KITTI-00 and KITTI-08 do slightly worse (0.80% against 0.79%, and 1.01%
+against 0.99%), within the overlap of their run-to-run ranges. Two costs come with it:
 
 - **Speed.** A place recognition query and up to five verifications per keyframe, on the SLAM thread. `AnyLoc` runs
-  DINOv2 on the CPU through ONNX Runtime, twice per keyframe, once to map the frame and once to query it: tracking ran
-  at 2.7 frames per second against 79 with the default mode, eight runs sharing 28 cores.
+  DINOv2 twice per keyframe, once to map the frame and once to query it, but on TensorRT that is now the small part:
+  alone on an RTX 4090, KITTI-00 tracked at 232 frames per second with the default mode, 203 with `AnyLoc` filling the
+  map and no queries, and 52 in this mode. The rest is the query and the verifications, which `Bow` pays as well: with
+  no network at all, it tracks KITTI-00 at 30 frames per second in this mode. With six runs sharing the machine, this
+  mode ran at 22.6 frames per second against 63.3 for the default one; on ONNX Runtime's CPU build it ran at 2.7.
 - **Backend choice.** `DBoW2` trains its vocabulary from the map and retrains it whenever the map changed since the
   last query, which in this mode is every keyframe, so its cost grows with the square of the map. `AnyLoc` fits its
   vocabulary once, to the first 8 keyframes; fitting it to the first 100 instead changed nothing on KITTI-00 and 02.
@@ -163,7 +167,8 @@ with it:
   default mode would have used, may be the better pose to close the loop with; that is untested, and a candidate for
   KITTI-00's small deficit.
 - **`AnyLoc` describes every keyframe twice.** The query is the frame `AddKeyframe` has just mapped, so querying by
-  the newest node's stored descriptor would halve the DINOv2 cost of this mode.
+  the newest node's stored descriptor would save one DINOv2 run and one VLAD encoding per keyframe, a few
+  milliseconds now that the network runs on TensorRT.
 - **`LoopClosureSolverTwoStepsEasy`'s "first to second beats current to second" check compares rotation matrix norms**,
   which are the same for every rotation, so rounding noise decides the rotation half of it. It predates this mode,
   which leans on it more than the default one does.
@@ -183,8 +188,9 @@ landmarks, which means it needs the SLAM map. That split is wired up as:
 2. **`LocalizeInMap` seeds itself.** Its `guess_pose` is optional; without one it asks the loaded map for up to
    `LocalizationSettings::vpr_candidates` places (default 5) that look like the images and runs the existing probe
    search seeded at each in turn, keeping the first whose PnP verification passes.
-3. **`RecognizePlaceByFrame` stays the cheap hint** (measured here: 0.9 ms Simple, 12 ms DBoW2, 46 ms AnyLoc),
-   because its job is *detecting* the kidnapping, not resolving it.
+3. **`RecognizePlaceByFrame` stays the cheap hint** (measured here: 0.9 ms Simple, 12 ms DBoW2, and 46 ms AnyLoc
+   when it ran DINOv2 on the CPU; on its TensorRT engine AnyLoc answered in 8 ms on an RTX 4090 against 38 ms on the
+   CPU, over a 300 frame map of KITTI-07), because its job is *detecting* the kidnapping, not resolving it.
 
 ### Still open
 
