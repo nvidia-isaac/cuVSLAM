@@ -306,6 +306,7 @@ struct PoseWithCovariance {
  *
  * The rig coordinate frame is user-defined and depends on the extrinsic parameters of the cameras.
  * The cameras' coordinate frames may not match the rig coordinate frame - depending on camers extrinsics.
+ * Mono mode is the exception: it tracks camera 0 as the rig, so camera 0 must sit at the rig origin.
  * The world coordinate frame is an arbitrary 3D coordinate frame. It coincides with the rig coordinate frame at the
  * first frame.
  */
@@ -383,7 +384,8 @@ public:
     Inertial,     ///< Uses stereo camera and IMU measurements. A single stereo-camera with a single IMU sensor is
                   ///< supported.
     RGBD,  ///< Uses RGB-D camera for tracking. A single RGB-D camera is supported. RGB & Depth images must be aligned.
-    Mono,  ///< Uses a single camera, tracking is accurate up to scale.
+    Mono,  ///< Uses a single camera, tracking is accurate up to scale. Camera 0 is tracked as the rig, so its
+           ///< rig_from_camera must be identity.
 
     /// @warning Experimental: tracking may be inaccurate or fail for some sensor configurations and scenes.
     ///

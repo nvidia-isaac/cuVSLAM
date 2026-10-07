@@ -102,7 +102,7 @@ void SolverSfMMono::mergeDataForEpipolar(Vector2TPairVector& sampleSequence) {
   }
 }
 
-// posMap in camera space
+// posMap in camera 0 space, which mono requires to be the rig origin
 void SolverSfMMono::getLastFewFramesTracks3DPosition(const Isometry3T& camera_from_world, Tracks3DMap& posMap) const {
   posMap.clear();
 
@@ -826,7 +826,8 @@ ErrorCode SolverSfMMono::monoSolveNextFrame(const std::vector<camera::Observatio
                                             const Isometry3T* predicted_pose,
                                             storage::Isometry3<float>& out_cameraExtrinsics,
                                             std::vector<Track2D>* out_tracks2d,
-                                            Tracks3DMap& out_tracks3d,  // in camera space
+                                            Tracks3DMap& out_tracks3d,  // in camera 0 space, which mono
+                                                                        // requires to be the rig origin
                                             Matrix6T& covariance) {
   out_cameraExtrinsics = Isometry3T();
   if (out_tracks2d != nullptr) {
