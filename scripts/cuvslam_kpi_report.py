@@ -31,8 +31,10 @@ import json
 import os
 from statistics import fmean, median, pstdev
 
-NO_DIFF_METRICS = {"FPS"}
-REQUIRED_METRICS = ["ATE", "ARE", "Kabsch", "TrackingLosts", "FPS"]
+REQUIRED_METRICS = ["ATE", "ARE", "Kabsch", "TrackingLosts", "Failed", "FPS"]
+# Integer counts: shown as min–max across configurations, and never flagged
+# by the rolling baseline for a change of one.
+COUNT_METRICS = {"TrackingLosts", "Failed"}
 REPORT_SCHEMA_VERSION = 3
 
 # Per-sequence failure checks, overridable in the KPI config's "defaults" and
@@ -46,14 +48,14 @@ FAILURE_MISSING = "missing"
 # Rolling-baseline regression check against the KPI history: a KPI regresses
 # when it is worse than the median of the last baseline_window runs by more
 # than max(baseline_mad_k * MAD, baseline_min_pct % of the median). Losts
-# never count a change of a single lost frame.
+# and failed-sequence counts never flag a change of one.
 DEFAULT_BASELINE = {"baseline_window": 14, "baseline_mad_k": 4.0, "baseline_min_pct": 3.0}
 MIN_BASELINE_RUNS = 3
-LOSTS_MIN_BAND = 1.0
+COUNT_MIN_BAND = 1.0
 HIGHER_IS_BETTER = {"FPS"}
 
 DATASET_DISPLAY_ALIASES = {"TARTAN_FLAKY": "TARTAN_F"}
-METRIC_UNITS = {"ATE": "%", "ARE": "º/m", "Kabsch": "", "TrackingLosts": "", "FPS": "Hz"}
+METRIC_UNITS = {"ATE": "%", "ARE": "º/m", "Kabsch": "", "TrackingLosts": "", "Failed": "", "FPS": "Hz"}
 
 
 def display_dataset_key(key):
@@ -75,7 +77,6 @@ def get_display_name(metric):
     """Get display name for metric (e.g., 'TrackingLosts' -> 'Losts')."""
     display_names = {
         "TrackingLosts": "Losts",
-        "diff TrackingLosts": "diff Losts"
     }
     return display_names.get(metric, metric)
 
@@ -285,8 +286,8 @@ def evaluate_baseline(key, current_value, series, settings):
     mad = median(abs(value - center) for value in values)
     band = max(settings["baseline_mad_k"] * mad, settings["baseline_min_pct"] / 100.0 * abs(center))
     metric = parsed[1]
-    if metric == "TrackingLosts":
-        band = max(band, LOSTS_MIN_BAND)
+    if metric in COUNT_METRICS:
+        band = max(band, COUNT_MIN_BAND)
     worse = center - current_value if metric in HIGHER_IS_BETTER else current_value - center
     return {"key": key, "current": current_value, "median": center, "band": band, "runs": len(values),
             "regressed": worse > band}
@@ -425,6 +426,7 @@ def summarize_mode(stats, dataset_type, checks):
         "ARE": mean("gt_av_rotation_error", accuracy_stats),
         "Kabsch": mean("gt_simple_error", accuracy_stats),
         "FPS": mean("average_fps", stats),
+        "Failed": sum(1 for run in runs if run["failure"] is not None),
         "TrackingLosts": sum(
             s.get("num_tracking_losts", 0) for s in stats if s.get("num_tracking_losts", -1) >= 0
         ),
@@ -514,16 +516,24 @@ def parse_kpi_key(key):
     return f"{dataset_name}-{dataset_type}_{mode}", metric
 
 
-def format_metric(metric, value, *, aggregate=False):
-    """Format one scalar KPI or one aggregate diff."""
+def format_metric(metric, value):
+    """Format one configuration's KPI value."""
     if value == "NA":
         return value
-    base_metric = metric.removeprefix("diff ")
-    if base_metric == "TrackingLosts":
-        return f"{float(value):.2f}" if aggregate else str(int(value))
-    if base_metric == "FPS":
+    if metric in COUNT_METRICS:
+        return str(int(value))
+    if metric == "FPS":
         return f"{float(value):.1f}"
     return f"{float(value):.4f}"
+
+
+def format_diff(metric, value):
+    """Format one configuration's change from the previous run, with its sign."""
+    if metric in COUNT_METRICS:
+        return f"{int(value):+d}"
+    if metric == "FPS":
+        return f"{float(value):+.1f}"
+    return f"{float(value):+.4f}"
 
 
 def organize_data(data, required_metrics=REQUIRED_METRICS, prev_data=None):
@@ -541,24 +551,21 @@ def organize_data(data, required_metrics=REQUIRED_METRICS, prev_data=None):
         value = safe_float(data[key])
         if value is None:
             metrics[metric] = "NA"
-            if metric not in NO_DIFF_METRICS:
-                metrics["diff " + metric] = "NA"
+            metrics["diff " + metric] = "NA"
             continue
 
-        if metric == "TrackingLosts":
+        if metric in COUNT_METRICS:
             metrics[metric] = int(value)
         elif metric == "FPS":
             metrics[metric] = round(value, 1)
         else:
             metrics[metric] = round(value, 4)
 
-        if metric in NO_DIFF_METRICS:
-            continue
         if "MONO" in dataset_key and metric == "ATE":
             metrics["diff " + metric] = "NA"
         elif prev_data is not None and safe_float(prev_data.get(key)) is not None:
             difference = value - safe_float(prev_data[key])
-            metrics["diff " + metric] = int(difference) if metric == "TrackingLosts" else round(difference, 4)
+            metrics["diff " + metric] = int(difference) if metric in COUNT_METRICS else round(difference, 4)
         else:
             metrics["diff " + metric] = "NA"
 
@@ -571,37 +578,28 @@ def organize_data(data, required_metrics=REQUIRED_METRICS, prev_data=None):
     return organized_data
 
 
-def table_columns(required_metrics=REQUIRED_METRICS, *, diffs=True):
-    diffable = [metric for metric in required_metrics if metric not in NO_DIFF_METRICS]
-    nondiff = [metric for metric in required_metrics if metric in NO_DIFF_METRICS]
-    return diffable + (["diff " + metric for metric in diffable] if diffs else []) + nondiff
-
-
 def column_title(metric, *, aggregate=False):
     title = get_display_name(metric)
     unit = get_unit(metric)
     if unit:
         title += f", {unit}"
     if aggregate:
-        if metric.startswith("diff "):
-            title += " (mean)"
-        elif metric == "TrackingLosts":
-            title += " (min–max)"
-        else:
-            title += " (mean ± σ)"
+        title += " (min–max)" if metric in COUNT_METRICS else " (mean ± σ)"
     return title
 
 
-def create_table(organized_data, required_metrics=REQUIRED_METRICS, *, config=None, aggregate=False,
-                 diffs=True, failures=None):
+def create_table(organized_data, required_metrics=REQUIRED_METRICS, *, config=None, aggregate=False, diffs=True,
+                 extra=None):
     """Render an already-organized KPI dictionary as Markdown.
 
-    failures, if given, is (column title, {dataset row: cell}) appended as the last column.
+    With diffs, each value that has a change from the previous run gets it on a
+    second line of the same cell, keeping the table one column per KPI. An
+    unchanged count gets no second line. extra, if given, is (column title,
+    {evaluation row: cell}) appended as the last column.
     """
-    columns = table_columns(required_metrics, diffs=diffs)
-    headers = (["Config"] if config else []) + ["Dataset"] + [
-        column_title(metric, aggregate=aggregate) for metric in columns
-    ] + ([failures[0]] if failures else [])
+    headers = (["Config"] if config else []) + ["Evaluation"] + [
+        column_title(metric, aggregate=aggregate) for metric in required_metrics
+    ] + ([extra[0]] if extra else [])
     lines = [
         "| " + " | ".join(headers) + " |",
         "|" + "|".join("---" for _ in headers) + "|",
@@ -609,15 +607,20 @@ def create_table(organized_data, required_metrics=REQUIRED_METRICS, *, config=No
 
     for dataset in sorted(organized_data):
         metrics = organized_data[dataset]
-        if not all(metric in metrics for metric in columns):
-            missing = [metric for metric in columns if metric not in metrics]
+        missing = [metric for metric in required_metrics if metric not in metrics]
+        if missing:
             raise ValueError(f"{dataset} is missing table columns: {', '.join(missing)}")
         cells = ([config] if config else []) + [display_dataset_key(dataset)]
-        cells.extend(
-            str(metrics[metric]) if aggregate else format_metric(metric, metrics[metric]) for metric in columns
-        )
-        if failures:
-            cells.append(failures[1].get(dataset, "NA"))
+        for metric in required_metrics:
+            cell = str(metrics[metric]) if aggregate else format_metric(metric, metrics[metric])
+            diff = metrics.get("diff " + metric, "NA")
+            if diffs and diff != "NA":
+                text = diff if aggregate else format_diff(metric, diff)
+                if not (metric in COUNT_METRICS and text in ("+0", "+0/+0")):
+                    cell += f"<br><sub>Δ {text}</sub>"
+            cells.append(cell)
+        if extra:
+            cells.append(extra[1].get(dataset, "NA"))
         lines.append("| " + " | ".join(cells) + " |")
     return "\n".join(lines) + "\n"
 
@@ -897,9 +900,8 @@ def render_regressions(results):
 def render_report(report, config):
     organized = organize_data(report["current"], prev_data=report["previous"])
     classified = classify_sequences([(config, report)])
-    failures = ("Failed", {row: str(len(c["broken"])) for row, c in classified.items()})
-    note = sequence_check_note(classified)
-    return ((f"_{note.strip()}_\n\n" if note else "") + create_table(organized, config=config, failures=failures)
+    note = "Δ is the change from the latest nightly. Failed counts failed sequences." + sequence_check_note(classified)
+    return (f"_{note}_\n\n" + create_table(organized, config=config)
             + render_regressions(report_baseline_results(report)) + render_failed_sequences(classified, 1))
 
 
@@ -924,7 +926,7 @@ def require_numeric(value, key, config):
 
 
 def format_distribution(metric, values):
-    if metric == "TrackingLosts":
+    if metric in COUNT_METRICS:
         low, high = int(min(values)), int(max(values))
         return str(low) if low == high else f"{low}–{high}"
     mean = fmean(values)
@@ -966,16 +968,13 @@ def aggregate_reports(config_reports):
         # null means the run had no valid measurement for this KPI.
         if any(report["current"][key] is None for _, report in config_reports):
             metrics[metric] = "NA"
-            if metric not in NO_DIFF_METRICS:
-                metrics["diff " + metric] = "NA"
+            metrics["diff " + metric] = "NA"
             continue
         current_values = [
             require_numeric(report["current"][key], key, config) for config, report in config_reports
         ]
         metrics[metric] = format_distribution(metric, current_values)
 
-        if metric in NO_DIFF_METRICS:
-            continue
         previous_complete = all(
             report["previous"] is not None and report["previous"].get(key) is not None
             for _, report in config_reports
@@ -984,47 +983,47 @@ def aggregate_reports(config_reports):
             previous_values = [
                 require_numeric(report["previous"][key], key, config) for config, report in config_reports
             ]
-            metrics["diff " + metric] = format_metric(
-                metric, fmean(current_values) - fmean(previous_values), aggregate=True
-            )
+            if metric in COUNT_METRICS:
+                metrics["diff " + metric] = (f"{int(min(current_values) - min(previous_values)):+d}/"
+                                             f"{int(max(current_values) - max(previous_values)):+d}")
+            else:
+                metrics["diff " + metric] = format_diff(metric, fmean(current_values) - fmean(previous_values))
         else:
             metrics["diff " + metric] = "NA"
 
     for metrics in organized.values():
         for metric in REQUIRED_METRICS:
             metrics.setdefault(metric, "NA")
-            if metric not in NO_DIFF_METRICS:
-                metrics.setdefault("diff " + metric, "NA")
+            metrics.setdefault("diff " + metric, "NA")
     return organized
 
 
 def render_aggregate_report(config_reports, *, values_only=False):
     """Render the cross-configuration table.
 
-    values_only drops the diff columns and the broken/flaky column and list,
-    for release notes where neither the previous nightly nor per-run health
-    is meaningful.
+    values_only drops the changes from the previous nightly, the regression
+    check, and the failed-sequence list, for release notes.
     """
     organized = aggregate_reports(config_reports)
     classified = classify_sequences(config_reports)
     count = len(config_reports)
     note = (
         f"_Aggregated across {count} configuration{'s' if count != 1 else ''}. "
-        "KPI values are mean ± population σ, Losts are min–max"
+        "Values are mean ± population σ; Losts and Failed (failed sequences) are min–max"
     )
     if not values_only:
         note += (
-            "; diffs compare the current and previous aggregated means. A broken sequence fails in every "
-            "configuration, a flaky one in some"
+            ". Δ is the change from the previous nightly: of the mean, or of min/max. A broken sequence fails "
+            "in every configuration, a flaky one in some"
         )
     note += "." + sequence_check_note(classified) + "_\n\n"
     if values_only:
         return note + create_table(organized, aggregate=True, diffs=False)
-    failures = (
+    broken_flaky = (
         "Broken / flaky",
         {row: f"{len(c['broken'])} / {len(c['flaky'])}" for row, c in classified.items()},
     )
-    return (note + create_table(organized, aggregate=True, failures=failures)
+    return (note + create_table(organized, aggregate=True, extra=broken_flaky)
             + render_regressions(aggregate_baseline_results(config_reports))
             + render_failed_sequences(classified, count))
 
