@@ -1,12 +1,12 @@
 # cuVSLAM Agent Skills
 
-The customer-facing skills in this directory help with NVIDIA cuVSLAM setup, trajectory replay, and troubleshooting.
+The customer-facing skills in this directory help with NVIDIA cuVSLAM setup, trajectory replay and evaluation, and troubleshooting.
 They can be used from a product checkout or installed individually.
 
 | Skill | Use it for |
 |-------|------------|
 | [cuvslam-onboard](cuvslam-onboard/SKILL.md) | Installation, builds, tracking modes, dataset examples, live cameras, and SLAM setup |
-| [cuvslam-trajectory](cuvslam-trajectory/SKILL.md) | Recorded dataset replay, TUM/KITTI pose export, and trajectory validation |
+| [cuvslam-trajectory](cuvslam-trajectory/SKILL.md) | Recorded dataset replay, TUM/KITTI pose export, validation, and optional ground-truth evaluation of new or existing trajectories |
 | [cuvslam-troubleshoot](cuvslam-troubleshoot/SKILL.md) | Existing build, tracking, calibration, synchronization, IMU, and integration failures |
 
 The contributor-only `cuvslam-ci` skill lives in `.agents/contributor-skills/cuvslam-ci/` in the product

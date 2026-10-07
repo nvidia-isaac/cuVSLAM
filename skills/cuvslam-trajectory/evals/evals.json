@@ -60,6 +60,38 @@
       "files": []
     },
     {
+      "id": "trajectory-evaluate-existing",
+      "prompt": "Evaluate /workspace/input/offset-estimate.txt against /workspace/input/valid-tum.txt as synthetic ground truth. Both are TUM world_from_cam0 poses in meters, seconds, xyzw, in the same right-handed world frame. Use no alignment. Report the default metrics and save the evaluation under /workspace/output/evaluation. Do not replay or set up cuVSLAM.",
+      "expected_output": "The independent evaluator reports ATE RMSE 1 m, ARE RMSE 30 degrees, GT distance 2 m and normalized ATE RMSE 50 percent, with 3 pairs and no exclusions. JSON and per-pose CSV are saved; no cuVSLAM runtime setup or replay occurs.",
+      "assertions": [
+        "Read cuvslam-trajectory/SKILL.md and references/evaluation.md.",
+        "Run scripts/evaluate_trajectory.py with matching physical/world frames and --alignment none.",
+        "Report definitions, units, association counts and output paths. Do not claim the synthetic estimate was produced by cuVSLAM."
+      ],
+      "expected_skill": "cuvslam-trajectory",
+      "expected_script": "scripts/evaluate_trajectory.py",
+      "files": [
+        "files/offset-estimate.txt",
+        "files/valid-tum.txt"
+      ]
+    },
+    {
+      "id": "trajectory-missing-extrinsic-fallback",
+      "prompt": "Compare /workspace/input/offset-estimate.txt (cam0) with /workspace/input/valid-tum.txt (body) as synthetic TUM trajectories, meters/seconds/xyzw in different right-handed world frames. I have no extrinsics: provide only a provisional comparison using the first 2 seconds for initial pose alignment and explain its limits. Save under /workspace/output/provisional. Do not replay.",
+      "expected_output": "An explicit missing-extrinsics fallback uses a fixed initial 2-second window (3 pairs), labels results provisional, and explains that world alignment cannot generally recover the missing camera/body extrinsic even when the fitted errors are small.",
+      "assertions": [
+        "Read references/evaluation.md and use --allow-missing-extrinsics with --alignment-window 2.",
+        "State the missing physical-frame relationship and preserve the provisional limitation.",
+        "Do not claim calibration recovery or bootstrap/replay cuVSLAM."
+      ],
+      "expected_skill": "cuvslam-trajectory",
+      "expected_script": "scripts/evaluate_trajectory.py",
+      "files": [
+        "files/offset-estimate.txt",
+        "files/valid-tum.txt"
+      ]
+    },
+    {
       "id": "trajectory-negative-live",
       "prompt": "Set up live cuVSLAM tracking from my RealSense camera. I have no recording and do not need a trajectory file.",
       "expected_output": "Do not activate cuvslam-trajectory. Route to cuvslam-onboard if available for live-camera setup.",

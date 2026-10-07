@@ -2,9 +2,10 @@
 name: cuvslam-trajectory
 description: >-
   Replay recorded EuRoC/ASL, KITTI odometry, EDEX, or ROS bag data through NVIDIA
-  cuVSLAM to export trajectory.txt, TUM poses, or KITTI poses. Also inspect replay
-  inputs and validate existing TUM trajectory files. Use for a recorded-data pose
-  deliverable; use cuvslam-onboard for first-time setup or live cameras, and
+  cuVSLAM to export trajectory.txt, TUM poses, or KITTI poses, and optionally
+  evaluate trajectories against ground truth with ATE and ARE. Also evaluate
+  existing trajectories without replay, inspect replay inputs, and validate TUM
+  files. Use cuvslam-onboard for first-time setup or live cameras, and
   cuvslam-troubleshoot for tracking failures or drift diagnosis.
 license: NVIDIA Community License
 allowed-tools: Read Glob Grep Bash Edit Write WebFetch
@@ -12,7 +13,7 @@ metadata:
   author: Zheng Wang <zhengwang@nvidia.com>
 ---
 
-# cuVSLAM trajectory replay
+# cuVSLAM trajectory replay and evaluation
 
 Use the bundled scripts instead of writing a one-off tracker. They handle dataset detection, the extra-camera-frame
 case, released/source API differences, atomic output, and validation.
@@ -20,7 +21,19 @@ case, released/source API differences, atomic output, and validation.
 `<skill-dir>` is this installed skill directory; `<cuvslam-repo>` is a separate cuVSLAM checkout
 containing `VERSION` and `tools/python_tools/`. Do not assume the skill is installed inside that
 checkout. Inspection and TUM validation use Python's standard library and need no CUDA runtime.
-For validation-only requests, run step 4 directly; for inspection-only requests, stop after step 2.
+
+## Route from the request
+
+| Request | Workflow |
+| --- | --- |
+| Run cuVSLAM on a recording / export poses | Replay and validate using the replay workflow below. |
+| Run cuVSLAM and evaluate / compare with GT / get metrics | Replay and validate, then follow the evaluation workflow. |
+| Evaluate an existing trajectory against GT | Evaluation only; skip replay, GPU checks, and cuVSLAM runtime setup. |
+| Validate an existing TUM file | Run replay step 4 directly. |
+| Inspect recording metadata | Stop after replay step 2. |
+
+Ground-truth files being present does not request evaluation. Follow user-specified metrics and conventions;
+do not substitute a new replay for an existing trajectory supplied for evaluation.
 
 ## Defaults
 
@@ -52,7 +65,7 @@ not a command-line option. Before adding an option not shown here, check its exa
 python3 <skill-dir>/scripts/replay_dataset.py --help
 ```
 
-## Required workflow
+## Replay workflow
 
 1. Resolve the cuVSLAM repository and dataset paths. If the prompt does not identify one dataset and discovery finds
    multiple plausible inputs, ask which one to use.
@@ -96,6 +109,31 @@ python3 <skill-dir>/scripts/replay_dataset.py --help
 5. Report success only after the replay command exits zero and validation prints `"valid": true`. State the absolute
    output path, output format, poses written versus frames, tracking losses, and any deliberately excluded unmatched
    inputs.
+
+## Evaluation workflow
+
+Read [references/evaluation.md](references/evaluation.md) before evaluating. Use the independent
+`scripts/evaluate_trajectory.py` helper (NumPy; PyYAML only for sensor YAML). It needs neither a product checkout
+nor cuVSLAM/CUDA. Inspect its `--help` for supported input formats and exact options.
+
+1. Identify each trajectory's physical frame (camera, body, IMU, or rig), world convention, pose direction,
+   quaternion ordering, timestamp units, and calibration source. Inspect the actual exporter and calibration,
+   including `sensor.yaml`; do not infer frames from filenames or tracking mode alone.
+2. Convert physical frames with the full rigid extrinsic, including rotation and translation, in the correct
+   direction. Keep this right-side pose conversion separate from left-side world alignment. Missing extrinsics
+   require an explicitly labeled provisional comparison: initial-window world alignment cannot generally recover
+   a missing camera/body extrinsic. Never silently assume identity for different physical frames.
+3. Associate timestamps within the overlapping interval and report exclusions. Declare the alignment method and
+   rationale. For an initial-window fit, define its duration/count, check fit validity and residuals, then apply
+   one fixed transform to the entire evaluation. Keep scale fixed at 1 for metric stereo/inertial estimates.
+4. Follow requested metrics. Otherwise report translation ATE RMSE in meters, rotation-angle ARE RMSE in degrees,
+   and normalized ATE RMSE = `100 * ATE_RMSE / GT traveled distance` in percent. Report ARE in degrees unless
+   the user defines a percentage denominator. Segment drift in `%` and `degrees/m` is a separate metric.
+   If a requested metric is unsupported by the helper, calculate it separately with its stated definition;
+   do not relabel a default metric to satisfy the request.
+5. Report numerical results only after a successful computation. Include frames, calibration source and transform
+   direction, alignment method/window/rationale and fit diagnostics, timestamp association, evaluated/excluded
+   pose counts, metric definitions and units, limitations, and absolute output paths. Preserve command/exit evidence.
 
 ## Invariants
 
