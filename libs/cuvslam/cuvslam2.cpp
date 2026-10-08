@@ -37,6 +37,7 @@
 #include "odometry/stereo_inertial_odometry.h"
 #include "odometry/svo_config.h"
 #include "slam/async_slam/async_slam.h"
+#include "slam/vpr/vpr_image.h"
 #ifdef USE_CUDA
 #include "odometry/rgbd_odometry.h"
 #endif
@@ -332,6 +333,66 @@ void FillImageSourceAndShape(const Image& image, ImageSource& source, ImageShape
 
   shape.width = image.width;
   shape.height = image.height;
+}
+
+// Copy a user image into the grayscale buffer the place recognition module works on.
+//
+// VPR never borrows the caller's pixels: a map entry outlives the call that produced it, and a query
+// runs while the tracker is recycling image buffers. GPU buffers are pulled to the host first, which
+// costs one copy per call and keeps the backends free of any CUDA dependency.
+slam::vpr::VprImage MakeVprImage(const Image& image, const bool use_gpu) {
+  if (image.pixels == nullptr || image.width <= 0 || image.height <= 0) {
+    return slam::vpr::VprImage{};
+  }
+  THROW_INVALID_ARG_IF(image.data_type != Image::DataType::UINT8,
+                       "Place recognition images must use ImageData::DataType::UINT8");
+
+#ifdef USE_CUDA
+  THROW_INVALID_ARG_IF(image.is_gpu_mem != cuda::IsGpuPointer(image.pixels),
+                       "is_gpu_mem flag mismatch for the place recognition image");
+#else
+  THROW_INVALID_ARG_IF(image.is_gpu_mem,
+                       "GPU memory requires a build with CUDA support (USE_CUDA=ON) for the place recognition image");
+#endif
+
+  const int channels = image.encoding == Image::Encoding::RGB ? 3 : 1;
+  const auto format =
+      image.encoding == Image::Encoding::RGB ? slam::vpr::VprPixelFormat::kRgb8 : slam::vpr::VprPixelFormat::kMono8;
+
+  if (!image.is_gpu_mem) {
+    // Host rows are documented as tightly packed; pitch is meaningful for device memory only.
+    return slam::vpr::MakeVprImage(image.pixels, image.width, image.height, 0, format);
+  }
+
+#ifdef USE_CUDA
+  CheckImageMemory(image, use_gpu, "place recognition image");
+  const size_t row_bytes = static_cast<size_t>(image.width) * channels;
+  const size_t pitch = image.pitch > 0 ? static_cast<size_t>(image.pitch) : row_bytes;
+  std::vector<uint8_t> host(row_bytes * static_cast<size_t>(image.height));
+  CUDA_CHECK(cudaMemcpy2D(host.data(), row_bytes, image.pixels, pitch, row_bytes, static_cast<size_t>(image.height),
+                          cudaMemcpyDeviceToHost));
+  return slam::vpr::MakeVprImage(host.data(), image.width, image.height, 0, format);
+#else
+  (void)use_gpu;
+  (void)channels;
+  THROW_INVALID_ARG_IF(true, "GPU memory requires a build with CUDA support (USE_CUDA=ON)");
+  return slam::vpr::VprImage{};
+#endif
+}
+
+// Pick the image the place recognition backend should look at: the first one taken by a primary
+// camera, because those are the only cameras SLAM maps with. A frame that carries no primary camera
+// has nothing comparable to the map, so it is refused rather than silently queried with the wrong
+// camera's pixels, which would read as "this place is not in the map".
+const Image* SelectVprImage(const Slam::ImageSet& images, const std::vector<uint8_t>& primary_cameras) {
+  for (const auto& image : images) {
+    for (const uint8_t cam_id : primary_cameras) {
+      if (image.camera_index == cam_id) {
+        return &image;
+      }
+    }
+  }
+  return nullptr;
 }
 
 // Validates depth images for the RGBD path: exactly one depth image is required.
@@ -1031,6 +1092,10 @@ public:
     options.throttling_time_ms = config.throttling_time_ms;
     options.retention_time_ms = config.retention_time_ms;
     options.delay_warning_queue_size = config.delay_warning_queue_size;
+    options.vpr_options.type = static_cast<slam::vpr::VprType>(config.vpr_mode);
+    options.vpr_options.model_path = std::string{config.vpr_model_path};
+    options.vpr_options.score_threshold = config.vpr_score_threshold;
+    options.vpr_map_path = std::string{config.vpr_map_path};
     use_gpu_ = config.use_gpu;
     gt_align_mode_ = config.gt_align_mode;
     if (config.gt_align_mode) {
@@ -1181,9 +1246,9 @@ void Slam::SaveMap(const std::string_view& folder_name, std::function<void(bool 
   }
 
 // timestamp_ns - localization timestamp
-void Slam::LocalizeInMap(const std::string_view& folder_name, int64_t timestamp_ns, const Pose& guess_pose,
-                         const ImageSet& images, const LocalizationSettings& settings, LocalizeStartCB start_cb,
-                         LocalizeFinishCB finish_cb) {
+void Slam::LocalizeInMap(const std::string_view& folder_name, int64_t timestamp_ns,
+                         const std::optional<Pose>& guess_pose, const ImageSet& images,
+                         const LocalizationSettings& settings, LocalizeStartCB start_cb, LocalizeFinishCB finish_cb) {
   slam::LocalizerOptions localizer_options;
   localizer_options.use_gpu = impl->use_gpu_;
 
@@ -1198,7 +1263,14 @@ void Slam::LocalizeInMap(const std::string_view& folder_name, int64_t timestamp_
     CheckImageMemory(images[i], impl->use_gpu_, "image " + std::to_string(i));
   }
 
-  const Isometry3T isometry_guess_pose = ConvertPoseToIsometry(guess_pose);
+  THROW_INVALID_ARG_IF(!guess_pose.has_value() && !impl->async_slam_->IsVprEnabled(),
+                       "LocalizeInMap without a guess pose searches the map by appearance, which needs "
+                       "Slam::Config::vpr_mode to be set to the mode the map was saved with.");
+
+  std::optional<Isometry3T> isometry_guess_pose;
+  if (guess_pose.has_value()) {
+    isometry_guess_pose = ConvertPoseToIsometry(*guess_pose);
+  }
 
   // copy user images
   Sources image_sources(impl->rig_.num_cameras);
@@ -1256,6 +1328,51 @@ void Slam::LocalizeInMap(const std::string_view& folder_name, int64_t timestamp_
 
   impl->async_slam_->LocalizeInMap(folder_name, timestamp_ns, isometry_guess_pose, images_ptrs, settings, start_cb,
                                    finish_cb);
+}
+
+void Slam::AddFrameToVprMap(const ImageSet& images) {
+  if (!impl->async_slam_->IsVprEnabled() || images.empty()) {
+    return;
+  }
+  // Ask before converting: the caller is expected to offer every frame, and only the first frame
+  // after a new keyframe has anywhere to go. The answer is a value the SLAM thread publishes, so
+  // this costs no lock and never waits behind a query in flight.
+  if (!impl->async_slam_->VprNeedsFrame()) {
+    return;
+  }
+
+  const Image* image = SelectVprImage(images, impl->primary_cameras_);
+  if (image == nullptr) {
+    return;
+  }
+  slam::vpr::VprImage vpr_image = MakeVprImage(*image, impl->use_gpu_);
+  if (vpr_image.Empty()) {
+    return;
+  }
+  impl->async_slam_->AddFrameToVprMap(std::move(vpr_image), image->timestamp_ns);
+}
+
+void Slam::RecognizePlaceByFrame(const ImageSet& images, RecognizePlaceFinishCB finish_cb) {
+  if (!finish_cb) {
+    return;
+  }
+  if (!impl->async_slam_->IsVprEnabled()) {
+    finish_cb(Result<PlaceRecognition>::Error("Place recognition is off: Slam::Config::vpr_mode is Off."));
+    return;
+  }
+
+  const Image* image = images.empty() ? nullptr : SelectVprImage(images, impl->primary_cameras_);
+  if (image == nullptr) {
+    finish_cb(Result<PlaceRecognition>::Error("No image from a primary camera was provided."));
+    return;
+  }
+  slam::vpr::VprImage vpr_image = MakeVprImage(*image, impl->use_gpu_);
+  if (vpr_image.Empty()) {
+    finish_cb(Result<PlaceRecognition>::Error("The provided image could not be read."));
+    return;
+  }
+
+  impl->async_slam_->RecognizePlace(std::move(vpr_image), std::move(finish_cb));
 }
 
 void Slam::GetSlamMetrics(Metrics& metrics) const {

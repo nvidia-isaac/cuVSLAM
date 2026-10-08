@@ -13,6 +13,20 @@
 
 ### Added
 
+- Visual place recognition, for the kidnapped robot problem: `Slam` keeps one frame descriptor per pose graph node,
+  and `Slam::RecognizePlaceByFrame` reports the node a single frame was observed from, and that node's current world
+  pose, with no pose guess. `Slam::AddFrameToVprMap` fills the map while mapping and `Slam::SaveMap` writes it as
+  part of the SLAM map. `Slam::Config::vpr_mode` picks the backend: `Simple` (thumbnails) and `Bow`
+  (in-tree ORB and a binary bag of words), neither with a third-party dependency, `DBoW2` (build with
+  `USE_DBOW2`, needs OpenCV) or `AnyLoc` (build with `USE_ONNXRUNTIME`, needs a DINOv2 ONNX model in
+  `Slam::Config::vpr_model_path`). All of it is available from Python; see the README
+- `Slam::LocalizeInMap` now takes an optional `guess_pose`. Without one it verifies the places the saved map's own
+  place recognition map proposes, which is what lets a robot that has no idea where it is relocalize at all;
+  `LocalizationSettings::vpr_candidates` bounds how many it tries
+- `Slam::Config::vpr_map_path`: loads a place recognition map on its own, for recognition without landmarks
+- `cuvslam_vpr_reporter`: scores a place recognition backend on two recordings of the same route and reports the
+  recognition and false positive rates with an HTML and PDF report
+- `cuvslam_export_dinov2`: exports the DINOv2 value-facet ONNX model that the AnyLoc backend reads
 - `Slam::Config::delay_warning_queue_size`: warns in verbose mode when more than the configured number of commands
   are queued to the SLAM thread, meaning SLAM falls behind odometry
 

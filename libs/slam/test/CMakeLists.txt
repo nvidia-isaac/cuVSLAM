@@ -26,6 +26,7 @@ set(SOURCES
     slam_test.cpp
     tail_test.cpp
     thread_safe_queue_test.cpp
+    vpr_test.cpp
     )
 
 set(LIBS
