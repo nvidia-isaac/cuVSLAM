@@ -221,15 +221,13 @@ TEST(Mask, RejectsInvalidMasks) {
                std::invalid_argument);
 }
 
+#ifdef USE_CUDA
+
 // Depth is masked as well as features, so a low-resolution mask must act exactly like its nearest-neighbor upscale.
 TEST(Mask, RgbdLowResolutionMaskMatchesUpscaled) {
   const auto half = MakeCenterMask(kWidth / 2, kHeight / 2);
   const auto full = MakeCenterMask(kWidth, kHeight);
-  std::vector<bool> memory_spaces = {false};
-#ifdef USE_CUDA
-  memory_spaces.push_back(true);
-#endif
-  for (bool on_gpu : memory_spaces) {
+  for (bool on_gpu : {false, true}) {
     SCOPED_TRACE(on_gpu ? "device memory" : "host memory");
     const auto expected = TrackSequence(Odometry::OdometryMode::RGBD, full, kWidth, kHeight, on_gpu, 10);
     const auto actual = TrackSequence(Odometry::OdometryMode::RGBD, half, kWidth / 2, kHeight / 2, on_gpu, 10);
@@ -238,8 +236,6 @@ TEST(Mask, RgbdLowResolutionMaskMatchesUpscaled) {
     EXPECT_EQ(actual.valid_per_frame, expected.valid_per_frame);
   }
 }
-
-#ifdef USE_CUDA
 
 // A device mask has to apply to the frame it was passed with, starting with the first one.
 TEST(Mask, DeviceMaskAppliesToCurrentFrame) {
