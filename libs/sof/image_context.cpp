@@ -285,12 +285,19 @@ bool ImageContext::build_gpu_depth_pyramid(const ImageSource& source, cudaStream
     }
   }
   if (mask_source != nullptr) {
-    if (mask_source->memory_type == ImageSource::Host) {
+    const bool same_size = meta_.mask_shape.width == meta_.shape.width && meta_.mask_shape.height == meta_.shape.height;
+    if (same_size && mask_source->memory_type == ImageSource::Host) {
       gpu_image_cast_.burn_mask_depth(reinterpret_cast<uint8_t*>(mask_source->data), meta_.shape, gpu_depth_, s);
     } else {
+      uint8_t* mask = reinterpret_cast<uint8_t*>(mask_source->data);
+      size_t mask_pitch = mask_source->pitch;
+      if (!same_size) {
+        resize_mask_gpu(*mask_source, s);
+        mask = gpu_mask_.ptr();
+        mask_pitch = gpu_mask_.pitch();
+      }
       uint2 size = {(unsigned)meta_.shape.width, (unsigned)meta_.shape.height};
-      CUDA_CHECK(cuda::burn_depth_mask(gpu_depth_.ptr(), gpu_depth_.pitch(),
-                                       reinterpret_cast<uint8_t*>(mask_source->data), mask_source->pitch, size, s));
+      CUDA_CHECK(cuda::burn_depth_mask(gpu_depth_.ptr(), gpu_depth_.pitch(), mask, mask_pitch, size, s));
     }
   }
 
@@ -320,57 +327,48 @@ bool ImageContext::process_mask_gpu(const ImageSource& mask_source, ImageMatrix<
                                     cudaStream_t s) {
   std::lock_guard<std::mutex> guard(mutex_);
 
-  if (mask_source.data == nullptr) {
+  if (mask_source.data == nullptr || mask_source.image_encoding != ImageEncoding::MONO8) {
     TraceError("Invalid mask source");
     return false;
   }
 
-  uint2 src_size = {static_cast<decltype(uint2::x)>(meta_.mask_shape.width),
-                    static_cast<decltype(uint2::y)>(meta_.mask_shape.height)};
-  uint2 dst_size = {static_cast<decltype(uint2::x)>(gpu_mask_.cols()),
-                    static_cast<decltype(uint2::y)>(gpu_mask_.rows())};
-
-  if (mask_source.memory_type == ImageSource::Host) {
-    if (src_size.x == dst_size.x && src_size.y == dst_size.y) {
-      mask_resized = mask_source.as<uint8_t>(meta_.mask_shape);
-      return true;
-    } else {
-      if (gpu_mask_source_ == nullptr) {
-        gpu_mask_source_ = std::make_unique<cuda::GPUImage8>(src_size.x, src_size.y);
-      }
-      const unsigned char* mask_source_ptr = static_cast<const unsigned char*>(mask_source.data);
-      gpu_mask_source_->copy(cuda::GPUCopyDirection::ToGPU, mask_source_ptr, s);
-      if (mask_source.image_encoding == ImageEncoding::MONO8) {
-        CUDA_CHECK(cuda::resize_mask(gpu_mask_source_->ptr(), src_size, gpu_mask_source_->pitch(), gpu_mask_.ptr(),
-                                     dst_size, gpu_mask_.pitch(), s));
-        gpu_mask_.copy(cuda::GPUCopyDirection::ToCPU, mask_resized.data(), s);
-        return true;
-      } else {
-        TraceError("Invalid mask source");
-        return false;
-      }
-    }
-  } else {
-    if (src_size.x == dst_size.x && src_size.y == dst_size.y) {
-      thread_local std::vector<uint8_t, cuda::HostAllocator<uint8_t>> cpu_input_mask;
-      cpu_input_mask.resize(src_size.y * src_size.x);
-      cudaMemcpy2DAsync((void*)cpu_input_mask.data(), src_size.x, mask_source.data, mask_source.pitch, src_size.x,
-                        src_size.y, cudaMemcpyDeviceToHost, s);
-      mask_resized = Eigen::Map<const ImageMatrix<uint8_t>>(cpu_input_mask.data(), src_size.y, src_size.x);
-      return true;
-    } else {
-      if (mask_source.image_encoding == ImageEncoding::MONO8) {
-        CUDA_CHECK(cuda::resize_mask(static_cast<const uint8_t*>(mask_source.data), src_size, mask_source.pitch,
-                                     gpu_mask_.ptr(), dst_size, gpu_mask_.pitch(), s));
-        gpu_mask_.copy(cuda::GPUCopyDirection::ToCPU, mask_resized.data(), s);
-        return true;
-      } else if (mask_source.image_encoding == ImageEncoding::RGB8) {
-        TraceError("Invalid mask source");
-        return false;
-      }
-    }
+  const bool same_size = meta_.mask_shape.width == meta_.shape.width && meta_.mask_shape.height == meta_.shape.height;
+  if (same_size && mask_source.memory_type == ImageSource::Host) {
+    mask_resized = mask_source.as<uint8_t>(meta_.mask_shape);
+    return true;
   }
+
+  // The caller reads mask_resized on the host as soon as this returns, so the copy must be complete.
+  mask_resized.resize(meta_.shape.height, meta_.shape.width);
+  if (same_size) {
+    CUDA_CHECK(cudaMemcpy2DAsync(mask_resized.data(), meta_.shape.width, mask_source.data, mask_source.pitch,
+                                 meta_.shape.width, meta_.shape.height, cudaMemcpyDeviceToHost, s));
+  } else {
+    resize_mask_gpu(mask_source, s);
+    gpu_mask_.copy(cuda::GPUCopyDirection::ToCPU, mask_resized.data(), s);
+  }
+  CUDA_CHECK(cudaStreamSynchronize(s));
   return true;
+}
+
+void ImageContext::resize_mask_gpu(const ImageSource& mask_source, cudaStream_t s) {
+  const uint2 src_size = {static_cast<decltype(uint2::x)>(meta_.mask_shape.width),
+                          static_cast<decltype(uint2::y)>(meta_.mask_shape.height)};
+  const uint2 dst_size = {static_cast<decltype(uint2::x)>(gpu_mask_.cols()),
+                          static_cast<decltype(uint2::y)>(gpu_mask_.rows())};
+
+  const uint8_t* src = static_cast<const uint8_t*>(mask_source.data);
+  size_t src_pitch = mask_source.pitch;
+  if (mask_source.memory_type == ImageSource::Host) {
+    if (gpu_mask_source_ == nullptr || gpu_mask_source_->cols() != src_size.x ||
+        gpu_mask_source_->rows() != src_size.y) {
+      gpu_mask_source_ = std::make_unique<cuda::GPUImage8>(src_size.x, src_size.y);
+    }
+    gpu_mask_source_->copy(cuda::GPUCopyDirection::ToGPU, src, s);
+    src = gpu_mask_source_->ptr();
+    src_pitch = gpu_mask_source_->pitch();
+  }
+  CUDA_CHECK(cuda::resize_mask(src, src_size, src_pitch, gpu_mask_.ptr(), dst_size, gpu_mask_.pitch(), s));
 }
 
 #endif

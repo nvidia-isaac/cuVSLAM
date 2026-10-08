@@ -313,7 +313,7 @@ void DumpTrackCall(const std::string& input_dump_root_dir, size_t frame_id, cons
           input_mask = cpu_input_mask.data();
 #endif
         } else {
-          if (mask.height != image.height && mask.width != image.width) {
+          if (mask.height != image.height || mask.width != image.width) {
             auto cpu_mask_map =
                 Eigen::Map<ImageMatrix<uint8_t>>(const_cast<uint8_t*>(input_mask), mask.height, mask.width);
             cpu_mask_resized.resize(image.height, image.width);

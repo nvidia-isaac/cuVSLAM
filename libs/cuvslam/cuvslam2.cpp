@@ -268,23 +268,25 @@ void CheckImageMemory(const ImageData& image, bool use_gpu, const std::string& w
       "is_gpu_mem is set for " + what + ", but tracking runs on the CPU. Pass host memory or set use_gpu to true.");
 }
 
+// Checks shared by images and masks: a buffer in a memory space tracking can read, tied to a camera of the rig.
+void CheckImageBuffer(const Image& image, bool use_gpu, size_t num_cameras, const std::string& what) {
+  THROW_INVALID_ARG_IF(image.pixels == nullptr, "No buffer provided for " + what);
+#ifdef USE_CUDA
+  THROW_INVALID_ARG_IF(image.is_gpu_mem != cuda::IsGpuPointer(image.pixels), "is_gpu_mem flag mismatch for " + what);
+#else
+  THROW_INVALID_ARG_IF(image.is_gpu_mem, "GPU memory requires a build with CUDA support (USE_CUDA=ON) for " + what);
+#endif
+  CheckImageMemory(image, use_gpu, what);
+  THROW_INVALID_ARG_IF(image.camera_index >= num_cameras, "camera_index >= number of cameras for " + what);
+}
+
 void CheckImages(const Odometry::ImageSet& images, bool use_gpu, int64_t frame_sync_threshold_ns,
                  const std::vector<std::unique_ptr<camera::ICameraModel>>& cameras_models) {
   THROW_INVALID_ARG_IF(images.empty(), "No images provided");
   for (size_t i = 0; i < images.size(); ++i) {
-    THROW_INVALID_ARG_IF(images[i].pixels == nullptr, "No buffer provided for image " + std::to_string(i));
-#ifdef USE_CUDA
-    THROW_INVALID_ARG_IF(images[i].is_gpu_mem != cuda::IsGpuPointer(images[i].pixels),
-                         "is_gpu_mem flag mismatch for image " + std::to_string(i));
-#else
-    THROW_INVALID_ARG_IF(images[i].is_gpu_mem,
-                         "GPU memory requires a build with CUDA support (USE_CUDA=ON) for image " + std::to_string(i));
-#endif
-    CheckImageMemory(images[i], use_gpu, "image " + std::to_string(i));
+    CheckImageBuffer(images[i], use_gpu, cameras_models.size(), "image " + std::to_string(i));
     THROW_INVALID_ARG_IF(images[i].data_type != Image::DataType::UINT8,
                          "Image data type must be UINT8 for image " + std::to_string(i));
-    THROW_INVALID_ARG_IF(images[i].camera_index >= cameras_models.size(),
-                         "camera_index >= number of cameras for image " + std::to_string(i));
     const auto& resolution = cameras_models[images[i].camera_index].get()->getResolution();
     THROW_INVALID_ARG_IF(images[i].width != resolution[0] || images[i].height != resolution[1],
                          "Image dimensions (" + std::to_string(images[i].width) + "x" +
@@ -305,9 +307,18 @@ void CheckImages(const Odometry::ImageSet& images, bool use_gpu, int64_t frame_s
 }
 
 // Masks travel with the images they belong to, so they must live in the same memory space.
-void CheckMasks(const Odometry::ImageSet& masks, bool use_gpu) {
+void CheckMasks(const Odometry::ImageSet& masks, bool use_gpu,
+                const std::vector<std::unique_ptr<camera::ICameraModel>>& cameras_models) {
   for (size_t i = 0; i < masks.size(); ++i) {
-    CheckImageMemory(masks[i], use_gpu, "mask " + std::to_string(i));
+    const std::string what = "mask " + std::to_string(i);
+    CheckImageBuffer(masks[i], use_gpu, cameras_models.size(), what);
+    THROW_INVALID_ARG_IF(masks[i].data_type != Image::DataType::UINT8 || masks[i].encoding != Image::Encoding::MONO,
+                         "Mask data type must be UINT8 with MONO encoding for " + what);
+    THROW_INVALID_ARG_IF(masks[i].width <= 0 || masks[i].height <= 0, "Mask dimensions must be positive for " + what);
+    for (size_t j = 0; j < i; ++j) {
+      THROW_INVALID_ARG_IF(masks[j].camera_index == masks[i].camera_index,
+                           "The same camera index for masks " + std::to_string(j) + ", " + std::to_string(i));
+    }
   }
 }
 
@@ -705,7 +716,7 @@ PoseEstimate Odometry::Track(const ImageSet& images, const ImageSet& masks, cons
   per_frame_setting.sm = impl->svo_settings.sm_settings;
 
   CheckImages(images, impl->use_gpu, impl->frame_sync_threshold_ns, impl->cameras_models);
-  CheckMasks(masks, impl->use_gpu);
+  CheckMasks(masks, impl->use_gpu, impl->cameras_models);
   if (impl->odometry_mode == OdometryMode::RGBD) {
     CheckDepths(depths, impl->use_gpu, impl->cameras_models);
   } else if (impl->odometry_mode == OdometryMode::Multisensor) {
