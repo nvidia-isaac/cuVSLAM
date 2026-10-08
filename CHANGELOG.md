@@ -1,5 +1,12 @@
 # Changelog
 
+## [17.0.1] - 2026-10-08
+
+### Fixed
+
+- Process abort (`std::out_of_range` on the bundle adjustment thread) in Multisensor and Inertial odometry with an IMU and asynchronous SBA
+- Untriangulated landmarks receiving invalid positions from bundle adjustment before gravity is initialized
+
 ## [17.0.0] - 2026-07-21
 
 Adds cuNLS-based multisensor fusion, improves tracking and SLAM robustness, and expands evaluation tooling.
