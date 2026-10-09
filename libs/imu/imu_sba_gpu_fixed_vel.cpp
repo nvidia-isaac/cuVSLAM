@@ -77,7 +77,8 @@ bool IMUBundlerGpuFixedVel::solve(ImuBAProblem& problem) {
   TRACE_EVENT ev = profiler_domain_.trace_event("GPU solve", profiler_color_);
 
   SetValues(problem);
-  if (num_inertials <= 0) {
+  // Kernels launch one block per point or observation, and an empty grid is a CUDA launch error.
+  if (num_inertials <= 0 || num_points == 0 || num_observations == 0) {
     return false;
   }
 
@@ -191,6 +192,11 @@ bool IMUBundlerGpuFixedVel::solve(ImuBAProblem& problem) {
     }
 
     CUDA_CHECK(cudaStreamSynchronize(stream.get_stream()));
+    if ((*working_buffer_solver_info)[0] != 0) {
+      // Damped reduced system is not positive definite: reject the step instead of propagating NaNs.
+      (*lambda)[0] *= 5.f;
+      continue;
+    }
     float cost = ((*working_cost)[0].num_skipped == num_observations) ? std::numeric_limits<float>::infinity()
                                                                       : (*working_cost)[0].cost;
     float predicted_relative_reduction = (*working_cost)[0].predicted_reduction / current_cost;
@@ -397,6 +403,8 @@ void IMUBundlerGpuFixedVel::ComputeUpdate(cudaStream_t s) {
   CUSOLVER_CHECK(cusolverDnSpotrf(cusolver_handle_, CUBLAS_FILL_MODE_LOWER, 15 * num_poses_opt,
                                   reduced_system_pose_block->ptr(), 15 * num_poses_opt, working_buffer_solver->ptr(),
                                   working_buffer_solver->size(), working_buffer_solver_info->ptr()));
+  // potrs below overwrites the info value, so fetch the factorization status now.
+  working_buffer_solver_info->copy(cuvslam::cuda::GPUCopyDirection::ToCPU, s);
 
   CUSOLVER_CHECK(cusolverDnSpotrs(cusolver_handle_, CUBLAS_FILL_MODE_LOWER, 15 * num_poses_opt, 1,
                                   reduced_system_pose_block->ptr(), 15 * num_poses_opt,
@@ -658,7 +666,7 @@ void IMUBundlerGpuFixedVel::AllocateBuffers() {
   }
 
   if (!working_buffer_solver_info) {
-    working_buffer_solver_info = std::make_unique<cuvslam::cuda::GPUOnlyArray<int>>(1);
+    working_buffer_solver_info = std::make_unique<cuvslam::cuda::GPUArrayPinned<int>>(1);
   }
 
   {

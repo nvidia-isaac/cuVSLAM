@@ -158,7 +158,7 @@ private:
   std::unique_ptr<cuvslam::cuda::GPUArrayPinned<CostResult>> working_cost;
   std::unique_ptr<cuvslam::cuda::GPUOnlyArray<float>> working_partial_costs;
   std::unique_ptr<cuvslam::cuda::GPUOnlyArray<float>> working_buffer_solver;
-  std::unique_ptr<cuvslam::cuda::GPUOnlyArray<int>> working_buffer_solver_info;
+  std::unique_ptr<cuvslam::cuda::GPUArrayPinned<int>> working_buffer_solver_info;
 
   std::unique_ptr<cuvslam::cuda::GPUArrayPinned<float>> lambda;
 
