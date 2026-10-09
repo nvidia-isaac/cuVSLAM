@@ -89,6 +89,9 @@ private:
   ImageMatrix<uint8_t> resize_mask_cpu(void* data);
 
 #ifdef USE_CUDA
+  // Resizes the mask to the image resolution into gpu_mask_, asynchronously on stream s.
+  void resize_mask_gpu(const ImageSource& mask_source, cudaStream_t s);
+
   cuda::GPUImageT gpu_image_;
   cuda::ImageCast gpu_image_cast_;
   cuda::GaussianGPUImagePyramid gpu_image_pyramid_;

@@ -578,8 +578,11 @@ public:
    * Must use ImageData::DataType::UINT8. Partial ImageSet is supported, for example due to frame drops. Corresponding
    * cameras are identified by Image::camera_index.
    * @param[in]  masks  (Optional) an array of corresponding masks no more than rig->num_cameras.
-   * Must use ImageData::DataType::UINT8. Partial ImageSet is supported, for example if mask is calculated on for some
-   * cameras. Corresponding cameras are identified by Image::camera_index.
+   * Must use ImageData::DataType::UINT8 and ImageData::Encoding::MONO. Non-zero pixels are excluded: no features are
+   * selected or kept there, and in OdometryMode::RGBD and OdometryMode::Multisensor the depth at those pixels is
+   * ignored. A mask may have a different resolution than its image; it is resized with nearest-neighbor
+   * interpolation. Partial ImageSet is supported, for example if masks are provided for only some cameras.
+   * Corresponding cameras are identified by Image::camera_index.
    * @param[in]  depths  (Optional) an array of depth images. In OdometryMode::RGBD exactly one depth
    * image must be provided. In OdometryMode::Multisensor pass one depth image per depth-providing
    * camera; each entry is matched to its rig camera by Image::camera_index and every camera_index

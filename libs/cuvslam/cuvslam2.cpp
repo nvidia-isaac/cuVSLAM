@@ -242,19 +242,22 @@ void CheckImuCalibration(const ImuCalibration& imu_calibration) {
   THROW_INVALID_ARG_IF(std::isnan(imu_calibration.frequency), "IMU Calibration: IMU data frequency is not valid");
 }
 
+// Checks shared by images and masks: a buffer tied to a camera of the rig.
+void CheckImageBuffer(const Image& image, size_t num_cameras, const std::string& what) {
+  THROW_INVALID_ARG_IF(image.pixels == nullptr, "No buffer provided for " + what);
+#ifdef USE_CUDA
+  THROW_INVALID_ARG_IF(image.is_gpu_mem != cuda::IsGpuPointer(image.pixels), "is_gpu_mem flag mismatch for " + what);
+#endif
+  THROW_INVALID_ARG_IF(image.camera_index >= num_cameras, "camera_index >= number of cameras for " + what);
+}
+
 void CheckImages(const Odometry::ImageSet& images, int64_t frame_sync_threshold_ns,
                  const std::vector<std::unique_ptr<camera::ICameraModel>>& cameras_models) {
   THROW_INVALID_ARG_IF(images.empty(), "No images provided");
   for (size_t i = 0; i < images.size(); ++i) {
-    THROW_INVALID_ARG_IF(images[i].pixels == nullptr, "No buffer provided for image " + std::to_string(i));
-#ifdef USE_CUDA
-    THROW_INVALID_ARG_IF(images[i].is_gpu_mem != cuda::IsGpuPointer(images[i].pixels),
-                         "is_gpu_mem flag mismatch for image " + std::to_string(i));
-#endif
+    CheckImageBuffer(images[i], cameras_models.size(), "image " + std::to_string(i));
     THROW_INVALID_ARG_IF(images[i].data_type != Image::DataType::UINT8,
                          "Image data type must be UINT8 for image " + std::to_string(i));
-    THROW_INVALID_ARG_IF(images[i].camera_index >= cameras_models.size(),
-                         "camera_index >= number of cameras for image " + std::to_string(i));
     const auto& resolution = cameras_models[images[i].camera_index].get()->getResolution();
     THROW_INVALID_ARG_IF(images[i].width != resolution[0] || images[i].height != resolution[1],
                          "Image dimensions (" + std::to_string(images[i].width) + "x" +
@@ -270,6 +273,21 @@ void CheckImages(const Odometry::ImageSet& images, int64_t frame_sync_threshold_
                            "The same image buffer for images " + std::to_string(j) + ", " + std::to_string(i));
       THROW_INVALID_ARG_IF(images[j].camera_index == images[i].camera_index,
                            "The same camera index for images " + std::to_string(j) + ", " + std::to_string(i));
+    }
+  }
+}
+
+void CheckMasks(const Odometry::ImageSet& masks,
+                const std::vector<std::unique_ptr<camera::ICameraModel>>& cameras_models) {
+  for (size_t i = 0; i < masks.size(); ++i) {
+    const std::string what = "mask " + std::to_string(i);
+    CheckImageBuffer(masks[i], cameras_models.size(), what);
+    THROW_INVALID_ARG_IF(masks[i].data_type != Image::DataType::UINT8 || masks[i].encoding != Image::Encoding::MONO,
+                         "Mask data type must be UINT8 with MONO encoding for " + what);
+    THROW_INVALID_ARG_IF(masks[i].width <= 0 || masks[i].height <= 0, "Mask dimensions must be positive for " + what);
+    for (size_t j = 0; j < i; ++j) {
+      THROW_INVALID_ARG_IF(masks[j].camera_index == masks[i].camera_index,
+                           "The same camera index for masks " + std::to_string(j) + ", " + std::to_string(i));
     }
   }
 }
@@ -649,6 +667,7 @@ PoseEstimate Odometry::Track(const ImageSet& images, const ImageSet& masks, cons
   per_frame_setting.sm = impl->svo_settings.sm_settings;
 
   CheckImages(images, impl->frame_sync_threshold_ns, impl->cameras_models);
+  CheckMasks(masks, impl->cameras_models);
   if (impl->odometry_mode == OdometryMode::RGBD) {
     CheckDepths(depths, impl->cameras_models);
   } else if (impl->odometry_mode == OdometryMode::Multisensor) {
