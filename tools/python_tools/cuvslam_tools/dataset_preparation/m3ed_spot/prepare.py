@@ -52,6 +52,7 @@ SEQUENCE_ARTIFACTS = (
     "stereo.edex",
     "frame_metadata.jsonl",
     "gt.txt",
+    "IMU.jsonl",
     "00/000000.png",
     "01/000000.png",
 )

@@ -20,7 +20,8 @@ Produces, per sequence::
     <sequence>/01/000000.png          OVC right, mono8
     <sequence>/frame_metadata.jsonl   per-frame timestamps for both cameras
     <sequence>/gt.txt                 3x4 pose per frame, relative to frame 0
-    <sequence>/stereo.edex            rig, per-camera intrinsics, and baseline
+    <sequence>/IMU.jsonl              OVC IMU samples spanning the converted frames
+    <sequence>/stereo.edex            rig, per-camera intrinsics, baseline, and IMU
 
 plus a ``dataset_metadata.json`` and the reporter config at the dataset root.
 
@@ -66,7 +67,7 @@ from cuvslam_tools.dataset_preparation import rgbd
 from cuvslam_tools.dataset_preparation.rgbd import RgbdConversionError as ConversionError
 
 _SCHEMA_VERSION = 1
-_CONVERTER_VERSION = 1
+_CONVERTER_VERSION = 2
 
 SOURCE_NAME = "M3ED: Multi-Robot, Multi-Sensor, Multi-Environment Event Dataset"
 SOURCE_URL = "https://m3ed.io"
@@ -146,7 +147,31 @@ _PROGRESS_EVERY = 256
 # the converter rather than to the data the suite reads.
 _STATE_FILE = ".conversion_state.json"
 
-_OVC_TIMESTAMP_UNIT_NS = 1_000  # /ovc/ts and pose ts are microseconds
+_OVC_TIMESTAMP_UNIT_NS = 1_000  # /ovc/ts, /ovc/imu/ts and pose ts are microseconds
+
+IMU_FILE = "IMU.jsonl"
+
+# The OVC IMU is a VectorNav VN-100 sampled at 400 Hz. The source carries only
+# its extrinsic, so the noise model is the one M3ED fed Kalibr for the
+# IMU-camera calibration, build_system/calibration/vn100.yaml at
+# daniilidis-group/m3ed@2b39788b930b69269cd55d251571962b6adc6b4a.
+IMU_FREQUENCY_HZ = 400.0
+IMU_ACCEL_NOISE_DENSITY = 1.372e-3  # m / (s^2 sqrt(Hz))
+IMU_ACCEL_RANDOM_WALK = 5.0e-5  # m / (s^3 sqrt(Hz))
+IMU_GYRO_NOISE_DENSITY = 6.10866e-05  # rad / (s sqrt(Hz))
+IMU_GYRO_RANDOM_WALK = 4.0e-6  # rad / (s^2 sqrt(Hz))
+
+# The published streams hold 2.5 ms between samples to within a few percent;
+# anything further off means a different sensor rate than the noise model.
+_IMU_RATE_TOLERANCE = 0.05
+
+# Every published sequence drops 0.05-0.6% of its IMU samples, and each dropped
+# one stays in the arrays as a row with this timestamp and NaN in every axis.
+_IMU_DROPOUT_TIMESTAMP = np.iinfo(np.int64).min
+
+# The longest dropout run published is four samples, a 12.5 ms gap. Far longer
+# gaps would leave preintegration bridging motion it never measured.
+_IMU_MAX_GAP_US = 50_000
 
 
 @dataclass(frozen=True)
@@ -315,6 +340,163 @@ def left_from_right(left: CameraCalibration, right: CameraCalibration):
     )
 
 
+@dataclass(frozen=True)
+class ImuStream:
+    """The OVC IMU samples and the IMU's extrinsic to the left event camera."""
+
+    timestamps: np.ndarray  # int64 nanoseconds, strictly increasing
+    angular_velocity: np.ndarray  # (n, 3) rad/s in the IMU frame
+    linear_acceleration: np.ndarray  # (n, 3) m/s^2 in the IMU frame
+    # Maps a point in the IMU frame into the left event camera frame.
+    prophesee_left_from_imu: Tuple[Tuple[Tuple[float, ...], ...], Tuple[float, ...]]
+    dropped_samples: int  # dropout rows removed from the source arrays
+    max_gap_us: int  # longest interval between kept samples
+
+
+def read_imu(handle) -> ImuStream:
+    """Read ``/ovc/imu`` from an open ``_data.h5``, without its dropout rows.
+
+    Only the three sample arrays and one 4x4 calibration are read, a few
+    megabytes per sequence, so this is cheap even over range requests.
+    """
+    for name in ("ovc/imu/ts", "ovc/imu/omega", "ovc/imu/accel", "ovc/imu/calib/T_to_prophesee_left"):
+        if name not in handle:
+            raise ConversionError(f"missing {name} in the source file")
+    stamps = np.asarray(handle["ovc/imu/ts"][()], dtype=np.int64)
+    omega = np.asarray(handle["ovc/imu/omega"][()], dtype=float)
+    accel = np.asarray(handle["ovc/imu/accel"][()], dtype=float)
+    if stamps.ndim != 1:
+        raise ConversionError("ovc/imu/ts must be a one-dimensional dataset")
+    for name, values in (("omega", omega), ("accel", accel)):
+        if values.shape != (stamps.size, 3):
+            raise ConversionError(
+                f"ovc/imu/{name} has shape {values.shape}, expected ({stamps.size}, 3)"
+            )
+
+    # A dropout is recognised only in its published form, so a NaN next to a
+    # real timestamp, or a placeholder holding values, still fails.
+    dropout = stamps == _IMU_DROPOUT_TIMESTAMP
+    if not (np.isnan(omega[dropout]).all() and np.isnan(accel[dropout]).all()):
+        raise ConversionError("ovc/imu holds dropout timestamps with measured values")
+    kept = ~dropout
+    stamps, omega, accel = stamps[kept], omega[kept], accel[kept]
+    for name, values in (("omega", omega), ("accel", accel)):
+        if not np.isfinite(values).all():
+            raise ConversionError(f"ovc/imu/{name} contains non-finite values outside dropouts")
+    if stamps.size < 2:
+        raise ConversionError("ovc/imu needs at least two valid samples")
+
+    intervals = np.diff(stamps)
+    if np.any(intervals <= 0):
+        raise ConversionError("ovc/imu/ts must be strictly increasing")
+    expected_us = 1e6 / IMU_FREQUENCY_HZ
+    median_us = float(np.median(intervals))
+    if abs(median_us - expected_us) > _IMU_RATE_TOLERANCE * expected_us:
+        raise ConversionError(
+            f"ovc/imu/ts median interval is {median_us:.1f} us, expected {expected_us:.1f} us "
+            f"for the {IMU_FREQUENCY_HZ:g} Hz noise model"
+        )
+    max_gap_us = int(intervals.max())
+    if max_gap_us > _IMU_MAX_GAP_US:
+        raise ConversionError(f"ovc/imu has a {max_gap_us / 1000:.1f} ms gap between samples")
+    return ImuStream(
+        timestamps=stamps * _OVC_TIMESTAMP_UNIT_NS,
+        angular_velocity=omega,
+        linear_acceleration=accel,
+        prophesee_left_from_imu=_split_matrix(handle["ovc/imu/calib/T_to_prophesee_left"][()]),
+        dropped_samples=int(dropout.sum()),
+        max_gap_us=max_gap_us,
+    )
+
+
+def left_from_imu(left: CameraCalibration, imu: ImuStream):
+    """Return the IMU's pose in the left OVC camera frame, which is the rig frame."""
+    left_from_prophesee = rgbd.invert_transform(*left.prophesee_left_from_camera)
+    return rgbd.compose_transforms(
+        left_from_prophesee[0],
+        left_from_prophesee[1],
+        imu.prophesee_left_from_imu[0],
+        imu.prophesee_left_from_imu[1],
+    )
+
+
+def edex_imu_transform(
+    rotation: Sequence[Sequence[float]], translation: Sequence[float]
+) -> List[List[float]]:
+    """Render the IMU's pose in the rig into the EDEX ``imu.transform`` matrix.
+
+    Unlike the camera matrix this one is a homogeneous rig-from-IMU transform,
+    but with the rig axes in the legacy cuVSLAM convention (y up, z backwards):
+    the reader applies ``LegacyEdexImuExtrinsicToOpenCV``, which negates the y
+    and z rows, so they are negated here to land back on the OpenCV rig.
+    """
+    signs = (1.0, -1.0, -1.0)
+    return [
+        [signs[row] * float(value) for value in rotation[row]] + [signs[row] * float(translation[row])]
+        for row in range(3)
+    ]
+
+
+def imu_document(left: CameraCalibration, imu: ImuStream) -> Dict[str, object]:
+    """Build the EDEX ``imu`` section, with the key names the EDEX reader accepts."""
+    rotation, translation = left_from_imu(left, imu)
+    return {
+        "measurements": IMU_FILE,
+        "transform": edex_imu_transform(rotation, translation),
+        "frequency": IMU_FREQUENCY_HZ,
+        "accel_noise_density": IMU_ACCEL_NOISE_DENSITY,
+        "accel_random_walk": IMU_ACCEL_RANDOM_WALK,
+        "gyro_noise_density": IMU_GYRO_NOISE_DENSITY,
+        "gyro_random_walk": IMU_GYRO_RANDOM_WALK,
+    }
+
+
+def imu_lines(imu: ImuStream, first_ns: int, last_ns: int) -> List[str]:
+    """Render ``IMU.jsonl`` for the samples from ``first_ns`` to ``last_ns`` inclusive."""
+    inside = np.flatnonzero((imu.timestamps >= first_ns) & (imu.timestamps <= last_ns))
+    if inside.size == 0:
+        raise ConversionError("no IMU sample falls inside the converted frames' time span")
+    lines = []
+    for index in inside:
+        wx, wy, wz = (float(value) for value in imu.angular_velocity[index])
+        ax, ay, az = (float(value) for value in imu.linear_acceleration[index])
+        lines.append(
+            json.dumps(
+                {
+                    "AngularVelocityX": wx,
+                    "AngularVelocityY": wy,
+                    "AngularVelocityZ": wz,
+                    "LinearAccelerationX": ax,
+                    "LinearAccelerationY": ay,
+                    "LinearAccelerationZ": az,
+                    "timestamp": int(imu.timestamps[index]),
+                    "type": "imu_data",
+                },
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        )
+    return lines
+
+
+def write_imu(
+    sequence_dir: Path, left: CameraCalibration, imu: ImuStream, first_ns: int, last_ns: int
+) -> Tuple[Dict[str, object], int]:
+    """Write ``IMU.jsonl`` and return the EDEX ``imu`` section and the sample count.
+
+    Shared by full conversion and by patching an already converted sequence, so
+    both produce the same bytes.
+    """
+    lines = imu_lines(imu, first_ns, last_ns)
+    (Path(sequence_dir) / IMU_FILE).write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return imu_document(left, imu), len(lines)
+
+
+def render_edex(document: Sequence[Dict[str, object]]) -> str:
+    """Serialize an EDEX document exactly as the converter writes it."""
+    return json.dumps(document, indent=4) + "\n"
+
+
 def edex_camera_transform(
     rotation: Sequence[Sequence[float]], translation: Sequence[float]
 ) -> List[List[float]]:
@@ -344,32 +526,42 @@ def _intrinsics_document(camera: CameraCalibration) -> Dict[str, object]:
 
 
 def edex_document(
-    left: CameraCalibration, right: CameraCalibration, frame_count: int
+    left: CameraCalibration,
+    right: CameraCalibration,
+    frame_count: int,
+    imu: Optional[Dict[str, object]] = None,
 ) -> List[Dict[str, object]]:
-    """Build the two-section EDEX document for the OVC stereo pair."""
+    """Build the two-section EDEX document for the OVC stereo pair.
+
+    ``imu`` is the section from ``imu_document``; it is placed last in the
+    header, which is also where patching an existing document appends it.
+    """
     if frame_count <= 0:
         raise ConversionError("cannot describe an empty sequence")
     rotation, translation = left_from_right(left, right)
+    header: Dict[str, object] = {
+        "version": "0.9",
+        "frame_start": 0,
+        "frame_end": frame_count - 1,
+        "cameras": [
+            {
+                "transform": [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                ],
+                "intrinsics": _intrinsics_document(left),
+            },
+            {
+                "transform": edex_camera_transform(rotation, translation),
+                "intrinsics": _intrinsics_document(right),
+            },
+        ],
+    }
+    if imu is not None:
+        header["imu"] = imu
     return [
-        {
-            "version": "0.9",
-            "frame_start": 0,
-            "frame_end": frame_count - 1,
-            "cameras": [
-                {
-                    "transform": [
-                        [1.0, 0.0, 0.0, 0.0],
-                        [0.0, 1.0, 0.0, 0.0],
-                        [0.0, 0.0, 1.0, 0.0],
-                    ],
-                    "intrinsics": _intrinsics_document(left),
-                },
-                {
-                    "transform": edex_camera_transform(rotation, translation),
-                    "intrinsics": _intrinsics_document(right),
-                },
-            ],
-        },
+        header,
         {
             "frame_metadata": rgbd.FRAME_METADATA_FILE,
             "points2d": {},
@@ -442,6 +634,7 @@ def convert_sequence(
 
     timestamps = read_frame_timestamps(data_handle)
     trajectory = read_trajectory(pose_handle)
+    imu = read_imu(data_handle)
 
     left_images = data_handle["ovc/left/data"]
     right_images = data_handle["ovc/right/data"]
@@ -525,8 +718,11 @@ def convert_sequence(
         + "\n",
         encoding="utf-8",
     )
+    imu_section, imu_samples = write_imu(
+        sequence_dir, left_calibration, imu, frame_timestamps[0], frame_timestamps[-1]
+    )
     (sequence_dir / rgbd.EDEX_FILE).write_text(
-        json.dumps(edex_document(left_calibration, right_calibration, len(names)), indent=4) + "\n",
+        render_edex(edex_document(left_calibration, right_calibration, len(names), imu_section)),
         encoding="utf-8",
     )
 
@@ -553,8 +749,17 @@ def convert_sequence(
         },
         "frame_limit": frame_limit,
     }
+    add_imu_metadata(metadata, imu, imu_samples)
     write_state(sequence_dir, frame_limit, metadata)
     return metadata
+
+
+def add_imu_metadata(metadata: Dict[str, object], imu: ImuStream, converted_samples: int) -> None:
+    """Record a sequence's IMU counts in its metadata entry."""
+    metadata.setdefault("source_counts", {})["imu_samples"] = int(imu.timestamps.size) + imu.dropped_samples
+    metadata.setdefault("converted_counts", {})["imu_samples"] = converted_samples
+    metadata["imu_dropped_samples"] = imu.dropped_samples
+    metadata["imu_max_gap_ms"] = imu.max_gap_us / 1000
 
 
 def write_state(
@@ -617,7 +822,12 @@ def existing_frame_count(sequence_dir: Path, frame_limit: Optional[int] = None) 
     elif state.get("frame_limit") != frame_limit or "metadata" not in state:
         return None
     metadata = sequence_dir / rgbd.FRAME_METADATA_FILE
-    required = (metadata, sequence_dir / rgbd.GROUND_TRUTH_FILE, sequence_dir / rgbd.EDEX_FILE)
+    required = (
+        metadata,
+        sequence_dir / rgbd.GROUND_TRUTH_FILE,
+        sequence_dir / IMU_FILE,
+        sequence_dir / rgbd.EDEX_FILE,
+    )
     if not all(path.is_file() and path.stat().st_size for path in required):
         return None
     with metadata.open(encoding="utf-8") as stream:
@@ -674,6 +884,20 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def imu_metadata() -> Dict[str, object]:
+    """Describe the IMU stream for ``dataset_metadata.json``."""
+    return {
+        "source": "/ovc/imu/{ts,omega,accel} from _data.h5",
+        "sensor": "VectorNav VN-100",
+        "frequency_hz": IMU_FREQUENCY_HZ,
+        "extrinsic": "/ovc/imu/calib/T_to_prophesee_left, expressed in the left OVC camera",
+        "span": "samples from the first to the last converted frame, inclusive",
+        "dropouts": "source rows with an INT64_MIN timestamp and NaN values are removed",
+        "noise_model": "daniilidis-group/m3ed@2b39788b930b69269cd55d251571962b6adc6b4a:"
+        "build_system/calibration/vn100.yaml",
+    }
+
+
 def _dataset_metadata(
     config_names: List[str], sequence_metadata: List[Dict[str, object]]
 ) -> Dict[str, object]:
@@ -697,6 +921,7 @@ def _dataset_metadata(
             "frame": "left event camera",
             "camera_extrinsic_applied": True,
         },
+        "imu": imu_metadata(),
         "reporter_configs": config_names,
         "sequences": sequence_metadata,
     }
