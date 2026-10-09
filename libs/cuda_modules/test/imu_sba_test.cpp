@@ -69,8 +69,8 @@ struct Scenario {
 
 // Ground truth is generated with the same discrete integration scheme as IMUPreintegration::update_state,
 // so keyframe states agree exactly with the preintegrated measurements.
-// exact: pure translation with no gyro bias, image noise or initial perturbation, so every inertial rotation
-// residual is the identity.
+// exact: pure translation with no gyro bias, image noise or rotation perturbation, so every inertial rotation
+// residual is the identity; optimized poses get a fixed translation offset so the solve still has work to do.
 Scenario MakeScenario(uint32_t seed, const Shape& shape = kParityShape, bool exact = false) {
   Scenario s;
   std::mt19937 rng(seed);
@@ -179,6 +179,9 @@ Scenario MakeScenario(uint32_t seed, const Shape& shape = kParityShape, bool exa
     Pose pose = truth[k];
     pose.gyro_bias.setZero();
     pose.acc_bias.setZero();
+    if (exact && k >= shape.num_fixed) {
+      pose.w_from_imu.translation() += Vector3T(0.01f, -0.01f, 0.01f);
+    }
     if (!exact && k >= shape.num_fixed) {
       pose.w_from_imu.linear() =
           pose.w_from_imu.linear() * ExpSO3(Vector3T(rot_noise(rng), rot_noise(rng), rot_noise(rng)));
@@ -206,6 +209,20 @@ Scenario MakeScenario(uint32_t seed, const Shape& shape = kParityShape, bool exa
   return s;
 }
 
+void ExpectSameSolution(const ImuBAProblem& cpu_problem, const ImuBAProblem& gpu_problem) {
+  EXPECT_NEAR(cpu_problem.initial_cost, gpu_problem.initial_cost, 1e-4f * cpu_problem.initial_cost);
+  for (size_t k = cpu_problem.num_fixed_key_frames; k < cpu_problem.rig_poses.size(); ++k) {
+    SCOPED_TRACE(k);
+    const Pose& c = cpu_problem.rig_poses[k];
+    const Pose& g = gpu_problem.rig_poses[k];
+    EXPECT_LT(RotationDistance(c.w_from_imu.linear(), g.w_from_imu.linear()), 1e-3f);
+    EXPECT_LT((c.w_from_imu.translation() - g.w_from_imu.translation()).norm(), 2e-3f);
+    EXPECT_LT((c.velocity - g.velocity).norm(), 5e-3f);
+    EXPECT_LT((c.gyro_bias - g.gyro_bias).norm(), 1e-3f);
+    EXPECT_LT((c.acc_bias - g.acc_bias).norm(), 1e-2f);
+  }
+}
+
 TEST(ImuSbaGpu, MatchesCpuBundler) {
   for (uint32_t seed : {1u, 2u, 3u}) {
     SCOPED_TRACE(seed);
@@ -218,18 +235,7 @@ TEST(ImuSbaGpu, MatchesCpuBundler) {
     IMUBundlerGpuFixedVel gpu(s.calib);
     ASSERT_TRUE(cpu.solve(cpu_problem));
     ASSERT_TRUE(gpu.solve(gpu_problem));
-    EXPECT_NEAR(cpu_problem.initial_cost, gpu_problem.initial_cost, 1e-4f * cpu_problem.initial_cost);
-
-    for (int k = kParityShape.num_fixed; k < kParityShape.num_poses; ++k) {
-      SCOPED_TRACE(k);
-      const Pose& c = cpu_problem.rig_poses[k];
-      const Pose& g = gpu_problem.rig_poses[k];
-      EXPECT_LT(RotationDistance(c.w_from_imu.linear(), g.w_from_imu.linear()), 1e-3f);
-      EXPECT_LT((c.w_from_imu.translation() - g.w_from_imu.translation()).norm(), 2e-3f);
-      EXPECT_LT((c.velocity - g.velocity).norm(), 5e-3f);
-      EXPECT_LT((c.gyro_bias - g.gyro_bias).norm(), 1e-3f);
-      EXPECT_LT((c.acc_bias - g.acc_bias).norm(), 1e-2f);
-    }
+    ExpectSameSolution(cpu_problem, gpu_problem);
   }
 }
 
@@ -240,11 +246,9 @@ TEST(ImuSbaGpu, HandlesNearIdentityRotationResiduals) {
   ImuBAProblem gpu_problem = s.problem;
   IMUBundlerCpuFixedVel cpu(s.calib);
   IMUBundlerGpuFixedVel gpu(s.calib);
-  cpu.solve(cpu_problem);
-  gpu.solve(gpu_problem);
-  ASSERT_TRUE(std::isfinite(cpu_problem.initial_cost));
-  ASSERT_TRUE(std::isfinite(gpu_problem.initial_cost));
-  EXPECT_NEAR(gpu_problem.initial_cost, cpu_problem.initial_cost, 1e-3f * cpu_problem.initial_cost + 1e-3f);
+  ASSERT_TRUE(cpu.solve(cpu_problem));
+  ASSERT_TRUE(gpu.solve(gpu_problem));
+  ExpectSameSolution(cpu_problem, gpu_problem);
 }
 
 // The inertial rotation residual is Log(dR^T * R1^T * R2). The SVD formulation that computed it before eigen-
