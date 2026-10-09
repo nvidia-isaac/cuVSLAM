@@ -12,41 +12,15 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
-set(MODULE_NAME "sba")
-
-set(HEADERS
-    bundle_adjustment_problem.h
-    mono_sba_solver.h
-    sba_config.h
-    sba_config_gflags.h
-    schur_complement_bundler_cpu.h
-    )
-
 set(SOURCES
-    mono_sba_solver.cpp
-    schur_complement_bundler_cpu.cpp
-    )
-
-
+        sba_config_test.cpp
+        )
 set(LIBS
-    camera
-    common
-    cuvslam_math
-    epipolar
-    profiler
-)
+        sba
+        )
 
-if(USE_CUDA)
-    set(HEADERS ${HEADERS} schur_complement_bundler_gpu.h)
-    set(SOURCES ${SOURCES} schur_complement_bundler_gpu.cpp)
-    set(LIBS ${LIBS} cuda_modules)
-endif()
-
-setup_staticlib_project(
-        MODULE_NAME "${MODULE_NAME}"
-        HEADERS ${HEADERS}
-        SOURCES ${SOURCES}
+setup_test_project(
+        MODULE_NAME ${MODULE_NAME}
         LIBRARIES ${LIBS}
+        SOURCES ${SOURCES}
 )
-
-add_subdirectory(test)
