@@ -378,6 +378,7 @@ NB_MODULE(pycuvslam, m) {
       m, "PoseEstimate",
       "Rig pose estimate from the tracker. The pose is world_from_rig where:\n\n"
       "The rig coordinate frame is user-defined and depends on the extrinsic parameters of the cameras.\n"
+      "Mono mode is the exception: it tracks camera 0 as the rig, so camera 0 must sit at the rig origin.\n"
       "The world coordinate frame is an arbitrary 3D coordinate frame, corresponding to the rig frame at the start of "
       "tracking.")
       .def(nb::init<>())
@@ -402,7 +403,8 @@ NB_MODULE(pycuvslam, m) {
   nb::class_<Landmark>(m, "Landmark", "3D landmark point")
       .def(nb::init<>())
       .def_rw("id", &Landmark::id, "Unique ID of the landmark")
-      .def_rw("coords", &Landmark::coords, "3D coordinates of the landmark in the world coordinate frame")
+      .def_rw("coords", &Landmark::coords,
+              "3D coordinates of the landmark in the rig coordinate frame of the VO frame it comes from")
       .def("__repr__",
            [](const Landmark& l) { return nb::str("cuvslam.Landmark(id={}, coords={})").format(l.id, l.coords); });
 
@@ -439,7 +441,9 @@ NB_MODULE(pycuvslam, m) {
              "Uses stereo camera and IMU measurements. A single stereo-camera with a single IMU is supported.")
       .value("RGBD", Odometry::OdometryMode::RGBD,
              "Uses RGB-D camera for tracking. A single RGB-D camera is supported. RGB & Depth images must be aligned.")
-      .value("Mono", Odometry::OdometryMode::Mono, "Uses a single camera, tracking is accurate up to scale.")
+      .value("Mono", Odometry::OdometryMode::Mono,
+             "Uses a single camera, tracking is accurate up to scale. Camera 0 is tracked as the rig, so its "
+             "rig_from_camera must be identity.")
       .value("Multisensor", Odometry::OdometryMode::Multisensor,
              "EXPERIMENTAL unified multi-sensor mode. Tracking may be inaccurate or fail for some sensor "
              "configurations and scenes. Supports any mix of plain RGB cameras, RGB-D cameras (any subset of the rig), "
@@ -740,7 +744,7 @@ NB_MODULE(pycuvslam, m) {
       .def(
           "get_last_landmarks", [](Odometry& self) -> std::vector<Landmark> { return self.GetLastLandmarks(); },
           "Get an array of landmarks from the last VO frame.\n\n"
-          "Landmarks are 3D points in the last camera frame.\n"
+          "Landmarks are 3D points in the rig frame of the last VO frame.\n"
           "Requires `enable_landmarks_export=True` in :class:`Odometry.Config`.")
       .def(
           "get_last_gravity",
