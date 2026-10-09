@@ -39,7 +39,11 @@ env:
 jobs:
   provision:
     name: "Provision ${{ github.event.inputs.dataset }}"
-    if: github.ref == 'refs/heads/main'
+    # On the m3ed-imu-patch branch only, the job patches the existing m3ed_spot
+    # tarball instead of provisioning it.
+    if: >-
+      github.ref == 'refs/heads/main' ||
+      (github.ref == 'refs/heads/vikuznetsov/m3ed-imu-patch' && github.event.inputs.dataset == 'm3ed_spot')
     runs-on: [gpu]
     timeout-minutes: 360
     steps:
@@ -82,12 +86,16 @@ jobs:
           DATASET: ${{ github.event.inputs.dataset }}
           FORCE_DOWNLOAD: ${{ github.event.inputs.force_download }}
           DRY_RUN: ${{ github.event.inputs.dry_run }}
-          AWS_ACCESS_KEY_ID: ${{ github.event.inputs.dry_run != 'true' && secrets.AWS_S3_ACCESS_KEY_ID || '' }}
-          AWS_SECRET_ACCESS_KEY: ${{ github.event.inputs.dry_run != 'true' && secrets.AWS_S3_SECRET_ACCESS_KEY || '' }}
+          AWS_ACCESS_KEY_ID: ${{ github.event.inputs.dry_run != 'true' && secrets.AWS_S3_ACCESS_KEY_ID || (github.ref == 'refs/heads/vikuznetsov/m3ed-imu-patch' && secrets.AWS_S3_RO_ACCESS_KEY_ID || '') }}
+          AWS_SECRET_ACCESS_KEY: ${{ github.event.inputs.dry_run != 'true' && secrets.AWS_S3_SECRET_ACCESS_KEY || (github.ref == 'refs/heads/vikuznetsov/m3ed-imu-patch' && secrets.AWS_S3_RO_SECRET_ACCESS_KEY || '') }}
         run: |
           host_work="$RUNNER_TEMP/provision-work-${GITHUB_RUN_ID}"
           container_work=/tmp/cuvslam-provision
           provision_image=cuvslam-ci:local
+          script=./scripts/provision_dataset.sh
+          if [ "$GITHUB_REF" = refs/heads/vikuznetsov/m3ed-imu-patch ]; then
+            script=./scripts/patch_m3ed_imu.sh
+          fi
           if [ "$DATASET" = tartan ]; then
             provision_image=cuvslam-dataset-provision:local
           fi
@@ -99,4 +107,5 @@ jobs:
             -v "$(pwd):/cuvslam:ro" \
             -v "$host_work:$container_work" \
             -w /cuvslam \
-            "$provision_image" ./scripts/provision_dataset.sh "$DATASET"
+            -e PATCH_WORK_DIR="$container_work" \
+            "$provision_image" "$script" "$DATASET"
