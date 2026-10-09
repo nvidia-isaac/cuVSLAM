@@ -78,15 +78,15 @@ def parse_depth_description(config_data) -> DepthDescription:
     # A malformed value propagates rather than being skipped or defaulted: dropping
     # a depth_id would track a rig with fewer depth cameras than it declares, and
     # defaulting a scale would read depth in raw units.
-    camera_ids = []
+    depth_camera_ids = []
     scale_by_camera = {}
     for cam in cameras:
         if not isinstance(cam, dict) or 'depth_id' not in cam:
             continue  # Skip invalid or depth-less camera entries
 
-        camera_id = int(cam['depth_id'])
-        camera_ids.append(camera_id)
-        scale_by_camera[camera_id] = float(cam.get('depth_scale_factor', 1.0))
+        depth_camera_id = int(cam['depth_id'])
+        depth_camera_ids.append(depth_camera_id)
+        scale_by_camera[depth_camera_id] = float(cam.get('depth_scale_factor', 1.0))
 
     distinct_scales = set(scale_by_camera.values())
     if len(distinct_scales) > 1:
@@ -115,7 +115,7 @@ def parse_depth_description(config_data) -> DepthDescription:
             scale_factor = NPY_DEPTH_SCALE_FACTOR
 
     return DepthDescription(
-        camera_ids=tuple(camera_ids),
+        camera_ids=tuple(depth_camera_ids),
         scale_factor=scale_factor,
         enable_depth_stereo_tracking=config_data[0].get('enable_depth_stereo_tracking', False),
     )
@@ -143,7 +143,7 @@ def single_depth_camera_id(description: DepthDescription) -> int:
 
 
 def remap_depth_camera_ids(
-    camera_ids: Sequence[int],
+    depth_camera_ids: Sequence[int],
     camera_id_map: Optional[Mapping[int, int]],
     requested_camera_ids: Optional[Sequence[int]] = None,
 ) -> list[int]:
@@ -154,13 +154,27 @@ def remap_depth_camera_ids(
             otherwise leave the settings pointing at an unrelated camera.
     """
     if camera_id_map is None:
-        return list(camera_ids)
+        return list(depth_camera_ids)
 
     remapped = []
-    for camera_id in camera_ids:
-        if camera_id not in camera_id_map:
+    for depth_camera_id in depth_camera_ids:
+        if depth_camera_id not in camera_id_map:
             raise ValueError(
-                f"depth camera id {camera_id} is not included in camera_ids {requested_camera_ids}."
+                f"depth camera id {depth_camera_id} is not included in camera_ids {requested_camera_ids}."
             )
-        remapped.append(camera_id_map[camera_id])
+        remapped.append(camera_id_map[depth_camera_id])
     return remapped
+
+
+def select_depth_camera_ids(
+    depth_camera_ids: Sequence[int],
+    camera_id_map: Optional[Mapping[int, int]],
+) -> list[int]:
+    """Keep the depth cameras a filtered rig still contains, in its contiguous camera-id space.
+
+    Multisensor fuses any subset of the rig's depth cameras, so a depth camera filtered
+    out of the rig is left out rather than rejected.
+    """
+    if camera_id_map is None:
+        return list(depth_camera_ids)
+    return [camera_id_map[depth_camera_id] for depth_camera_id in depth_camera_ids if depth_camera_id in camera_id_map]

@@ -530,8 +530,8 @@ class EdexReader(DatasetReader):
             ) from e
 
         multisensor_settings = vslam.Odometry.MultisensorSettings()
-        multisensor_settings.depth_camera_ids = depth_config.remap_depth_camera_ids(
-            description.camera_ids, self.camera_id_map, self.camera_ids
+        multisensor_settings.depth_camera_ids = depth_config.select_depth_camera_ids(
+            description.camera_ids, self.camera_id_map
         )
         multisensor_settings.depth_scale_factor = description.scale_factor
         # enable_depth_stereo_tracking keeps the binding default of True, matching
@@ -818,10 +818,11 @@ class EdexReader(DatasetReader):
             if frame_data["imu_data"] and not seam_skip_imu:
                 imu_data = frame_data["imu_data"]
                 for imu_measurement in imu_data:
-                    # Normalize timestamp to integer nanoseconds (handles float/int and various scales).
+                    # load_imu_data() already normalized the timestamp to integer nanoseconds; normalizing again
+                    # would treat zero-based nanoseconds as seconds.
                     # adjust_timestamp() offsets by current_loop for Repeat mode; pass-through otherwise.
                     # Shuttle blocks inertial mode upstream.
-                    original_ts = self.normalize_timestamp_to_ns(imu_measurement['timestamp'])
+                    original_ts = imu_measurement['timestamp']
                     if in_repeat and original_ts > self.max_ts:
                         continue
                     timestamp = self.adjust_timestamp(original_ts)

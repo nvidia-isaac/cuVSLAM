@@ -142,5 +142,19 @@ class TestRemapDepthCameraIds(unittest.TestCase):
             depth_config.remap_depth_camera_ids([0], {1: 0}, [1])
 
 
+
+class TestSelectDepthCameraIds(unittest.TestCase):
+    def test_an_unfiltered_rig_keeps_every_depth_camera(self):
+        self.assertEqual(depth_config.select_depth_camera_ids([0, 1, 2, 3], None), [0, 1, 2, 3])
+
+    def test_depth_cameras_filtered_out_of_the_rig_are_left_out(self):
+        self.assertEqual(depth_config.select_depth_camera_ids([0, 1, 2, 3], {0: 0, 1: 1}), [0, 1])
+
+    def test_kept_depth_cameras_follow_the_filtered_rig(self):
+        self.assertEqual(depth_config.select_depth_camera_ids([1, 3], {1: 0, 2: 1, 3: 2}), [0, 2])
+
+    def test_a_rig_without_selected_depth_cameras_runs_without_depth(self):
+        self.assertEqual(depth_config.select_depth_camera_ids([2, 3], {0: 0, 1: 1}), [])
+
 if __name__ == "__main__":
     unittest.main()
