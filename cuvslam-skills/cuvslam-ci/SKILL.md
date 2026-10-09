@@ -98,8 +98,8 @@ The release procedure, including patch releases and the cherry-pick rule, is in 
 2. Manually dispatch `Nightly Build & Test` from that branch. Release dispatches always build, even without commits in the last 24 hours.
 3. At dispatch, before the matrix and evaluation jobs start, `check-changes` validates the branch name against `VERSION`, derives the tag from the branch (`release/v17.0.1` -> `v17.0.1`, requiring `VERSION` = `17.0.1`), and fails if a Release or tag for that version already exists.
 4. After every matrix job and evaluation succeeds, `publish-release` rechecks that the tag is still free and creates a draft Release containing the already-built C++ archives, wheels, documentation, and permanent evaluation bundle.
-5. Review the draft and publish it manually. Never create the tag beforehand, because an existing draft/published Release or tag with the same version makes the workflow refuse to run.
-6. To rebuild an unpublished release after fixes, explicitly delete the old draft and its tag (never the tag of a published release), then dispatch the updated release branch again.
+5. Review the draft and publish it manually. The draft has no git tag (`untagged-…` URL); publishing creates it at the built commit. Never create the tag beforehand, because an existing draft/published Release or tag with the same version makes the workflow refuse to run.
+6. To rebuild an unpublished release after fixes, explicitly delete the old draft, plus any hand-made tag for the version (never the tag of a published release), then dispatch the updated release branch again.
 
 Scheduled nightlies publish only versioned 30-day Actions artifacts. They never create or update a GitHub Release.
 
