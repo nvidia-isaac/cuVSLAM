@@ -22,6 +22,7 @@ set(SOURCES
         gftt_test.cpp
         st_tracker_test.cpp
         sba_test.cpp
+        imu_sba_test.cpp
         icp_tools_test.cpp
         )
 
@@ -33,6 +34,7 @@ set(LIBS
     utils
     log
     sba
+    imu
     cuda_modules
     cuda_kernels
     cuvslam_math
