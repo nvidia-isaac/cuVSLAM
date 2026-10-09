@@ -117,8 +117,8 @@ for attempt in 1 2; do
   sync
   tar_rc=0
   tar -C "$upload_src" -cf "$tarball" \
-    --checkpoint=1000 \
-    --checkpoint-action=echo='tar checkpoint %d' \
+    --checkpoint=100000 \
+    --checkpoint-action=echo='%T' \
     --totals \
     . || tar_rc=$?
   if [ "$tar_rc" -eq 0 ]; then
