@@ -83,7 +83,9 @@ fi
 
 backup="${s3_tarball%.tar}.pre-imu-$(date -u +%Y%m%d%H%M%S).tar"
 echo "=== Backing up the original to $backup ==="
-aws s3 cp "$s3_tarball" "$backup" --no-progress
+# The default copy also copies tags, which needs s3:GetObjectTagging; the
+# provisioning key does not have it.
+aws s3 cp "$s3_tarball" "$backup" --copy-props metadata-directive --no-progress
 
 echo "=== Uploading to $s3_tarball ==="
 aws s3 cp "$tarball" "$s3_tarball" --no-progress
