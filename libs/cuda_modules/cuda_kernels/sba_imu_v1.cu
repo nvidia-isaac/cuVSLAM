@@ -67,7 +67,10 @@ __device__ __forceinline__ cuvslam::cuda::Matf33 Exp(const cuvslam::cuda::Vecf3&
   return res;
 }
 
-__device__ __forceinline__ void Log(cuvslam::cuda::Vecf3& result, const cuvslam::cuda::Matf33& m, float threshold) {
+// Axis from the SVD of (m - I). Accurate near pi, but the closed-form SVD of (m - I) underflows to inf/NaN in float
+// once the angle drops below ~1e-6 rad.
+__device__ __forceinline__ void LogFromSvd(cuvslam::cuda::Vecf3& result, const cuvslam::cuda::Matf33& m,
+                                           float threshold) {
   cuvslam::cuda::Matf33 a = m;
   a.d_[0][0] -= 1.f;
   a.d_[1][1] -= 1.f;
@@ -86,6 +89,25 @@ __device__ __forceinline__ void Log(cuvslam::cuda::Vecf3& result, const cuvslam:
 
   float wmag = atan2f(dot(rvec, wvec), trace(a) + 2.f);
   mul(wmag, wvec, result);
+}
+
+// Axis from the skew part of m, which is exact near the identity, where converged inertial residuals live. The skew
+// part vanishes near pi, so the axis error grows as ~1e-7 / (pi - angle) there and LogFromSvd() takes over.
+__device__ __forceinline__ void Log(cuvslam::cuda::Vecf3& result, const cuvslam::cuda::Matf33& m, float threshold) {
+  cuvslam::cuda::Vecf3 rvec;  // 2 * sin(theta) * axis
+  rvec.d_[0] = m.d_[2][1] - m.d_[1][2];
+  rvec.d_[1] = m.d_[0][2] - m.d_[2][0];
+  rvec.d_[2] = m.d_[1][0] - m.d_[0][1];
+  const float two_sin = sqrtf(dot(rvec, rvec));
+  const float two_cos = trace(m) - 1.f;
+  if (two_cos < -1.9f) {
+    LogFromSvd(result, m, threshold);
+    return;
+  }
+  const float theta = atan2f(two_sin, two_cos);
+  // theta / (2 sin(theta)), with its Taylor expansion where the division loses precision.
+  const float scale = (theta < 1e-3f) ? 0.5f * (1.f + theta * theta * (1.f / 6.f)) : theta / two_sin;
+  mul(scale, rvec, result);
 }
 
 __device__ __forceinline__ cuvslam::cuda::Vecf3 Log(const cuvslam::cuda::Matf33& m, float threshold) {
@@ -412,8 +434,7 @@ __global__ void evaluate_cost_stage_1_kernel(
     const cuvslam::cuda::Matf33* __restrict__ problem_rig_poses_preint_gyro_random_walk_accum_info_matrix__ptr,
     cuvslam::cuda::Matf33* __restrict__ imu_from_w_linear, float* __restrict__ imu_from_w_translation,
     float* __restrict__ cost_ptr, float threshold, int num_poses, int num_fixed_key_frames, float prior_gyro,
-    float prior_acc, float3 gravity, float imu_penalty, float boundary_imu_penalty, float acc_rw_penalty,
-    float robustifier_scale_pose) {
+    float prior_acc, float3 gravity, float imu_penalty, float boundary_imu_penalty, float acc_rw_penalty) {
   float cost = 0.f;
 
   const int pose_id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -637,9 +658,7 @@ __global__ void evaluate_cost_stage_1_kernel(
       inertial_error.d_[7] = v2.d_[1];
       inertial_error.d_[8] = v2.d_[2];
 
-      cost +=
-          ComputeHuberLoss(eff_penalty * dot(inertial_error, problem_rig_poses_preint_info_matrix_ * inertial_error),
-                           robustifier_scale_pose);
+      cost += eff_penalty * dot(inertial_error, problem_rig_poses_preint_info_matrix_ * inertial_error);
     }
   }
 
@@ -1515,8 +1534,8 @@ __global__ void build_full_system_stage_3_kernel(
     const float* __restrict__ model_random_walk_gyro_residuals_ptr,
     const float* __restrict__ model_random_walk_acc_residuals_ptr, const float* __restrict__ problem_rig_poses_other,
     float* __restrict__ full_system_pose_block, int full_system_pose_block_pitch,
-    float* __restrict__ full_system_pose_rhs, int num_poses, int num_fixed_key_frames, float robustifier_scale_pose,
-    float imu_penalty, float boundary_imu_penalty, float acc_rw_penalty, float prior_gyro, float prior_acc) {
+    float* __restrict__ full_system_pose_rhs, int num_poses, int num_fixed_key_frames, float imu_penalty,
+    float boundary_imu_penalty, float acc_rw_penalty, float prior_gyro, float prior_acc) {
   int x = threadIdx.x;
   int y = threadIdx.y;
   int id = blockIdx.x;
@@ -1558,7 +1577,6 @@ __global__ void build_full_system_stage_3_kernel(
 
     cuvslam::cuda::Vecf9 e;
     for (int j = 0; j < 9; ++j) e.d_[j] = model_inertial_residuals[i * 9 + j];
-    float w = ComputeDHuberLoss(dot(e, info * e), robustifier_scale_pose);
 
     const bool is_acc_block = ((x == 4) || (x == 9)) || ((y == 4) || (y == 9));
     const float rw_penalty_this_edge =
@@ -1625,7 +1643,7 @@ __global__ void build_full_system_stage_3_kernel(
       }
       cuvslam::cuda::Matf93 m_right = m_right_ptr[i];
 
-      cuvslam::cuda::Matf33 h = (w * imu_penalty) * (transp(m_left) * info * m_right);
+      cuvslam::cuda::Matf33 h = imu_penalty * (transp(m_left) * info * m_right);
       if (y > x) h = transp(h);
 
       m = m + h;
@@ -1662,7 +1680,7 @@ __global__ void build_full_system_stage_3_kernel(
       }
       cuvslam::cuda::Matf93 m_left = m_left_ptr[i];
 
-      v = v - (w * imu_penalty) * (transp(m_left) * (info * e));
+      v = v - imu_penalty * (transp(m_left) * (info * e));
 
       if ((x == 3) || (x == 4)) {
         v = v - info_gyro_or_acc_rw * model_random_walk_gyro_or_acc_residuals;
@@ -1678,8 +1696,6 @@ __global__ void build_full_system_stage_3_kernel(
 
     cuvslam::cuda::Vecf9 e;
     for (int j = 0; j < 9; ++j) e.d_[j] = model_inertial_residuals[(i - 1) * 9 + j];
-
-    float w = ComputeDHuberLoss(dot(e, info * e), robustifier_scale_pose);
 
     int min_xy = min(x, y);
     int max_xy = max(x, y);
@@ -1712,7 +1728,7 @@ __global__ void build_full_system_stage_3_kernel(
     }
     cuvslam::cuda::Matf93 m_right = m_right_ptr[i - 1];
 
-    cuvslam::cuda::Matf33 h = (w * eff_penalty_prev) * (transp(m_left) * info * m_right);
+    cuvslam::cuda::Matf33 h = eff_penalty_prev * (transp(m_left) * info * m_right);
     if (y > x) h = transp(h);
 
     m = m + h;
@@ -1731,7 +1747,7 @@ __global__ void build_full_system_stage_3_kernel(
           break;
       }
       cuvslam::cuda::Matf93 m_left = m_left_ptr[i - 1];
-      v = v - (w * eff_penalty_prev) * (transp(m_left) * (info * e));
+      v = v - eff_penalty_prev * (transp(m_left) * (info * e));
     }
   }  // if ((x < 3) && (y < 3))
 
@@ -1785,6 +1801,21 @@ __global__ void build_full_system_stage_3_kernel(
   }
   if ((x == y) && (x < 5)) {
     for (int j = 0; j < 3; ++j) full_system_pose_rhs[15 * id + 3 * x + j] = v.d_[j];
+  }
+}
+
+__global__ void so3_log_kernel(const cuvslam::cuda::Matf33* __restrict__ rotations,
+                               cuvslam::cuda::Vecf3* __restrict__ logs, int count, bool svd_based) {
+  const int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= count) {
+    return;
+  }
+  // Same threshold as the residual kernels.
+  const float threshold = 1e-4f;
+  if (svd_based) {
+    LogFromSvd(logs[i], rotations[i], threshold);
+  } else {
+    Log(logs[i], rotations[i], threshold);
   }
 }
 
@@ -1882,8 +1913,8 @@ cudaError_t evaluate_cost(
     const cuvslam::cuda::Matf22* problem_observation_infos, cuvslam::cuda::Matf33* imu_from_w_linear,
     float* imu_from_w_translation, float* cost, int* num_skipped, float* partial_costs, float threshold, int num_poses,
     int num_observations, int num_fixed_key_frames, float prior_gyro, float prior_acc, float3 gravity,
-    float imu_penalty, float boundary_imu_penalty, float acc_rw_penalty, float robustifier_scale_pose,
-    float robustifier_scale, const cuvslam::cuda::Matf33& calib_left_from_imu_linear,
+    float imu_penalty, float boundary_imu_penalty, float acc_rw_penalty, float robustifier_scale,
+    const cuvslam::cuda::Matf33& calib_left_from_imu_linear,
     const cuvslam::cuda::Vecf3& calib_left_from_imu_translation, cudaStream_t s) {
   {
     const int THREADBLOCK_SIZE = 32;
@@ -1897,7 +1928,7 @@ cudaError_t evaluate_cost(
         problem_rig_poses_preint_acc_random_walk_accum_info_matrix_,
         problem_rig_poses_preint_gyro_random_walk_accum_info_matrix_, imu_from_w_linear, imu_from_w_translation, cost,
         threshold, num_poses, num_fixed_key_frames, prior_gyro, prior_acc, gravity, imu_penalty, boundary_imu_penalty,
-        acc_rw_penalty, robustifier_scale_pose);
+        acc_rw_penalty);
     const cudaError_t error = cudaGetLastError();
     if (error != cudaSuccess) return error;
   }
@@ -2063,8 +2094,8 @@ cudaError_t build_full_system(
     cuvslam::cuda::Matf33* full_system_point_block, float* full_system_point_rhs,
     float* full_system_point_pose_block_transposed, int full_system_point_pose_block_transposed_pitch,
     float* full_system_pose_block, int full_system_pose_block_pitch, float* full_system_pose_rhs, int num_observations,
-    int num_points, int num_poses, int num_fixed_key_frames, float robustifier_scale_pose, float imu_penalty,
-    float boundary_imu_penalty, float acc_rw_penalty, float prior_gyro, float prior_acc, cudaStream_t s) {
+    int num_points, int num_poses, int num_fixed_key_frames, float imu_penalty, float boundary_imu_penalty,
+    float acc_rw_penalty, float prior_gyro, float prior_acc, cudaStream_t s) {
   int num_poses_opt = num_poses - num_fixed_key_frames;
 
   {
@@ -2133,8 +2164,8 @@ cudaError_t build_full_system(
         model_inertial_jacobians_jv_right, problem_rig_poses_preint_acc_random_walk_accum_info_matrix_,
         problem_rig_poses_preint_gyro_random_walk_accum_info_matrix_, model_random_walk_gyro_residuals,
         model_random_walk_acc_residuals, problem_rig_poses_other, full_system_pose_block, full_system_pose_block_pitch,
-        full_system_pose_rhs, num_poses, num_fixed_key_frames, robustifier_scale_pose, imu_penalty,
-        boundary_imu_penalty, acc_rw_penalty, prior_gyro, prior_acc);
+        full_system_pose_rhs, num_poses, num_fixed_key_frames, imu_penalty, boundary_imu_penalty, acc_rw_penalty,
+        prior_gyro, prior_acc);
     const cudaError_t error = cudaGetLastError();
     if (error != cudaSuccess) return error;
   }
@@ -2163,6 +2194,17 @@ cudaError_t init_update(cuvslam::cuda::Matf33* update_pose_w_from_imu_linear, fl
   }
 
   return cudaSuccess;
+}
+
+cudaError_t so3_log(const cuvslam::cuda::Matf33* rotations, cuvslam::cuda::Vecf3* logs, int count, bool svd_based,
+                    cudaStream_t s) {
+  if (count <= 0) {
+    return cudaSuccess;
+  }
+  const int THREADBLOCK_SIZE = 32;
+  const int blocks = (count + THREADBLOCK_SIZE - 1) / THREADBLOCK_SIZE;
+  so3_log_kernel<<<blocks, THREADBLOCK_SIZE, 0, s>>>(rotations, logs, count, svd_based);
+  return cudaGetLastError();
 }
 
 }  // namespace cuvslam::cuda::sba_imu

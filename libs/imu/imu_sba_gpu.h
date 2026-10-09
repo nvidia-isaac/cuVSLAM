@@ -105,7 +105,6 @@ private:
   int num_poses_opt_allocated;
   int num_poses_opt;
   float3 gravity;
-  float robustifier_scale_pose;
   float robustifier_scale;
   float prior_gyro;
   float prior_acc;
