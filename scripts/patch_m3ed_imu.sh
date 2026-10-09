@@ -67,7 +67,7 @@ echo "$changed file(s) changed"
 
 echo "=== Creating tarball ==="
 sync
-tar -C "$root" -cf "$tarball" --checkpoint=1000 --checkpoint-action=echo='tar checkpoint %d' --totals .
+tar -C "$root" -cf "$tarball" --checkpoint=100000 --checkpoint-action=echo='%T' --totals .
 ls -lh "$tarball"
 
 if [ "$DRY_RUN" = "true" ]; then
