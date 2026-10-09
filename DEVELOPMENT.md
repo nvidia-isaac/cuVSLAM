@@ -98,10 +98,18 @@ merge it there before dispatching.
 
 ### Tags and rebuilds
 
-- Do not create the release tag yourself. Publishing the draft creates it at the commit the workflow built.
+- Do not create the release tag yourself. The workflow creates the release for the commit it built, and the tag
+  belongs to that release.
 - The workflow refuses to run if a Release, draft or published, or a tag already exists for the version. A published
   version is never rebuilt: release a new patch version instead.
-- To rebuild an unpublished draft, delete the draft and dispatch the branch again.
+- To rebuild an unpublished draft, delete both the draft and its tag, then dispatch the branch again:
+
+  ```bash
+  gh release delete vX.Y.Z -y
+  git push origin :refs/tags/vX.Y.Z   # only if the tag exists
+  ```
+
+  Never delete the tag of a published release.
 - After publishing, the branch is no longer needed for that version. Keep it for the next patch or delete it; the
   next patch can branch from the tag.
 
