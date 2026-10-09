@@ -61,6 +61,34 @@ RIGHT_TO_PROPHESEE = np.array(
 )
 
 
+# The published IMU is mounted upside down relative to the event camera, a half
+# turn about y, and offset from it, so both the rotation and the translation of
+# the extrinsic are visible in the rig transform.
+IMU_TO_PROPHESEE = np.array(
+    [
+        [-1.0, 0.0, 0.0, 0.09],
+        [0.0, 1.0, 0.0, -0.06],
+        [0.0, 0.0, -1.0, -0.015],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+)
+IMU_INTERVAL_US = 2_500
+
+
+def _write_imu(ovc, first_us, last_us, **overrides):
+    stamps = np.arange(first_us, last_us + 1, IMU_INTERVAL_US, dtype=np.int64)
+    imu = ovc.create_group("imu")
+    imu.create_dataset("ts", data=overrides.get("imu_ts", stamps))
+    count = stamps.size
+    # Distinct per sample and per axis, so a dropped, shifted or swapped column
+    # is visible in the output.
+    omega = np.stack([np.arange(count) * 0.001 + axis for axis in (0.1, 0.2, 0.3)], axis=1)
+    accel = np.stack([np.arange(count) * 0.01 + axis for axis in (1.0, -9.8, 0.5)], axis=1)
+    imu.create_dataset("omega", data=overrides.get("imu_omega", omega))
+    imu.create_dataset("accel", data=overrides.get("imu_accel", accel))
+    imu.create_group("calib").create_dataset("T_to_prophesee_left", data=IMU_TO_PROPHESEE)
+
+
 def _write_calibration(group, intrinsics, distortion, transform):
     group.create_dataset("camera_model", data=b"pinhole")
     group.create_dataset("distortion_model", data=b"radtan")
@@ -78,6 +106,8 @@ def write_data_file(path, frames=6, first_us=0, interval_us=FRAME_INTERVAL_US, *
             [first_us + index * interval_us for index in range(frames)], dtype=np.int64
         )
         ovc.create_dataset("ts", data=overrides.get("ts", stamps))
+        # The real stream starts and ends a little outside the frames.
+        _write_imu(ovc, max(first_us - 10_000, 0), int(stamps[-1]) + 10_000, **overrides)
         for side, intrinsics, distortion, transform in (
             ("left", LEFT_INTRINSICS, LEFT_DISTORTION, LEFT_TO_PROPHESEE),
             ("right", RIGHT_INTRINSICS, RIGHT_DISTORTION, RIGHT_TO_PROPHESEE),
@@ -225,6 +255,79 @@ class TestSourceReading(unittest.TestCase):
                 self.assertAlmostEqual(transform[row][column], rotation[column][row])
             self.assertAlmostEqual(transform[row][3], translation[row])
 
+    def test_imu_timestamps_are_converted_to_nanoseconds(self):
+        with h5py.File(self._data(frames=3), "r") as handle:
+            imu = convert_m3ed_spot.read_imu(handle)
+        self.assertEqual(imu.timestamps[:3].tolist(), [0, 2_500_000, 5_000_000])
+        self.assertEqual(imu.angular_velocity.shape, (imu.timestamps.size, 3))
+
+    def _imu_with_dropouts(self, dropped, **changes):
+        stamps = np.arange(0, 400_000, IMU_INTERVAL_US, dtype=np.int64)
+        omega = np.ones((stamps.size, 3))
+        accel = np.ones((stamps.size, 3))
+        # The published placeholder: INT64_MIN timestamp, NaN on every axis.
+        stamps[dropped] = np.iinfo(np.int64).min
+        omega[dropped] = np.nan
+        accel[dropped] = np.nan
+        for name, (index, value) in changes.items():
+            {"ts": stamps, "omega": omega, "accel": accel}[name][index] = value
+        return self._data(frames=3, imu_ts=stamps, imu_omega=omega, imu_accel=accel)
+
+    def test_imu_dropout_rows_are_removed_and_counted(self):
+        with h5py.File(self._imu_with_dropouts([5, 6, 40]), "r") as handle:
+            imu = convert_m3ed_spot.read_imu(handle)
+        self.assertEqual(imu.dropped_samples, 3)
+        self.assertEqual(imu.timestamps.size, 160 - 3)
+        self.assertTrue(np.isfinite(imu.angular_velocity).all())
+        self.assertEqual(imu.max_gap_us, 3 * IMU_INTERVAL_US)
+        self.assertNotIn(5 * IMU_INTERVAL_US * 1000, imu.timestamps.tolist())
+
+    def test_a_nan_sample_at_a_real_timestamp_is_rejected(self):
+        path = self._imu_with_dropouts([5], omega=((7, 1), np.nan))
+        with h5py.File(path, "r") as handle:
+            with self.assertRaisesRegex(convert_m3ed_spot.ConversionError, "outside dropouts"):
+                convert_m3ed_spot.read_imu(handle)
+
+    def test_a_dropout_timestamp_holding_values_is_rejected(self):
+        path = self._imu_with_dropouts([5], accel=((5, 0), 1.0))
+        with h5py.File(path, "r") as handle:
+            with self.assertRaisesRegex(convert_m3ed_spot.ConversionError, "dropout timestamps"):
+                convert_m3ed_spot.read_imu(handle)
+
+    def test_an_imu_gap_longer_than_the_bound_is_rejected(self):
+        with h5py.File(self._imu_with_dropouts(list(range(10, 40))), "r") as handle:
+            with self.assertRaisesRegex(convert_m3ed_spot.ConversionError, "ms gap"):
+                convert_m3ed_spot.read_imu(handle)
+
+    def test_imu_at_another_rate_than_the_noise_model_is_rejected(self):
+        stamps = np.arange(0, 200_000, 5_000, dtype=np.int64)
+        path = self._data(
+            frames=3, imu_ts=stamps, imu_omega=np.zeros((stamps.size, 3)), imu_accel=np.zeros((stamps.size, 3))
+        )
+        with h5py.File(path, "r") as handle:
+            with self.assertRaisesRegex(convert_m3ed_spot.ConversionError, "median interval"):
+                convert_m3ed_spot.read_imu(handle)
+
+    def test_imu_sample_arrays_of_the_wrong_length_are_rejected(self):
+        path = self._data(frames=3, imu_omega=np.zeros((3, 3)))
+        with h5py.File(path, "r") as handle:
+            with self.assertRaisesRegex(convert_m3ed_spot.ConversionError, "ovc/imu/omega has shape"):
+                convert_m3ed_spot.read_imu(handle)
+
+    def test_edex_imu_transform_is_rig_from_imu_in_the_legacy_rig_axes(self):
+        with h5py.File(self._data(), "r") as handle:
+            left = convert_m3ed_spot.read_camera_calibration(handle, "left")
+            imu = convert_m3ed_spot.read_imu(handle)
+        transform = np.array(convert_m3ed_spot.imu_document(left, imu)["transform"])
+
+        # The rig is the left OVC camera, so the IMU's pose in it chains through
+        # the event camera both extrinsics point into.
+        rig_from_imu = np.linalg.inv(LEFT_TO_PROPHESEE) @ IMU_TO_PROPHESEE
+        # LegacyEdexImuExtrinsicToOpenCV left-multiplies by diag(1, -1, -1);
+        # undoing that must give back the OpenCV rig-from-IMU transform.
+        legacy_to_opencv = np.diag([1.0, -1.0, -1.0])
+        np.testing.assert_allclose(legacy_to_opencv @ transform, rig_from_imu[:3], atol=1e-12)
+
     def test_baseline_comes_from_the_two_extrinsics(self):
         with h5py.File(self._data(), "r") as handle:
             left = convert_m3ed_spot.read_camera_calibration(handle, "left")
@@ -261,7 +364,7 @@ class TestConvertSequence(unittest.TestCase):
             sorted(
                 entry.name for entry in sequence_dir.iterdir() if not entry.name.startswith(".")
             ),
-            ["00", "01", "frame_metadata.jsonl", "gt.txt", "stereo.edex"],
+            ["00", "01", "IMU.jsonl", "frame_metadata.jsonl", "gt.txt", "stereo.edex"],
         )
         self.assertEqual(metadata["converted_counts"]["frames"], 6)
         self.assertEqual(
@@ -315,6 +418,51 @@ class TestConvertSequence(unittest.TestCase):
         # Replay must use the real frame times, not a synthesized frame rate.
         self.assertEqual(metadata["frame_metadata"], "frame_metadata.jsonl")
         self.assertNotIn("fps", metadata)
+
+    def test_imu_spans_exactly_the_converted_frames(self):
+        metadata = self._convert(frame_limit=4)
+        lines = (self.output / self.sequence / "IMU.jsonl").read_text().splitlines()
+        samples = [json.loads(line) for line in lines]
+        # Frames 0..3 sit at 0..120 ms and the IMU ticks every 2.5 ms, both ends
+        # included.
+        self.assertEqual(samples[0]["timestamp"], 0)
+        self.assertEqual(samples[-1]["timestamp"], 120_000_000)
+        self.assertEqual(len(samples), 49)
+        self.assertEqual(metadata["converted_counts"]["imu_samples"], 49)
+        self.assertGreater(metadata["source_counts"]["imu_samples"], 49)
+        self.assertEqual(samples[0]["type"], "imu_data")
+        np.testing.assert_allclose(
+            [samples[1][axis] for axis in ("AngularVelocityX", "AngularVelocityY", "AngularVelocityZ")],
+            [0.101, 0.201, 0.301],
+        )
+        self.assertAlmostEqual(samples[1]["LinearAccelerationY"], -9.79)
+
+    def test_edex_imu_section_uses_the_key_names_the_reader_accepts(self):
+        self._convert()
+        rig = json.loads((self.output / self.sequence / "stereo.edex").read_text())[0]
+        # libs/edex/edex_internal.h reads these names; the longer
+        # accelerometer_*/gyroscope_* spellings are silently ignored.
+        self.assertEqual(
+            sorted(rig["imu"]),
+            [
+                "accel_noise_density",
+                "accel_random_walk",
+                "frequency",
+                "gyro_noise_density",
+                "gyro_random_walk",
+                "measurements",
+                "transform",
+            ],
+        )
+        self.assertEqual(rig["imu"]["measurements"], "IMU.jsonl")
+        self.assertEqual(rig["imu"]["frequency"], 400.0)
+        self.assertEqual(list(rig)[-1], "imu")
+
+    def test_an_output_without_imu_is_not_reused(self):
+        self._convert()
+        sequence_dir = self.output / self.sequence
+        (sequence_dir / "IMU.jsonl").unlink()
+        self.assertIsNone(convert_m3ed_spot.existing_frame_count(sequence_dir))
 
     def test_ground_truth_applies_the_event_camera_extrinsic(self):
         self._convert()
