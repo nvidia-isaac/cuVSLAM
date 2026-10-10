@@ -15,9 +15,11 @@
 
 """Collect, compare, aggregate, and render cuVSLAM evaluation KPIs.
 
-Runner-local port of the OSMO osmo_reporter (full_kpis_report.py). The KPI math
-(ATE / ARE / Kabsch / Losts / FPS, per dataset, ODOM + SLAM) is unchanged; the
-OSMO-specific output paths and the Slack webhook notification are removed so the
+Runner-local port of the OSMO osmo_reporter (full_kpis_report.py). KPIs are
+ATE / ARE / Kabsch / KabschRot / Losts / Failed / FPS, per dataset, ODOM + SLAM. ATE and
+ARE are segment drift (%, º/m); Kabsch and KabschRot are absolute errors after
+aligning the whole trajectory to ground truth, shown as ATE RMSE (m) and ARE
+RMSE (º). The OSMO-specific output paths and the Slack webhook notification are removed so the
 script runs on the GitHub Actions gpu runner with only the standard library.
 
 The ``collect`` command converts cuvslam_app stats into machine-readable raw and
@@ -31,7 +33,7 @@ import json
 import os
 from statistics import fmean, median, pstdev
 
-REQUIRED_METRICS = ["ATE", "ARE", "Kabsch", "TrackingLosts", "Failed", "FPS"]
+REQUIRED_METRICS = ["ATE", "ARE", "Kabsch", "KabschRot", "TrackingLosts", "Failed", "FPS"]
 # Integer counts: shown as min–max across configurations, and never flagged
 # by the rolling baseline for a change of one.
 COUNT_METRICS = {"TrackingLosts", "Failed"}
@@ -42,7 +44,7 @@ REPORT_SCHEMA_VERSION = 3
 # counted in the report; with exclude_failed it is also left out of the
 # accuracy metrics, so a few divergent trajectories cannot swing the means.
 DEFAULT_SEQUENCE_CHECKS = {"max_ate_pct": 10.0, "max_lost_frame_pct": 1.0, "exclude_failed": False}
-EXCLUDABLE_METRICS = ("ATE", "ARE", "Kabsch")
+EXCLUDABLE_METRICS = ("ATE", "ARE", "Kabsch", "KabschRot")
 FAILURE_MISSING = "missing"
 
 # Rolling-baseline regression check against the KPI history: a KPI regresses
@@ -55,7 +57,9 @@ COUNT_MIN_BAND = 1.0
 HIGHER_IS_BETTER = {"FPS"}
 
 DATASET_DISPLAY_ALIASES = {"TARTAN_FLAKY": "TARTAN_F"}
-METRIC_UNITS = {"ATE": "%", "ARE": "º/m", "Kabsch": "", "TrackingLosts": "", "Failed": "", "FPS": "Hz"}
+METRIC_UNITS = {"ATE": "%", "ARE": "º/m", "Kabsch": "m", "KabschRot": "º", "TrackingLosts": "", "Failed": "",
+                "FPS": "Hz"}
+METRIC_DISPLAY_NAMES = {"Kabsch": "ATE RMSE", "KabschRot": "ARE RMSE", "TrackingLosts": "Losts"}
 
 
 def display_dataset_key(key):
@@ -67,18 +71,12 @@ def display_dataset_key(key):
 
 
 def get_unit(metric):
-    for unit_key, unit_value in METRIC_UNITS.items():
-        if unit_key in metric:
-            return unit_value
-    return ""
+    return METRIC_UNITS.get(metric, "")
 
 
 def get_display_name(metric):
     """Get display name for metric (e.g., 'TrackingLosts' -> 'Losts')."""
-    display_names = {
-        "TrackingLosts": "Losts",
-    }
-    return display_names.get(metric, metric)
+    return METRIC_DISPLAY_NAMES.get(metric, metric)
 
 
 def parse_all_stats_json(json_path):
@@ -425,6 +423,7 @@ def summarize_mode(stats, dataset_type, checks):
         "ATE": mean("gt_av_translation_error", accuracy_stats),
         "ARE": mean("gt_av_rotation_error", accuracy_stats),
         "Kabsch": mean("gt_simple_error", accuracy_stats),
+        "KabschRot": mean("gt_simple_rotation_error", accuracy_stats),
         "FPS": mean("average_fps", stats),
         "Failed": sum(1 for run in runs if run["failure"] is not None),
         "TrackingLosts": sum(
@@ -703,7 +702,7 @@ def sequence_check_note(classified):
     rows = sorted({display_dataset_key(row).split("-")[0] for row, c in classified.items() if c["excluded"]})
     if not rows:
         return ""
-    return f" Failed sequences are excluded from ATE, ARE and Kabsch for {', '.join(rows)}."
+    return f" Failed sequences are excluded from ATE, ARE, ATE RMSE and ARE RMSE for {', '.join(rows)}."
 
 
 def dataset_sort_key(folder):
