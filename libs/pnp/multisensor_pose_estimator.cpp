@@ -207,6 +207,9 @@ bool MultisensorPoseEstimator::solve(Isometry3T& rig_from_world, Matrix6T& stati
   pose_state_ptrs_.clear();
 
   cunls::Problem problem;
+  // Depth cameras or an inertial prior do not guarantee residuals (no depth points, no planes yet, failed IMU
+  // prediction), and cuNLS cannot minimize a problem without factors.
+  size_t num_factor_batches = 0;
 
   if (n >= settings_.min_observations) {
     auto* obs_ptr = reinterpret_cast<const cunls::Vector<2>*>(gpu_observation_xy_.ptr());
@@ -220,6 +223,7 @@ bool MultisensorPoseEstimator::solve(Isometry3T& rig_from_world, Matrix6T& stati
     loss_reproj.emplace(fw.reprojection / static_cast<float>(n), 1, fw.robust_reprojection);
     pose_state_ptrs_.assign(n, se3_states.StateBlockDevicePtr(0));
     problem.AddFactorBatch(&*pnp_cost, &*loss_reproj, pose_state_ptrs_);
+    ++num_factor_batches;
   }
 
   problem.AddStateBatch(&se3_states);
@@ -268,6 +272,7 @@ bool MultisensorPoseEstimator::solve(Isometry3T& rig_from_world, Matrix6T& stati
       icp_costs[idx].emplace(reinterpret_cast<const float3*>(d_depth_points_.ptr()), d_cfr_ptr, cp.depth_tex, cp.focal,
                              cp.principal, cp.img_size, num_dp);
       problem.AddFactorBatch(&*icp_costs[idx], &*loss_icp_scaled, icp_state_ptrs_);
+      ++num_factor_batches;
 
       ++idx;
     }
@@ -322,6 +327,7 @@ bool MultisensorPoseEstimator::solve(Isometry3T& rig_from_world, Matrix6T& stati
         loss_p2p[cam_idx].emplace(p2p_scale, 1, fw.robust_point_to_plane);
         p2p_state_ptrs_[cam_idx].assign(nf, se3_states.StateBlockDevicePtr(0));
         problem.AddFactorBatch(&*p2p_costs[cam_idx], &*loss_p2p[cam_idx], p2p_state_ptrs_[cam_idx]);
+        ++num_factor_batches;
         ++cam_idx;
       }
     }
@@ -377,7 +383,13 @@ bool MultisensorPoseEstimator::solve(Isometry3T& rig_from_world, Matrix6T& stati
       inertial_state_ptrs_.push_back(prev_pose_state->StateBlockDevicePtr(0));
       inertial_state_ptrs_.push_back(se3_states.StateBlockDevicePtr(0));
       problem.AddFactorBatch(inertial_cost.get(), &*inertial_loss, inertial_state_ptrs_);
+      ++num_factor_batches;
     }
+  }
+
+  if (num_factor_batches == 0) {
+    static_info_exp.setZero();
+    return false;
   }
 
   {
