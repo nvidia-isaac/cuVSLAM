@@ -16,6 +16,7 @@
 
 set(SOURCES
     image_format_test.cpp
+    mask_test.cpp
     pose_test.cpp
     tracker_test.cpp
     )
