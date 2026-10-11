@@ -88,11 +88,14 @@ Repository secrets, split read from write so fork-reachable jobs never hold a ke
   dataset also holds calibrated `expected` values keyed `<METRIC>_<TYPE>_<MODE>`. A malformed file raises, because
   the sequence checks change KPI values.
 - Rolling-baseline check: `collect -H` reads the last `baseline_window` `kpi_<run>.json` files from the config's
-  KPI history (skipping the current run's) and stores each key's series in the report's `baseline` block. `render`
-  and `aggregate` list KPIs worse than the series median by more than max(`baseline_mad_k` × MAD,
-  `baseline_min_pct` % of the median), in the worse direction only (FPS down, the rest up), needing at least 3 runs.
-  The nightly aggregate first averages each history run across the configurations, so its band reflects the noise of
-  the aggregated mean. PR runs compare against `main`'s nightly history for `EVAL_CONFIG`. It never fails the job, and
+  KPI history (skipping the current run's) and stores each key's series in the report's `baseline` block. A KPI is
+  outside the band when it is worse than the series median by more than max(`baseline_mad_k` × MAD,
+  `baseline_min_pct` % of the median), MAD being the median absolute deviation, in the worse direction only (FPS
+  down, the rest up), needing at least 3 runs. It regresses after `baseline_persist_runs` available runs in a row
+  outside the band, which keeps one-off flips of bimodal SLAM KPIs from flagging; defaults are 14 runs, 4 × MAD, 10%,
+  and 2 runs. `render` and `aggregate` mark regressed cells ⚠ and list them. The nightly aggregate first reduces each
+  history run across the configurations (the mean, or the maximum for counts), so its band reflects the noise of the
+  value shown. PR runs compare against `main`'s nightly history for `EVAL_CONFIG`. It never fails the job, and
   a manually dispatched nightly writes into the history like a scheduled one.
 - Drift check: covers every key the registry's `kpi-keys` lists for the suite, plus any calibrated key. The tolerance
   is the calibrated entry's own (`{"value": ..., "tol_pct"|"tol_abs": ...}`), else the dataset's for that metric,
@@ -103,9 +106,10 @@ Repository secrets, split read from write so fork-reachable jobs never hold a ke
   sequences out of the ATE, ARE and Kabsch means (TUM and TartanAir); Losts and FPS always cover every sequence.
 - Nightly: `cuvslam_kpi_report.py aggregate` publishes one row per evaluation (dataset, type, mode). KPI cells contain
   the mean and population standard deviation across all four x86 configurations, except the counts Losts and Failed,
-  which show min–max. Each cell's second line (`<br><sub>Δ …</sub>`) is the change from the previous nightly: of the
-  mean, or of min/max. The last column counts broken sequences (failed in every configuration) and flaky ones (failed
-  in some), and a collapsed "Failed sequences" section lists them. `aggregate --values-only` drops the changes, the
+  which show min–max. Each cell's second line (`<br><sub>Δ …</sub>`) is the change from the rolling-baseline median:
+  of the mean, or of min/max. Broken / flaky, next to Failed, counts the failed sequences that failed in every
+  configuration and in some; a collapsed "Failed sequences" section lists them. FPS is the last column, and the notes,
+  naming the configurations, follow the table. `aggregate --values-only` drops the changes, the
   Broken / flaky column, the regression check, and the failed-sequence list for release notes. Temporary per-config `eval-kpis-staging-<version>-<slug>` and
   `eval-reports-staging-<version>-<slug>` artifacts, raw per-config JSON, reports, and history remain namespaced by
   `platform-cuda-ubuntu`. `RUN_ID` is the UTC date. After aggregation, staging artifacts are replaced by

@@ -45,11 +45,15 @@ DEFAULT_SEQUENCE_CHECKS = {"max_ate_pct": 10.0, "max_lost_frame_pct": 1.0, "excl
 EXCLUDABLE_METRICS = ("ATE", "ARE", "Kabsch")
 FAILURE_MISSING = "missing"
 
-# Rolling-baseline regression check against the KPI history: a KPI regresses
-# when it is worse than the median of the last baseline_window runs by more
-# than max(baseline_mad_k * MAD, baseline_min_pct % of the median). Losts
-# and failed-sequence counts never flag a change of one.
-DEFAULT_BASELINE = {"baseline_window": 14, "baseline_mad_k": 4.0, "baseline_min_pct": 3.0}
+# Rolling-baseline regression check against the KPI history. A KPI is outside
+# the band when it is worse than the median of its last baseline_window runs
+# by more than max(baseline_mad_k * MAD, baseline_min_pct % of the median),
+# MAD being the median absolute deviation from that median. It regresses when
+# it has been outside the band for baseline_persist_runs runs in a row, which
+# keeps one-off flips of a bimodal KPI from flagging. Losts and failed-sequence
+# counts never flag a change of one.
+DEFAULT_BASELINE = {"baseline_window": 14, "baseline_mad_k": 4.0, "baseline_min_pct": 10.0,
+                    "baseline_persist_runs": 2}
 MIN_BASELINE_RUNS = 3
 COUNT_MIN_BAND = 1.0
 HIGHER_IS_BETTER = {"FPS"}
@@ -182,7 +186,7 @@ def _validated_settings(spec, where, *, is_defaults):
             if not isinstance(value, bool):
                 raise ValueError(f"{where}.{key} must be a boolean")
             settings[key] = value
-        elif key == "baseline_window":
+        elif key in ("baseline_window", "baseline_persist_runs"):
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise ValueError(f"{where}.{key} must be a positive integer")
             settings[key] = value
@@ -269,28 +273,45 @@ def build_baseline(current, history, kpi_config):
     }
 
 
+def _baseline_band(metric, value, window, settings):
+    """(median, band, outside) of one value against the window before it."""
+    center = median(window)
+    mad = median(abs(item - center) for item in window)
+    band = max(settings["baseline_mad_k"] * mad, settings["baseline_min_pct"] / 100.0 * abs(center))
+    if metric in COUNT_METRICS:
+        band = max(band, COUNT_MIN_BAND)
+    worse = center - value if metric in HIGHER_IS_BETTER else value - center
+    return center, band, worse > band
+
+
 def evaluate_baseline(key, current_value, series, settings):
     """Compare one KPI with the median of its recent history.
 
-    Returns None without enough history, else a dict with the median, the
-    band, the number of runs used, and whether the KPI regressed.
+    series holds the history runs, oldest first, with None for runs that have
+    no value. Returns None without enough history, else a dict with the
+    median, the band, the number of runs used, how many available runs in a
+    row ending with the current one are outside their band, and whether that
+    streak is long enough to count as a regression.
     """
     parsed = parse_kpi_key(key)
     current_value = safe_float(current_value)
     if parsed is None or current_value is None:
         return None
-    values = [value for value in series[-settings["baseline_window"]:] if value is not None]
-    if len(values) < MIN_BASELINE_RUNS:
-        return None
-    center = median(values)
-    mad = median(abs(value - center) for value in values)
-    band = max(settings["baseline_mad_k"] * mad, settings["baseline_min_pct"] / 100.0 * abs(center))
     metric = parsed[1]
-    if metric in COUNT_METRICS:
-        band = max(band, COUNT_MIN_BAND)
-    worse = center - current_value if metric in HIGHER_IS_BETTER else current_value - center
-    return {"key": key, "current": current_value, "median": center, "band": band, "runs": len(values),
-            "regressed": worse > band}
+    window_size = settings["baseline_window"]
+    available = [value for value in series if value is not None] + [current_value]
+    if len(available) - 1 < MIN_BASELINE_RUNS:
+        return None
+    center, band, outside = _baseline_band(metric, current_value, available[-1 - window_size:-1], settings)
+    streak = 0
+    for index in range(len(available) - 1, -1, -1):
+        window = available[max(0, index - window_size):index]
+        if len(window) < MIN_BASELINE_RUNS or not _baseline_band(metric, available[index], window, settings)[2]:
+            break
+        streak += 1
+    return {"key": key, "current": current_value, "median": center, "band": band,
+            "runs": min(window_size, len(available) - 1), "nights": streak,
+            "regressed": outside and streak >= settings["baseline_persist_runs"]}
 
 
 def resolve_tolerance(kpi_config, dataset_name, metric):
@@ -595,11 +616,13 @@ def create_table(organized_data, required_metrics=REQUIRED_METRICS, *, config=No
     With diffs, each value that has a change from the previous run gets it on a
     second line of the same cell, keeping the table one column per KPI. An
     unchanged count gets no second line. extra, if given, is (column title,
-    {evaluation row: cell}) appended as the last column.
+    {evaluation row: cell}) placed right after Failed.
     """
-    headers = (["Config"] if config else []) + ["Evaluation"] + [
-        column_title(metric, aggregate=aggregate) for metric in required_metrics
-    ] + ([extra[0]] if extra else [])
+    headers = (["Config"] if config else []) + ["Evaluation"]
+    for metric in required_metrics:
+        headers.append(column_title(metric, aggregate=aggregate))
+        if extra and metric == "Failed":
+            headers.append(extra[0])
     lines = [
         "| " + " | ".join(headers) + " |",
         "|" + "|".join("---" for _ in headers) + "|",
@@ -615,12 +638,12 @@ def create_table(organized_data, required_metrics=REQUIRED_METRICS, *, config=No
             cell = str(metrics[metric]) if aggregate else format_metric(metric, metrics[metric])
             diff = metrics.get("diff " + metric, "NA")
             if diffs and diff != "NA":
-                text = diff if aggregate else format_diff(metric, diff)
+                text = str(diff)
                 if not (metric in COUNT_METRICS and text in ("+0", "+0/+0")):
                     cell += f"<br><sub>Δ {text}</sub>"
             cells.append(cell)
-        if extra:
-            cells.append(extra[1].get(dataset, "NA"))
+            if extra and metric == "Failed":
+                cells.append(extra[1].get(dataset, "NA"))
         lines.append("| " + " | ".join(cells) + " |")
     return "\n".join(lines) + "\n"
 
@@ -831,25 +854,34 @@ def load_report(path):
     return report
 
 
+def stored_baseline_settings(baseline, dataset_name):
+    """A report's baseline settings for one dataset, with defaults for keys older reports lack."""
+    stored = baseline.get("settings", {}).get(dataset_name)
+    return {**DEFAULT_BASELINE, **stored} if stored else None
+
+
 def report_baseline_results(report):
     """Rolling-baseline results for one configuration's report."""
     baseline = report["baseline"]
     results = []
     for key, value in sorted(report["current"].items()):
         parsed = parse_kpi_key(key)
-        settings = baseline.get("settings", {}).get(parsed[0].split("-")[0]) if parsed else None
+        settings = stored_baseline_settings(baseline, parsed[0].split("-")[0]) if parsed else None
         if settings:
             result = evaluate_baseline(key, value, baseline.get("values", {}).get(key, []), settings)
             if result:
+                result["delta"] = format_diff(parsed[1], result["current"] - result["median"])
                 results.append(result)
     return results
 
 
 def aggregate_baseline_results(config_reports):
-    """Rolling-baseline results for the mean across configurations.
+    """Rolling-baseline results for the values shown in the aggregate table.
 
-    Each history run shared by every configuration is averaged across them, so
-    the band reflects the noise of the aggregated mean, not of one configuration.
+    Each history run shared by every configuration is first reduced across
+    them: the mean for accuracy and FPS, so the band reflects the noise of the
+    aggregated mean, and the maximum for counts, the worst configuration. A
+    count's delta also reports the change of the minimum.
     """
     run_lists = [report["baseline"].get("runs", []) for _, report in config_reports]
     common = [run for run in run_lists[0] if all(run in runs for runs in run_lists[1:])] if run_lists else []
@@ -857,52 +889,87 @@ def aggregate_baseline_results(config_reports):
     results = []
     for key in sorted(reference["current"]):
         parsed = parse_kpi_key(key)
-        settings = reference["baseline"].get("settings", {}).get(parsed[0].split("-")[0]) if parsed else None
+        settings = stored_baseline_settings(reference["baseline"], parsed[0].split("-")[0]) if parsed else None
         currents = [safe_float(report["current"].get(key)) for _, report in config_reports]
         if not settings or any(value is None for value in currents):
             continue
-        series = []
+        per_run = []
         for run in common:
             values = []
             for (_, report), runs in zip(config_reports, run_lists):
                 history = report["baseline"].get("values", {}).get(key, [])
                 index = runs.index(run)
                 values.append(history[index] if index < len(history) else None)
-            series.append(fmean(values) if all(value is not None for value in values) else None)
-        result = evaluate_baseline(key, fmean(currents), series, settings)
+            per_run.append(values if all(value is not None for value in values) else None)
+        metric = parsed[1]
+        if metric in COUNT_METRICS:
+            series = [max(values) if values else None for values in per_run]
+            result = evaluate_baseline(key, max(currents), series, settings)
+            if result:
+                low = median([min(values) for values in per_run if values][-settings["baseline_window"]:])
+                result["delta"] = f"{round(min(currents) - low):+d}/{round(result['current'] - result['median']):+d}"
+        else:
+            series = [fmean(values) if values else None for values in per_run]
+            result = evaluate_baseline(key, fmean(currents), series, settings)
+            if result:
+                result["delta"] = format_diff(metric, result["current"] - result["median"])
         if result:
             results.append(result)
     return results
 
 
+def apply_baseline_deltas(organized, results):
+    """Set each cell's Δ to its change from the baseline median, ⚠ on a regression."""
+    for metrics in organized.values():
+        for metric in REQUIRED_METRICS:
+            metrics["diff " + metric] = "NA"
+    for result in results:
+        row, metric = parse_kpi_key(result["key"])
+        if row in organized and organized[row].get(metric) != "NA":
+            organized[row]["diff " + metric] = result["delta"] + (" ⚠" if result["regressed"] else "")
+    return organized
+
+
 def render_regressions(results):
-    """Markdown summary of the rolling-baseline check."""
+    """Markdown list of the regressed KPIs, the cells marked ⚠ in the table."""
     if not results:
         return "\n_Rolling-baseline check: not enough KPI history yet._\n"
     regressed = [r for r in results if r["regressed"]]
     if not regressed:
         return f"\n_Rolling-baseline check: no regressions in {len(results)} KPIs._\n"
-    lines = [
-        f"\n**Regressions against the rolling baseline** ({len(regressed)} of {len(results)} KPIs worse than "
-        "the median of recent nightlies by more than the band):\n"
-    ]
+    lines = [f"\n**Regressions** ({len(regressed)} of {len(results)} KPIs, marked ⚠ above):\n"]
     for r in regressed:
         row, metric = parse_kpi_key(r["key"])
         change = (100.0 * (r["current"] - r["median"]) / abs(r["median"])) if r["median"] else None
         change_text = f" ({change:+.1f}%)" if change is not None else ""
         lines.append(
             f"- `{display_dataset_key(row)}` {get_display_name(metric)}: {r['current']:.4g} vs median "
-            f"{r['median']:.4g}{change_text}, band ±{r['band']:.3g} over {r['runs']} runs"
+            f"{r['median']:.4g}{change_text}, band ±{r['band']:.3g}, outside it for {r['nights']} runs"
         )
     return "\n".join(lines) + "\n"
 
 
+def baseline_note(config_reports):
+    """One sentence describing the rolling-baseline settings in use."""
+    settings = {}
+    for _, report in config_reports:
+        settings.update(report["baseline"].get("settings", {}))
+    if not settings:
+        return "Δ needs KPI history"
+    s = {**DEFAULT_BASELINE, **next(iter(settings.values()))}
+    return (f"Δ is the change from the median of the last {s['baseline_window']} nightlies; ⚠ marks a KPI worse "
+            f"than that median by more than max({s['baseline_mad_k']:g} × MAD, {s['baseline_min_pct']:g}%) "
+            f"for {s['baseline_persist_runs']} runs in a row")
+
+
 def render_report(report, config):
-    organized = organize_data(report["current"], prev_data=report["previous"])
+    results = report_baseline_results(report)
+    organized = apply_baseline_deltas(organize_data(report["current"]), results)
     classified = classify_sequences([(config, report)])
-    note = "Δ is the change from the latest nightly. Failed counts failed sequences." + sequence_check_note(classified)
-    return (f"_{note}_\n\n" + create_table(organized, config=config)
-            + render_regressions(report_baseline_results(report)) + render_failed_sequences(classified, 1))
+    settings_note = baseline_note([(config, report)]) + ", against main's nightly history"
+    note = f"{settings_note}. Failed counts sequences that failed.{sequence_check_note(classified)}"
+    return (create_table(organized, config=config) + f"\n_{note}_\n"
+            + render_regressions(results) + render_failed_sequences(classified, 1))
 
 
 def render_drift(report):
@@ -975,22 +1042,6 @@ def aggregate_reports(config_reports):
         ]
         metrics[metric] = format_distribution(metric, current_values)
 
-        previous_complete = all(
-            report["previous"] is not None and report["previous"].get(key) is not None
-            for _, report in config_reports
-        )
-        if previous_complete:
-            previous_values = [
-                require_numeric(report["previous"][key], key, config) for config, report in config_reports
-            ]
-            if metric in COUNT_METRICS:
-                metrics["diff " + metric] = (f"{int(min(current_values) - min(previous_values)):+d}/"
-                                             f"{int(max(current_values) - max(previous_values)):+d}")
-            else:
-                metrics["diff " + metric] = format_diff(metric, fmean(current_values) - fmean(previous_values))
-        else:
-            metrics["diff " + metric] = "NA"
-
     for metrics in organized.values():
         for metric in REQUIRED_METRICS:
             metrics.setdefault(metric, "NA")
@@ -999,32 +1050,36 @@ def aggregate_reports(config_reports):
 
 
 def render_aggregate_report(config_reports, *, values_only=False):
-    """Render the cross-configuration table.
+    """Render the cross-configuration table, with its notes below it.
 
-    values_only drops the changes from the previous nightly, the regression
-    check, and the failed-sequence list, for release notes.
+    values_only drops the Δ lines, the Broken / flaky column, the regression
+    list, and the failed-sequence list, for release notes.
     """
     organized = aggregate_reports(config_reports)
     classified = classify_sequences(config_reports)
     count = len(config_reports)
+    configs = ", ".join(f"`{config}`" for config, _ in config_reports)
     note = (
-        f"_Aggregated across {count} configuration{'s' if count != 1 else ''}. "
-        "Values are mean ± population σ; Losts and Failed (failed sequences) are min–max"
+        f"Across {count} configuration{'s' if count != 1 else ''}: {configs}. Values are mean ± population σ; "
+        "Losts and Failed are min–max. Failed counts the sequences that failed in a configuration"
     )
-    if not values_only:
-        note += (
-            ". Δ is the change from the previous nightly: of the mean, or of min/max. A broken sequence fails "
-            "in every configuration, a flaky one in some"
-        )
-    note += "." + sequence_check_note(classified) + "_\n\n"
     if values_only:
-        return note + create_table(organized, aggregate=True, diffs=False)
+        note += "." + sequence_check_note(classified)
+        return create_table(organized, aggregate=True, diffs=False) + f"\n_{note}_\n"
+    results = aggregate_baseline_results(config_reports)
+    apply_baseline_deltas(organized, results)
+    settings_note = baseline_note(config_reports)
+    note += (
+        "; of those, a broken sequence failed in every configuration and a flaky one in some. "
+        f"{settings_note}. For Losts and Failed, Δ is of min/max and ⚠ follows the worst configuration."
+        + sequence_check_note(classified)
+    )
     broken_flaky = (
         "Broken / flaky",
         {row: f"{len(c['broken'])} / {len(c['flaky'])}" for row, c in classified.items()},
     )
-    return (note + create_table(organized, aggregate=True, extra=broken_flaky)
-            + render_regressions(aggregate_baseline_results(config_reports))
+    return (create_table(organized, aggregate=True, extra=broken_flaky) + f"\n_{note}_\n"
+            + render_regressions(results)
             + render_failed_sequences(classified, count))
 
 
