@@ -6,6 +6,9 @@
 
 - Process abort (`std::out_of_range` on the bundle adjustment thread) in Multisensor and Inertial odometry with an IMU and asynchronous SBA
 - Untriangulated landmarks receiving invalid positions from bundle adjustment before gravity is initialized
+- Track masks: invalid masks are rejected, an all-excluding mask no longer throws `cudaErrorInvalidValue` in
+  Multisensor mode, GPU masks apply to the current frame, and masks of another resolution are resized before masking
+  depth
 
 ## [17.0.0] - 2026-07-21
 
