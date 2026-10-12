@@ -61,6 +61,17 @@ using namespace cuvslam;
 int main(int argc, char** argv) {
 #ifdef USE_RERUN
   // Unit tests must not require a viewer. RERUN=1 can override this default for interactive debugging.
+  //
+  // The Rerun SDK is linked statically into both test executables and libcuvslam.so, so each binary
+  // has its own programmatic default. The environment variable is process-wide and disables every
+  // copy before any RecordingStream is created.
+  if (std::getenv("RERUN") == nullptr) {
+#ifdef _WIN32
+    _putenv_s("RERUN", "0");
+#else
+    setenv("RERUN", "0", 0);
+#endif
+  }
   rerun::set_default_enabled(false);
 #endif
 
