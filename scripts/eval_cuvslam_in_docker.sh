@@ -11,7 +11,8 @@ if [ "$#" -ne 1 ]; then
   echo "  AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY  From AWS_S3_* repository secrets in CI"
   echo "  KPI_HISTORY_DIR  Override KPI path (default \$RUNNER_STORAGE_ROOT/cuvslam-ci/kpi-history)"
   echo "  EVAL_SUITE       smoke or full; unset evaluates every record"
-  echo "  RUN_ID, MAX_WORKERS, EVAL_WRITE_HISTORY"
+  echo "  RUN_ID, MAX_WORKERS"
+  echo "  EVAL_WRITE_HISTORY  true to write KPI history outside CI; in CI only scheduled runs on main write it"
   exit 1
 fi
 
@@ -47,9 +48,17 @@ if [ -z "${MAX_WORKERS:-}" ]; then
   echo "Eval parallelism: max_workers=$MAX_WORKERS (nproc=$nproc_n, mem-capped=${mem_cap} at 4GB/worker, ceiling=${worker_ceiling})"
 fi
 
-if [ "${EVAL_WRITE_HISTORY:-}" = "true" ] || \
-   { [ "${GITHUB_ACTIONS:-}" = "true" ] && \
-     { [ "${GITHUB_EVENT_NAME:-}" = "schedule" ] || [ "${GITHUB_EVENT_NAME:-}" = "workflow_dispatch" ]; }; }; then
+# Only scheduled nightlies on main build the KPI history that diffs and the
+# regression check compare against. Every other CI run, including a manual
+# dispatch from a branch or a release candidate, reads it, so a branch's results
+# never become main's baseline. EVAL_WRITE_HISTORY only applies outside CI.
+if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+  if [ "${GITHUB_EVENT_NAME:-}" = "schedule" ] && [ "${GITHUB_REF:-}" = "refs/heads/main" ]; then
+    WRITE_HISTORY=true
+  else
+    WRITE_HISTORY=false
+  fi
+elif [ "${EVAL_WRITE_HISTORY:-}" = "true" ]; then
   WRITE_HISTORY=true
 else
   WRITE_HISTORY=false
