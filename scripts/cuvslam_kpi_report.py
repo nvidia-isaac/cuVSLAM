@@ -26,9 +26,11 @@ Markdown KPI tables for PR and nightly CI publication.
 """
 
 from argparse import ArgumentParser
+import datetime
 import glob
 import json
 import os
+import re
 from statistics import fmean, median, pstdev
 
 REQUIRED_METRICS = ["ATE", "ARE", "Kabsch", "TrackingLosts", "Failed", "FPS"]
@@ -45,16 +47,26 @@ DEFAULT_SEQUENCE_CHECKS = {"max_ate_pct": 10.0, "max_lost_frame_pct": 1.0, "excl
 EXCLUDABLE_METRICS = ("ATE", "ARE", "Kabsch")
 FAILURE_MISSING = "missing"
 
-# Rolling-baseline regression check against the KPI history. A KPI is outside
-# the band when it is worse than the median of its last baseline_window runs
-# by more than max(baseline_mad_k * MAD, baseline_min_pct % of the median),
-# MAD being the median absolute deviation from that median. It regresses when
-# it has been outside the band for baseline_persist_runs runs in a row, which
-# keeps one-off flips of a bimodal KPI from flagging. Losts and failed-sequence
-# counts never flag a change of one.
-DEFAULT_BASELINE = {"baseline_window": 14, "baseline_mad_k": 4.0, "baseline_min_pct": 10.0,
-                    "baseline_persist_runs": 2}
+# Regression check against known levels in the KPI history. Many SLAM KPIs flip
+# between a few discrete values run to run, so a spread around one median
+# cannot tell a flip from a regression. Instead, a level is known when at least
+# baseline_level_min_runs of the last baseline_window runs lie within
+# max(baseline_level_pct % of the median, LEVEL_MAD_FACTOR * MAD) of it, the
+# earliest at least baseline_level_min_age_days old. A KPI regresses when, in
+# every configuration of a group (the two Ubuntu builds of one CUDA version run
+# identical computations), it is off every known level and worse than all of
+# them: a flip lands on a known level, and a
+# one-off jump in one build is not confirmed by the other. A new level stays
+# flagged until it is old enough to count as known. Counts use a tolerance of
+# at least one. FPS depends on the runner, so it is only checked where the
+# collector was told the hardware is dedicated (--flag-fps).
+DEFAULT_BASELINE = {"baseline_window": 14, "baseline_level_pct": 5.0, "baseline_level_min_runs": 2,
+                    "baseline_level_min_age_days": 7}
 MIN_BASELINE_RUNS = 3
+# The level tolerance also scales with the history's spread (median absolute
+# deviation), so a KPI that jitters continuously, rather than flipping between
+# discrete values, finds its ordinary values on known levels.
+LEVEL_MAD_FACTOR = 2.0
 COUNT_MIN_BAND = 1.0
 HIGHER_IS_BETTER = {"FPS"}
 
@@ -186,7 +198,7 @@ def _validated_settings(spec, where, *, is_defaults):
             if not isinstance(value, bool):
                 raise ValueError(f"{where}.{key} must be a boolean")
             settings[key] = value
-        elif key in ("baseline_window", "baseline_persist_runs"):
+        elif key in ("baseline_window", "baseline_level_min_runs", "baseline_level_min_age_days"):
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise ValueError(f"{where}.{key} must be a positive integer")
             settings[key] = value
@@ -263,55 +275,75 @@ def load_history(history_dir, run_id, count):
     return history[::-1]
 
 
-def build_baseline(current, history, kpi_config):
-    """Per-key history series for the rolling-baseline check, stored in the report."""
+def build_baseline(current, history, kpi_config, *, flag_fps=False):
+    """Per-key history series for the regression check, stored in the report."""
     prefixes = {parse_kpi_key(key)[0].split("-")[0] for key in current if parse_kpi_key(key)}
     return {
         "runs": [run for run, _ in history],
         "values": {key: [safe_float(data.get(key)) for _, data in history] for key in sorted(current)},
         "settings": {prefix: resolve_baseline_settings(kpi_config, prefix) for prefix in sorted(prefixes)},
+        "flag_fps": flag_fps,
     }
 
 
-def _baseline_band(metric, value, window, settings):
-    """(median, band, outside) of one value against the window before it."""
-    center = median(window)
-    mad = median(abs(item - center) for item in window)
-    band = max(settings["baseline_mad_k"] * mad, settings["baseline_min_pct"] / 100.0 * abs(center))
-    if metric in COUNT_METRICS:
-        band = max(band, COUNT_MIN_BAND)
-    worse = center - value if metric in HIGHER_IS_BETTER else value - center
-    return center, band, worse > band
+def run_date(run):
+    """The date of a history run named by its RUN_ID (YYYY-MM-DD), or None."""
+    try:
+        return datetime.date.fromisoformat(str(run)[:10])
+    except ValueError:
+        return None
 
 
-def evaluate_baseline(key, current_value, series, settings):
-    """Compare one KPI with the median of its recent history.
+def history_values(baseline, key, window):
+    """The last window available (run date, value) pairs of one key; missing runs are skipped."""
+    runs = baseline.get("runs", [])
+    values = baseline.get("values", {}).get(key, [])
+    pairs = [(run_date(run), value) for run, value in zip(runs, values) if value is not None]
+    return pairs[-window:]
 
-    series holds the history runs, oldest first, with None for runs that have
-    no value. Returns None without enough history, else a dict with the
-    median, the band, the number of runs used, how many available runs in a
-    row ending with the current one are outside their band, and whether that
-    streak is long enough to count as a regression.
+
+def classify_levels(metric, tonight, reference, today, settings):
+    """Compare tonight's values of one group against the known levels of its history.
+
+    tonight holds one value per configuration of the group; reference pools the
+    (run date, value) history of all of them. Returns None while no level is
+    known yet, else a dict whose status is "regressed" (every value off all
+    known levels and worse than all of them), "better" (the same, but better),
+    or "known".
     """
-    parsed = parse_kpi_key(key)
-    current_value = safe_float(current_value)
-    if parsed is None or current_value is None:
+    if len(reference) < MIN_BASELINE_RUNS:
         return None
-    metric = parsed[1]
-    window_size = settings["baseline_window"]
-    available = [value for value in series if value is not None] + [current_value]
-    if len(available) - 1 < MIN_BASELINE_RUNS:
+    center = median(value for _, value in reference)
+    spread = median(abs(value - center) for _, value in reference)
+    tolerance = max(settings["baseline_level_pct"] / 100.0 * abs(center), LEVEL_MAD_FACTOR * spread)
+    if metric in COUNT_METRICS:
+        tolerance = max(tolerance, COUNT_MIN_BAND)
+
+    def near(value):
+        return [date for date, other in reference if abs(other - value) <= tolerance]
+
+    def known(value):
+        dates = near(value)
+        if len(dates) < settings["baseline_level_min_runs"]:
+            return False
+        dated = [date for date in dates if date is not None]
+        return not dated or (today - min(dated)).days >= settings["baseline_level_min_age_days"]
+
+    levels = [value for _, value in reference if known(value)]
+    if not levels:
         return None
-    center, band, outside = _baseline_band(metric, current_value, available[-1 - window_size:-1], settings)
-    streak = 0
-    for index in range(len(available) - 1, -1, -1):
-        window = available[max(0, index - window_size):index]
-        if len(window) < MIN_BASELINE_RUNS or not _baseline_band(metric, available[index], window, settings)[2]:
-            break
-        streak += 1
-    return {"key": key, "current": current_value, "median": center, "band": band,
-            "runs": min(window_size, len(available) - 1), "nights": streak,
-            "regressed": outside and streak >= settings["baseline_persist_runs"]}
+    higher_is_better = metric in HIGHER_IS_BETTER
+    worst = min(levels) if higher_is_better else max(levels)
+    best = max(levels) if higher_is_better else min(levels)
+    status = "known"
+    if not any(known(value) for value in tonight):
+        if all((value < worst - tolerance) if higher_is_better else (value > worst + tolerance) for value in tonight):
+            status = "regressed"
+        elif all((value > best + tolerance) if higher_is_better else (value < best - tolerance) for value in tonight):
+            status = "better"
+    first_seen = sorted(date for value in tonight for date in near(value) if date is not None)
+    return {"status": status, "values": list(tonight), "worst": worst, "best": best,
+            "since": first_seen[0] if first_seen else today}
 
 
 def resolve_tolerance(kpi_config, dataset_name, metric):
@@ -860,32 +892,47 @@ def stored_baseline_settings(baseline, dataset_name):
     return {**DEFAULT_BASELINE, **stored} if stored else None
 
 
-def report_baseline_results(report):
-    """Rolling-baseline results for one configuration's report."""
-    baseline = report["baseline"]
+def config_group(config):
+    """The configurations that run identical computations share a group: one per CUDA version."""
+    match = re.search(r"cuda(\d+\.\d+)", config)
+    return f"CUDA {match.group(1)}" if match else config
+
+
+def report_date(report):
+    return run_date(report.get("run_id")) or datetime.date.today()
+
+
+def group_level_results(key, members, settings, today):
+    """Known-level results per group for one key; members are (config, report) pairs."""
+    metric = parse_kpi_key(key)[1]
+    groups = {}
+    for config, report in members:
+        groups.setdefault(config_group(config), []).append(report)
     results = []
-    for key, value in sorted(report["current"].items()):
-        parsed = parse_kpi_key(key)
-        settings = stored_baseline_settings(baseline, parsed[0].split("-")[0]) if parsed else None
-        if settings:
-            result = evaluate_baseline(key, value, baseline.get("values", {}).get(key, []), settings)
-            if result:
-                result["delta"] = format_diff(parsed[1], result["current"] - result["median"])
-                results.append(result)
+    for group, reports in sorted(groups.items()):
+        tonight = [safe_float(report["current"].get(key)) for report in reports]
+        if any(value is None for value in tonight):
+            continue
+        reference = [pair for report in reports
+                     for pair in history_values(report["baseline"], key, settings["baseline_window"])]
+        result = classify_levels(metric, tonight, reference, today, settings)
+        if result:
+            results.append(dict(result, group=group, configs=len(reports)))
     return results
 
 
-def aggregate_baseline_results(config_reports):
-    """Rolling-baseline results for the values shown in the aggregate table.
+def baseline_results(config_reports):
+    """Per-key Δ from the baseline median and known-level regressions, for one or more configurations.
 
-    Each history run shared by every configuration is first reduced across
-    them: the mean for accuracy and FPS, so the band reflects the noise of the
-    aggregated mean, and the maximum for counts, the worst configuration. A
-    count's delta also reports the change of the minimum.
+    With several configurations, Δ compares the mean (min/max for counts) with
+    the median of the same reduction over the history runs every configuration
+    has; regressions are judged per group, never on the reduced values.
     """
-    run_lists = [report["baseline"].get("runs", []) for _, report in config_reports]
-    common = [run for run in run_lists[0] if all(run in runs for runs in run_lists[1:])] if run_lists else []
     reference = config_reports[0][1]
+    flag_fps = all(report["baseline"].get("flag_fps", False) for _, report in config_reports)
+    run_lists = [report["baseline"].get("runs", []) for _, report in config_reports]
+    common = [run for run in run_lists[0] if all(run in runs for runs in run_lists[1:])]
+    today = report_date(reference)
     results = []
     for key in sorted(reference["current"]):
         parsed = parse_kpi_key(key)
@@ -893,6 +940,7 @@ def aggregate_baseline_results(config_reports):
         currents = [safe_float(report["current"].get(key)) for _, report in config_reports]
         if not settings or any(value is None for value in currents):
             continue
+        metric = parsed[1]
         per_run = []
         for run in common:
             values = []
@@ -900,21 +948,21 @@ def aggregate_baseline_results(config_reports):
                 history = report["baseline"].get("values", {}).get(key, [])
                 index = runs.index(run)
                 values.append(history[index] if index < len(history) else None)
-            per_run.append(values if all(value is not None for value in values) else None)
-        metric = parsed[1]
+            if all(value is not None for value in values):
+                per_run.append(values)
+        per_run = per_run[-settings["baseline_window"]:]
+        if len(per_run) < MIN_BASELINE_RUNS:
+            continue
         if metric in COUNT_METRICS:
-            series = [max(values) if values else None for values in per_run]
-            result = evaluate_baseline(key, max(currents), series, settings)
-            if result:
-                low = median([min(values) for values in per_run if values][-settings["baseline_window"]:])
-                result["delta"] = f"{round(min(currents) - low):+d}/{round(result['current'] - result['median']):+d}"
+            delta = (f"{round(min(currents) - median(min(v) for v in per_run)):+d}/"
+                     f"{round(max(currents) - median(max(v) for v in per_run)):+d}")
+            if len(config_reports) == 1:
+                delta = delta.split("/")[1]
         else:
-            series = [fmean(values) if values else None for values in per_run]
-            result = evaluate_baseline(key, fmean(currents), series, settings)
-            if result:
-                result["delta"] = format_diff(metric, result["current"] - result["median"])
-        if result:
-            results.append(result)
+            delta = format_diff(metric, fmean(currents) - median(fmean(v) for v in per_run))
+        levels = [] if metric == "FPS" and not flag_fps else group_level_results(key, config_reports, settings, today)
+        results.append({"key": key, "delta": delta, "levels": levels,
+                        "regressed": any(level["status"] == "regressed" for level in levels)})
     return results
 
 
@@ -930,40 +978,54 @@ def apply_baseline_deltas(organized, results):
     return organized
 
 
+def _level_lines(results, status):
+    lines = []
+    for result in results:
+        row, metric = parse_kpi_key(result["key"])
+        for level in result["levels"]:
+            if level["status"] != status:
+                continue
+            bound = level["worst"] if status == "regressed" else level["best"]
+            values = ", ".join(format_metric(metric, value) for value in level["values"])
+            lines.append(
+                f"- `{display_dataset_key(row)}` {get_display_name(metric)}, {level['group']}: {values} vs "
+                f"{'worst' if status == 'regressed' else 'best'} known level {format_metric(metric, bound)} "
+                f"(new level since {level['since']})"
+            )
+    return lines
+
+
 def render_regressions(results):
-    """Markdown list of the regressed KPIs, the cells marked ⚠ in the table."""
+    """Regressed KPIs (the cells marked ⚠) and, collapsed, accuracy KPIs at a new better level."""
     if not results:
-        return "\n_Rolling-baseline check: not enough KPI history yet._\n"
-    regressed = [r for r in results if r["regressed"]]
-    if not regressed:
-        return f"\n_Rolling-baseline check: no regressions in {len(results)} KPIs._\n"
-    lines = [f"\n**Regressions** ({len(regressed)} of {len(results)} KPIs, marked ⚠ above):\n"]
-    for r in regressed:
-        row, metric = parse_kpi_key(r["key"])
-        change = (100.0 * (r["current"] - r["median"]) / abs(r["median"])) if r["median"] else None
-        change_text = f" ({change:+.1f}%)" if change is not None else ""
-        lines.append(
-            f"- `{display_dataset_key(row)}` {get_display_name(metric)}: {r['current']:.4g} vs median "
-            f"{r['median']:.4g}{change_text}, band ±{r['band']:.3g}, outside it for {r['nights']} runs"
-        )
-    return "\n".join(lines) + "\n"
+        return "\n_Regression check: not enough KPI history yet._\n"
+    regressed = _level_lines(results, "regressed")
+    text = (f"\n**Regressions** ({len(regressed)}, marked ⚠ above):\n\n" + "\n".join(regressed) + "\n"
+            if regressed else f"\n_Regression check: no regressions in {len(results)} KPIs._\n")
+    better = _level_lines([r for r in results if parse_kpi_key(r["key"])[1] in EXCLUDABLE_METRICS], "better")
+    if better:
+        text += "\n<details><summary>New better levels</summary>\n\n" + "\n".join(better) + "\n\n</details>\n"
+    return text
 
 
 def baseline_note(config_reports):
-    """One sentence describing the rolling-baseline settings in use."""
+    """One sentence describing Δ and ⚠ with the settings in use."""
     settings = {}
     for _, report in config_reports:
         settings.update(report["baseline"].get("settings", {}))
     if not settings:
         return "Δ needs KPI history"
     s = {**DEFAULT_BASELINE, **next(iter(settings.values()))}
-    return (f"Δ is the change from the median of the last {s['baseline_window']} nightlies; ⚠ marks a KPI worse "
-            f"than that median by more than max({s['baseline_mad_k']:g} × MAD, {s['baseline_min_pct']:g}%) "
-            f"for {s['baseline_persist_runs']} runs in a row")
+    scope = ("in both builds of a CUDA version" if len(config_reports) > 1 else "in this configuration")
+    fps = "" if all(r["baseline"].get("flag_fps") for _, r in config_reports) else "; FPS is not checked here"
+    return (f"Δ is the change from the median of the last {s['baseline_window']} runs. ⚠ marks a KPI that, {scope}, "
+            f"is more than {s['baseline_level_pct']:g}% off every level seen before (in at least "
+            f"{s['baseline_level_min_runs']} runs, first at least {s['baseline_level_min_age_days']} days ago) and "
+            f"worse than all of them{fps}")
 
 
 def render_report(report, config):
-    results = report_baseline_results(report)
+    results = baseline_results([(config, report)])
     organized = apply_baseline_deltas(organize_data(report["current"]), results)
     classified = classify_sequences([(config, report)])
     settings_note = baseline_note([(config, report)]) + ", against main's nightly history"
@@ -1066,12 +1128,12 @@ def render_aggregate_report(config_reports, *, values_only=False):
     if values_only:
         note += "." + sequence_check_note(classified)
         return create_table(organized, aggregate=True, diffs=False) + f"\n_{note}_\n"
-    results = aggregate_baseline_results(config_reports)
+    results = baseline_results(config_reports)
     apply_baseline_deltas(organized, results)
     settings_note = baseline_note(config_reports)
     note += (
         "; of those, a broken sequence failed in every configuration and a flaky one in some. "
-        f"{settings_note}. For Losts and Failed, Δ is of min/max and ⚠ follows the worst configuration."
+        f"{settings_note}. For Losts and Failed, Δ is of min/max."
         + sequence_check_note(classified)
     )
     broken_flaky = (
@@ -1105,7 +1167,7 @@ def collect_command(args):
         ]
         history = load_history(args.history, args.run_id, max(windows))
         print(f"Rolling baseline: {len(history)} KPI history run(s) from {args.history}")
-        baseline = build_baseline(current, history, kpi_config)
+        baseline = build_baseline(current, history, kpi_config, flag_fps=args.flag_fps)
     report = build_report(args.run_id, current, previous, kpi_config, sequences, expected_keys, baseline)
     write_json(args.out_kpi_json, current)
     write_json(args.out_report_json, report)
@@ -1140,6 +1202,8 @@ def build_argument_parser():
     collect.add_argument("-d", "--run_id", default="")
     collect.add_argument("-k", "--prev_kpi", default="")
     collect.add_argument("-b", "--baseline_ranges", default="")
+    collect.add_argument("--flag-fps", action="store_true",
+                         help="also check FPS for regressions; only meaningful on dedicated hardware")
     collect.add_argument("-H", "--history", default="",
                          help="KPI history directory of kpi_<run>.json files for the rolling-baseline check")
     collect.add_argument("-e", "--expected_keys", default="",

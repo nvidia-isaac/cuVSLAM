@@ -87,16 +87,19 @@ Repository secrets, split read from write so fork-reachable jobs never hold a ke
   sequence checks (`max_ate_pct`, `max_lost_frame_pct`, `exclude_failed`), the rolling-baseline settings, and per-metric drift `tolerances`; a
   dataset also holds calibrated `expected` values keyed `<METRIC>_<TYPE>_<MODE>`. A malformed file raises, because
   the sequence checks change KPI values.
-- Rolling-baseline check: `collect -H` reads the last `baseline_window` `kpi_<run>.json` files from the config's
-  KPI history (skipping the current run's) and stores each key's series in the report's `baseline` block. A KPI is
-  outside the band when it is worse than the series median by more than max(`baseline_mad_k` × MAD,
-  `baseline_min_pct` % of the median), MAD being the median absolute deviation, in the worse direction only (FPS
-  down, the rest up), needing at least 3 runs. It regresses after `baseline_persist_runs` available runs in a row
-  outside the band, which keeps one-off flips of bimodal SLAM KPIs from flagging; defaults are 14 runs, 4 × MAD, 10%,
-  and 2 runs. `render` and `aggregate` mark regressed cells ⚠ and list them. The nightly aggregate first reduces each
-  history run across the configurations (the mean, or the maximum for counts), so its band reflects the noise of the
-  value shown. PR runs compare against `main`'s nightly history for `EVAL_CONFIG`. It never fails the job, and
-  a manually dispatched nightly writes into the history like a scheduled one.
+- Regression check: `collect -H` reads the last `baseline_window` `kpi_<run>.json` files from the config's KPI
+  history (skipping the current run's; nights without a run simply do not exist) and stores each key's series in the
+  report's `baseline` block. Many SLAM KPIs flip between a few discrete values run to run, so instead of a band around
+  a median, the check learns known levels: a value is on a known level when at least `baseline_level_min_runs` history
+  values lie within max(`baseline_level_pct` % of the median, 2 × MAD) of it, the earliest at least
+  `baseline_level_min_age_days` old. The two Ubuntu builds of a CUDA version run identical computations, so they form
+  one group with a pooled history. A KPI regresses (⚠) when, in every build of a group, it is off every known level and
+  worse than all of them: flips land on known levels, and a one-off jump in one build is not confirmed by the other. A
+  new level stays flagged until it is old enough to be known; a better one is listed, collapsed, as a new better level.
+  Defaults: 14 runs, 5%, 2 runs, 7 days. FPS is only checked with `collect --flag-fps`, which `run_eval.sh` passes on
+  aarch64 (Jetson runners run one job each; the x86 GPU runners are shared). PR runs compare their one build against
+  `main`'s nightly history for `EVAL_CONFIG`. Table Δ is the change from the median of the last runs. It never fails
+  the job, and a manually dispatched nightly writes into the history like a scheduled one.
 - Drift check: covers every key the registry's `kpi-keys` lists for the suite, plus any calibrated key. The tolerance
   is the calibrated entry's own (`{"value": ..., "tol_pct"|"tol_abs": ...}`), else the dataset's for that metric,
   else the default's. Uncalibrated keys are SKIPPED.
