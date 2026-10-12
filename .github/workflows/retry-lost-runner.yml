@@ -84,25 +84,31 @@ jobs:
 
             await core.summary.addRaw(body).write();
 
-            const { data: openIssues } = await github.rest.issues.listForRepo({
-              owner, repo, state: 'open', labels: process.env.TRACKING_ISSUE_LABEL, per_page: 1,
-            });
-            if (openIssues.length > 0) {
-              await github.rest.issues.createComment({ owner, repo, issue_number: openIssues[0].number, body });
-            } else {
-              await github.rest.issues.create({
-                owner, repo,
-                title: process.env.TRACKING_ISSUE_TITLE,
-                labels: [process.env.TRACKING_ISSUE_LABEL],
-                body: [
-                  'Each comment records a CI job whose self-hosted runner lost communication with GitHub.',
-                  'Subscribe to this issue to be notified. Close it to start a fresh one on the next event.',
-                  '',
-                  '---',
-                  '',
-                  body,
-                ].join('\n'),
+            let issueError = null;
+            try {
+              const { data: openIssues } = await github.rest.issues.listForRepo({
+                owner, repo, state: 'open', labels: process.env.TRACKING_ISSUE_LABEL, per_page: 1,
               });
+              if (openIssues.length > 0) {
+                await github.rest.issues.createComment({ owner, repo, issue_number: openIssues[0].number, body });
+              } else {
+                await github.rest.issues.create({
+                  owner, repo,
+                  title: process.env.TRACKING_ISSUE_TITLE,
+                  labels: [process.env.TRACKING_ISSUE_LABEL],
+                  body: [
+                    'Each comment records a CI job whose self-hosted runner lost communication with GitHub.',
+                    'Subscribe to this issue to be notified. Close it to start a fresh one on the next event.',
+                    '',
+                    '---',
+                    '',
+                    body,
+                  ].join('\n'),
+                });
+              }
+            } catch (error) {
+              issueError = error;
+              core.error(`Tracking issue update failed: ${error.message}`);
             }
 
             if (process.env.SLACK_WEBHOOK_URL) {
@@ -128,4 +134,6 @@ jobs:
 
             if (rerunError) {
               core.setFailed(action);
+            } else if (issueError) {
+              core.setFailed(`Tracking issue update failed: ${issueError.message}`);
             }
