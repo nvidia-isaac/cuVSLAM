@@ -35,6 +35,8 @@ jobs:
     steps:
       - name: Inspect run, re-run, and notify
         uses: actions/github-script@v7
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.CI_ALERT_SLACK_WEBHOOK_URL }}
         with:
           script: |
             const { owner, repo } = context.repo;
@@ -101,6 +103,27 @@ jobs:
                   body,
                 ].join('\n'),
               });
+            }
+
+            if (process.env.SLACK_WEBHOOK_URL) {
+              const slackJobs = lost.map(j => `• <${j.html_url}|${j.name}> on \`${j.runner_name || 'unknown'}\``);
+              const text = [
+                `:warning: CI runner lost communication: *${run.name}* on \`${run.head_branch}\`, <${runUrl}|attempt ${attempt}>`,
+                ...slackJobs,
+                action,
+              ].join('\n');
+              try {
+                const response = await fetch(process.env.SLACK_WEBHOOK_URL, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ text }),
+                });
+                if (!response.ok) {
+                  core.warning(`Slack notification failed: HTTP ${response.status}`);
+                }
+              } catch (error) {
+                core.warning(`Slack notification failed: ${error.message}`);
+              }
             }
 
             if (rerunError) {
