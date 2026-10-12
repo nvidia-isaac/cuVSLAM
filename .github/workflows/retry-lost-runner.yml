@@ -6,8 +6,9 @@ name: Retry lost runner
 
 on:
   workflow_run:
-    workflows: ["Nightly Build & Test", "PR Verify"]
+    workflows: ["Nightly Build & Test"]
     types: [completed]
+    branches: [main, "release/**"]
 
 concurrency:
   group: retry-lost-runner-${{ github.event.workflow_run.id }}
