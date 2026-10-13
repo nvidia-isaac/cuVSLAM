@@ -105,7 +105,7 @@ SolverSfMMultisensor::SolverSfMMultisensor(map::UnifiedMap& map, const camera::R
       break;
   }
 
-  imu_ = std::make_unique<ImuFusionContext>(map_, rig_, calib, pose_estimator_);
+  imu_ = std::make_unique<ImuFusionContext>(map_, rig_, calib, pose_estimator_, sba_mode == sba::InertialGPU);
   imu_->register_gravity_callback();
 }
 

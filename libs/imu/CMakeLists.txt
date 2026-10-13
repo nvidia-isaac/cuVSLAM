@@ -17,6 +17,7 @@
 set(MODULE_NAME "imu")
 
 set(HEADERS
+    imu_bundler.h
     imu_preintegration.h
     imu_sba.h
     imu_sba_problem.h
@@ -28,6 +29,7 @@ set(HEADERS
     )
 
 set(SOURCES
+    imu_bundler.cpp
     imu_preintegration.cpp
     imu_sba_fixed_vel.cpp
     imu_sba_problem.cpp
