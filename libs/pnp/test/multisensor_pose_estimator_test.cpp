@@ -142,6 +142,26 @@ TEST(MultisensorPoseEstimatorTest, EmptyObservations) {
   EXPECT_FALSE(ok);
 }
 
+// An inertial prior without preintegration contributes no factor, so with no observations the
+// problem is empty. The solver has to report failure instead of handing cuNLS an empty problem.
+TEST(MultisensorPoseEstimatorTest, InertialPriorWithoutResidualsFails) {
+  auto cam = MakePinhole();
+  auto rig = MakeRig(cam);
+
+  cuvslam::pnp::MultisensorPoseEstimator estimator(rig);
+
+  Isometry3T pose = Isometry3T::Identity();
+  Matrix6T info = Matrix6T::Identity();
+  std::unordered_map<TrackId, Vector3T> landmarks;
+  std::vector<camera::Observation> obs;
+  cuvslam::pnp::InertialPriorInput imu_in;
+
+  bool ok = true;
+  EXPECT_NO_THROW(ok = estimator.solve(pose, info, obs, landmarks, {}, {}, {}, imu_in));
+  EXPECT_FALSE(ok);
+  EXPECT_TRUE(info.isZero());
+}
+
 // Multi-camera rig: verify that per-observation camera_from_rig extrinsics
 // are correctly accounted for in the PnP factor.
 TEST(MultisensorPoseEstimatorTest, MultiCameraReprojectionConvergence) {

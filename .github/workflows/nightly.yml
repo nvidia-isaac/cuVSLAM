@@ -21,10 +21,13 @@ env:
   BENCHMARK_RESULTS_ARTIFACT: benchmark-results-staging
   EVAL_KPIS_ARTIFACT: eval-kpis-staging
   EVAL_REPORT_ARTIFACT: eval-reports-staging
+  # Jetson smoke-eval results are diagnostics: a separate prefix keeps them out
+  # of the x86 aggregate and the release evaluation bundle.
+  JETSON_EVAL_KPIS_ARTIFACT: jetson-eval-kpis
+  JETSON_EVAL_REPORT_ARTIFACT: jetson-eval-reports
   AWS_DEFAULT_REGION: ${{ vars.AWS_DEFAULT_REGION }}
   S3_DATASETS_BUCKET: ${{ vars.S3_DATASETS_BUCKET }}
-  # Jetson configurations inherit this but never read it: their eval steps are
-  # gated on matrix.eval.
+  # The default suite; build-and-test overrides it per matrix entry.
   EVAL_SUITE: full
 
 jobs:
@@ -166,6 +169,8 @@ jobs:
     if: needs.check-changes.outputs.should_build == 'true'
     runs-on: ${{ fromJSON(matrix.runner) }}
     timeout-minutes: ${{ matrix.job_timeout || 120 }}
+    env:
+      EVAL_SUITE: ${{ matrix.eval_suite || 'full' }}
     strategy:
       fail-fast: false
       matrix:
@@ -185,8 +190,11 @@ jobs:
 
           # Jetson configs (CUDA version must match host JetPack driver)
           # Orin uses base_image override; cuda value is not used for the Docker base but kept for artifact naming
+          # Thor runs the smoke eval suite (eval_suite: smoke), reported per device and never aggregated with x86.
+          # Its eval steps are informational (continue-on-error) while runtime and variance are characterized.
+          # Orin does not: staging the smoke datasets filled its disk.
           - { name: "aarch64 / Orin (JP 6.1)",  runner: '["jetson-orin"]', cuda: "12.6.3", ubuntu: "22.04", archs: "87",  platform: "orin",  wheel: true, benchmark: true, base_image: "nvcr.io/nvidia/12.6.11-devel:12.6.11-devel-aarch64-ubuntu22.04", ports_mirror: "http://mirrors.ocf.berkeley.edu/ubuntu-ports" }
-          - { name: "aarch64 / Thor (JP 7.1)",  runner: '["jetson-thor"]', cuda: "13.0.1", ubuntu: "24.04", archs: "110", platform: "thor",  wheel: true, benchmark: true, retries: 3, build_timeout: 60, job_timeout: 180, ports_mirror: "http://mirrors.ocf.berkeley.edu/ubuntu-ports" }
+          - { name: "aarch64 / Thor (JP 7.1)",  runner: '["jetson-thor"]', cuda: "13.0.1", ubuntu: "24.04", archs: "110", platform: "thor",  wheel: true, benchmark: true, eval: true, eval_suite: smoke, retries: 3, build_timeout: 60, job_timeout: 240, ports_mirror: "http://mirrors.ocf.berkeley.edu/ubuntu-ports" }
     steps:
       - name: Verify GPU
         run: nvidia-smi
@@ -212,6 +220,7 @@ jobs:
 
       - name: Build CI tools image
         if: matrix.eval
+        continue-on-error: ${{ matrix.eval_suite == 'smoke' }}
         env:
           AWS_CLI_PUBLIC_KEY: ${{ vars.AWS_CLI_PUBLIC_KEY }}
         run: |
@@ -241,6 +250,7 @@ jobs:
 
       - name: Verify eval prerequisites
         if: matrix.eval
+        continue-on-error: ${{ matrix.eval_suite == 'smoke' }}
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_RO_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_RO_SECRET_ACCESS_KEY }}
@@ -255,6 +265,7 @@ jobs:
 
       - name: Stage eval datasets
         if: matrix.eval
+        continue-on-error: ${{ matrix.eval_suite == 'smoke' }}
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_RO_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_RO_SECRET_ACCESS_KEY }}
@@ -385,6 +396,7 @@ jobs:
 
       - name: Run cuVSLAM evaluation
         if: matrix.eval
+        continue-on-error: ${{ matrix.eval_suite == 'smoke' }}
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_RO_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_RO_SECRET_ACCESS_KEY }}
@@ -393,24 +405,38 @@ jobs:
           KPI_HISTORY_DIR="${RUNNER_STORAGE_ROOT:?RUNNER_STORAGE_ROOT must be set}/cuvslam-ci/kpi-history/${{ matrix.platform }}-cuda${{ matrix.cuda }}-ubuntu${{ matrix.ubuntu }}" \
           ./scripts/eval_cuvslam_in_docker.sh ./output
 
+      - name: Publish Jetson eval job summary
+        if: always() && matrix.eval_suite == 'smoke'
+        run: |
+          table=$(find output/eval -maxdepth 1 -name 'kpi_*.json.table' -print -quit 2>/dev/null || true)
+          {
+            echo "## cuVSLAM smoke eval (${{ matrix.platform }})"
+            echo ""
+            if [ -n "$table" ]; then
+              cat "$table"
+            else
+              echo "No KPI table was produced; inspect the Run cuVSLAM evaluation step."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload KPI results
         if: always() && matrix.eval
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ env.EVAL_KPIS_ARTIFACT }}-${{ needs.check-changes.outputs.package_version }}-${{ matrix.platform }}-cuda${{ matrix.cuda }}-ubuntu${{ matrix.ubuntu }}
+          name: ${{ matrix.eval_suite == 'smoke' && env.JETSON_EVAL_KPIS_ARTIFACT || env.EVAL_KPIS_ARTIFACT }}-${{ needs.check-changes.outputs.package_version }}-${{ matrix.platform }}-cuda${{ matrix.cuda }}-ubuntu${{ matrix.ubuntu }}
           path: output/eval/kpi_*.json
           overwrite: true
-          retention-days: 1
+          retention-days: ${{ matrix.eval_suite == 'smoke' && 30 || 1 }}
           if-no-files-found: warn
 
       - name: Upload eval PDF reports for aggregation
         if: always() && matrix.eval
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ env.EVAL_REPORT_ARTIFACT }}-${{ needs.check-changes.outputs.package_version }}-${{ matrix.platform }}-cuda${{ matrix.cuda }}-ubuntu${{ matrix.ubuntu }}
+          name: ${{ matrix.eval_suite == 'smoke' && env.JETSON_EVAL_REPORT_ARTIFACT || env.EVAL_REPORT_ARTIFACT }}-${{ needs.check-changes.outputs.package_version }}-${{ matrix.platform }}-cuda${{ matrix.cuda }}-ubuntu${{ matrix.ubuntu }}
           path: output/eval/stats/**/report_*.pdf
           overwrite: true
-          retention-days: 1
+          retention-days: ${{ matrix.eval_suite == 'smoke' && 30 || 1 }}
           if-no-files-found: warn
 
       - name: Upload test results

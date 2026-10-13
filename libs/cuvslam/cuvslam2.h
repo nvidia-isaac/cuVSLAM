@@ -306,6 +306,7 @@ struct PoseWithCovariance {
  *
  * The rig coordinate frame is user-defined and depends on the extrinsic parameters of the cameras.
  * The cameras' coordinate frames may not match the rig coordinate frame - depending on camers extrinsics.
+ * Mono mode is the exception: it tracks camera 0 as the rig, so camera 0 must sit at the rig origin.
  * The world coordinate frame is an arbitrary 3D coordinate frame. It coincides with the rig coordinate frame at the
  * first frame.
  */
@@ -330,11 +331,11 @@ struct Observation {
 /**
  * @brief Landmark
  *
- * 3D point with coordinates in meters in world frame
+ * 3D point with coordinates in meters in the rig frame of the VO frame it comes from
  */
 struct Landmark {
   uint64_t id;      ///< landmark id
-  Vector3f coords;  ///< x, y, z in meters in world frame
+  Vector3f coords;  ///< x, y, z in meters in the rig frame
 };
 
 /**
@@ -383,7 +384,8 @@ public:
     Inertial,     ///< Uses stereo camera and IMU measurements. A single stereo-camera with a single IMU sensor is
                   ///< supported.
     RGBD,  ///< Uses RGB-D camera for tracking. A single RGB-D camera is supported. RGB & Depth images must be aligned.
-    Mono,  ///< Uses a single camera, tracking is accurate up to scale.
+    Mono,  ///< Uses a single camera, tracking is accurate up to scale. Camera 0 is tracked as the rig, so its
+           ///< rig_from_camera must be identity.
 
     /// @warning Experimental: tracking may be inaccurate or fail for some sensor configurations and scenes.
     ///
@@ -598,8 +600,11 @@ public:
    * Must use ImageData::DataType::UINT8. Partial ImageSet is supported, for example due to frame drops. Corresponding
    * cameras are identified by Image::camera_index.
    * @param[in]  masks  (Optional) an array of corresponding masks no more than rig->num_cameras.
-   * Must use ImageData::DataType::UINT8. Partial ImageSet is supported, for example if mask is calculated on for some
-   * cameras. Corresponding cameras are identified by Image::camera_index.
+   * Must use ImageData::DataType::UINT8 and ImageData::Encoding::MONO. Non-zero pixels are excluded: no features are
+   * selected or kept there, and in OdometryMode::RGBD and OdometryMode::Multisensor the depth at those pixels is
+   * ignored. A mask may have a different resolution than its image; it is resized with nearest-neighbor
+   * interpolation. Partial ImageSet is supported, for example if masks are provided for only some cameras.
+   * Corresponding cameras are identified by Image::camera_index.
    * @param[in]  depths  (Optional) an array of depth images. In OdometryMode::RGBD exactly one depth
    * image must be provided. In OdometryMode::Multisensor pass one depth image per depth-providing
    * camera; each entry is matched to its rig camera by Image::camera_index and every camera_index
@@ -659,7 +664,7 @@ public:
    * @brief Get Last Landmarks
    *
    * Get an array of landmarks from the last VO frame;
-   * Landmarks are 3D points in the last camera frame.
+   * Landmarks are 3D points in the rig frame of the last VO frame.
    * @return Array of landmarks
    * @throws std::invalid_argument if stats export is disabled
    * @see Landmark
@@ -1132,7 +1137,7 @@ public:
    * poses are not updated immediately.
    *
    * @param[in]  images     synchronized images, no more than the number of cameras in the rig
-   * @param[in]  masks      (Optional) corresponding masks
+   * @param[in]  masks      (Optional) corresponding masks, non-zero pixels are excluded, see Odometry::Track()
    * @param[in]  depths     (Optional) depth images, see Odometry::Track()
    *
    * @return odometry pose estimate and, when available, the SLAM pose

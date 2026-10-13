@@ -101,12 +101,15 @@ void run_sba(const UnifiedMap::SubMap& recent_map, const camera::Rig& rig, const
   {
     for (const auto& landmarks : recent_map.landmark_and_obs) {
       for (const auto& [landmark, obs] : landmarks) {
+        const std::optional<Vector3T> point_w = landmark->get_pose();
+        if (!point_w) {
+          continue;
+        }
         auto it = pointObservationCount.find(landmark);
         if (it == pointObservationCount.end()) {
           int point_id = static_cast<int>(problem.points.size());
           pointObservationCount.insert(it, {landmark, point_id});
-          Vector3T point_w = *landmark->get_pose();
-          problem.points.push_back(point_w);
+          problem.points.push_back(*point_w);
         }
         total_observarions += obs.size();
       }
@@ -147,11 +150,12 @@ void run_sba(const UnifiedMap::SubMap& recent_map, const camera::Rig& rig, const
     const auto& landmarks = recent_map.landmark_and_obs[i];
     int pose_id = keyframe_to_pose_id.at(kf);
     for (const auto& [landmark, obs] : landmarks) {
-      if (!landmark->get_pose()) {
+      // The tracking thread may triangulate a landmark after the first pass; only indexed points are in the problem.
+      auto it = pointObservationCount.find(landmark);
+      if (it == pointObservationCount.end()) {
         continue;
       }
-
-      int point_id = pointObservationCount.at(landmark);
+      int point_id = it->second;
 
       for (const auto& o : obs) {
         problem.observation_xys.push_back(o.xy);
@@ -215,15 +219,15 @@ void run_imu_sba(const UnifiedMap::SubMap& recent_map, const Vector3T& gravity, 
   {
     for (const auto& landmarks : recent_map.landmark_and_obs) {
       for (const auto& [landmark, obs] : landmarks) {
-        if (!landmark->get_pose()) {
+        const std::optional<Vector3T> point_w = landmark->get_pose();
+        if (!point_w) {
           continue;
         }
         auto it = pointObservationCount.find(landmark);
         if (it == pointObservationCount.end()) {
           int point_id = static_cast<int>(problem.points.size());
           pointObservationCount.insert(it, {landmark, point_id});
-          Vector3T point_w = *landmark->get_pose();
-          problem.points.push_back(point_w);
+          problem.points.push_back(*point_w);
         }
         total_observarions += obs.size();
       }
@@ -254,11 +258,12 @@ void run_imu_sba(const UnifiedMap::SubMap& recent_map, const Vector3T& gravity, 
     const auto& landmarks = recent_map.landmark_and_obs[i];
     int pose_id = keyframe_to_pose_id.at(kf);
     for (const auto& [landmark, obs] : landmarks) {
-      if (!landmark->get_pose()) {
+      // The tracking thread may triangulate a landmark after the first pass; only indexed points are in the problem.
+      auto it = pointObservationCount.find(landmark);
+      if (it == pointObservationCount.end()) {
         continue;
       }
-
-      int point_id = pointObservationCount.at(landmark);
+      int point_id = it->second;
 
       for (const auto& o : obs) {
         problem.observation_xys.push_back(o.xy);

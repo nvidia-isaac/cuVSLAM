@@ -17,11 +17,6 @@ if command -v aws >/dev/null 2>&1; then
   fi
 fi
 
-if [ "${GITHUB_ACTIONS:-}" = "true" ] && ! $have_aws; then
-  echo "Error: repository secrets AWS_S3_ACCESS_KEY_ID and AWS_S3_SECRET_ACCESS_KEY are required for dataset staging." >&2
-  exit 1
-fi
-
 resolve_eval_suite_args
 dataset_registry validate "${EVAL_SUITE_ARGS[@]}"
 
@@ -45,10 +40,11 @@ done <<< "$eval_datasets"
 if $have_aws; then
   echo "Eval prerequisites OK (S3 tarball staging; KPI history under $RUNNER_STORAGE_ROOT)"
 elif $cache_ok; then
-  echo "Warning: AWS credentials unset; using local dataset cache at $LOCAL_DATASETS_DIR." >&2
+  echo "Note: no AWS CLI with credentials here; using the staged dataset cache at $LOCAL_DATASETS_DIR." >&2
   echo "Eval prerequisites OK (cached datasets; KPI history under $RUNNER_STORAGE_ROOT)"
 else
-  echo "Error: eval datasets missing at $LOCAL_DATASETS_DIR and AWS credentials are unset." >&2
-  echo "Run ./scripts/stage_eval_datasets.sh after configuring AWS_S3_ACCESS_KEY_ID / AWS_S3_SECRET_ACCESS_KEY." >&2
+  echo "Error: eval datasets missing at $LOCAL_DATASETS_DIR, and no AWS CLI with credentials to stage them." >&2
+  echo "Run ./scripts/stage_eval_datasets.sh with AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY set" \
+    "(in CI, from the AWS_S3_RO_* repository secrets)." >&2
   exit 1
 fi
