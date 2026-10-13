@@ -343,14 +343,34 @@ class TestSuiteSelection(unittest.TestCase):
             dataset_registry.DATASETS = original
 
     def test_smoke_covers_every_modality(self):
-        # Pre-merge has to exercise stereo, stereo-inertial and RGB-D. Which
-        # datasets provide that is free to change; the coverage is not.
+        # Pre-merge has to exercise stereo, stereo-inertial, RGB-D and
+        # multi-sensor. Which datasets provide that is free to change; the
+        # coverage is not.
         modes = {
             record.kpi_type
             for spec in dataset_registry.eval_datasets("smoke")
             for record in dataset_registry.eval_records(spec, "smoke")
         }
-        self.assertEqual(modes, {"MCAM", "VIO", "RGBD"})
+        self.assertEqual(modes, {"MCAM", "VIO", "RGBD", "MSF"})
+
+    def test_smoke_records_are_exact(self):
+        # PR verify and the Thor nightly both run smoke, so this is the
+        # pre-merge cost.
+        records = [
+            (spec.dataset_id, record.odometry_mode)
+            for spec in dataset_registry.eval_datasets("smoke")
+            for record in dataset_registry.eval_records(spec, "smoke")
+        ]
+        self.assertEqual(
+            records,
+            [
+                ("kitti", "multicamera"),
+                ("kitti", "multisensor"),
+                ("euroc", "inertial"),
+                ("icl_nuim", "rgbd"),
+                ("icl_nuim", "multisensor"),
+            ],
+        )
 
     def test_omitted_suite_matches_full(self):
         self.assertEqual(
