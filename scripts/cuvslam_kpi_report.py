@@ -324,9 +324,10 @@ def classify_levels(metric, tonight, reference, today, settings):
 
     def known(value):
         dates = near(value)
-        if len(dates) < settings["baseline_level_min_runs"]:
+        # Both builds of a group add a value per night, so count nights, not values.
+        dated = {date for date in dates if date is not None}
+        if len(dated) + dates.count(None) < settings["baseline_level_min_runs"]:
             return False
-        dated = [date for date in dates if date is not None]
         return not dated or (today - min(dated)).days >= settings["baseline_level_min_age_days"]
 
     levels = [value for _, value in reference if known(value)]
