@@ -41,6 +41,7 @@ See [Requirements](README.md#performance).
   - [Try to use rectified images if possible](#try-to-use-rectified-images-if-possible)
   - [Disable SLAM and ground constraint](#disable-slam-and-ground-constraint)
 - [Step 6: Verify synchronization](#step-6-verify-synchronization)
+  - [Cameras that are not synchronized with each other](#cameras-that-are-not-synchronized-with-each-other)
 - [Step 7: Run stereo odometry tracking](#step-7-run-stereo-odometry-tracking)
 - [Step 8: Adjust odometry settings](#step-8-adjust-odometry-settings)
   - [Improve input images](#improve-input-images)
@@ -150,8 +151,9 @@ cuvslam::Odometry::Config::max_frame_delta_s
 image_jitter_threshold_ms
 ```
 
-In the Isaac ROS cuVSLAM node, there is also a synchronizer that can align multiple image streams with non-equal
-timestamps. Check Isaac ROS documentation and tune:
+In the Isaac ROS cuVSLAM node, there is also a synchronizer that groups images whose timestamps are within
+`sync_matching_threshold_ms` into one frame; it cannot synchronize free-running cameras. Check Isaac ROS documentation
+and tune:
 
 ```
 num_cameras
@@ -350,6 +352,20 @@ transparency. This makes it easy to spot frames where “double images” move o
 Example: Left and right eyes out of sync
 
 ![Example: Left and right eyes out of sync](doc/images/troubleshooting_desync.gif)
+
+### Cameras that are not synchronized with each other
+
+Each `track()` call must carry images captured at one instant (within 1 ms). A camera may be missing from a call,
+for example after a frame drop, but cycling through cameras or camera groups across calls is not supported, and neither
+is filling an empty slot with an older image or giving images from different instants one timestamp. cuVSLAM matches
+features across cameras only within a call. `track()` rejects a call whose image timestamps differ by 1 ms or more,
+but when such input passes this check, the pose freezes, drifts or, with an IMU, diverges without an error.
+
+If your cameras are not synchronized:
+
+1. Synchronize them in hardware (external trigger).
+2. If they mostly line up, pass only frame sets whose images are within 1 ms of each other and drop the rest.
+3. Otherwise, run one tracker per camera (or per synchronized stereo pair) and fuse their poses yourself.
 
 ## Step 7: Run stereo odometry tracking
 
