@@ -634,7 +634,10 @@ bool SolverSfMInertial::solveNextFrame(int64_t time_ns, const sof::FrameState& f
     last_valid_pose.preintegration = sba_imu::IMUPreintegration(curr_pose.gyro_bias, curr_pose.acc_bias);
   }
 
-  integrated = !pnp_result && imu_state == StateMachine::State::Ok;
+  const bool no_observations = obs_vector_.empty();
+  const bool integrated_from_blackout =
+      !pnp_result && no_observations && no_drops && !is_first_run && maybe_gravity.has_value();
+  integrated = !pnp_result && (imu_state == StateMachine::State::Ok || integrated_from_blackout);
   TraceMessage(
       "Frame: pnp=%d integrated=%d imu_state=%d obs=%d vel=[%.3f,%.3f,%.3f] gbias=[%.4f,%.4f,%.4f] "
       "abias=[%.4f,%.4f,%.4f]",
@@ -657,10 +660,14 @@ bool SolverSfMInertial::solveNextFrame(int64_t time_ns, const sof::FrameState& f
   }
 
   if (integrated) {
-    integ_kf.predict_pose(*maybe_gravity, integ_kf.preintegration, curr_pose);
+    if (integrated_from_blackout) {
+      prev_pose.predict_pose(*maybe_gravity, prev_pose.preintegration, curr_pose);
+    } else {
+      integ_kf.predict_pose(*maybe_gravity, integ_kf.preintegration, curr_pose);
+    }
     TraceDebug("Pose was integrated!");
   }
-  if (pnp_result || imu_state == StateMachine::State::Ok) {
+  if (pnp_result || integrated) {
     // either we successfully converged, or successfully integrated the pose
     world_from_rig = curr_pose.w_from_imu * imu_from_rig;
     rig_from_w = world_from_rig.inverse();
