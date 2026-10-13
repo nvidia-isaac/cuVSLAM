@@ -540,7 +540,7 @@ bool LocalizerAndMapper::GetLastKeyframePoseAndTimestamp(Isometry3T& last_keyfra
 bool LocalizerAndMapper::CalcBetweenPose(
     KeyFrameId from, KeyFrameId to,
     const std::vector<VOFrameData::Track2DXY>& tracks2d_norm,  // normalized coordinates
-    const std::map<TrackId, Vector3T>& tracks3d_rel,           // xyz in camera space
+    const std::map<TrackId, Vector3T>& tracks3d_rel,           // coordinates in rig space
     Isometry3T& pose, Matrix6T& covariance) const {
   // xyz in "from" keyframe space
   // uv in "to" keyframe space

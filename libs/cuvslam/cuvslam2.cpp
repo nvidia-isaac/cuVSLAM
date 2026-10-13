@@ -612,6 +612,12 @@ Odometry::Odometry(const Rig& rig, const Config& cfg) {
       break;
     }
     case OdometryMode::Mono: {
+      // Mono estimates camera 0's pose and reports its landmarks in camera 0's frame, so camera 0 has to be the
+      // rig origin for the tracker to report rig poses and rig space landmark coordinates.
+      const Pose& rig_from_camera = rig.cameras[0].rig_from_camera;
+      THROW_INVALID_ARG_IF(
+          rig_from_camera.rotation != Pose{}.rotation || rig_from_camera.translation != Pose{}.translation,
+          "Mono mode tracks camera 0 as the rig, so cameras[0].rig_from_camera must be identity");
       tracker->visual_odometry = std::make_unique<odom::MonoVisualOdometry>(tracker->rig, svo_settings, cfg.use_gpu);
       break;
     }

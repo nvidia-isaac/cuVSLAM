@@ -189,7 +189,7 @@ void AsyncSlam::TrackResult(const FrameId frameId, const int64_t timestamp_ns,
       if (invalid_cam_id_count > 0) {
         SlamStdout("Skipped %d track(s) with invalid camera id", invalid_cam_id_count);
       }
-      // xyz to camera space
+      // rig space coordinates of the tracks that survived
       for (const auto& [track_id, xyz_rel] : stat.tracks3d) {
         if (added_tracks.find(track_id) == added_tracks.end()) {
           continue;
