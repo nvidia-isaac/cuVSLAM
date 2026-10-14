@@ -16,7 +16,10 @@
 
 #include "slam/map/spatial_index/lsi_grid.h"
 
+#include <algorithm>
 #include <iterator>
+#include <unordered_map>
+#include <vector>
 
 #include "camera/rig.h"
 #include "common/log_types.h"
@@ -346,6 +349,31 @@ void LSIGrid::OnUpdateKeyframePoseFinished() {
   }
   log::Message<LogFrames>(log::kInfo, "OnUpdateKeyframePoseFinished %zd", update_keyframe_pose_items_.size());
 
+  // Keyframes of the landmarks read from the database, which stay out of memory.
+  std::unordered_map<LandmarkId, std::vector<KeyFrameId>> stored_keyframes;
+  const auto seen_from = [&](LandmarkId landmark_id, KeyFrameId keyframe_id) {
+    const auto in_memory = landmarks_.find(landmark_id);
+    if (in_memory != landmarks_.end()) {
+      return in_memory->second.GetLandmarkInKeyframe(keyframe_id) != nullptr;
+    }
+    // Staged landmarks join their cells when they are activated.
+    if (!database_ || staged_landmarks_.count(landmark_id) != 0) {
+      return false;
+    }
+    const auto [stored, unread] = stored_keyframes.try_emplace(landmark_id);
+    if (unread) {
+      GridLandmark landmark;
+      if (database_->TryGetRecord(SlamDatabaseTable::Landmarks, landmark_id, [&](const BlobReader& blob_reader) {
+            return LandmarkFromBlob(blob_reader, landmark);
+          })) {
+        for (const LandmarkInKeyframe& seen : landmark.keyframes) {
+          stored->second.push_back(seen.keyframe_id);
+        }
+      }
+    }
+    return std::find(stored->second.begin(), stored->second.end(), keyframe_id) != stored->second.end();
+  };
+
   for (auto& it : update_keyframe_pose_items_) {
     // copy landmarks that is in this cell and is related to this keyframe to new cell
     // auto& cell_old = this->cells_[it.hash_cell_id_old];
@@ -354,16 +382,10 @@ void LSIGrid::OnUpdateKeyframePoseFinished() {
 
     for (auto it_landmark_old_id = start_end_landmarks.first; it_landmark_old_id != start_end_landmarks.second;
          it_landmark_old_id++) {
-      auto landmark_id = *it_landmark_old_id;
-      auto landmark_it = this->landmarks_.find(landmark_id);
-      if (landmark_it == this->landmarks_.end()) {
-        continue;
+      const LandmarkId landmark_id = *it_landmark_old_id;
+      if (seen_from(landmark_id, it.keyframe_id)) {
+        cell_new.Add(landmark_id);
       }
-      auto lm_kf = landmark_it->second.GetLandmarkInKeyframe(it.keyframe_id);
-      if (!lm_kf) {
-        continue;
-      }
-      cell_new.Add(landmark_id);
     }
   }
 
