@@ -230,12 +230,12 @@ __device__ __forceinline__ T extract(const Vec<T, 3>& a, int index) {
 
 template <typename T, int M, int N>
 __device__ __forceinline__ T extract(const Mat<T, M, N>& a, int row_id, int col_id) {
-  T res;
+  T res = a.d_[0][0];
   for (int i = 0; i < M; ++i) {
     for (int j = 0; j < N; ++j) {
-      if ((i == row_id) && (j == col_id))
-        ;
-      res = a.d_[i][j];
+      if ((i == row_id) && (j == col_id)) {
+        res = a.d_[i][j];
+      }
     }
   }
   return res;

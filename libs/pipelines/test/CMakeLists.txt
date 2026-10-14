@@ -13,6 +13,7 @@
 # of the software or derivative works thereof, you agree to be bound by this License.
 
 set(SOURCES
+    service_sba_test.cpp
     tracker_state_machine_test.cpp
 )
 

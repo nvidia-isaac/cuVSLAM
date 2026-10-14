@@ -20,6 +20,19 @@ To enable SLAM and save both odometry and SLAM poses:
 - `--cfg_enable_slam` - enables SLAM tracking
 - `--cfg_enable_export` - enables observation/landmark export (required for SLAM to get odometry state)
 
+### Multisensor (experimental)
+
+Multisensor mode needs a cuNLS build (`-DUSE_CUNLS=ON`). List the cameras that supply depth; IMU fusion turns on
+automatically when the edex has an IMU:
+```bash
+./bin/cuvslam_api_launcher -edex=<edex file> --cfg_odom_mode=4 --cfg_depth_camera_ids=0,1 --cfg_depth_scale_factor=1000
+```
+
+### Profiling
+
+Configure with `-DUSE_NVTX=ON` and switch the domains you need to `Enable` in `libs/profiler/profiler_enable.h`.
+The launcher marks every `Odometry::Track` and `Slam::Track` call with an NVTX range in the `Launcher` domain.
+
 ### Save Map
 
 To save a SLAM map:

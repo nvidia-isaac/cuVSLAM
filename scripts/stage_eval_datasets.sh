@@ -8,6 +8,14 @@ export AWS_DEFAULT_REGION
 RUNNER_LOCAL_DATASETS_ROOT="${RUNNER_LOCAL_DATASETS_ROOT:-${HOME:-/tmp}/.cache/cuvslam}"
 LOCAL_DATASETS_DIR="$RUNNER_LOCAL_DATASETS_ROOT/datasets/vslam"
 FORCE_RESTAGE="${FORCE_RESTAGE:-false}"
+# Space left free after staging, for the build, the eval outputs, and the runner
+# agent itself: filling the disk kills the runner mid-job, not just this step.
+STAGING_MIN_FREE_GIB="${STAGING_MIN_FREE_GIB:-10}"
+if ! [[ "$STAGING_MIN_FREE_GIB" =~ ^[0-9]{1,6}$ ]]; then
+  echo "Error: STAGING_MIN_FREE_GIB must be a non-negative whole number of GiB, got '$STAGING_MIN_FREE_GIB'." >&2
+  exit 1
+fi
+STAGING_MIN_FREE_GIB=$((10#$STAGING_MIN_FREE_GIB))
 
 S3_BUCKET="$(s3_dataset_bucket)"
 
@@ -39,11 +47,12 @@ report_staging_profile() {
     "files=$file_count total_mib_s=$total_rate"
 }
 
-stage_one() {
+# Returns 0 when the cached copy of a dataset can be used as is. Sets
+# remote_etag and remote_bytes (empty if unknown) for the caller.
+cache_is_current() {
   local name="$1"
-  local s3_key s3_uri
+  local s3_key
   s3_key="$(s3_dataset_key "$name")"
-  s3_uri="$(s3_tarball_uri "$name")"
   local dest="$LOCAL_DATASETS_DIR/$name"
   local etag_file="$dest/.s3_etag"
 
@@ -85,6 +94,52 @@ stage_one() {
     echo "Error: dataset $name not in local cache ($dest) and AWS credentials are unset." >&2
     exit 1
   fi
+  return 1
+}
+
+# Fails before any download when the datasets still to stage do not fit, or
+# when the size of one cannot be read: staging it unchecked could fill the disk.
+# The tarballs are uncompressed, so their size is what extraction writes, and a
+# replaced dataset needs its full new size because the old copy is removed only
+# after the new one is in place.
+check_free_space() {
+  local required=0 unknown=() name
+  while read -r name; do
+    if cache_is_current "$name" >/dev/null; then
+      continue
+    fi
+    if [[ "$remote_bytes" =~ ^[0-9]+$ ]]; then
+      required=$((required + remote_bytes))
+    else
+      unknown+=("$name")
+    fi
+  done <<< "$1"
+
+  local available headroom
+  available="$(df -P -B1 "$LOCAL_DATASETS_DIR" | awk 'NR == 2 {print $4}')"
+  headroom=$((STAGING_MIN_FREE_GIB * 1073741824))
+  echo "Free space: $((available / 1073741824)) GiB available under $LOCAL_DATASETS_DIR;" \
+    "$((required / 1073741824)) GiB to stage plus ${STAGING_MIN_FREE_GIB} GiB headroom"
+  if [ "${#unknown[@]}" -gt 0 ]; then
+    echo "Error: could not read the S3 object size of ${unknown[*]}; not staging without a free-space check." >&2
+    exit 1
+  fi
+  if [ $((required + headroom)) -gt "$available" ]; then
+    echo "Error: not enough free space under $LOCAL_DATASETS_DIR to stage the datasets." >&2
+    echo "Free space, point RUNNER_LOCAL_DATASETS_ROOT at a larger disk, or lower STAGING_MIN_FREE_GIB." >&2
+    exit 1
+  fi
+}
+
+stage_one() {
+  local name="$1"
+  if cache_is_current "$name"; then
+    return 0
+  fi
+  local s3_uri
+  s3_uri="$(s3_tarball_uri "$name")"
+  local dest="$LOCAL_DATASETS_DIR/$name"
+  local etag_file="$dest/.s3_etag"
 
   echo "Staging $name from $s3_uri -> $dest"
   # Extract as the object arrives: peak disk is one expanded dataset instead of
@@ -128,6 +183,8 @@ if ! eval_datasets="$(dataset_registry list --eval "${EVAL_SUITE_ARGS[@]}")" || 
   echo "Error: the dataset registry lists no evaluation datasets for this suite." >&2
   exit 1
 fi
+
+check_free_space "$eval_datasets"
 
 while read -r name; do
   stage_one "$name"

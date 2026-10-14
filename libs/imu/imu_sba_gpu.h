@@ -105,7 +105,6 @@ private:
   int num_poses_opt_allocated;
   int num_poses_opt;
   float3 gravity;
-  float robustifier_scale_pose;
   float robustifier_scale;
   float prior_gyro;
   float prior_acc;
@@ -158,7 +157,7 @@ private:
   std::unique_ptr<cuvslam::cuda::GPUArrayPinned<CostResult>> working_cost;
   std::unique_ptr<cuvslam::cuda::GPUOnlyArray<float>> working_partial_costs;
   std::unique_ptr<cuvslam::cuda::GPUOnlyArray<float>> working_buffer_solver;
-  std::unique_ptr<cuvslam::cuda::GPUOnlyArray<int>> working_buffer_solver_info;
+  std::unique_ptr<cuvslam::cuda::GPUArrayPinned<int>> working_buffer_solver_info;
 
   std::unique_ptr<cuvslam::cuda::GPUArrayPinned<float>> lambda;
 

@@ -18,6 +18,7 @@ Workflows (`.github/workflows/`):
 - `pr-verify.yml` - lint, then build + unit test on x86, Orin, and Thor; eval on the x86 job (fork-gated); posts a KPI table to the PR comment. Jetson benchmarks do not run on PRs.
 - `nightly.yml` - scheduled/manual build + test matrix; eval on the four x86 configs and CUDA micro-benchmarks on Orin and Thor; writes per-config reports and versioned Actions artifacts. Scheduled runs never create a Release. A manual dispatch from a matching `release/vX.Y.Z` branch promotes the same distributable bytes to a protected draft GitHub Release.
 - `provision-datasets.yml` - manual `workflow_dispatch` on the default branch; downloads, converts, and uploads a dataset tarball to S3. The only writer of dataset storage.
+- `retry-lost-runner.yml` - after a failed nightly run on `main` or `release/**`, re-runs the failed jobs only if a self-hosted runner lost communication, and reports each such event on the `ci-runner-lost` issue (and Slack, if configured).
 
 Branch protection is not in this repository. The default-branch ruleset is configured in the GitHub
 UI; read what is actually enforced with `gh api repos/<owner>/<repo>/rules/branches/main`.
@@ -91,11 +92,15 @@ tracked worktree differs from `HEAD`.
 
 ## Task: build a draft release
 
-1. Create or update a branch named `release/vMAJOR.MINOR[.PATCH][-SUFFIX]`.
+The release procedure, including patch releases and the cherry-pick rule, is in the "Releases" section of
+[DEVELOPMENT.md](../../DEVELOPMENT.md). The workflow side:
+
+1. Create or update a branch named `release/v<VERSION>`, where `VERSION` on that branch already holds the new version.
 2. Manually dispatch `Nightly Build & Test` from that branch. Release dispatches always build, even without commits in the last 24 hours.
-3. After every matrix job and evaluation succeeds, the workflow validates the branch version against `VERSION`, derives the tag from the branch (`release/v17.0` -> `v17.0`), and creates a draft Release containing the already-built C++ archives, wheels, documentation, and permanent evaluation bundle.
-4. Review the draft and publish it manually. A draft/published Release or Git tag with the same version is never overwritten.
-5. To rebuild an unpublished release after fixes, explicitly delete the old draft and dispatch the updated release branch again.
+3. At dispatch, before the matrix and evaluation jobs start, `check-changes` validates the branch name against `VERSION`, derives the tag from the branch (`release/v17.0.1` -> `v17.0.1`, requiring `VERSION` = `17.0.1`), and fails if a Release or tag for that version already exists.
+4. After every matrix job and evaluation succeeds, `publish-release` rechecks that the tag is still free and creates a draft Release containing the already-built C++ archives, wheels, documentation, and permanent evaluation bundle.
+5. Review the draft and publish it manually. The draft has no git tag (`untagged-…` URL); publishing creates it at the built commit. Never create the tag beforehand, because an existing draft/published Release or tag with the same version makes the workflow refuse to run.
+6. To rebuild an unpublished release after fixes, explicitly delete the old draft, plus any hand-made tag for the version (never the tag of a published release), then dispatch the updated release branch again.
 
 Scheduled nightlies publish only versioned 30-day Actions artifacts. They never create or update a GitHub Release.
 
