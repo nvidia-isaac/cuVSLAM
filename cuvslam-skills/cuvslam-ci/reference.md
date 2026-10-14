@@ -14,6 +14,7 @@ playbooks are in [SKILL.md](SKILL.md).
 - `pr-verify.yml`: lint in the CI image, then build + unit test on x86 (fork-gated), Orin, and Thor. The x86 job stages datasets, runs eval, and posts a KPI table to the PR comment. A status job aggregates the required checks.
 - `nightly.yml`: build + test matrix across four x86 CUDA/Ubuntu configs plus Orin and Thor. The four x86 configs run eval (`eval: true`) and generate KPI data and PDF reports; Orin and Thor run CUDA micro-benchmarks (`benchmark: true`) and generate structured speed reports. Scheduled and ordinary manual runs retain versioned Actions artifacts but never create a Release. A successful manual dispatch from a matching `release/vX.Y.Z` branch promotes the same consumer artifacts to an unpublished draft Release.
 - `provision-datasets.yml`: manual `workflow_dispatch`, gated to the default branch. Builds the CI image, runs `provision_dataset.sh` for the chosen dataset, uploads `<name>.tar`. The only writer of dataset storage.
+- `retry-lost-runner.yml`: `workflow_run` after a failed nightly run on `main` or `release/**`. PR Verify is excluded because `workflow_run` branch filters match the PR head branch, which a fork can name `main`. If any failed job carries the "lost communication with the server" annotation, it calls `rerun-failed-jobs` (up to `MAX_ATTEMPTS` total attempts) and records the event as a comment on the open `ci-runner-lost` issue, creating one if none is open. Failures without a lost runner are left alone. It never checks out the inspected run's code. Like every `workflow_run` workflow, it only takes effect from the default branch.
 Branch protection is not part of this repository. The default-branch ruleset is configured in the
 GitHub UI, so nothing here applies or verifies it; read the live rules with
 `gh api repos/<owner>/<repo>/rules/branches/main`.
@@ -64,11 +65,12 @@ Repository secrets, split read from write so fork-reachable jobs never hold a ke
 
 - `AWS_S3_RO_ACCESS_KEY_ID` / `AWS_S3_RO_SECRET_ACCESS_KEY` - read-only S3; eval staging in `pr-verify.yml` and `nightly.yml`. Passed as `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`.
 - `AWS_S3_ACCESS_KEY_ID` / `AWS_S3_SECRET_ACCESS_KEY` - read-write S3; `provision-datasets.yml` only.
+- `CI_ALERT_SLACK_WEBHOOK_URL` (optional) - Slack incoming-webhook URL; `retry-lost-runner.yml` posts lost-runner events to it when set.
 
 ## Dataset registry and layout
 
-- `DATASETS` in `tools/python_tools/cuvslam_tools/dataset_registry.py` is the single source of truth. A `DatasetSpec` holds the ID, the preparation module, and its `EvalSpec` records; an `EvalSpec` holds the reporter config filename, the `cuvslam_app` flags, suite membership, and gating. Provisionable means the dataset is present; eval-enabled means it has at least one `EvalSpec`. KITTI, EuRoC, TUM, ICL-NUIM, M3ED-SPOT and TartanAir V1 are eval-enabled; `tartan` and `coda` are provisionable only. `tartanair_v1` rebuilds the OSMO TartanAir evaluation from the public V1 Hard release: `download_tartanair_v1.sh` fetches left and right images and left depth for 16 environments and accepts each zip only if it matches the size and MD5 pinned in `zipfiles.txt`, and the converter ships three reporter configs: `tartan-vo_slam.cfg` (`TARTAN`) with every trajectory, and the OSMO split into `tartan_stable-vo_slam.cfg` (`TARTAN_STABLE`, OSMO's `TARTAN`) and `tartan_flaky-vo_slam.cfg` (`TARTAN_FLAKY`). All three ship in the tarball, so choosing between them is a registry change; eval runs the full config, with failed sequences excluded from the `TARTAN` accuracy means. Smoke runs KITTI, EuRoC and ICL-NUIM, which covers stereo, stereo-inertial and RGB-D; TUM is full-only because it is the larger RGB-D corpus and ICL-NUIM already covers the modality pre-merge, and M3ED-SPOT is full-only because at 56 GiB and 57k frames in two modes it is the most expensive record in the suite. TartanAir V1 is full-only, as it was on OSMO.
-- One dataset can carry several records. KITTI, TUM and ICL-NUIM each have a second, full-only `informational` record that replays the same reporter config in `multisensor` mode, so the `MSF` KPI rows compare the cuNLS solver against the default one on identical frames. EuRoC and M3ED-SPOT have none: the cuNLS solver projects through a pinhole camera and only warns on the fisheye and polynomial models those two use, so a record there would report numbers computed from the wrong geometry. `multisensor` needs `USE_CUNLS=ON`, which every CI configuration has.
+- `DATASETS` in `tools/python_tools/cuvslam_tools/dataset_registry.py` is the single source of truth. A `DatasetSpec` holds the ID, the preparation module, and its `EvalSpec` records; an `EvalSpec` holds the reporter config filename, the `cuvslam_app` flags, suite membership, and gating. Provisionable means the dataset is present; eval-enabled means it has at least one `EvalSpec`. KITTI, EuRoC, TUM, ICL-NUIM, M3ED-SPOT and TartanAir V1 are eval-enabled; `tartan` and `coda` are provisionable only. `tartanair_v1` rebuilds the OSMO TartanAir evaluation from the public V1 Hard release: `download_tartanair_v1.sh` fetches left and right images and left depth for 16 environments and accepts each zip only if it matches the size and MD5 pinned in `zipfiles.txt`, and the converter ships three reporter configs: `tartan-vo_slam.cfg` (`TARTAN`) with every trajectory, and the OSMO split into `tartan_stable-vo_slam.cfg` (`TARTAN_STABLE`, OSMO's `TARTAN`) and `tartan_flaky-vo_slam.cfg` (`TARTAN_FLAKY`). All three ship in the tarball, so choosing between them is a registry change; eval runs the full config, with failed sequences excluded from the `TARTAN` accuracy means. Smoke runs KITTI, EuRoC and ICL-NUIM, which covers stereo, stereo-inertial and RGB-D, plus the KITTI and ICL-NUIM `multisensor` records; TUM is full-only because it is the larger RGB-D corpus and ICL-NUIM already covers the modality pre-merge, and M3ED-SPOT is full-only because at 56 GiB and 57k frames in two modes it is the most expensive record in the suite. TartanAir V1 is full-only, as it was on OSMO.
+- One dataset can carry several records. KITTI, TUM and ICL-NUIM each have a second, `informational` record that replays the same reporter config in `multisensor` mode, so the `MSF` KPI rows compare the cuNLS solver against the default one on identical frames. Each follows its default record's suites: KITTI's and ICL-NUIM's are in smoke, TUM's is full-only. EuRoC and M3ED-SPOT have none: the cuNLS solver projects through a pinhole camera and only warns on the fisheye and polynomial models those two use, so a record there would report numbers computed from the wrong geometry. `multisensor` needs `USE_CUNLS=ON`, which every CI configuration has.
 - The module is standard library only and imports converters lazily, so shell wrappers call it with `PYTHONPATH=tools/python_tools` inside `cuvslam-ci:local` before anything is installed. `datasets_config.sh` wraps it as `dataset_registry`; `run_eval.sh` defines its own shim because the S3 variables `datasets_config.sh` requires are absent in the eval container.
 - Subcommands: `validate [--dataset] [--suite]`, `list [--eval] [--suite]`, `eval-records [--suite]` (tab-separated `id`, KPI prefix, config path, flags), `kpi-keys [--suite]`, `prepare-module`, `prepare --root-file`, `verify-staged --root`.
 - Suites: `EVAL_SUITE` selects records in `stage_eval_datasets.sh`, `check_eval_prerequisites.sh`, and `run_eval.sh`, and `eval_cuvslam_in_docker.sh` forwards it into the container. Unset means every record; validation requires every `EvalSpec` to belong to `full`, so unset and `full` agree. `validate --suite` additionally rejects a suite that would select nothing.
@@ -87,13 +89,19 @@ Repository secrets, split read from write so fork-reachable jobs never hold a ke
   sequence checks (`max_ate_pct`, `max_lost_frame_pct`, `exclude_failed`), the rolling-baseline settings, and per-metric drift `tolerances`; a
   dataset also holds calibrated `expected` values keyed `<METRIC>_<TYPE>_<MODE>`. A malformed file raises, because
   the sequence checks change KPI values.
-- Rolling-baseline check: `collect -H` reads the last `baseline_window` `kpi_<run>.json` files from the config's
-  KPI history (skipping the current run's) and stores each key's series in the report's `baseline` block. `render`
-  and `aggregate` list KPIs worse than the series median by more than max(`baseline_mad_k` × MAD,
-  `baseline_min_pct` % of the median), in the worse direction only (FPS down, the rest up), needing at least 3 runs.
-  The nightly aggregate first averages each history run across the configurations, so its band reflects the noise of
-  the aggregated mean. PR runs compare against `main`'s nightly history for `EVAL_CONFIG`. It never fails the job, and
-  a manually dispatched nightly writes into the history like a scheduled one.
+- Regression check: `collect -H` reads the last `baseline_window` `kpi_<run>.json` files from the config's KPI
+  history (skipping the current run's; nights without a run simply do not exist) and stores each key's series in the
+  report's `baseline` block. Many SLAM KPIs flip between a few discrete values run to run, so instead of a band around
+  a median, the check learns known levels: a value is on a known level when at least `baseline_level_min_runs` history
+  values lie within max(`baseline_level_pct` % of the median, 2 × MAD) of it, the earliest at least
+  `baseline_level_min_age_days` old. The two Ubuntu builds of a CUDA version run identical computations, so they form
+  one group with a pooled history. A KPI regresses (⚠) when, in every build of a group, it is off every known level and
+  worse than all of them: flips land on known levels, and a one-off jump in one build is not confirmed by the other. A
+  new level stays flagged until it is old enough to be known; a better one is listed, collapsed, as a new better level.
+  Defaults: 14 runs, 5%, 2 runs, 7 days. FPS is only checked with `collect --flag-fps`, which `run_eval.sh` passes on
+  aarch64 (Jetson runners run one job each; the x86 GPU runners are shared). PR runs compare their one build against
+  `main`'s nightly history for `EVAL_CONFIG`. Table Δ is the change from the median of the last runs. It never fails
+  the job.
 - Drift check: covers every key the registry's `kpi-keys` lists for the suite, plus any calibrated key. The tolerance
   is the calibrated entry's own (`{"value": ..., "tol_pct"|"tol_abs": ...}`), else the dataset's for that metric,
   else the default's. Uncalibrated keys are SKIPPED.
@@ -103,9 +111,10 @@ Repository secrets, split read from write so fork-reachable jobs never hold a ke
   sequences out of the ATE, ARE and Kabsch means (TUM and TartanAir); Losts and FPS always cover every sequence.
 - Nightly: `cuvslam_kpi_report.py aggregate` publishes one row per evaluation (dataset, type, mode). KPI cells contain
   the mean and population standard deviation across all four x86 configurations, except the counts Losts and Failed,
-  which show min–max. Each cell's second line (`<br><sub>Δ …</sub>`) is the change from the previous nightly: of the
-  mean, or of min/max. The last column counts broken sequences (failed in every configuration) and flaky ones (failed
-  in some), and a collapsed "Failed sequences" section lists them. `aggregate --values-only` drops the changes, the
+  which show min–max. Each cell's second line (`<br><sub>Δ …</sub>`) is the change from the rolling-baseline median:
+  of the mean, or of min/max. Broken / flaky, next to Failed, counts the failed sequences that failed in every
+  configuration and in some; a collapsed "Failed sequences" section lists them. FPS is the last column, and the notes,
+  naming the configurations, follow the table. `aggregate --values-only` drops the changes, the
   Broken / flaky column, the regression check, and the failed-sequence list for release notes. Temporary per-config `eval-kpis-staging-<version>-<slug>` and
   `eval-reports-staging-<version>-<slug>` artifacts, raw per-config JSON, reports, and history remain namespaced by
   `platform-cuda-ubuntu`. `RUN_ID` is the UTC date. After aggregation, staging artifacts are replaced by
@@ -155,6 +164,9 @@ Repository secrets, split read from write so fork-reachable jobs never hold a ke
 - Direct distributable uploads: `upload-artifact@v7` uses `archive: false` only for single-file C++ archives, wheels, documentation, and the evaluation record. Multi-file diagnostics retain the default ZIP container.
 - Release safety: only manual dispatches from validated `release/*` branches can publish, and they create drafts. Scheduled runs have no `contents: write` permission. Rebuilding requires explicit deletion of the previous draft; published Releases and existing tags are never moved or replaced.
 - Uncompressed `.tar`: gzip was dropped to cap memory on the provisioning runner. Packing (`provision_dataset.sh`) and extraction (`stage_eval_datasets.sh`) stay gzip-free and consistent.
+- KPI history is written only by scheduled nightlies on `main` (`eval_cuvslam_in_docker.sh` checks the event and ref).
+  Manual dispatches, including from branches and `release/*`, and PR runs mount it read-only, so a branch's results
+  never become the baseline that diffs and the regression check compare against.
 - KPI history publish uses a direct copy: the S3-backed history mount does not implement `rename(2)`, so `run_eval.sh` copies the KPI JSON straight to the target rather than staging to `.tmp` and `mv`.
 - Fail-fast on `RUNNER_STORAGE_ROOT`: the nightly eval step errors if it is unset rather than building a filesystem-root path; `check_eval_prerequisites.sh` also requires it.
 - Runner requirements: every eval-enabled runner needs the `RUNNER_STORAGE_ROOT` mount and configured repository secrets/variables. The AWS CLI and `check_eval_prerequisites.sh` run in the CI tools image and read the mounted storage and credentials there.
