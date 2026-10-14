@@ -90,9 +90,10 @@
     <label><input type="checkbox" id="gaps"> Connect across missing values</label>
     <div class="hint">A gap means the nightly ran but produced no value for that KPI. Nights without a nightly
       run have no point and are always connected.</div>
-    <label><input type="checkbox" id="band"> Rolling baseline band</label>
-    <div class="hint">Median of the previous nightlies ± the regression band used by the nightly report; points
-      worse than the band are marked ✕.</div>
+    <label><input type="checkbox" id="band"> Known levels (regression check)</label>
+    <div class="hint">Shades the known levels from the previous nightlies, plus their tolerance, as the nightly
+      report judges them. ✕ marks a regression (both Ubuntu builds of a CUDA version off every known level and
+      worse), ▲ a new better level. FPS is only checked on Jetson.</div>
     <h2>Dates</h2>
     <input type="date" id="from"> <input type="date" id="to">
     <button id="share">Copy link to this view</button>
@@ -207,7 +208,8 @@ function collectSeries() {
       const runs = [...byRun.keys()].sort();
       const reduce = DATA.metrics[kpi.metric].count ? (xs) => Math.max(...xs)
                                                    : (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
-      series.push({key, kpi, config: `mean of ${perConfig.length}`, runs, values: runs.map((r) => reduce(byRun.get(r)))});
+      series.push({key, kpi, config: `mean of ${perConfig.length}`, configs: perConfig.map((s) => s.config), runs,
+                   values: runs.map((r) => reduce(byRun.get(r)))});
     } else {
       for (const s of perConfig) series.push({key, kpi, ...s});
     }
@@ -217,21 +219,77 @@ function collectSeries() {
 
 function inRange(run) { return (!state.from || run >= state.from) && (!state.to || run <= state.to); }
 
-// Mirrors evaluate_baseline() in cuvslam_kpi_report.py for every point against the runs before it.
-function baselineBand(s) {
-  const settings = DATA.baseline.settings[s.kpi.dataset], meta = DATA.metrics[s.kpi.metric];
-  if (!settings) return null;
-  const lo = [], hi = [], worse = [];
-  s.values.forEach((v, i) => {
-    const window = s.values.slice(Math.max(0, i - settings.baseline_window), i).filter((x) => x !== null);
-    if (window.length < DATA.baseline.min_runs) { lo.push(null); hi.push(null); return; }
-    const center = median(window), mad = median(window.map((x) => Math.abs(x - center)));
-    let band = Math.max(settings.baseline_mad_k * mad, settings.baseline_min_pct / 100 * Math.abs(center));
-    if (meta.count) band = Math.max(band, 1);
-    lo.push(center - band); hi.push(center + band);
-    if (v !== null && (meta.higher_is_better ? center - v : v - center) > band) worse.push(i);
-  });
-  return {lo, hi, worse};
+const DAY_MS = 86400000;
+const levelCache = new Map();
+
+// Mirrors classify_levels() in cuvslam_kpi_report.py. tonight holds the night's value of every build of the group;
+// reference pools their [date, value] history. Returns null while no level is known yet.
+function classifyLevels(meta, tonight, reference, today, settings) {
+  if (reference.length < DATA.baseline.min_runs) return null;
+  const values = reference.map(([, v]) => v);
+  const center = median(values), spread = median(values.map((v) => Math.abs(v - center)));
+  let tolerance = Math.max(settings.baseline_level_pct / 100 * Math.abs(center), DATA.baseline.level_mad_factor * spread);
+  if (meta.count) tolerance = Math.max(tolerance, DATA.baseline.count_min_band);
+  const known = (value) => {
+    // Every build of a group adds a value per night, so count nights, not values.
+    const dates = new Set(reference.filter(([, other]) => Math.abs(other - value) <= tolerance).map(([d]) => d));
+    if (dates.size < settings.baseline_level_min_runs) return false;
+    const earliest = [...dates].sort()[0];
+    return (Date.parse(today) - Date.parse(earliest)) / DAY_MS >= settings.baseline_level_min_age_days;
+  };
+  const levels = values.filter(known);
+  if (!levels.length) return null;
+  const hib = meta.higher_is_better;
+  const worst = hib ? Math.min(...levels) : Math.max(...levels), best = hib ? Math.max(...levels) : Math.min(...levels);
+  let status = "known";
+  if (!tonight.some(known)) {
+    if (tonight.every((v) => (hib ? v < worst - tolerance : v > worst + tolerance))) status = "regressed";
+    else if (tonight.every((v) => (hib ? v > best + tolerance : v < best - tolerance))) status = "better";
+  }
+  return {status, lo: Math.min(...levels) - tolerance, hi: Math.max(...levels) + tolerance};
+}
+
+// Per-night results of the nightly regression check for one KPI and group, each night judged against the history
+// before it, as baseline_results() does with the reports of that night's builds.
+function levelResults(key, group) {
+  const cacheKey = `${key}|${group}`;
+  if (levelCache.has(cacheKey)) return levelCache.get(cacheKey);
+  const results = new Map(), kpi = DATA.kpis[key], meta = DATA.metrics[kpi.metric];
+  const settings = DATA.baseline.settings[kpi.dataset];
+  const members = Object.values(DATA.configs).filter((c) => c.group === group && c.values[key]);
+  if (settings && !(kpi.metric === "FPS" && !members.every((c) => c.flag_fps))) {
+    const files = Math.max(...Object.values(DATA.baseline.settings).map((s) => s.baseline_window));
+    for (const night of [...new Set(members.flatMap((c) => c.runs))].sort()) {
+      const ran = members.filter((c) => c.runs.includes(night));
+      const tonight = ran.map((c) => c.values[key][c.runs.indexOf(night)]);
+      if (tonight.some((v) => v === null)) continue;
+      // Like load_history() and history_values(): the last `files` runs before tonight, then their values.
+      const reference = ran.flatMap((c) => {
+        const end = c.runs.indexOf(night), start = Math.max(0, end - files);
+        return c.runs.slice(start, end).map((run, i) => [run, c.values[key][start + i]])
+          .filter(([, v]) => v !== null).slice(-settings.baseline_window);
+      });
+      const result = classifyLevels(meta, tonight, reference, night, settings);
+      if (result) results.set(night, result);
+    }
+  }
+  levelCache.set(cacheKey, results);
+  return results;
+}
+
+// A combined series is flagged on a night when any group of its configurations is, like the nightly aggregate.
+function seriesLevels(s) {
+  if (!s.configs) return levelResults(s.key, DATA.configs[s.config].group);
+  const groups = [...new Set(s.configs.map((c) => DATA.configs[c].group))].map((g) => levelResults(s.key, g));
+  const merged = new Map();
+  for (const run of s.runs) {
+    const statuses = groups.map((g) => g.get(run)?.status).filter(Boolean);
+    if (statuses.length) {
+      merged.set(run, {status: statuses.includes("regressed") ? "regressed" : statuses.includes("better") ? "better"
+                                                                                                       : "known"});
+    }
+  }
+  return merged;
 }
 
 function panelOf(s) {
@@ -247,6 +305,28 @@ function panelTitle(panel) {
   return `${meta.label}${unit ? ` (${unit})` : ""} — ${meta.higher_is_better ? "higher" : "lower"} is better`;
 }
 
+// One flat block per night from that night to the next, since each night has its own known levels, joined into a
+// polygon per run of consecutive nights with results. Filling between two edge traces breaks across gaps.
+function levelBand(runs, results, y) {
+  const xs = [], ys = [];
+  let segment = [];
+  const flush = () => {
+    if (!segment.length) return;
+    const upper = segment.flatMap(([a, b, r]) => [[a, y(r.hi)], [b, y(r.hi)]]);
+    const lower = segment.slice().reverse().flatMap(([a, b, r]) => [[b, y(r.lo)], [a, y(r.lo)]]);
+    for (const [px, py] of [...upper, ...lower, upper[0]]) { xs.push(px); ys.push(py); }
+    xs.push(null); ys.push(null);
+    segment = [];
+  };
+  runs.forEach((run, i) => {
+    if (!results[i]) { flush(); return; }
+    const start = Date.parse(run), end = i + 1 < runs.length ? Date.parse(runs[i + 1]) : start + DAY_MS;
+    segment.push([start, end, results[i]]);
+  });
+  flush();
+  return {x: xs, y: ys};
+}
+
 function tracesFor(s, name) {
   const color = colorFor(name), idx = s.runs.map((r, i) => i).filter((i) => inRange(s.runs[i]));
   const ref = state.yaxis === "pct" ? median(idx.map((i) => s.values[i]).filter((v) => v !== null)) : null;
@@ -259,17 +339,22 @@ function tracesFor(s, name) {
     hovertemplate: `%{x}<br>${name}<br>%{customdata:.4g} ${unit}<extra></extra>`,
   }];
   if (state.band) {
-    const b = baselineBand(s);
-    if (b) {
-      const common = {x, type: "scatter", mode: "lines", line: {width: 0, color}, legendgroup: name,
-                      showlegend: false, hoverinfo: "skip", connectgaps: state.gaps};
-      traces.unshift({...common, y: idx.map((i) => y(b.lo[i]))},
-                     {...common, y: idx.map((i) => y(b.hi[i])), fill: "tonexty", fillcolor: color + "26"});
-      const worse = b.worse.filter((i) => inRange(s.runs[i]));
-      if (worse.length) {
-        traces.push({x: worse.map((i) => s.runs[i]), y: worse.map((i) => y(s.values[i])), type: "scatter",
-                     mode: "markers", marker: {symbol: "x", size: 10, color: "#d62728"}, legendgroup: name,
-                     showlegend: false, hovertemplate: `%{x}<br>${name}<br>outside baseline band<extra></extra>`});
+    const levels = seriesLevels(s);
+    if (!s.configs) {
+      traces.unshift({...levelBand(idx.map((i) => s.runs[i]), idx.map((i) => levels.get(s.runs[i])), y),
+                      type: "scatter", mode: "lines", line: {width: 0}, fill: "toself", fillcolor: color + "26",
+                      legendgroup: name, showlegend: false, hoverinfo: "skip"});
+    }
+    const flagged = (status) => idx.filter((i) => levels.get(s.runs[i])?.status === status);
+    for (const [status, marker, text] of [
+      ["regressed", {symbol: "x", size: 10, color: "#d62728"}, "regression: off every known level, worse"],
+      ["better", {symbol: "triangle-up", size: 10, color: "#2ca02c"}, "new better level"],
+    ]) {
+      const points = flagged(status);
+      if (points.length) {
+        traces.push({x: points.map((i) => s.runs[i]), y: points.map((i) => y(s.values[i])), type: "scatter",
+                     mode: "markers", marker, legendgroup: name, showlegend: false,
+                     hovertemplate: `%{x}<br>${name}<br>${text}<extra></extra>`});
       }
     }
   }

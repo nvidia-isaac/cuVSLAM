@@ -29,12 +29,12 @@ import os
 import shutil
 import sys
 
-from cuvslam_kpi_report import (COUNT_METRICS, HIGHER_IS_BETTER, METRIC_UNITS, MIN_BASELINE_RUNS, REQUIRED_METRICS,
-                                get_display_name, load_json_object, load_kpi_config, parse_kpi_key,
-                                resolve_baseline_settings, safe_float, write_json)
+from cuvslam_kpi_report import (COUNT_METRICS, COUNT_MIN_BAND, HIGHER_IS_BETTER, LEVEL_MAD_FACTOR, METRIC_UNITS,
+                                MIN_BASELINE_RUNS, REQUIRED_METRICS, config_group, get_display_name, load_json_object,
+                                load_kpi_config, parse_kpi_key, resolve_baseline_settings, safe_float, write_json)
 
 SITE_SUBDIR = "kpi"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 PAGE_SOURCE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kpi_site", "index.html")
 
 
@@ -69,6 +69,15 @@ def load_config_runs(path):
     return load_report_file(path)
 
 
+def level_group(slug):
+    """The regression-check group of a <platform>-cuda<X.Y.Z>-ubuntu<V> config.
+
+    Each platform's nightly report is judged on its own, and within one, the
+    builds of a CUDA version form a group (config_group).
+    """
+    return f"{slug.split('-', 1)[0]} {config_group(slug)}"
+
+
 def build_data(configs, kpi_config):
     """The kpi/data.json document: per-config run dates and value series, plus KPI metadata."""
     data_configs = {}
@@ -78,6 +87,9 @@ def build_data(configs, kpi_config):
         config_keys = sorted({key for values in runs.values() for key in values if parse_kpi_key(key)})
         keys.update(config_keys)
         data_configs[slug] = {
+            "group": level_group(slug),
+            # run_eval.sh passes --flag-fps on aarch64 only: Jetson runners are dedicated, x86 ones shared.
+            "flag_fps": not slug.startswith("x86_64-"),
             "runs": dates,
             "values": {key: [safe_float(runs[run].get(key)) for run in dates] for key in config_keys},
         }
@@ -101,6 +113,8 @@ def build_data(configs, kpi_config):
         },
         "baseline": {
             "min_runs": MIN_BASELINE_RUNS,
+            "level_mad_factor": LEVEL_MAD_FACTOR,
+            "count_min_band": COUNT_MIN_BAND,
             "settings": {dataset: resolve_baseline_settings(kpi_config, dataset) for dataset in datasets},
         },
         "kpis": kpis,
