@@ -18,7 +18,8 @@
   aside { width: 270px; flex: none; padding: 12px 14px; background: var(--bg-side); border-right: 1px solid var(--line);
           overflow-y: auto; max-height: calc(100vh - 50px); position: sticky; top: 0; }
   aside h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 14px 0 4px; }
-  aside h2 .all { float: right; font-weight: normal; text-transform: none; cursor: pointer; color: #0066cc; }
+  aside h2 .all { float: right; font: inherit; font-weight: normal; letter-spacing: normal; text-transform: none;
+                  cursor: pointer; color: #0066cc; background: none; border: 0; margin: 0; padding: 0; width: auto; }
   aside label { display: block; padding: 1px 0; cursor: pointer; white-space: nowrap; overflow: hidden;
                 text-overflow: ellipsis; }
   aside select, aside input[type=date] { width: 100%; padding: 3px; }
@@ -39,21 +40,21 @@
 </header>
 <main>
   <aside>
-    <h2>Panels</h2>
-    <select id="panel">
+    <h2 id="panel-heading">Panels</h2>
+    <select id="panel" aria-labelledby="panel-heading">
       <option value="row">One per dataset / mode</option>
       <option value="metric">One per metric</option>
       <option value="config">One per configuration</option>
     </select>
     <h2>Layout</h2>
-    <select id="columns">
+    <select id="columns" aria-label="Layout columns">
       <option value="auto">Columns: auto</option>
       <option value="1">1 column</option>
       <option value="2">2 columns</option>
       <option value="3">3 columns</option>
       <option value="4">4 columns</option>
     </select>
-    <select id="height">
+    <select id="height" aria-label="Chart height">
       <option value="auto">Height: auto</option>
       <option value="260">Small</option>
       <option value="360">Medium</option>
@@ -61,28 +62,28 @@
       <option value="fill">Fill screen</option>
     </select>
     <div class="hint">Auto uses one full-screen chart when only one panel is left.</div>
-    <h2>Configurations</h2>
-    <select id="combine">
+    <h2 id="combine-heading">Configurations</h2>
+    <select id="combine" aria-labelledby="combine-heading">
       <option value="each">Show each configuration</option>
       <option value="mean">Combine (mean; max for counts)</option>
     </select>
     <div id="configs"></div>
-    <h2>Metrics <span class="all" data-group="metrics">all / none</span></h2>
+    <h2>Metrics <button type="button" class="all" data-group="metrics">all / none</button></h2>
     <div id="metrics"></div>
-    <h2>Datasets <span class="all" data-group="datasets">all / none</span></h2>
+    <h2>Datasets <button type="button" class="all" data-group="datasets">all / none</button></h2>
     <div id="datasets"></div>
-    <h2>Tracking types <span class="all" data-group="types">all / none</span></h2>
+    <h2>Tracking types <button type="button" class="all" data-group="types">all / none</button></h2>
     <div id="types"></div>
     <h2>Modes</h2>
     <div id="modes"></div>
-    <h2>Y axis</h2>
-    <select id="yaxis">
+    <h2 id="yaxis-heading">Y axis</h2>
+    <select id="yaxis" aria-labelledby="yaxis-heading">
       <option value="abs">Absolute value</option>
       <option value="pct">% change vs series median</option>
     </select>
     <label><input type="checkbox" id="log"> Log scale</label>
-    <h2>Style</h2>
-    <select id="style">
+    <h2 id="style-heading">Style</h2>
+    <select id="style" aria-labelledby="style-heading">
       <option value="lines+markers">Lines and markers</option>
       <option value="lines">Lines</option>
       <option value="markers">Markers</option>
@@ -95,7 +96,7 @@
       report judges them. ✕ marks a regression (both Ubuntu builds of a CUDA version off every known level and
       worse), ▲ a new better level. FPS is only checked on Jetson.</div>
     <h2>Dates</h2>
-    <input type="date" id="from"> <input type="date" id="to">
+    <input type="date" id="from" aria-label="From date"> <input type="date" id="to" aria-label="To date">
     <button id="share">Copy link to this view</button>
   </aside>
   <section id="panels"></section>
@@ -183,7 +184,13 @@ function buildControls(opts) {
     $(k).addEventListener("change", () => { state[k] = $(k).checked; update(); });
   }
   $("share").addEventListener("click", async () => {
-    await navigator.clipboard.writeText(location.href);
+    try {
+      // navigator.clipboard is only defined on HTTPS and localhost pages, and writeText can be denied.
+      await navigator.clipboard.writeText(location.href);
+    } catch (e) {
+      window.prompt("Copy the link to this view:", location.href);
+      return;
+    }
     $("share").textContent = "Link copied"; setTimeout(() => { $("share").textContent = "Copy link to this view"; }, 1500);
   });
 }
