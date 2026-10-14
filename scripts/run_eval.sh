@@ -147,6 +147,11 @@ fi
 if [ -d "$KPI_HISTORY" ]; then
   KPI_ARGS+=(-H "$KPI_HISTORY")
 fi
+# FPS is only comparable across runs on dedicated hardware: the Jetson runners
+# run one job each, while the x86 GPU runners are shared.
+if [ "${KPI_FLAG_FPS:-$([ "$(uname -m)" = aarch64 ] && echo true || echo false)}" = "true" ]; then
+  KPI_ARGS+=(--flag-fps)
+fi
 
 BASELINE_RANGES="/cuvslam/scripts/kpi_baseline_ranges.json"
 if [ -f "$BASELINE_RANGES" ]; then

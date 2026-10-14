@@ -214,7 +214,7 @@ DATASETS: dict[str, DatasetSpec] = {
             EvalSpec(
                 config="kitti-vio_slam_gt.cfg",
                 args=_multisensor_args("--rectified_stereo_camera=true", "--multicam_mode=moderate"),
-                suites=frozenset({FULL_SUITE}),
+                suites=frozenset(SUITES),
                 gating="informational",
             ),
         ),
@@ -266,12 +266,10 @@ DATASETS: dict[str, DatasetSpec] = {
                 args=_rgbd_args(),
                 suites=frozenset(SUITES),
             ),
-            # Full only while the mode is experimental, even though the dataset
-            # is cheap enough for smoke. Promote once the MSF keys are calibrated.
             EvalSpec(
                 config="icl_nuim-rgbd_slam.cfg",
                 args=_multisensor_args(),
-                suites=frozenset({FULL_SUITE}),
+                suites=frozenset(SUITES),
                 gating="informational",
             ),
         ),
