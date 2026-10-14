@@ -626,6 +626,12 @@ class TestBindings(unittest.TestCase):
         ]
         self.assertEqual(len(values), len(set(values)))
 
+    def test_slam_and_tracker_cannot_be_subclassed(self):
+        # __new__ builds them, so a subclass __init__ could not change how
+        for base in (vslam.Slam, vslam.Tracker):
+            with self.assertRaises(TypeError):
+                type('Subclass', (base,), {})
+
 
 if __name__ == "__main__":
     unittest.main()

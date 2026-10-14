@@ -87,6 +87,23 @@ Odometry::Config PyDefaultOdometryConfig() {
   return cfg;
 }
 
+// A callable that the SLAM thread may drop last; it is released with the GIL held.
+std::shared_ptr<nb::callable> GilSafeCallable(nb::callable callable) {
+  return std::shared_ptr<nb::callable>(new nb::callable(std::move(callable)), [](nb::callable* held) {
+    nb::gil_scoped_acquire gil;
+    delete held;
+  });
+}
+
+// Owned by its Python object, which deletes it without the GIL: the SLAM thread it joins may wait for the GIL.
+template <typename T>
+std::shared_ptr<T> DeletedWithoutGil(T* object) {
+  return std::shared_ptr<T>(object, [](T* owned) {
+    nb::gil_scoped_release release;
+    delete owned;
+  });
+}
+
 enum class ArrayType {
   Image,
   Mask,
@@ -817,11 +834,13 @@ NB_MODULE(pycuvslam, m) {
           "    parameters (dict[str, str]): Map of key/value string pairs to apply.");
 
   // Slam class must be defined before its nested enums/classes are bound to it.
+  // Final, since __new__ builds it: a subclass __init__ could not change how.
   auto slam_cls = nb::class_<Slam>(
       m, "Slam",
       "Builds and optimizes a reusable map from odometry results, including loop closure, map persistence, and "
       "relocalization.\n\n"
-      "Use directly for manual orchestration, or access Tracker's instance through its `slam` property.");
+      "Use directly for manual orchestration, or access Tracker's instance through its `slam` property.",
+      nb::is_final());
 
   nb::enum_<Slam::DataLayer>(slam_cls, "DataLayer", "Data layer for SLAM")
       .value("Landmarks", Slam::DataLayer::Landmarks, "Landmarks that are visible in the current frame")
@@ -990,8 +1009,10 @@ NB_MODULE(pycuvslam, m) {
 
   // Slam class methods
   slam_cls
-      .def(nb::init<const Rig&, const std::vector<uint8_t>&, const Slam::Config&>(), nb::arg("rig"),
-           nb::arg("primary_cameras"), nb::arg("config") = Slam::Config{})
+      .def(nb::new_([](const Rig& rig, const std::vector<uint8_t>& primary_cameras, const Slam::Config& config) {
+             return DeletedWithoutGil(new Slam(rig, primary_cameras, config));
+           }),
+           nb::arg("rig"), nb::arg("primary_cameras"), nb::arg("config") = Slam::Config{})
       .def("track", &Slam::Track, nb::arg("state"), nb::arg("gt_pose") = nullptr,
            "Update SLAM pose based on Odometry state and past SLAM loop closures.\n\n"
            "This method should be called after each successful Odometry.track() call.\n"
@@ -1022,9 +1043,9 @@ NB_MODULE(pycuvslam, m) {
       .def(
           "save_map",
           [](Slam& self, const std::string_view& folder_name, nb::callable callback) {
-            self.SaveMap(folder_name, [callback](bool success) {
+            self.SaveMap(folder_name, [callback = GilSafeCallable(std::move(callback))](bool success) {
               nb::gil_scoped_acquire gil;
-              callback(success);
+              (*callback)(success);
             });
           },
           nb::arg("folder_name"), nb::arg("callback"),
@@ -1044,13 +1065,13 @@ NB_MODULE(pycuvslam, m) {
             auto image_set = ImageSetFromNDArrays(images, timestamp_ns, ArrayType::Image);
             self.LocalizeInMap(
                 folder_name, timestamp_ns, guess_pose, image_set, settings,
-                [start_cb] {
+                [start_cb = GilSafeCallable(std::move(start_cb))] {
                   nb::gil_scoped_acquire gil;
-                  start_cb();
+                  (*start_cb)();
                 },
-                [finish_cb](const Result<Pose>& result) {
+                [finish_cb = GilSafeCallable(std::move(finish_cb))](const Result<Pose>& result) {
                   nb::gil_scoped_acquire gil;
-                  finish_cb(result.data, result.error_message);
+                  (*finish_cb)(result.data, result.error_message);
                 });
           },
           nb::arg("folder_name"), nb::arg("timestamp_ns"), nb::arg("guess_pose"), nb::arg("images"),
@@ -1113,10 +1134,12 @@ NB_MODULE(pycuvslam, m) {
           "Returns:\n"
           "    List of poses with timestamps");
 
+  // Final, since __new__ builds it: a subclass __init__ could not change how.
   auto tracker_cls = nb::class_<Tracker>(m, "Tracker",
                                          "Coordinates cuVSLAM Odometry and optional SLAM.\n\n"
                                          "Submit frames and IMU measurements through this class. Use the `odometry` "
-                                         "and `slam` properties for module-specific queries and operations.");
+                                         "and `slam` properties for module-specific queries and operations.",
+                                         nb::is_final());
 
   nb::enum_<Tracker::Mode>(tracker_cls, "Mode", "What the tracker runs, and in which thread")
       .value("OdometryOnlyRealtime", Tracker::Mode::OdometryOnlyRealtime,
@@ -1129,31 +1152,30 @@ NB_MODULE(pycuvslam, m) {
              "Odometry and SLAM, both in the calling thread, which makes a run reproducible.");
 
   tracker_cls
-      .def(
-          "__init__",
-          [](Tracker* self, const Rig& rig, Tracker::Mode mode, const std::optional<Odometry::Config>& odom_config,
-             const std::optional<Slam::Config>& slam_config) {
-            // An omitted config means the Python default, which is not the C++ default.
-            const Odometry::Config odometry_config = odom_config.value_or(PyDefaultOdometryConfig());
-            new (self) Tracker(rig, mode, odometry_config, slam_config.has_value() ? &*slam_config : nullptr);
-          },
-          nb::arg("rig"), nb::arg("mode"), nb::arg("odom_config") = nb::none(), nb::arg("slam_config") = nb::none(),
-          "Initialize the cuVSLAM system. Each `Odometry.OdometryMode` has specific `rig` requirements.\n\n"
-          "`mode` picks whether SLAM runs and whether the bundle adjuster and SLAM get threads of their own. It has "
-          "to agree with the configurations: a realtime mode needs `odom_config.async_sba == True` and "
-          "`slam_config.sync_mode == False`, an offline mode needs the opposite. The tracker checks these rather than "
-          "changing them, so what you configure is what runs. Both fields default to the realtime values, so the "
-          "offline modes need configurations that say so.\n\n"
-          "Parameters:\n"
-          "    rig: Camera rig configuration\n"
-          "    mode: What to run, and whether to run it in the background, see :class:`cuvslam.Tracker.Mode`\n"
-          "    odom_config: Optional odometry configuration (uses defaults if omitted)\n"
-          "    slam_config: SLAM configuration, used only in the SLAM modes; None uses the SLAM defaults, which suit "
-          "`Mode.OdometryWithSlamRealtime`. Must be None in the odometry-only modes. `gt_align_mode` requires "
-          "standalone Odometry and Slam instances.\n\n"
-          "Raises:\n"
-          "    ValueError: If the rig is invalid, if a configuration disagrees with `mode`, or if `slam_config` is "
-          "given in an odometry-only mode.")
+      .def(nb::new_([](const Rig& rig, Tracker::Mode mode, const std::optional<Odometry::Config>& odom_config,
+                       const std::optional<Slam::Config>& slam_config) {
+             // An omitted config means the Python default, which is not the C++ default.
+             const Odometry::Config odometry_config = odom_config.value_or(PyDefaultOdometryConfig());
+             return DeletedWithoutGil(
+                 new Tracker(rig, mode, odometry_config, slam_config.has_value() ? &*slam_config : nullptr));
+           }),
+           nb::arg("rig"), nb::arg("mode"), nb::arg("odom_config") = nb::none(), nb::arg("slam_config") = nb::none(),
+           "Initialize the cuVSLAM system. Each `Odometry.OdometryMode` has specific `rig` requirements.\n\n"
+           "`mode` picks whether SLAM runs and whether the bundle adjuster and SLAM get threads of their own. It has "
+           "to agree with the configurations: a realtime mode needs `odom_config.async_sba == True` and "
+           "`slam_config.sync_mode == False`, an offline mode needs the opposite. The tracker checks these rather than "
+           "changing them, so what you configure is what runs. Both fields default to the realtime values, so the "
+           "offline modes need configurations that say so.\n\n"
+           "Parameters:\n"
+           "    rig: Camera rig configuration\n"
+           "    mode: What to run, and whether to run it in the background, see :class:`cuvslam.Tracker.Mode`\n"
+           "    odom_config: Optional odometry configuration (uses defaults if omitted)\n"
+           "    slam_config: SLAM configuration, used only in the SLAM modes; None uses the SLAM defaults, which suit "
+           "`Mode.OdometryWithSlamRealtime`. Must be None in the odometry-only modes. `gt_align_mode` requires "
+           "standalone Odometry and Slam instances.\n\n"
+           "Raises:\n"
+           "    ValueError: If the rig is invalid, if a configuration disagrees with `mode`, or if `slam_config` is "
+           "given in an odometry-only mode.")
       .def(
           "track",
           [](Tracker& self, int64_t timestamp, const std::vector<nb::ndarray<nb::ro>>& images,
