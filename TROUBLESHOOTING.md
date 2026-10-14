@@ -359,7 +359,7 @@ Each `track()` call must carry images captured at one instant (within 1 ms). A c
 for example after a frame drop, but cycling through cameras or camera groups across calls is not supported, and neither
 is filling an empty slot with an older image or giving images from different instants one timestamp. cuVSLAM matches
 features across cameras only within a call. `track()` rejects a call whose image timestamps differ by 1 ms or more,
-but when such input passes this check, the pose freezes, drifts or, with an IMU, diverges without an error.
+but when such input passes this check, tracking accuracy is not guaranteed.
 
 If your cameras are not synchronized:
 
