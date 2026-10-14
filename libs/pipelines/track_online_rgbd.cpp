@@ -139,9 +139,6 @@ bool SolverSfMRGBD::solveNextFrame(int64_t time_ns, const sof::FrameState& frame
   return result;
 }
 
-// Exports observations in left camera along with corresponding 3d points
-// out_tracks2d - output 2d track coordinates in pixels
-// out_tracks3d - in rig space
 void SolverSfMRGBD::exportTracks(const std::vector<camera::Observation>& observations,
                                  std::vector<Track2D>& out_tracks2d, Tracks3DMap& out_tracks3d,
                                  const Isometry3T& rig_from_world) const {
