@@ -174,7 +174,14 @@ public:
   //   true if the flush succeeded, false if no database is attached
   bool FlushActiveDatabase() const;
 
-  void DetachDatabase();  // flush data and close connection
+  // Writes all unsaved data to the attached writable database, which then holds the whole map; nothing else changes.
+  bool FlushMapToDatabase();
+
+  bool HasWritableDatabase() const;
+  bool IsDatabaseAt(const std::string& path) const;  // the attached database is the one in folder `path`
+
+  // Reopens the attached read-only database for writing, keeping the map in memory as it is.
+  bool ReopenDatabaseForWriting(const std::string& path);
 
   // ----- Loop closure search -----
 
@@ -372,6 +379,7 @@ private:
   // ----- Visual place recognition -----
   // Keyed by the node ids of map_'s pose graph.
   std::unique_ptr<vpr::VprMap> vpr_map_;
+  bool vpr_map_unreadable_ = false;  // the database's VPR map is kept as it is, never overwritten
 
   // The VPR map is a singleton of the attached database, like the spatial index.
   bool PutVprMapToDatabase();
@@ -387,6 +395,9 @@ private:
   // ----- Internal methods -----
   // Installs the single PoseGraph removal callback, for keyframe_removed_ and the VPR map.
   void RegisterRemoveNodeCB();
+
+  // Saves a map that LocalizeInMap loaded read-only: a copy of it, updated from memory; the session keeps it.
+  bool SaveLoadedMap(const std::string& path);
 
   // Attempts to add an edge between two keyframes in the pose graph.
   // Returns false if an existing edge has higher weight or if the 'start' keyframe pose is not found.

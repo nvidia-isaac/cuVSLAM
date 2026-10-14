@@ -87,6 +87,14 @@ Odometry::Config PyDefaultOdometryConfig() {
   return cfg;
 }
 
+// A callable that the SLAM thread may drop last; it is released with the GIL held.
+std::shared_ptr<nb::callable> GilSafeCallable(nb::callable callable) {
+  return std::shared_ptr<nb::callable>(new nb::callable(std::move(callable)), [](nb::callable* held) {
+    nb::gil_scoped_acquire gil;
+    delete held;
+  });
+}
+
 enum class ArrayType {
   Image,
   Mask,
@@ -835,8 +843,8 @@ NB_MODULE(pycuvslam, m) {
   nb::class_<Slam::Config>(slam_cls, "Config", "SLAM configuration parameters")
       .def(nb::init<std::string_view, bool, bool, bool, bool, bool, float, float, uint32_t, uint32_t, uint32_t,
                     uint32_t, bool, std::string_view, float, Slam::LoopClosureMode>(),
-           nb::kw_only(), nb::arg("map_cache_path") = Slam::Config{}.map_cache_path,
-           nb::arg("use_gpu") = Slam::Config{}.use_gpu, nb::arg("sync_mode") = Slam::Config{}.sync_mode,
+           nb::kw_only(), nb::arg("map_path") = Slam::Config{}.map_path, nb::arg("use_gpu") = Slam::Config{}.use_gpu,
+           nb::arg("sync_mode") = Slam::Config{}.sync_mode,
            nb::arg("enable_reading_internals") = true,  // enable by default; in Python convenience is a priority
            nb::arg("planar_constraints") = Slam::Config{}.planar_constraints,
            nb::arg("gt_align_mode") = Slam::Config{}.gt_align_mode,
@@ -849,10 +857,11 @@ NB_MODULE(pycuvslam, m) {
            nb::arg("use_vpr") = Slam::Config{}.use_vpr, nb::arg("vpr_model_path") = Slam::Config{}.vpr_model_path,
            nb::arg("vpr_score_threshold") = Slam::Config{}.vpr_score_threshold,
            nb::arg("loop_closure_mode") = Slam::Config{}.loop_closure_mode)
-      .def_rw("map_cache_path", &Slam::Config::map_cache_path,
+      .def_rw("map_path", &Slam::Config::map_path,
               "If empty, map is kept in memory only. Else, map is synced to disk (LMDB) at this path, allowing "
-              "large-scale maps; if the path already exists it will be overwritten. To load an existing map, use "
-              "LocalizeInMap(). To save map, use SaveMap().")
+              "large-scale maps; if the path already exists it will be overwritten. `flush_map` saves the map there, "
+              "and `save_map` fails. To load an existing map, use `localize_in_map`; once it succeeds, the session "
+              "writes the loaded folder if `attach` is set, and no map file otherwise.")
       .def_rw("use_gpu", &Slam::Config::use_gpu, "Whether to use GPU acceleration")
       .def_rw("sync_mode", &Slam::Config::sync_mode,
               "If true, localization and mapping run in the same thread as visual odometry")
@@ -889,15 +898,15 @@ NB_MODULE(pycuvslam, m) {
               "`gt_align_mode` off, else constructing Slam raises ValueError.")
       .def("__repr__", [](const Slam::Config& cfg) {
         return nb::str(
-                   "cuvslam.Slam.Config(map_cache_path={}, use_gpu={}, sync_mode={}, enable_reading_internals={}, "
+                   "cuvslam.Slam.Config(map_path={}, use_gpu={}, sync_mode={}, enable_reading_internals={}, "
                    "planar_constraints={}, gt_align_mode={}, map_cell_size={}, max_landmarks_distance={}, "
                    "max_map_size={}, throttling_time_ms={}, retention_time_ms={}, delay_warning_queue_size={}, "
                    "use_vpr={}, vpr_model_path={}, vpr_score_threshold={}, "
                    "loop_closure_mode={})")
-            .format(cfg.map_cache_path, cfg.use_gpu, cfg.sync_mode, cfg.enable_reading_internals,
-                    cfg.planar_constraints, cfg.gt_align_mode, cfg.map_cell_size, cfg.max_landmarks_distance,
-                    cfg.max_map_size, cfg.throttling_time_ms, cfg.retention_time_ms, cfg.delay_warning_queue_size,
-                    cfg.use_vpr, cfg.vpr_model_path, cfg.vpr_score_threshold, cfg.loop_closure_mode);
+            .format(cfg.map_path, cfg.use_gpu, cfg.sync_mode, cfg.enable_reading_internals, cfg.planar_constraints,
+                    cfg.gt_align_mode, cfg.map_cell_size, cfg.max_landmarks_distance, cfg.max_map_size,
+                    cfg.throttling_time_ms, cfg.retention_time_ms, cfg.delay_warning_queue_size, cfg.use_vpr,
+                    cfg.vpr_model_path, cfg.vpr_score_threshold, cfg.loop_closure_mode);
       });
 
   nb::class_<Slam::LocalizationSettings>(slam_cls, "LocalizationSettings", "Localization settings")
@@ -1056,39 +1065,59 @@ NB_MODULE(pycuvslam, m) {
       .def(
           "save_map",
           [](Slam& self, const std::string_view& folder_name, nb::callable callback) {
-            self.SaveMap(folder_name, [callback](bool success) {
+            self.SaveMap(folder_name, [callback = GilSafeCallable(std::move(callback))](bool success) {
               nb::gil_scoped_acquire gil;
-              callback(success);
+              (*callback)(success);
             });
           },
           nb::arg("folder_name"), nb::arg("callback"),
           "Save SLAM database (map) to a folder.\n\n"
           "This folder will be created if it does not exist.\n"
           "**WARNING**: *Contents of the folder will be overwritten.*\n"
+          "It fails while the session writes its map in place (`map_path`, or `localize_in_map` with `attach`): "
+          "`flush_map` saves it there. It also fails for the folder of a map that `localize_in_map` loaded and the "
+          "folders that contain it.\n"
           "This method works asynchronously depending on the `sync_mode` parameter in `Slam.Config`.\n"
           "In both cases, the callback will be called with a flag indicating if the map was saved successfully.\n\n"
           "Parameters:\n"
           "    folder_name: Folder name where SLAM database will be saved\n"
           "    callback: Function to be called when save is complete (takes bool success parameter)")
       .def(
+          "flush_map",
+          [](Slam& self, nb::callable callback) {
+            self.FlushMap([callback = GilSafeCallable(std::move(callback))](bool success) {
+              nb::gil_scoped_acquire gil;
+              (*callback)(success);
+            });
+          },
+          nb::arg("callback"),
+          "Write all unsaved data of the map to its map file: `map_path`, or the folder that `localize_in_map` "
+          "attached.\n\n"
+          "The file then holds the whole map, and mapping goes on as before. It fails without one.\n"
+          "This method works asynchronously depending on the `sync_mode` parameter in `Slam.Config`.\n"
+          "In both cases, the callback will be called with a flag indicating if the map was flushed successfully.\n\n"
+          "Parameters:\n"
+          "    callback: Function to be called when flush is complete (takes bool success parameter)")
+      .def(
           "localize_in_map",
           [](Slam& self, const std::string_view& folder_name, int64_t timestamp_ns,
              const std::optional<Pose>& guess_pose, const std::vector<nb::ndarray<nb::ro>>& images,
-             const Slam::LocalizationSettings& settings, nb::callable start_cb, nb::callable finish_cb) {
+             const Slam::LocalizationSettings& settings, nb::callable start_cb, nb::callable finish_cb, bool attach) {
             auto image_set = ImageSetFromNDArrays(images, timestamp_ns, ArrayType::Image);
             self.LocalizeInMap(
                 folder_name, timestamp_ns, guess_pose, image_set, settings,
-                [start_cb] {
+                [start_cb = GilSafeCallable(std::move(start_cb))] {
                   nb::gil_scoped_acquire gil;
-                  start_cb();
+                  (*start_cb)();
                 },
-                [finish_cb](const Result<Pose>& result) {
+                [finish_cb = GilSafeCallable(std::move(finish_cb))](const Result<Pose>& result) {
                   nb::gil_scoped_acquire gil;
-                  finish_cb(result.data, result.error_message);
-                });
+                  (*finish_cb)(result.data, result.error_message);
+                },
+                attach);
           },
           nb::arg("folder_name"), nb::arg("timestamp_ns"), nb::arg("guess_pose").none(), nb::arg("images"),
-          nb::arg("settings"), nb::arg("start_cb"), nb::arg("finish_cb"),
+          nb::arg("settings"), nb::arg("start_cb"), nb::arg("finish_cb"), nb::arg("attach") = false,
           "Localize in the existing database (map).\n\n"
           "If ``Slam.Config.sync_mode`` is false, work is queued for the background slam thread and the callback runs "
           "when localization finishes (possibly on another thread than the caller). If ``Slam.Config.sync_mode`` is "
@@ -1096,6 +1125,8 @@ NB_MODULE(pycuvslam, m) {
           "Finds the rig pose in the saved map. If successful, replace current map with saved one.\n"
           "`finish_cb` receives the localization result or an error message.\n"
           "With guess_pose=None, it needs `Slam.Config.use_vpr` and a map saved with it.\n"
+          "It fails if the map has more nodes than `Slam.Config.max_map_size` (0: no limit), and for the folder of "
+          "the map file this session writes; `flush_map` saves that one.\n"
           "Parameters:\n"
           "    folder_name: Folder containing the saved SLAM map\n"
           "    timestamp_ns: Timestamp for the image frame in nanoseconds\n"
@@ -1103,7 +1134,10 @@ NB_MODULE(pycuvslam, m) {
           "    images: List of numpy arrays containing the camera images\n"
           "    settings: Localization settings\n"
           "    start_cb: Called when localization begins (no arguments)\n"
-          "    finish_cb: Called when localization completes (receives pose result and error message)")
+          "    finish_cb: Called when localization completes (receives pose result and error message)\n"
+          "    attach: On success, the session writes its map into folder_name from then on, as with `map_path`: "
+          "`flush_map` saves it there, `save_map` fails, and destroying Slam writes it there. The folder holds a "
+          "whole map only after that. Nothing else may open the folder while it is attached.")
       .def(
           "get_landmarks",
           [](Slam& self, Slam::DataLayer layer) -> Slam::Landmarks {
@@ -1142,9 +1176,10 @@ NB_MODULE(pycuvslam, m) {
           "recognize_place_by_frame",
           [](Slam& self, const std::vector<nb::ndarray<nb::ro>>& images, int64_t timestamp_ns, nb::callable finish_cb) {
             auto image_set = ImageSetFromNDArrays(images, timestamp_ns, ArrayType::Image);
-            self.RecognizePlaceByFrame(image_set, [finish_cb](const Result<Slam::PlaceRecognition>& result) {
+            self.RecognizePlaceByFrame(image_set, [finish_cb = GilSafeCallable(std::move(finish_cb))](
+                                                      const Result<Slam::PlaceRecognition>& result) {
               nb::gil_scoped_acquire gil;
-              finish_cb(result.data, result.error_message);
+              (*finish_cb)(result.data, result.error_message);
             });
           },
           nb::arg("images"), nb::arg("timestamp_ns"), nb::arg("finish_cb"),

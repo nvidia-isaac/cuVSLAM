@@ -97,9 +97,9 @@ AsyncSlam::AsyncSlam(const camera::Rig& rig, const std::vector<CameraId>& camera
 
   tail_.Clear();
 
-  if (!options.map_cache_path.empty()) {
-    if (!slam_->AttachToNewDatabase(options.map_cache_path)) {
-      throw std::runtime_error("Failed to connect SLAM to map at " + options.map_cache_path);
+  if (!options.map_path.empty()) {
+    if (!slam_->AttachToNewDatabase(options.map_path)) {
+      throw std::runtime_error("Failed to connect SLAM to map at " + options.map_path);
     }
   }
 
@@ -376,6 +376,26 @@ void AsyncSlam::CopyToDatabaseCmd::Execute(AsyncSlam& async_slam, FrameId, const
   async_slam.CopyToDatabase_worker(path_);
 }
 
+void AsyncSlam::FlushMap(const std::function<void(bool)>& callback) {
+  const auto vo_keyframe = std::make_shared<VOKeyframeInfo>(VOKeyframeInfo());
+  vo_keyframe->command = std::make_shared<FlushMapCmd>(callback);
+  input_queue_.Push(vo_keyframe);
+  if (reproduce_mode_) {
+    ProcessInputSynchronously();
+  }
+}
+
+void AsyncSlam::FlushMapCmd::Execute(AsyncSlam& async_slam, FrameId, const Isometry3T&) {
+  bool flushed = false;
+  {
+    const std::lock_guard slam_guard(async_slam.slam_mutex_);
+    flushed = async_slam.slam_->FlushMapToDatabase();
+  }
+  if (callback_) {
+    callback_(flushed);
+  }
+}
+
 // Set landmarks view
 void AsyncSlam::SetLandmarksView(std::shared_ptr<ViewManager<ViewLandmarks>> view) {
   this->landmarks_view_ = std::move(view);
@@ -398,9 +418,11 @@ void AsyncSlam::Shutdown() {
   if (thread_.joinable()) {
     thread_.join();
   }
-  // Copy to database
+  // The database stays open, so SaveMap after Stop() still sees a loaded map.
   std::lock_guard slam_guard(slam_mutex_);
-  slam_->DetachDatabase();
+  if (slam_->HasWritableDatabase()) {
+    slam_->FlushMapToDatabase();
+  }
 }
 
 std::string AsyncSlam::FrameInformationString(const sof::Images& images) {

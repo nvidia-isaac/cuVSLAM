@@ -152,8 +152,8 @@ def _apply_slam_section(config: Slam.Config, section: dict) -> None:
             config.max_map_size = int(value)
         elif key == "throttling_time_ms":
             config.throttling_time_ms = int(value)
-        elif key == "map_cache_path":
-            warnings.warn("'map_cache_path' cannot be loaded from YAML (string does not persist); "
+        elif key == "map_path":
+            warnings.warn("'map_path' cannot be loaded from YAML (string does not persist); "
                           "set it directly on the config object after loading.", stacklevel=2)
         else:
             warnings.warn(f"try_load_slam_config_from_file: unknown key {key!r} (ignored)", stacklevel=2)

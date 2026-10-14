@@ -19,7 +19,10 @@ set(HEADERS
 # Source files
 set(SOURCES
     async_slam_concurrency_test.cpp
+    attached_map_test.cpp
     lcs_vpr_test.cpp
+    localize_in_map_test.cpp
+    lsi_grid_test.cpp
     pgo_test.cpp
     p3p_test.cpp
     pnp_ransac_test.cpp

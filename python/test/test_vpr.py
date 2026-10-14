@@ -434,22 +434,22 @@ class TestVprAnyLoc(unittest.TestCase):
             self.assertEqual(reloaded.node_id, place.node_id)
             self.assertEqual(reloaded.timestamp_ns, place.timestamp_ns)
 
-    def test_a_map_cache_keeps_its_places_when_the_session_ends(self):
-        # With map_cache_path the map lives in LMDB; ending the session writes the VPR map there too.
-        cache = tempfile.mkdtemp()
+    def test_an_attached_map_keeps_its_places_when_the_session_ends(self):
+        # With map_path the map lives in LMDB; ending the session writes the VPR map there too.
+        map_dir = tempfile.mkdtemp()
         try:
             slam_cfg = self.anyloc_config()
-            slam_cfg.map_cache_path = cache  # the config borrows this str
+            slam_cfg.map_path = map_dir  # the config borrows this str
             tracker = self.make_tracker(slam_cfg)
             frames = self.track_prefix(tracker, n_frames=200)
             del tracker
 
-            results = [self.relocalize(timestamp, images, localization_settings(), cache)
+            results = [self.relocalize(timestamp, images, localization_settings(), map_dir)
                        for timestamp, images in frames[::2]]
             self.assertTrue(any(pose is not None for pose, _ in results),
-                            f"nothing relocalized in the map cache; errors were {sorted({e for _, e in results})}")
+                            f"nothing relocalized in the attached map; errors were {sorted({e for _, e in results})}")
         finally:
-            shutil.rmtree(cache, ignore_errors=True)
+            shutil.rmtree(map_dir, ignore_errors=True)
 
     def relocalize(self, timestamp, images, settings, folder):
         """Localize one frame of a fresh session in the saved map, without a guess pose."""

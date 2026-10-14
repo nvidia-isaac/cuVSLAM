@@ -204,7 +204,7 @@ std::vector<vpr::VprPlace> LocalizerAndMapper::RecognizeLoopClosurePlaces(const 
 }
 
 bool LocalizerAndMapper::PutVprMapToDatabase() {
-  if (!IsVprEnabled() || !map_.database_ || map_.database_->IsReadOnly()) {
+  if (!IsVprEnabled() || vpr_map_unreadable_ || !map_.database_ || map_.database_->IsReadOnly()) {
     return true;
   }
   return map_.database_->SetSingleton(SlamDatabaseSingleton::VprMap, 0,
@@ -212,12 +212,17 @@ bool LocalizerAndMapper::PutVprMapToDatabase() {
 }
 
 void LocalizerAndMapper::GetVprMapFromDatabase() {
+  vpr_map_unreadable_ = false;
   if (!IsVprEnabled() || !map_.database_) {
     return;
   }
-  // A map saved without VPR has none.
-  map_.database_->TryGetSingleton(SlamDatabaseSingleton::VprMap,
-                                  [&](const BlobReader& reader) { return vpr_map_->FromBlob(reader); });
+  // A map saved without VPR has none; one from another engine or format stays as it is.
+  bool present = false;
+  const bool loaded = map_.database_->TryGetSingleton(SlamDatabaseSingleton::VprMap, [&](const BlobReader& reader) {
+    present = true;
+    return vpr_map_->FromBlob(reader);
+  });
+  vpr_map_unreadable_ = present && !loaded;
 }
 
 bool LocalizerAndMapper::GetKeepTrackPoses() const { return keep_track_poses_; }
@@ -366,6 +371,13 @@ bool LocalizerAndMapper::AttachToNewDatabase(const std::string& path) {
 
 bool LocalizerAndMapper::AttachToNewDatabaseSaveMapAndDetach(const std::string& path) {
 #ifdef USE_LMDB
+  if (map_.database_) {
+    if (!map_.database_->IsReadOnly()) {
+      SlamStderr("SaveMap can't save a map that the session writes in place; FlushMap saves it.\n");
+      return false;
+    }
+    return SaveLoadedMap(path);
+  }
   if (!AttachToNewDatabase(path)) {
     return false;
   }
@@ -383,9 +395,85 @@ bool LocalizerAndMapper::AttachToNewDatabaseSaveMapAndDetach(const std::string& 
 #endif
 }
 
-void LocalizerAndMapper::DetachDatabase() {
-  PutVprMapToDatabase();
-  map_.DetachDatabase(false);
+bool LocalizerAndMapper::FlushMapToDatabase() {
+  if (!map_.database_ || map_.database_->IsReadOnly()) {
+    SlamStderr(
+        "FlushMap needs a map that the session writes in place: Slam::Config::map_path, or LocalizeInMap with "
+        "attach.\n");
+    return false;
+  }
+  ReduceKeyframes();  // as after every batch, so the file has no more nodes than max_map_size
+  bool flushed = map_.landmarks_spatial_index_->FlushToDatabase(map_.pose_graph_hypothesis_);
+  flushed &= map_.pose_graph_.PutToDatabase(map_.database_.get());
+  flushed &= map_.pose_graph_hypothesis_.PutToDatabase(map_.database_.get());
+  flushed &= PutVprMapToDatabase();
+  flushed &= map_.database_->Flush();
+  return flushed;
+}
+
+bool LocalizerAndMapper::HasWritableDatabase() const { return map_.database_ && !map_.database_->IsReadOnly(); }
+
+bool LocalizerAndMapper::IsDatabaseAt(const std::string& path) const {
+  return map_.database_ && map_.database_->IsAt(path);
+}
+
+bool LocalizerAndMapper::ReopenDatabaseForWriting(const std::string& path) {
+#ifdef USE_LMDB
+  if (!map_.database_ || !map_.database_->IsReadOnly()) {
+    return HasWritableDatabase();
+  }
+  // Opened next to the read-only one, which stays until the switch, so a failure changes nothing.
+  auto lmdb = std::make_shared<LmdbSlamDatabase>();
+  if (!lmdb->Open(path.c_str(), LmdbSlamDatabase::OpenMode::READ_WRITE_EXISTS)) {
+    SlamStderr("Failed to open Slam Database %s for writing.\n", path.c_str());
+    return false;
+  }
+  for (const SlamDatabaseTable table :
+       {SlamDatabaseTable::Landmarks, SlamDatabaseTable::Descriptors, SlamDatabaseTable::SpatialCells}) {
+    if (lmdb->GetRecordsCount(table) != map_.database_->GetRecordsCount(table)) {
+      SlamStderr("Slam Database %s changed since it was loaded.\n", path.c_str());
+      return false;
+    }
+  }
+  map_.AttachDatabase(lmdb, false);
+  return true;
+#else
+  SlamStderr("ReopenDatabaseForWriting is not implemented for databases other than LMDB.");
+  return false;
+#endif
+}
+
+bool LocalizerAndMapper::SaveLoadedMap(const std::string& path) {
+#ifdef USE_LMDB
+  // The map can be bigger than memory, so its database is copied rather than loaded.
+  if (!map_.database_->CopyTo(path)) {
+    SlamStderr("Failed to copy Slam Database to %s.\n", path.c_str());
+    return false;
+  }
+  LmdbSlamDatabase copy;
+  if (!copy.Open(path.c_str(), LmdbSlamDatabase::OpenMode::READ_WRITE)) {
+    SlamStderr("Failed to open Slam Database %s.\n", path.c_str());
+    return false;
+  }
+  bool saved = map_.landmarks_spatial_index_->SaveToDatabase(copy, map_.pose_graph_hypothesis_);
+  saved &= map_.pose_graph_.PutToDatabase(&copy);
+  saved &= map_.pose_graph_hypothesis_.PutToDatabase(&copy);
+  // Without a VPR map of its own, the session leaves the loaded one in the copy as it is.
+  if (IsVprEnabled() && !vpr_map_unreadable_) {
+    saved &= copy.SetSingleton(SlamDatabaseSingleton::VprMap, 0,
+                               [&](BlobWriter& writer) { return vpr_map_->ToBlob(writer); });
+  }
+  saved &= copy.Flush();
+  if (!saved) {
+    SlamStderr("Failed to save the map to %s.\n", path.c_str());
+    return false;
+  }
+  SlamStdout("Successfully copied Slam Database %s.\n", path.c_str());
+  return true;
+#else
+  SlamStderr("SaveLoadedMap is not implemented for databases other than LMDB.");
+  return false;
+#endif
 }
 
 void LocalizerAndMapper::DetectLoopClosure(const ILoopClosureSolver& loop_closure_solver, const Images& images,
@@ -641,8 +729,10 @@ void LocalizerAndMapper::ReduceKeyframes() {
   while (map_.pose_graph_.GetKeyframeCount() > max_keyframes_count_) {
     // select not standalone most confident edge
     const EdgeId edge_id = map_.pose_graph_.GetSmallestVarianceEdgeId();
-    if (edge_id != InvalidEdgeId) {
-      map_.pose_graph_.ReduceSingleEdge(edge_id, map_.pose_graph_hypothesis_, update_landmark_keyframe);
+    // Nothing can be merged now; the next keyframe tries again.
+    if (edge_id == InvalidEdgeId ||
+        !map_.pose_graph_.ReduceSingleEdge(edge_id, map_.pose_graph_hypothesis_, update_landmark_keyframe)) {
+      break;
     }
   }
   RERUN(map_.logPoseGraph);

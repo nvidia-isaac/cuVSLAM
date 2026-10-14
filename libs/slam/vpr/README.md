@@ -30,9 +30,9 @@ that node's picture, and the rest cost a `HasImage` lookup. It also bounds the m
 which matters because AnyLoc searches exhaustively.
 
 **The place recognition map is part of the SLAM map.** It is a singleton of the SLAM database next to the spatial
-index, `SlamDatabaseSingleton::VprMap`, written by `SaveMap` and when a `map_cache_path` database is detached, and
-read back with the pose graph whose node ids it uses. Without a database it lives in memory, like the rest of the
-map.
+index, `SlamDatabaseSingleton::VprMap`, written by `SaveMap`, by `FlushMap` and when the map file at `map_path` is
+detached, and read back with the pose graph whose node ids it uses. Without a database it lives in memory, like the
+rest of the map.
 
 **The default score threshold, 0.68, favors precision.** On KITTI-07 (ViT-S/14 block 9 value facet at 322x322, a
 64 node map of frames 0..299, 68 queries scored against ground truth) every query within 2 m of the node it matched
@@ -205,8 +205,8 @@ landmarks, which means it needs the SLAM map. That split is wired up as:
   spacing, and a map whose nodes are further apart than one grid step will want a wider one.
 - **After `LocalizeInMap` the session maps into the loaded map.** Its new keyframes join `RecognizePlaceByFrame`'s
   search, the localization keyframe first, so a query can match a frame of this session; and the loop closure filter
-  for the recent past judges loaded places by their saved timestamps. `LocalizeInMap` also trims the loaded map to
-  the session's `max_map_size`, and does not keep the loaded landmarks.
+  for the recent past judges loaded places by their saved timestamps. `LocalizeInMap` refuses a map with more nodes
+  than the session's `max_map_size`.
 - **Nothing detects the kidnapping.** The two-stage protocol — run recognition continuously, and when its answer
   disagrees with the current SLAM pose for several consecutive frames, or when there is no SLAM pose yet, call
   `LocalizeInMap` without a guess and continue tracking in the map it swaps in — is left to the caller.

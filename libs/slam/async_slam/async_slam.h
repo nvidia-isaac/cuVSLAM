@@ -42,7 +42,7 @@
 namespace cuvslam::slam {
 
 struct AsyncSlamOptions {
-  std::string map_cache_path;  // if non-empty, connect to LMDB at this path
+  std::string map_path;  // if non-empty, connect to LMDB at this path
   bool use_gpu = true;
   bool reproduce_mode = true;            // allow to repeat results: ransac.seed(0), sync=true
   bool pose_for_frame_required = false;  // set true for calling GetPoseForFrame()
@@ -89,9 +89,10 @@ public:
                    const sof::Images& images, const Isometry3T& delta);
 
   // Without `guess_pose`, the saved map's place recognition proposes the poses to verify.
+  // With `attach`, a successful localization makes the session write into the loaded folder.
   void LocalizeInMap(const std::string_view& folder_name, int64_t timestamp_ns,
                      const std::optional<Isometry3T>& guess_pose, const sof::Images& images,
-                     const Slam::LocalizationSettings& settings, Slam::LocalizeStartCB start_cb,
+                     const Slam::LocalizationSettings& settings, bool attach, Slam::LocalizeStartCB start_cb,
                      Slam::LocalizeFinishCB finish_cb);
 
   Isometry3T GetSlamPose() const;
@@ -105,6 +106,9 @@ public:
   const std::list<LoopClosureStamped>& GetLastLoopClosuresStamped();
 
   void CopyToDatabase(const std::string& path, const std::function<void(bool)>& callback = nullptr);
+
+  // Writes all unsaved data to the session's map file: AsyncSlamOptions::map_path, or a folder LocalizeInMap attached.
+  void FlushMap(const std::function<void(bool)>& callback);
 
   // Set landmarks view
   void SetLandmarksView(std::shared_ptr<ViewManager<ViewLandmarks>> view);
@@ -147,7 +151,7 @@ private:
   public:
     LocalizeInMapCmd(const std::string_view& folder_name, int64_t timestamp_ns,
                      const std::optional<Isometry3T>& guess_pose, const sof::Images& images,
-                     const Slam::LocalizationSettings& settings, Slam::LocalizeStartCB start_cb,
+                     const Slam::LocalizationSettings& settings, bool attach, Slam::LocalizeStartCB start_cb,
                      Slam::LocalizeFinishCB finish_cb);
 
     ~LocalizeInMapCmd() override = default;
@@ -159,6 +163,7 @@ private:
     const std::optional<Isometry3T> guess_pose_;
     const sof::Images images_;
     const Slam::LocalizationSettings settings_;
+    const bool attach_;
     Slam::LocalizeStartCB start_cb_;
     Slam::LocalizeFinishCB finish_cb_;
   };
@@ -170,6 +175,17 @@ private:
     ~CopyToDatabaseCmd() override = default;
 
     void Execute(AsyncSlam& async_slam, FrameId, const Isometry3T&) override;
+  };
+
+  class FlushMapCmd : public ICommand {
+  public:
+    explicit FlushMapCmd(std::function<void(bool)> callback) : callback_(std::move(callback)) {}
+    ~FlushMapCmd() override = default;
+
+    void Execute(AsyncSlam& async_slam, FrameId, const Isometry3T&) override;
+
+  private:
+    std::function<void(bool)> callback_;
   };
 
   class AddFrameToVprMapCmd : public ICommand {

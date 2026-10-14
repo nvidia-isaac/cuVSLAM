@@ -33,6 +33,7 @@
 
 #include "common/include_gtest.h"
 #include "common/vector_3t.h"
+#include "slam/map/database/lmdb_slam_database.h"
 #include "slam/slam/slam.h"
 #include "slam/vpr/ivpr.h"
 #include "slam/vpr/vpr_image.h"
@@ -1519,30 +1520,79 @@ TEST_F(VprPoseGraph, AMapSavedWithoutPlaceRecognitionLoadsWithAnEmptyOne) {
   EXPECT_EQ(reader->GetVprMapSize(), 0u);
 }
 
-TEST_F(VprPoseGraph, SaveMapWritesThePlaceRecognitionMapOfAMapCacheSession) {
-  // Like Slam::Config::map_cache_path, then Slam::SaveMap into another folder.
+TEST_F(VprPoseGraph, FlushMapWritesThePlaceRecognitionMapToTheMapFile) {
+  // Like Slam::Config::map_path, then Slam::FlushMap.
   std::filesystem::create_directories(folder_);
-  ASSERT_TRUE(mapper_->AttachToNewDatabase((folder_ / "cache").string()));
+  const std::string map_file = (folder_ / "map").string();
+  ASSERT_TRUE(mapper_->AttachToNewDatabase(map_file));
   BuildChain(3, 1.f);
-  const std::string saved = (folder_ / "saved").string();
-  ASSERT_TRUE(mapper_->AttachToNewDatabaseSaveMapAndDetach(saved));
+  ASSERT_TRUE(mapper_->FlushMapToDatabase());
+  mapper_.reset();  // ends without detaching
 
   std::unique_ptr<LocalizerAndMapper> reader = MakeMapper();
-  ASSERT_TRUE(reader->AttachToExistingReadOnlyDatabase(saved));
+  ASSERT_TRUE(reader->AttachToExistingReadOnlyDatabase(map_file));
   EXPECT_EQ(reader->GetVprMapSize(), 3u);
   EXPECT_EQ(reader->RecognizePlace(images_[2]).node_id, 2u);
 }
 
-TEST_F(VprPoseGraph, TheMapCacheDatabaseGetsThePlaceRecognitionMapOnDetach) {
-  // Like Slam::Config::map_cache_path: the database is attached before mapping.
-  ASSERT_TRUE(mapper_->AttachToNewDatabase(Folder()));
+TEST_F(VprPoseGraph, ASessionWithoutPlaceRecognitionKeepsTheLoadedIndex) {
+  std::filesystem::create_directories(folder_);
+  const std::string saved = (folder_ / "saved").string();
+  const std::string copy = (folder_ / "copy").string();
   BuildChain(3, 1.f);
-  mapper_->DetachDatabase();
+  ASSERT_TRUE(mapper_->AttachToNewDatabaseSaveMapAndDetach(saved));
 
-  std::unique_ptr<LocalizerAndMapper> reader = MakeMapper();
-  ASSERT_TRUE(reader->AttachToExistingReadOnlyDatabase(Folder()));
-  EXPECT_EQ(reader->GetVprMapSize(), 3u);
-  EXPECT_EQ(reader->RecognizePlace(images_[1]).node_id, 1u);
+  std::unique_ptr<LocalizerAndMapper> session = MakeMapper(VprOptions{});
+  ASSERT_TRUE(session->AttachToExistingReadOnlyDatabase(saved));
+  ASSERT_FALSE(session->IsVprEnabled());
+  ASSERT_TRUE(session->AttachToNewDatabaseSaveMapAndDetach(copy));  // SaveMap
+  ASSERT_TRUE(session->ReopenDatabaseForWriting(saved));            // LocalizeInMap with attach
+  ASSERT_TRUE(session->FlushMapToDatabase());
+  session.reset();
+
+  for (const std::string& folder : {saved, copy}) {
+    std::unique_ptr<LocalizerAndMapper> reader = MakeMapper();
+    ASSERT_TRUE(reader->AttachToExistingReadOnlyDatabase(folder));
+    EXPECT_EQ(reader->GetVprMapSize(), 3u) << folder;
+  }
+}
+
+TEST_F(VprPoseGraph, AnUnreadablePlaceRecognitionMapIsKeptAsItIs) {
+  std::filesystem::create_directories(folder_);
+  const std::string saved = (folder_ / "saved").string();
+  const std::string copy = (folder_ / "copy").string();
+  BuildChain(3, 1.f);
+  ASSERT_TRUE(mapper_->AttachToNewDatabaseSaveMapAndDetach(saved));
+  // As from another engine or format.
+  const std::string other = "another VPR map";
+  {
+    LmdbSlamDatabase database;
+    ASSERT_TRUE(database.Open(saved.c_str(), LmdbSlamDatabase::OpenMode::READ_WRITE_EXISTS));
+    ASSERT_TRUE(database.SetSingleton(SlamDatabaseSingleton::VprMap, 0, [&](BlobWriter& writer) {
+      writer.write(other.data(), other.size());
+      return true;
+    }));
+  }
+
+  std::unique_ptr<LocalizerAndMapper> session = MakeMapper();
+  ASSERT_TRUE(session->AttachToExistingReadOnlyDatabase(saved));
+  ASSERT_TRUE(session->IsVprEnabled());
+  EXPECT_EQ(session->GetVprMapSize(), 0u);
+  ASSERT_TRUE(session->AttachToNewDatabaseSaveMapAndDetach(copy));  // SaveMap
+  ASSERT_TRUE(session->ReopenDatabaseForWriting(saved));            // LocalizeInMap with attach
+  ASSERT_TRUE(session->FlushMapToDatabase());
+  session.reset();
+
+  for (const std::string& folder : {saved, copy}) {
+    LmdbSlamDatabase database;
+    ASSERT_TRUE(database.Open(folder.c_str(), LmdbSlamDatabase::OpenMode::READ_ONLY_EXISTS));
+    std::string kept;
+    ASSERT_TRUE(database.GetSingleton(SlamDatabaseSingleton::VprMap, [&](const BlobReader& reader) {
+      kept.resize(reader.remaining());
+      return reader.read(kept.data(), kept.size());
+    })) << folder;
+    EXPECT_EQ(kept, other) << folder;
+  }
 }
 #endif  // USE_LMDB
 

@@ -62,11 +62,11 @@ for timestamp, images in sequence:
         tracker.slam.recognize_place_by_frame(images, timestamp, on_place)
 ```
 
-The place recognition map is part of the SLAM map: `save_map` writes both into one LMDB database, and
-`localize_in_map` reads both from it. Without `map_cache_path` it is kept in memory, like the rest of the map; with it,
-it is written to that database when SLAM is destroyed, unless `save_map` or `localize_in_map` replaced that database
-during the session. After `localize_in_map` the session keeps mapping into the loaded map, and its new frames are
-recognized too.
+The place recognition map is part of the SLAM map: `save_map` writes both into one LMDB database, and `localize_in_map`
+reads both from it. Without `map_path` it is kept in memory, like the rest of the map; with it, it is written to that
+database by `flush_map` and when SLAM is destroyed. `localize_in_map` replaces that database with the loaded one, which
+is written the same way when localized with `attach=True`. After `localize_in_map` the session keeps mapping into the
+loaded map, and its new frames are recognized too.
 
 `save_map`, `localize_in_map` and `recognize_place_by_frame` are asynchronous: they queue the work for the SLAM
 thread and their callbacks run when it finishes, possibly on that thread. `sync_mode=True` above, which

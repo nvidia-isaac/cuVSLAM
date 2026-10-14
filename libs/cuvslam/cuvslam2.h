@@ -794,9 +794,10 @@ public:
    */
   struct Config {
     /// If empty, map is kept in memory only. Else, map is synced to disk (LMDB) at this path, allowing large-scale
-    /// maps; if the path already exists it will be overwritten. To load an existing map, use LocalizeInMap(). To save
-    /// map, use SaveMap().
-    std::string_view map_cache_path = "";
+    /// maps; if the path already exists it will be overwritten. FlushMap() saves the map there, and SaveMap() fails.
+    /// To load an existing map, use LocalizeInMap(); once it succeeds, the session writes the loaded folder if
+    /// `attach` is set, and no map file otherwise.
+    std::string_view map_path = "";
     /// Enable GPU use for SLAM
     bool use_gpu = true;
     /// Synchronous mode (does not run a separate work thread if true)
@@ -990,11 +991,20 @@ public:
    * Save SLAM database (map) to folder asynchronously.
    * This folder will be created, if it does not exist.
    * Contents of the folder will be overwritten.
+   * Fails while the session writes its map in place (`Config::map_path`, or `LocalizeInMap` with `attach`): FlushMap()
+   * saves it there. Also fails for the folder of a map that `LocalizeInMap` loaded and the folders that contain it.
    * The saved map includes the place recognition map when `Config::use_vpr` is set.
    * @param[in] folder_name Folder name, where SLAM database (map) will be saved
    * @param[in] callback Callback function to be called when save is complete, may be called in a separate thread
    */
   void SaveMap(const std::string_view& folder_name, std::function<void(bool success)> callback) const;
+
+  /**
+   * Write all unsaved data of the map to its map file asynchronously: `Config::map_path`, or the folder that
+   * `LocalizeInMap` attached. The file then holds the whole map, and mapping goes on as before. Fails without one.
+   * @param[in] callback Callback function to be called when flush is complete, may be called in a separate thread
+   */
+  void FlushMap(std::function<void(bool success)> callback) const;
 
   /// Callback invoked when localization starts, may be called in a separate thread
   using LocalizeStartCB = std::function<void()>;
@@ -1008,6 +1018,8 @@ public:
    * runs immediately before this call returns.
    * Finds the rig pose in the saved map. If successful, replace current map with saved one.
    * Without `guess_pose`, it needs `Config::use_vpr` and a map saved with it.
+   * Fails if the map has more nodes than `Config::max_map_size` (0: no limit), and for the folder of the map file
+   * this session writes; FlushMap() saves that one.
    * @param[in] folder_name Folder containing the saved SLAM map (database)
    * @param[in] timestamp_ns Time in nanoseconds for the localized pose. If all images timestamps are equal, it makes
    *                         sense to use images[0].timestamp_ns.
@@ -1016,10 +1028,14 @@ public:
    * @param[in] settings Localization settings
    * @param[in] start_cb Called when localization starts, may be called in a separate thread
    * @param[in] finish_cb Called when localization completes, may be called in a separate thread
+   * @param[in] attach On success, the session writes its map into `folder_name` from then on, as with
+   *                   `Config::map_path`: FlushMap() saves it there, SaveMap() fails, and destroying Slam writes it
+   *                   there. The folder holds a whole map only after that. Nothing else may open the folder while
+   *                   it is attached.
    */
   void LocalizeInMap(const std::string_view& folder_name, int64_t timestamp_ns, const std::optional<Pose>& guess_pose,
                      const ImageSet& images, const LocalizationSettings& settings, LocalizeStartCB start_cb,
-                     LocalizeFinishCB finish_cb);
+                     LocalizeFinishCB finish_cb, bool attach = false);
 
   /**
    * Get SLAM metrics.

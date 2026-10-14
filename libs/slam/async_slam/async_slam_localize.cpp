@@ -84,10 +84,10 @@ void AddFakeKeyframeForLastTailPose(LocalizerAndMapper& slam, const Tail& tail) 
 // Should be very fast. Just put task to the queue to not block main thread.
 void AsyncSlam::LocalizeInMap(const std::string_view& folder_name, int64_t timestamp_ns,
                               const std::optional<Isometry3T>& guess_pose, const sof::Images& images,
-                              const Slam::LocalizationSettings& settings, Slam::LocalizeStartCB start_cb,
+                              const Slam::LocalizationSettings& settings, bool attach, Slam::LocalizeStartCB start_cb,
                               Slam::LocalizeFinishCB finish_cb) {
-  const auto cmd =
-      std::make_shared<LocalizeInMapCmd>(folder_name, timestamp_ns, guess_pose, images, settings, start_cb, finish_cb);
+  const auto cmd = std::make_shared<LocalizeInMapCmd>(folder_name, timestamp_ns, guess_pose, images, settings, attach,
+                                                      start_cb, finish_cb);
   const auto vo_keyframe = std::make_shared<VOKeyframeInfo>(VOKeyframeInfo());
   vo_keyframe->command = cmd;
   input_queue_.Push(vo_keyframe);
@@ -99,13 +99,14 @@ void AsyncSlam::LocalizeInMap(const std::string_view& folder_name, int64_t times
 // This constructor should be very fast - all work should be offloaded to ::Execute
 AsyncSlam::LocalizeInMapCmd::LocalizeInMapCmd(const std::string_view& folder_name, int64_t timestamp_ns,
                                               const std::optional<Isometry3T>& guess_pose, const sof::Images& images,
-                                              const Slam::LocalizationSettings& settings,
+                                              const Slam::LocalizationSettings& settings, bool attach,
                                               Slam::LocalizeStartCB start_cb, Slam::LocalizeFinishCB finish_cb)
     : folder_name_(folder_name),
       timestamp_ns_(timestamp_ns),
       guess_pose_(guess_pose),
       images_(images),
       settings_(settings),
+      attach_(attach),
       start_cb_(start_cb),
       finish_cb_(finish_cb) {}
 
@@ -125,6 +126,14 @@ void AsyncSlam::LocalizeInMapCmd::Execute(AsyncSlam& async_slam, FrameId, const 
     options.angle_step_rads = settings_.angular_step_rads;
     options.vpr_options = async_slam.options_.vpr_options;
   }
+
+  bool own_map = false;
+  {
+    std::lock_guard slam_guard(async_slam.slam_mutex_);
+    own_map = async_slam.slam_->HasWritableDatabase() && async_slam.slam_->IsDatabaseAt(folder_name_);
+  }
+  CALLBACK_AND_RETURN_IF(own_map, finish_cb_, Pose,
+                         "The folder holds the map this session is writing; FlushMap saves it.");
 
   // TODO: keep localizer to safe memory
   const auto localizer = std::make_unique<Localizer>();  // only for the duration of the localization
@@ -157,7 +166,6 @@ void AsyncSlam::LocalizeInMapCmd::Execute(AsyncSlam& async_slam, FrameId, const 
     std::lock_guard slam_guard(async_slam.slam_mutex_);
     pgo_opt = async_slam.slam_->GetPoseGraphOptimizerOptions();
     result.slam_from->SetReproduceMode(async_slam.slam_->GetReproduceMode());
-    result.slam_from->SetLandmarksSpatialIndex(async_slam.slam_->GetLandmarksSpatialIndexOptions());
     result.slam_from->SetKeyframesLimit(async_slam.slam_->GetKeyframesLimit());
     result.slam_from->SetKeepTrackPoses(async_slam.slam_->GetKeepTrackPoses());
     maybe_active_cameras = async_slam.slam_->GetActiveCameras();
@@ -168,13 +176,28 @@ void AsyncSlam::LocalizeInMapCmd::Execute(AsyncSlam& async_slam, FrameId, const 
   if (maybe_active_cameras) {
     result.slam_from->SetActiveCameras(maybe_active_cameras.value());
   }
+  // The session trims its map to max_map_size, which would drop parts of the loaded map, so it has to fit already.
+  const size_t keyframes_limit = static_cast<size_t>(result.slam_from->GetKeyframesLimit());
+  const size_t keyframe_count = result.slam_from->GetMap().GetPoseGraph().GetKeyframeCount();
+  CALLBACK_AND_RETURN_IF(keyframes_limit != 0 && keyframe_count > keyframes_limit, finish_cb_, Pose,
+                         "The map has " + std::to_string(keyframe_count) + " nodes, more than max_map_size " +
+                             std::to_string(keyframes_limit) + "; set max_map_size to 0 or at least " +
+                             std::to_string(keyframe_count) + ".");
   result.slam_from->RebuildSpatialIndex();
-  result.slam_from->ReduceKeyframes();
+  // Nothing writes before the swap below, so a rejected localization leaves the folder as it was.
+  CALLBACK_AND_RETURN_IF(attach_ && !result.slam_from->ReopenDatabaseForWriting(folder_name_), finish_cb_, Pose,
+                         "Can't open the map folder for writing, or it changed since it was loaded, so it can't be "
+                         "attached.");
 
+  bool flushed = true;
   bool tail_updated = false;
   {
     std::lock_guard slam_guard(async_slam.slam_mutex_);
-    tail_updated = async_slam.tail_.UpdatePoseBySLAM(timestamp_ns_, result.pose_in_slam);
+    // The session's map file gets everything mapped before the swap, also what Track added meanwhile in sync mode.
+    if (async_slam.slam_->HasWritableDatabase()) {
+      flushed = async_slam.slam_->FlushMapToDatabase();
+    }
+    tail_updated = flushed && async_slam.tail_.UpdatePoseBySLAM(timestamp_ns_, result.pose_in_slam);
     if (tail_updated) {
       std::swap(async_slam.slam_, result.slam_from);
       AddFakeKeyframeForLocalizedPose(*async_slam.slam_, result.from_keyframe_id, result.pose_in_slam, timestamp_ns_,
@@ -183,6 +206,7 @@ void AsyncSlam::LocalizeInMapCmd::Execute(AsyncSlam& async_slam, FrameId, const 
       async_slam.vpr_wants_frame_ = async_slam.slam_->VprHeadNeedsImage();
     }
   }
+  CALLBACK_AND_RETURN_IF(!flushed, finish_cb_, Pose, "Failed to write the session's map file; the session keeps it.");
   CALLBACK_AND_RETURN_IF(!tail_updated, finish_cb_, Pose,
                          "Localization timestamp is outside the SLAM retention window. LocalizeInMap can initialize "
                          "an empty SLAM state, but once SLAM has retained poses the timestamp must be within that "

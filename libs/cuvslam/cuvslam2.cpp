@@ -1086,7 +1086,7 @@ public:
     SetTrackerRigAndIntrinsics(cameras_models_, rig_, rig.cameras);
 
     slam::AsyncSlamOptions options;
-    options.map_cache_path = config.map_cache_path;
+    options.map_path = config.map_path;
     options.use_gpu = config.use_gpu;
     options.reproduce_mode = config.sync_mode;
     options.pose_for_frame_required = true;  // required for localization
@@ -1252,6 +1252,8 @@ void Slam::SaveMap(const std::string_view& folder_name, std::function<void(bool 
   impl->async_slam_->CopyToDatabase(std::string{folder_name}, callback);
 }
 
+void Slam::FlushMap(std::function<void(bool success)> callback) const { impl->async_slam_->FlushMap(callback); }
+
 #define CALLBACK_AND_RETURN_IF(condition, callback, type, message) \
   if (condition) {                                                 \
     callback(Result<type>::Error(message));                        \
@@ -1261,7 +1263,8 @@ void Slam::SaveMap(const std::string_view& folder_name, std::function<void(bool 
 // timestamp_ns - localization timestamp
 void Slam::LocalizeInMap(const std::string_view& folder_name, int64_t timestamp_ns,
                          const std::optional<Pose>& guess_pose, const ImageSet& images,
-                         const LocalizationSettings& settings, LocalizeStartCB start_cb, LocalizeFinishCB finish_cb) {
+                         const LocalizationSettings& settings, LocalizeStartCB start_cb, LocalizeFinishCB finish_cb,
+                         bool attach) {
   slam::LocalizerOptions localizer_options;
   localizer_options.use_gpu = impl->use_gpu_;
 
@@ -1341,8 +1344,8 @@ void Slam::LocalizeInMap(const std::string_view& folder_name, int64_t timestamp_
       std::any_of(images_ptrs.begin(), images_ptrs.end(), [](const auto& image) { return image != nullptr; });
   THROW_INVALID_ARG_IF(!has_images, "No valid images to localize");
 
-  impl->async_slam_->LocalizeInMap(folder_name, timestamp_ns, isometry_guess_pose, images_ptrs, settings, start_cb,
-                                   finish_cb);
+  impl->async_slam_->LocalizeInMap(folder_name, timestamp_ns, isometry_guess_pose, images_ptrs, settings, attach,
+                                   start_cb, finish_cb);
 }
 
 void Slam::AddFrameToVprMap(const ImageSet& images) {
