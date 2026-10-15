@@ -13,6 +13,9 @@
 # of the software or derivative works thereof, you agree to be bound by this License.
 
 import os
+import re
+import subprocess
+import sys
 import tempfile
 import shutil
 import unittest
@@ -29,6 +32,41 @@ import data_gen as data
 W, H = 640, 480  # Image size of tracked images
 BASELINE = 0.25  # Baseline distance between cameras (m)
 STEPS = 30       # Number of steps
+
+# Drops an async session while the SLAM thread is inside a callback and has more callbacks queued.
+END_WITH_PENDING_CALLBACKS = """
+import sys
+import threading
+import time
+import numpy as np
+sys.path.insert(0, {test_dir!r})
+import cuvslam as vslam
+import data_gen as data
+rig = vslam.Rig(data.generate_stereo_camera({width}, {height}, {baseline}), [vslam.ImuCalibration()])
+slam_cfg = vslam.Slam.Config(sync_mode=False)
+{session}
+images = [np.zeros(({height}, {width}), dtype=np.uint8)] * 2
+settings = vslam.Slam.LocalizationSettings(horizontal_search_radius=0.25, vertical_search_radius=0.25,
+                                           horizontal_step=0.0625, vertical_step=0.0625, angular_step_rads=0.03125)
+results = []
+callback_threads = []
+started = threading.Event()
+def first():
+    callback_threads.append(threading.get_ident())
+    started.set()
+    time.sleep(0.5)  # the session is dropped meanwhile, and this callback needs the GIL back
+def localize(start_cb):
+    # There is no map, so it fails, but its callbacks still run on the SLAM thread
+    slam.localize_in_map("/nonexistent/cuvslam/map", 0, vslam.Pose(), images, settings, start_cb,
+                         lambda pose, error: results.append(error))
+localize(first)
+if not started.wait(60):
+    sys.exit("the first callback did not run")
+for _ in range(10):
+    localize(lambda: None)
+del {owners}
+print("RESULT", len(results), callback_threads[0] != threading.get_ident())
+"""
 
 plt = None
 
@@ -238,6 +276,30 @@ class TestMap(unittest.TestCase):
         self.assertTrue(any(self.try_localize(img, 'map', i, perturb=False) for i in range(10, 20)))
         # Localization in the end of the map isn't working well
         # self.assertTrue(any(self.try_localize(img, 'map', i, perturb=False) for i in range(20, 30)))
+
+    def end_with_pending_callbacks(self, session, owners):
+        script = END_WITH_PENDING_CALLBACKS.format(test_dir=os.path.dirname(os.path.abspath(__file__)), width=W,
+                                                   height=H, baseline=BASELINE, session=session, owners=owners)
+        # In a child process, so that a deadlock fails the test instead of hanging it
+        try:
+            result = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True, timeout=120)
+        except subprocess.TimeoutExpired:
+            self.fail(f"destroying {owners} with callbacks pending did not return")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        found = re.search(r"^RESULT (\d+) (True|False)$", result.stdout, re.MULTILINE)
+        self.assertIsNotNone(found, result.stdout)
+        self.assertGreaterEqual(int(found.group(1)), 1)
+        self.assertEqual(found.group(2), "True", "the callback did not run on the SLAM thread")
+
+    def test_destroying_slam_with_callbacks_pending_returns(self):
+        self.end_with_pending_callbacks("slam = vslam.Slam(rig, [0], slam_cfg)", "slam")
+
+    def test_destroying_tracker_with_callbacks_pending_returns(self):
+        session = ("odom_cfg = vslam.Odometry.Config(odometry_mode=vslam.Odometry.OdometryMode.Multicamera, "
+                   "rectified_stereo_camera=True, async_sba=True)\n"
+                   "tracker = vslam.Tracker(rig, vslam.Tracker.Mode.OdometryWithSlamRealtime, odom_cfg, slam_cfg)\n"
+                   "slam = tracker.slam")
+        self.end_with_pending_callbacks(session, "slam, tracker")
 
 
 if __name__ == "__main__":
