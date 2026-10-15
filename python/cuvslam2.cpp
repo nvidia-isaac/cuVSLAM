@@ -15,6 +15,7 @@
  */
 
 #include <chrono>
+#include <utility>
 
 #include "nanobind/nanobind.h"
 #include "nanobind/ndarray.h"
@@ -85,6 +86,18 @@ Odometry::Config PyDefaultOdometryConfig() {
   cfg.enable_observations_export = kPyDefaultEnableObservationsExport;
   cfg.enable_landmarks_export = kPyDefaultEnableLandmarksExport;
   return cfg;
+}
+
+// Runs a Python callback for SLAM, possibly on the SLAM thread. An exception it raises cannot unwind through SLAM,
+// so it is reported to sys.unraisablehook, as Python does for exceptions it cannot propagate.
+template <typename... Args>
+void CallSlamCallback(const nb::callable& callback, const char* context, Args&&... args) {
+  nb::gil_scoped_acquire gil;
+  try {
+    callback(std::forward<Args>(args)...);
+  } catch (nb::python_error& e) {
+    e.discard_as_unraisable(context);
+  }
 }
 
 // A callable that the SLAM thread may drop last; it is released with the GIL held.
@@ -1044,8 +1057,7 @@ NB_MODULE(pycuvslam, m) {
           "save_map",
           [](Slam& self, const std::string_view& folder_name, nb::callable callback) {
             self.SaveMap(folder_name, [callback = GilSafeCallable(std::move(callback))](bool success) {
-              nb::gil_scoped_acquire gil;
-              (*callback)(success);
+              CallSlamCallback(*callback, "Slam.save_map callback", success);
             });
           },
           nb::arg("folder_name"), nb::arg("callback"),
@@ -1053,7 +1065,8 @@ NB_MODULE(pycuvslam, m) {
           "This folder will be created if it does not exist.\n"
           "**WARNING**: *Contents of the folder will be overwritten.*\n"
           "This method works asynchronously depending on the `sync_mode` parameter in `Slam.Config`.\n"
-          "In both cases, the callback will be called with a flag indicating if the map was saved successfully.\n\n"
+          "In both cases, the callback will be called with a flag indicating if the map was saved successfully.\n"
+          "An exception raised by the callback is reported to ``sys.unraisablehook`` instead of propagating.\n\n"
           "Parameters:\n"
           "    folder_name: Folder name where SLAM database will be saved\n"
           "    callback: Function to be called when save is complete (takes bool success parameter)")
@@ -1066,12 +1079,10 @@ NB_MODULE(pycuvslam, m) {
             self.LocalizeInMap(
                 folder_name, timestamp_ns, guess_pose, image_set, settings,
                 [start_cb = GilSafeCallable(std::move(start_cb))] {
-                  nb::gil_scoped_acquire gil;
-                  (*start_cb)();
+                  CallSlamCallback(*start_cb, "Slam.localize_in_map start_cb");
                 },
                 [finish_cb = GilSafeCallable(std::move(finish_cb))](const Result<Pose>& result) {
-                  nb::gil_scoped_acquire gil;
-                  (*finish_cb)(result.data, result.error_message);
+                  CallSlamCallback(*finish_cb, "Slam.localize_in_map finish_cb", result.data, result.error_message);
                 });
           },
           nb::arg("folder_name"), nb::arg("timestamp_ns"), nb::arg("guess_pose"), nb::arg("images"),
@@ -1082,6 +1093,7 @@ NB_MODULE(pycuvslam, m) {
           "true, localization runs immediately before this call returns.\n"
           "Finds the rig pose in the saved map. If successful, replace current map with saved one.\n"
           "`finish_cb` receives the localization result or an error message.\n"
+          "An exception raised by either callback is reported to ``sys.unraisablehook`` instead of propagating.\n"
           "Parameters:\n"
           "    folder_name: Folder containing the saved SLAM map\n"
           "    timestamp_ns: Timestamp for the image frame in nanoseconds\n"

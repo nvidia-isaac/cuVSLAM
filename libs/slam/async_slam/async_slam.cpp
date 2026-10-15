@@ -299,9 +299,7 @@ bool AsyncSlam::GetLastTelemetry(AsyncSlamLCTelemetry& telemetry) const {
 const std::list<LoopClosureStamped>& AsyncSlam::GetLastLoopClosuresStamped() { return last_loop_closures_stamped_; }
 
 void AsyncSlam::CopyToDatabase(const std::string& path, const std::function<void(bool)>& callback) {
-  const auto copy_to_database_cmd = std::make_shared<CopyToDatabaseCmd>(path);
-  assert(!copy_to_database_callback_);
-  copy_to_database_callback_ = callback;
+  const auto copy_to_database_cmd = std::make_shared<CopyToDatabaseCmd>(path, callback);
   TraceDebug("AttachToNewDatabaseSaveMapAndDetach reproduce_mode_=%d", reproduce_mode_ ? 1 : 0);
   if (reproduce_mode_) {
     // sync
@@ -317,7 +315,10 @@ void AsyncSlam::CopyToDatabase(const std::string& path, const std::function<void
 }
 
 void AsyncSlam::CopyToDatabaseCmd::Execute(AsyncSlam& async_slam, FrameId, const Isometry3T&) {
-  async_slam.CopyToDatabase_worker(path_);
+  const bool status = async_slam.CopyToDatabase_worker(path_);
+  if (callback_) {
+    callback_(status);
+  }
 }
 
 // Set landmarks view

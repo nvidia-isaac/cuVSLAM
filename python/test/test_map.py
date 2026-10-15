@@ -19,6 +19,7 @@ import sys
 import tempfile
 import shutil
 import unittest
+from unittest import mock
 import numpy as np
 import threading
 from numpy.testing import assert_array_almost_equal
@@ -300,6 +301,38 @@ class TestMap(unittest.TestCase):
                    "tracker = vslam.Tracker(rig, vslam.Tracker.Mode.OdometryWithSlamRealtime, odom_cfg, slam_cfg)\n"
                    "slam = tracker.slam")
         self.end_with_pending_callbacks(session, "slam, tracker")
+
+    def check_raising_callbacks_are_reported(self, sync_mode):
+        slam = vslam.Slam(self.rig, [0], vslam.Slam.Config(sync_mode=sync_mode))
+        images = [np.zeros((H, W), dtype=np.uint8)] * self.num_cameras
+        _, _, settings = self.get_localization_configs()
+        done = threading.Event()
+
+        def fail(*args):
+            raise ValueError("callback failed")
+
+        def fail_last(*args):
+            done.set()
+            raise ValueError("callback failed")
+
+        reported = []
+        with mock.patch('sys.unraisablehook', lambda report: reported.append((type(report.exc_value), report.object))):
+            # There is no map, so it fails, but its callbacks still run
+            slam.localize_in_map("/nonexistent/cuvslam/map", 0, vslam.Pose(), images, settings, fail, fail)
+            slam.save_map(self.map_path('map'), fail_last)
+            self.assertTrue(done.wait(60), "the callbacks did not run")
+            del slam  # joins the SLAM thread, which reports the last exception after setting done
+        self.assertEqual(sorted(reported, key=lambda r: r[1]), [
+            (ValueError, "Slam.localize_in_map finish_cb"),
+            (ValueError, "Slam.localize_in_map start_cb"),
+            (ValueError, "Slam.save_map callback"),
+        ])
+
+    def test_raising_callbacks_are_reported_in_async_mode(self):
+        self.check_raising_callbacks_are_reported(sync_mode=False)
+
+    def test_raising_callbacks_are_reported_in_sync_mode(self):
+        self.check_raising_callbacks_are_reported(sync_mode=True)
 
 
 if __name__ == "__main__":
