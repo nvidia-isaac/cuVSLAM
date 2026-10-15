@@ -22,6 +22,7 @@ cuVSLAM is the library by NVIDIA, providing various Visual Tracking Camera modes
 - [Build cuVSLAM](#build-cuvslam)
 - [FAQ](#faq)
 - [Development](#development)
+- [Agent Skills](#agent-skills)
 - [Feedback](#feedback)
 - [License](#license)
 - [Citation](#citation)
@@ -295,7 +296,12 @@ Ubuntu 24.04. Jetson wheels are limited to Orin with `cu12`/`cp310` and Thor wit
 
 See [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
 
+# Agent Skills
 
+Customer-facing skills live under [skills/](skills/README.md), with `.agents/skills` and `.claude/skills` aliases
+for local discovery. They cover cuVSLAM setup, troubleshooting, and dataset trajectory replay. The contributor-only
+[CI/CD skill](.agents/contributor-skills/cuvslam-ci/SKILL.md) covers repository development workflows. See the skills
+README for local discovery and installation.
 
 # Feedback
 

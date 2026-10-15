@@ -1,0 +1,81 @@
+{
+  "skill_name": "cuvslam-onboard",
+  "evals": [
+    {
+      "id": "onboard-wheel",
+      "prompt": "Use cuvslam-onboard to explain which PyCuVSLAM wheel fits an x86_64 Ubuntu 24.04 machine with Python 3.12 and an installed CUDA 13 toolkit. Give installation and verification commands only; do not install anything.",
+      "expected_output": "Select an x86_64 cu13 cp312-abi3 wheel from the official cuVSLAM release matching the desired version. Explain that CUDA is installed separately, show pip installation in a virtual environment, and verify import plus cuvslam.get_version().",
+      "assertions": [
+        "Read cuvslam-onboard/SKILL.md.",
+        "Match architecture, Python ABI, and installed CUDA major when selecting the wheel.",
+        "Give install and import verification commands without executing installation or a source build."
+      ],
+      "expected_skill": "cuvslam-onboard",
+      "expected_script": null,
+      "files": []
+    },
+    {
+      "id": "onboard-multisensor",
+      "prompt": "I am setting up cuVSLAM with one aligned RGB-D camera plus an IMU. Which mode supports this sensor combination, what build support is needed, and what camera-model limitation should I check? Explain only.",
+      "expected_output": "Use Multisensor, with a cuNLS-enabled build and pinhole cameras. One RGB-D camera supplies the required scale constraint, and an IMU is optional in this mode. Multisensor is experimental. Inertial requires stereo plus IMU and is not the mode for this rig.",
+      "assertions": [
+        "Read cuvslam-onboard/SKILL.md.",
+        "Choose Multisensor for RGB-D plus IMU.",
+        "Explain the cuNLS, pinhole-camera, and experimental-status constraints."
+      ],
+      "expected_skill": "cuvslam-onboard",
+      "expected_script": null,
+      "files": []
+    },
+    {
+      "id": "onboard-source-reinstall",
+      "prompt": "I already have cuVSLAM checked out at /workspace/cuVSLAM, a Release build at /workspace/cuvslam-build, and a Python environment at /workspace/cuvslam-env. Give the commands to install PyCuVSLAM from that build and explain what to do after rebuilding the C++ library. Do not execute them.",
+      "expected_output": "Reuse the supplied checkout, build, and environment. Set CUVSLAM_BUILD_DIR=/workspace/cuvslam-build for pip install /workspace/cuVSLAM/python/. Reinstall the Python bindings after each C++ rebuild because of the scikit-build-core limitation.",
+      "assertions": [
+        "Read cuvslam-onboard/SKILL.md.",
+        "Use the supplied paths without asking for clone or environment destinations.",
+        "Set CUVSLAM_BUILD_DIR and explain the required reinstall after rebuilding."
+      ],
+      "expected_skill": "cuvslam-onboard",
+      "expected_script": null,
+      "files": []
+    },
+    {
+      "id": "onboard-offline-slam",
+      "prompt": "Help me configure a new offline PyCuVSLAM mapping example. Which Tracker mode and odometry/SLAM synchronization settings must agree, and what does later map localization need? I only need an explanation.",
+      "expected_output": "Use Tracker.Mode.OdometryWithSlamOffline, Odometry.Config(async_sba=False), and Slam.Config(sync_mode=True). The tracker rejects mismatched mode/configuration. Save the map after mapping and supply an initial pose hint and images for localization.",
+      "assertions": [
+        "Read cuvslam-onboard/SKILL.md.",
+        "Specify all three matching offline settings.",
+        "State that localization needs an initial pose hint."
+      ],
+      "expected_skill": "cuvslam-onboard",
+      "expected_script": null,
+      "files": []
+    },
+    {
+      "id": "onboard-negative-replay",
+      "prompt": "My cuVSLAM environment is ready. Export a TUM trajectory.txt from my recorded KITTI sequence; this is a pose-file task, not installation.",
+      "expected_output": "Do not activate cuvslam-onboard. Route to cuvslam-trajectory if available, and resolve the dataset location before replay. Do not start an onboarding or live-camera workflow.",
+      "assertions": [
+        "Do not read cuvslam-onboard/SKILL.md.",
+        "Recognize recorded pose export as a trajectory task."
+      ],
+      "expected_skill": null,
+      "expected_script": null,
+      "files": []
+    },
+    {
+      "id": "onboard-negative-drift",
+      "prompt": "My existing Isaac ROS visual_slam installation runs, but stereo tracking jumps during turns. Help diagnose the failure rather than setting up a new installation.",
+      "expected_output": "Do not activate cuvslam-onboard. Route to cuvslam-troubleshoot if available and begin diagnosis of the existing tracking problem.",
+      "assertions": [
+        "Do not read cuvslam-onboard/SKILL.md.",
+        "Do not clone or reinstall cuVSLAM as the first diagnostic action."
+      ],
+      "expected_skill": null,
+      "expected_script": null,
+      "files": []
+    }
+  ]
+}
