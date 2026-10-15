@@ -28,6 +28,7 @@
 #include "slam/map/descriptor/feature_descriptor.h"
 #include "slam/map/pose_graph/pose_graph.h"
 #include "slam/slam/slam.h"
+#include "slam/vpr/vpr_sof_image.h"
 
 namespace cuvslam::slam {
 
@@ -80,6 +81,18 @@ void LocalizerAndMapper::AddKeyframe(const Isometry3T& from_last_keyframe, const
     if (keep_track_poses_) {
       keyframe_sources_[keyFrameId] = frame_data.frame_id;
     }
+
+    // Store the node's VPR image now if its pixels are still alive; Slam::AddFrameToVprMap covers recycled ones.
+    if (vpr_map_ && vpr_map_->Enabled()) {
+      vpr_map_->OnKeyframeAdded(keyFrameId, static_cast<int64_t>(timestamp_ns));
+      if (!vpr_map_->HasImage(keyFrameId)) {
+        const vpr::VprImage vpr_image = vpr::MakeVprImageFromImages(images);
+        if (!vpr_image.Empty()) {
+          vpr_map_->AddFrame(keyFrameId, static_cast<int64_t>(timestamp_ns), vpr_image);
+        }
+      }
+    }
+
     MoveReadyStagedLandmarksToLSI(timestamp_ns);
   }
 

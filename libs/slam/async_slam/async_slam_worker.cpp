@@ -93,6 +93,7 @@ bool AsyncSlam::AddKeyframesAndRunCommands_worker(FrameId& frame_id, uint64_t& t
       }
       slam_->AddKeyframe(track_data.from_keyframe, frame_data, is_valid_image ? current_images : Images());
       pose_estimate_slam = slam_->GetCurrentPose();
+      vpr_wants_frame_ = slam_->VprHeadNeedsImage();
     }
     SlamStdout("'");
 
