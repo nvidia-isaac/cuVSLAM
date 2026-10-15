@@ -248,6 +248,7 @@ def stat_to_dict(stat: Any) -> dict:
         "gt_av_rotation_error": stat.gt_av_rotation_error,
         "gt_n_error_segments": stat.gt_n_error_segments,
         "gt_simple_error": stat.gt_simple_error,
+        "gt_simple_rotation_error": stat.gt_simple_rotation_error,
         "num_tracking_losts": stat.num_tracking_losts,
         "odometry_mode": stat.odometry_mode,
         "seg_err_points": getattr(stat, "seg_err_points", []),
