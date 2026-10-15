@@ -73,7 +73,13 @@ pip install -r examples/requirements.txt   # rerun-sdk, numpy, etc.
 
 ### Clone
 
-Use the resolved clone destination as `<install-dir>`; reuse an existing checkout when available.
+Use the resolved checkout location as `<install-dir>`. If it already contains a cuVSLAM checkout, reuse it:
+
+```bash
+cd <install-dir>
+```
+
+Otherwise, clone into a new destination:
 
 ```bash
 git clone https://github.com/nvidia-isaac/cuVSLAM.git <install-dir>

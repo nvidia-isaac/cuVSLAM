@@ -23,8 +23,9 @@ Diagnose and fix issues with NVIDIA cuVSLAM — visual odometry and SLAM.
 This skill may be installed outside the product checkout. Resolve `<cuvslam-repo>` before using
 repository files or tools. `references/`, `commands/`, and `scripts/` below belong to this skill;
 run bundled scripts by their absolute installed paths. Build, `examples/`, and `tools/` paths
-belong to the cuVSLAM checkout. If it is unavailable, use the matching product version's
-[published troubleshooting guide](https://github.com/nvidia-isaac/cuVSLAM/blob/main/TROUBLESHOOTING.md)
+belong to the cuVSLAM checkout. If it is unavailable, use the
+[current published troubleshooting guide](https://github.com/nvidia-isaac/cuVSLAM/blob/main/TROUBLESHOOTING.md)
+on `main`, checking version-specific advice against the installed product version,
 and request a checkout only when the diagnosis needs source or built tools.
 
 ## Quick Triage

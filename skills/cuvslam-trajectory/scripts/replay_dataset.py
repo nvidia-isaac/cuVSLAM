@@ -28,7 +28,7 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -829,8 +829,14 @@ def _write_tum(
             for timestamp, pose in ordered:
                 translation = list(pose.translation)
                 rotation = list(pose.rotation)
-                values = [timestamp / 1e9, *translation, *rotation]
-                stream.write(" ".join(f"{float(value):.12g}" for value in values) + "\n")
+                seconds, nanoseconds = divmod(abs(timestamp), 1_000_000_000)
+                sign = "-" if timestamp < 0 else ""
+                values = [*translation, *rotation]
+                stream.write(
+                    f"{sign}{seconds}.{nanoseconds:09d} "
+                    + " ".join(f"{float(value):.12g}" for value in values)
+                    + "\n"
+                )
         stats = validate_tum(
             temporary,
             expected_rows=expected_frames,
@@ -848,15 +854,13 @@ def _write_kitti(
     output: Path,
     *,
     expected_frames: int,
-    min_coverage: float,
+    write_poses: Callable[[dict[int, Any], str], int],
 ) -> dict[str, Any]:
-    from cuvslam_tools.tracker.kitti_benchmark import save_poses_to_kitti_benchmark
-
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = output.with_name(f".{output.name}.tmp")
     poses = {frame_id: value[1] for frame_id, value in processor.poses.items()}
     try:
-        save_poses_to_kitti_benchmark(poses, str(temporary))
+        write_poses(poses, str(temporary))
         rows = [
             line.split()
             for line in temporary.read_text(encoding="utf-8").splitlines()
@@ -866,11 +870,12 @@ def _write_kitti(
             raise ReplayError(f"KITTI output validation failed: {output}")
         if not all(math.isfinite(float(value)) for row in rows for value in row):
             raise ReplayError(f"KITTI output contains non-finite values: {output}")
-        coverage = len(rows) / expected_frames
-        if coverage < min_coverage:
+        if len(rows) != expected_frames:
             raise ReplayError(
-                f"trajectory coverage {coverage:.3%} is below {min_coverage:.3%}"
+                "KITTI output requires a pose for every frame "
+                f"({len(rows)}/{expected_frames} rows); use TUM output for partial trajectories"
             )
+        coverage = len(rows) / expected_frames
         os.replace(temporary, output)
     finally:
         temporary.unlink(missing_ok=True)
@@ -915,7 +920,12 @@ def main() -> int:
     )
     parser.add_argument("--output", help="output path; relative paths are resolved beside the dataset")
     parser.add_argument("--output-format", choices=["tum", "kitti"], default="tum")
-    parser.add_argument("--min-coverage", type=float, default=0.9)
+    parser.add_argument(
+        "--min-coverage",
+        type=float,
+        default=0.9,
+        help="minimum TUM pose coverage (default: 0.9); KITTI requires every frame",
+    )
     parser.add_argument(
         "--inspect",
         action="store_true",
@@ -945,6 +955,13 @@ def main() -> int:
 
         repo = args.repo.expanduser().resolve()
         vslam, np, Image = _load_runtime(repo)
+        if args.output_format == "kitti":
+            try:
+                from cuvslam_tools.tracker.kitti_benchmark import save_poses_to_kitti_benchmark
+            except (ImportError, OSError) as exc:
+                raise ReplayError(
+                    f"KITTI writer is not ready ({exc}); run bootstrap_runtime.py --repo {repo}"
+                ) from exc
         print(f"cuVSLAM version: {vslam.get_version()}", flush=True)
         if description.kind == "rosbag":
             description = _convert_rosbag(
@@ -980,7 +997,7 @@ def main() -> int:
                 processor,
                 output,
                 expected_frames=expected_frames,
-                min_coverage=args.min_coverage,
+                write_poses=save_poses_to_kitti_benchmark,
             )
         print(json.dumps(stats, indent=2, sort_keys=True), flush=True)
         print(
@@ -989,7 +1006,7 @@ def main() -> int:
             flush=True,
         )
         return 0
-    except (IndexError, KeyError, OSError, RuntimeError, ValueError) as exc:
+    except (ImportError, IndexError, KeyError, OSError, RuntimeError, ValueError) as exc:
         parser.exit(1, f"Replay failed: {exc}\n")
 
 

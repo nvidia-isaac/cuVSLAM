@@ -52,11 +52,17 @@ def _cuda_major() -> int:
     directory_names = []
     if cuda_root.exists():
         directory_names.extend((cuda_root.name, cuda_root.resolve().name))
-    directory_names.extend(path.name for path in Path("/usr/local").glob("cuda-*"))
     for name in directory_names:
-        match = re.fullmatch(r"cuda-(\d+)(?:\.\d+)?", name)
+        match = re.fullmatch(r"cuda-(\d+)(?:\.\d+)*", name)
         if match:
             return int(match.group(1))
+    versions = [
+        tuple(int(part) for part in match.group(1).split("."))
+        for path in Path("/usr/local").glob("cuda-*")
+        if path.is_dir() and (match := re.fullmatch(r"cuda-(\d+(?:\.\d+)*)", path.name))
+    ]
+    if versions:
+        return max(versions)[0]
     runtime_library = ctypes.util.find_library("cudart") or ""
     match = re.search(r"libcudart\.so\.(\d+)", runtime_library)
     if match:
