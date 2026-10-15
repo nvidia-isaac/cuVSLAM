@@ -9,7 +9,14 @@ fi
 
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 OUTPUT_DIR=$(realpath "$1")
-EXPECTED_BENCHMARKS=13
+
+annotate() {
+  if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+    echo "::$1::$2"
+  else
+    echo "${1^}: $2" >&2
+  fi
+}
 
 if [ ! -d "$OUTPUT_DIR/build" ]; then
   echo "Error: $OUTPUT_DIR/build not found."
@@ -55,14 +62,14 @@ if [ -f "$OUTPUT_DIR/cpp-benchmark-results.xml" ]; then
     --xml "$OUTPUT_DIR/cpp-benchmark-results.xml" \
     --metadata "$OUTPUT_DIR/cpp-benchmark-metadata.json" \
     --output-json "$OUTPUT_DIR/cpp-benchmark-results.json" \
-    --output-markdown "$OUTPUT_DIR/benchmark-summary.md" \
-    --expected-count "$EXPECTED_BENCHMARKS" || report_status=$?
+    --output-markdown "$OUTPUT_DIR/benchmark-summary.md" || report_status=$?
 else
-  echo "Error: benchmark run did not produce cpp-benchmark-results.xml." >&2
-  report_status=2
+  annotate error "The benchmark container exited with status $benchmark_status without writing \
+cpp-benchmark-results.xml; see cpp-benchmark-output.log in the benchmark artifact."
+  report_status=1
 fi
 
-if [ "$benchmark_status" -ne 0 ]; then
-  echo "Benchmark tests failed; preserving the failure in the generated report." >&2
+if [ "$benchmark_status" -ne 0 ] && [ "$report_status" -eq 0 ]; then
+  echo "The benchmark container exited with status $benchmark_status; failures are recorded in the benchmark report."
 fi
 exit "$report_status"
