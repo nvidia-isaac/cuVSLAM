@@ -90,7 +90,7 @@ Key parameters to note once you have the config:
   cuNLS availability, `depth_camera_ids`, and pinhole calibration.
   Knowing this up front directs the diagnosis toward vision, depth, or IMU root causes.
 - `rectified_images` (Isaac ROS) / `rectified_stereo_camera` (C++ API) — wrong value flips the entire stereo pipeline
-- `image_jitter_threshold_ms` — tolerated timestamp jitter between left/right images; too tight a value causes frames to be dropped silently
+- `image_jitter_threshold_ms` — tolerated gap between consecutive frames (exceeding it only logs a warning), not a tolerance between cameras
 - `Tracker.Mode` plus the `async_sba` / `sync_mode` that must match it — affects reproducibility
 - `enable_slam` / loop closure settings — SLAM should only be tuned after odometry is solid
 - `denoise_input_images`, `imu_from_left` — sensor-specific flags
@@ -169,7 +169,7 @@ With the config and dataset in hand, verify these before touching the diagnostic
 
 1. **Accurate intrinsic calibration** — verify distortion model and params match the actual camera. See `references/edex-calibration-pitfalls.md` for common EDEX mistakes (e.g. `"fisheye"` with zero params ≠ `"pinhole"`).
 2. **Accurate extrinsic calibration** (stereo/multi-cam) — verify baseline axis and magnitude match the physical rig. See `references/edex-calibration-pitfalls.md` for wrong-axis baseline diagnosis.
-3. **Proper image synchronization** — left/right timestamps must match per frame.
+3. **Proper image synchronization** — each `track()` call carries images captured at one instant (within 1 ms), never cameras cycled across calls.
 4. **Sharp images, low noise** — frame rate matters more than resolution.
 5. **Textured, rigid scenes** — avoid repetitive patterns and dynamic objects.
 6. **Correct parameters and coordinate frames** — check `rectified_stereo_camera` flag.
