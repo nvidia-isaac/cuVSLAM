@@ -45,6 +45,11 @@ requests an override, use these exact `replay_dataset.py` options:
 | `--output PATH` | Output filename or full path. Relative paths resolve in the default output directory, not the shell's working directory. |
 | `--output-format FORMAT` | Either `tum` (default) or `kitti`. |
 
+With `--output-format kitti`, replay validates the output before publishing it: each row must contain 12 finite
+values, and every replayed frame must have a pose. Empty, malformed, or incomplete output is rejected even if
+`--min-coverage` is lower than 1; that option applies only to TUM output. A zero exit status and `"valid": true`
+confirm successful KITTI validation.
+
 `--output-path` and `--output-file` are unsupported. The `output_path` key printed by `--inspect` is a JSON field,
 not a command-line option. Before adding an option not shown here, check its exact spelling and accepted values:
 
@@ -87,7 +92,8 @@ python3 <skill-dir>/scripts/replay_dataset.py --help
    `--cuda-major 12|13`; do not select the driver-reported maximum CUDA version unless that runtime is installed. If
    no released wheel matches, explain the mismatch. Build from source only when necessary and compatible with the
    user's time/compute constraints; run it in the foreground and do not leave a polling wrapper as the deliverable.
-4. The replay script validates TUM output automatically. For an existing or externally generated TUM file, run:
+4. The replay script validates both TUM and KITTI output automatically. For an existing or externally generated
+   TUM file only, run:
 
    ```bash
    python3 <skill-dir>/scripts/validate_tum.py <trajectory-path> [--expected-rows N]
