@@ -25,8 +25,8 @@ namespace cuvslam::math {
 
 // Point-to-point ICP cost: residual dim = 1, single SE(3) state block (tangent dim 6).
 //
-// Projective formulation: the state is rig_from_world. cam_from_rig is always provided;
-// the kernel composes cam_from_world = cam_from_rig * rig_from_world. Each reference
+// Projective formulation: the state is world_from_rig (the cuNLS pose convention). cam_from_rig is
+// always provided; the kernel composes cam_from_world = cam_from_rig * world_from_rig^-1. Each reference
 // landmark is transformed into the current camera, projected to a single pixel, and
 // compared against the depth sample there. The residual is the signed depth difference
 // r = p_cam.z - d. The kernel also applies a fixed relative-depth gate to robustly
@@ -44,14 +44,18 @@ public:
         image_size_(image_size),
         num_factors_(num_factors) {}
 
-  bool Evaluate(float* residuals, float* jacobians, float const* const* state_pointers,
-                cudaStream_t stream) const final {
+  bool Evaluate(float* residuals, float* jacobians, float const* const* state_pointers, cudaStream_t stream,
+                const int* factor_ids, size_t num_factor_ids) const final {
+    // cuNLS passes the resolved item count; only plain evaluation (item t is factor t) is supported.
+    if (factor_ids != nullptr || (num_factor_ids != 0 && num_factor_ids != num_factors_)) {
+      return false;
+    }
     CUDA_CHECK(cuda::point_to_point_icp_evaluate(d_landmarks_, state_pointers, d_cam_from_rig_, depth_tex_, focal_,
                                                  principal_, image_size_, residuals, jacobians, num_factors_, stream));
     return true;
   }
 
-  size_t NumFactors() const final { return num_factors_; }
+  size_t NumActiveFactors() const final { return num_factors_; }
 
 private:
   const float3* d_landmarks_;

@@ -76,6 +76,26 @@ float3 TransformPointCPU(const float* M, float3 p) {
           M[8] * p.x + M[9] * p.y + M[10] * p.z + M[11]};
 }
 
+void InvertSE3CPU(const float* A, float* C) {
+  for (int r = 0; r < 3; r++) {
+    for (int c = 0; c < 3; c++) {
+      C[r * 4 + c] = A[c * 4 + r];
+    }
+    C[r * 4 + 3] = -(A[0 * 4 + r] * A[3] + A[1 * 4 + r] * A[7] + A[2 * 4 + r] * A[11]);
+  }
+  C[12] = C[13] = C[14] = 0.f;
+  C[15] = 1.f;
+}
+
+void ComposeSE3CPU(const float* A, const float* B, float* C) {
+  for (int r = 0; r < 4; r++) {
+    for (int c = 0; c < 4; c++) {
+      C[r * 4 + c] = A[r * 4 + 0] * B[0 * 4 + c] + A[r * 4 + 1] * B[1 * 4 + c] + A[r * 4 + 2] * B[2 * 4 + c] +
+                     A[r * 4 + 3] * B[3 * 4 + c];
+    }
+  }
+}
+
 std::vector<float> RenderDepthFromPoints(const float* cam_from_world, const std::vector<float3>& world_points) {
   std::vector<float> depth(kWidth * kHeight, 0.f);
   for (const auto& pw : world_points) {
@@ -119,9 +139,9 @@ struct TestResources {
     if (d_cam_from_rig) cudaFree(d_cam_from_rig);
   }
 
-  // Run the projective ICP kernel. residuals is 1 float per factor, jacobians (if requested)
-  // is 6 floats per factor. The relative-depth rejection threshold is hard-coded in the
-  // kernel translation unit (kMaxRelDepth in point_to_point_icp_kernel.cu).
+  // Run the projective ICP kernel at the state world_from_rig. residuals is 1 float per factor,
+  // jacobians (if requested) is 6 floats per factor. The relative-depth rejection threshold is
+  // hard-coded in the kernel translation unit (kMaxRelDepth in point_to_point_icp_kernel.cu).
   void evaluate(const float* state_host, std::vector<float>& res, std::vector<float>* jac) {
     float* d_state;
     cudaMalloc(reinterpret_cast<void**>(&d_state), 16 * sizeof(float));
@@ -178,8 +198,10 @@ TEST(PointToPointICPTest, ResidualZeroAtGT) {
   // the factor was kept (the gate writes both residual and Jacobian to zero on rejection).
   // At GT the residual is exactly 0 for every kept factor, so a residual-magnitude check
   // alone cannot distinguish "perfect match" from "rejected" — we need the Jacobian.
+  float world_from_rig[16];
+  InvertSE3CPU(cam_from_world, world_from_rig);
   std::vector<float> residuals, jacobians;
-  tr.evaluate(cam_from_world, residuals, &jacobians);
+  tr.evaluate(world_from_rig, residuals, &jacobians);
 
   int num_active = 0;
   for (size_t i = 0; i < tr.N; i++) {
@@ -198,30 +220,51 @@ TEST(PointToPointICPTest, ResidualZeroAtGT) {
   EXPECT_GT(num_active, 0) << "No active factors at GT pose";
 }
 
-// Verify the 1x6 Jacobian matches the analytic formula dr/dxi = (R * [-[p_w]x | I])_z,
-// i.e. the z-row of the 3x6 point Jacobian. Correspondences are not re-linearized, so the
-// derivative of the sampled depth w.r.t. pose is not part of the Jacobian (standard ICP).
-TEST(PointToPointICPTest, JacobianMatchesAnalyticFormula) {
+// Verify the 1x6 Jacobian against central differences along the cuNLS SE(3) update
+// W' = W * Exp(xi) of the state W = world_from_rig, with a non-identity cam_from_rig.
+// The depth texture is piecewise constant around each projected landmark, so the sampled
+// depth does not change under the small probe steps and the differences isolate d(p_cam.z)/dxi.
+TEST(PointToPointICPTest, JacobianMatchesFiniteDifferences) {
   std::vector<float3> world_points = {{0.1f, -0.2f, 2.f}, {0.5f, 0.3f, 3.f}, {-0.3f, 0.1f, 1.5f}};
 
-  float cam_from_world[16], cam_from_rig[16];
-  MakeIdentity(cam_from_rig);
-  MakeSE3(0.05f, -0.03f, 0.02f, 0.1f, -0.05f, 0.02f, cam_from_world);
+  float rig_from_world[16], cam_from_rig[16], cam_from_world[16], world_from_rig[16];
+  MakeSE3(0.05f, -0.03f, 0.02f, 0.1f, -0.05f, 0.02f, rig_from_world);
+  MakeSE3(-0.04f, 0.06f, 0.03f, 0.05f, 0.02f, -0.03f, cam_from_rig);
+  ComposeSE3CPU(cam_from_rig, rig_from_world, cam_from_world);
+  InvertSE3CPU(rig_from_world, world_from_rig);
 
   auto depth_host = RenderDepthFromPoints(cam_from_world, world_points);
   TestResources tr(depth_host, world_points, cam_from_rig);
 
   std::vector<float> residuals, jacobians;
-  tr.evaluate(cam_from_world, residuals, &jacobians);
+  tr.evaluate(world_from_rig, residuals, &jacobians);
 
-  const float* M = cam_from_world;
+  // Tangent ordering is (omega, t); a single nonzero component makes MakeSE3 an exact Exp.
+  constexpr float kEps = 1e-3f;
+  std::vector<std::vector<float>> numeric(6);
+  for (int k = 0; k < 6; k++) {
+    float xi[6] = {0.f, 0.f, 0.f, 0.f, 0.f, 0.f};
+    std::vector<float> res_plus, res_minus;
+    float step[16], perturbed[16];
+
+    xi[k] = kEps;
+    MakeSE3(xi[0], xi[1], xi[2], xi[3], xi[4], xi[5], step);
+    ComposeSE3CPU(world_from_rig, step, perturbed);
+    tr.evaluate(perturbed, res_plus, nullptr);
+
+    xi[k] = -kEps;
+    MakeSE3(xi[0], xi[1], xi[2], xi[3], xi[4], xi[5], step);
+    ComposeSE3CPU(world_from_rig, step, perturbed);
+    tr.evaluate(perturbed, res_minus, nullptr);
+
+    numeric[k].resize(tr.N);
+    for (size_t pt = 0; pt < tr.N; pt++) {
+      numeric[k][pt] = (res_plus[pt] - res_minus[pt]) / (2.f * kEps);
+    }
+  }
 
   int checked = 0;
   for (size_t pt = 0; pt < tr.N; pt++) {
-    float3 pw = world_points[pt];
-    float3 pc = TransformPointCPU(M, pw);
-    if (pc.z < 0.01f) continue;
-
     // Skip rejected correspondences (zero residual + zero Jacobian).
     bool jac_all_zero = true;
     for (int j = 0; j < 6; j++) {
@@ -230,29 +273,16 @@ TEST(PointToPointICPTest, JacobianMatchesAnalyticFormula) {
         break;
       }
     }
-    if (jac_all_zero) continue;
-
-    // Expected = z-row of R * [-[p_w]x | I].
-    // Rotation cols: col k = R_z . (e_k x p_w), where R_z = (M[8], M[9], M[10]).
-    //   e_0 x p_w = (0, -pw.z, pw.y)
-    //   e_1 x p_w = (pw.z, 0, -pw.x)
-    //   e_2 x p_w = (-pw.y, pw.x, 0)
-    // Translation cols: R_z itself.
-    const float R0 = M[8], R1 = M[9], R2 = M[10];
-    float expected[6];
-    expected[0] = R0 * 0.f + R1 * (-pw.z) + R2 * pw.y;
-    expected[1] = R0 * pw.z + R1 * 0.f + R2 * (-pw.x);
-    expected[2] = R0 * (-pw.y) + R1 * pw.x + R2 * 0.f;
-    expected[3] = R0;
-    expected[4] = R1;
-    expected[5] = R2;
+    if (jac_all_zero) {
+      continue;
+    }
 
     for (int j = 0; j < 6; j++) {
-      EXPECT_NEAR(jacobians[pt * 6 + j], expected[j], 1e-4f) << "Jacobian mismatch at point=" << pt << " col=" << j;
+      EXPECT_NEAR(jacobians[pt * 6 + j], numeric[j][pt], 2e-3f) << "Jacobian mismatch at point=" << pt << " col=" << j;
     }
     ++checked;
   }
-  EXPECT_GT(checked, 0) << "No active factors available to verify the Jacobian";
+  EXPECT_EQ(checked, static_cast<int>(tr.N)) << "Every landmark should produce an active factor";
 }
 
 // A depth-axis perturbation of the pose should produce a non-zero scalar residual equal
@@ -271,11 +301,12 @@ TEST(PointToPointICPTest, ResidualMatchesDepthDifferenceForZPerturbation) {
   // Translate the cam_from_world origin by +kDz along camera-z: every transformed
   // p_cam.z grows by kDz while the depth texture still reads 2.0, so r = p_cam.z - d = +kDz.
   constexpr float kDz = 0.02f;
-  float perturbed[16];
+  float perturbed[16], world_from_rig[16];
   MakeSE3(0, 0, 0, 0, 0, kDz, perturbed);
+  InvertSE3CPU(perturbed, world_from_rig);
 
   std::vector<float> residuals;
-  tr.evaluate(perturbed, residuals, nullptr);
+  tr.evaluate(world_from_rig, residuals, nullptr);
 
   for (size_t i = 0; i < tr.N; i++) {
     EXPECT_NEAR(residuals[i], kDz, 1e-4f) << "Expected r = p_cam.z - d = +kDz at point " << i;
@@ -296,11 +327,12 @@ TEST(PointToPointICPTest, ResidualInvariantToLateralTranslationOnPlane) {
   TestResources tr(depth_host, world_points, cam_from_rig);
 
   // 5 cm lateral translation: projection pixel moves, depth value unchanged.
-  float perturbed[16];
+  float perturbed[16], world_from_rig[16];
   MakeSE3(0, 0, 0, 0.05f, 0, 0, perturbed);
+  InvertSE3CPU(perturbed, world_from_rig);
 
   std::vector<float> residuals;
-  tr.evaluate(perturbed, residuals, nullptr);
+  tr.evaluate(world_from_rig, residuals, nullptr);
 
   for (size_t i = 0; i < tr.N; i++) {
     EXPECT_NEAR(residuals[i], 0.f, 1e-4f) << "Expected zero residual at point " << i;
@@ -335,29 +367,30 @@ TEST(PointToPointICPTest, RelativeDepthRejection) {
   }
 }
 
-// A non-identity cam_from_rig must be composed with rig_from_world; equivalent
+// A non-identity cam_from_rig must be composed with the state; equivalent
 // effective poses should produce equivalent residuals.
 TEST(PointToPointICPTest, CamFromRigComposition) {
   std::vector<float3> world_points = {{0.f, 0.f, 3.f}};
 
-  float rig_from_world[16], cam_from_rig[16];
-  MakeIdentity(rig_from_world);
+  float world_from_rig[16], cam_from_rig[16];
+  MakeIdentity(world_from_rig);
   MakeSE3(0, 0, 0, 0.2f, 0, 0, cam_from_rig);
 
-  float cam_from_world[16];
+  float cam_from_world[16], world_from_cam[16];
   MakeSE3(0, 0, 0, 0.2f, 0, 0, cam_from_world);
+  InvertSE3CPU(cam_from_world, world_from_cam);
 
   auto depth_host = RenderDepthFromPoints(cam_from_world, world_points);
 
   TestResources tr1(depth_host, world_points, cam_from_rig);
   std::vector<float> res1;
-  tr1.evaluate(rig_from_world, res1, nullptr);
+  tr1.evaluate(world_from_rig, res1, nullptr);
 
   float identity[16];
   MakeIdentity(identity);
   TestResources tr2(depth_host, world_points, identity);
   std::vector<float> res2;
-  tr2.evaluate(cam_from_world, res2, nullptr);
+  tr2.evaluate(world_from_cam, res2, nullptr);
 
   EXPECT_NEAR(res1[0], res2[0], 1e-4f) << "cam_from_rig composition mismatch";
 }
