@@ -138,8 +138,10 @@ Repository secrets, split read from write so fork-reachable jobs never hold a ke
 - Per-config staging artifacts use
   `benchmark-results-staging-<version>-<platform>-cuda<version>-ubuntu<version>`. The nightly summary publishes the
   Orin and Thor tables independently, then retains `benchmark-results-<version>` for 30 days.
-- Benchmark test failures are informational during the initial soak period. Missing tests, malformed metrics, or a
-  missing Orin/Thor report fail summary consolidation because they indicate broken benchmark coverage.
+- Benchmark test failures, malformed metrics, and skips are informational during the initial soak period; they are
+  reported as job summary rows and run annotations. There is no fixed benchmark count, so adding a benchmark needs no
+  CI change. A run with no active benchmark results, or a missing Orin/Thor report, fails summary consolidation
+  because it indicates broken benchmark coverage.
 - Jetson benchmarks do not run on PRs and are CI diagnostics, not release assets. They are not added to
   `cuvslam-evaluation-<version>.tar.gz`.
 
