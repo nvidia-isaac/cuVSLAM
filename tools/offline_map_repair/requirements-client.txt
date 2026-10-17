@@ -1,0 +1,8 @@
+# Install into a Python environment with cuVSLAM built from the supported source.
+# The NAT server has its own isolated environment and dependencies in pyproject.toml.
+mcp==1.30.0
+lmdb==3.0.0
+numpy>=1.26,<3
+scipy>=1.11,<2
+PyYAML>=6,<7
+Pillow>=10,<13

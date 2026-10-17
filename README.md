@@ -61,6 +61,11 @@ The current implementation supports pinhole cameras only.
 The quickest way to get started is to [install PyCuVSLAM from a pre-built wheel](#install-from-wheels)
 and explore the [examples](examples/).
 
+For experimental offline editing of saved SLAM maps through NVIDIA NeMo Agent
+Toolkit's MCP server, see [Offline map repair](tools/offline_map_repair/README.md).
+The guide covers map inspection, replay-based repair, maintenance, and native
+relocalization checks for the supported map serialization.
+
 ## ROS2 Support
 
 To use cuVSLAM in a ROS2 environment:

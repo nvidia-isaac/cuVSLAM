@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cuvslam-map-nat"
+version = "0.1.0"
+description = "Offline cuVSLAM map record tools served by NVIDIA NeMo Agent Toolkit"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "nvidia-nat==1.9.0", "nvidia-nat-mcp==1.9.0", "nvidia-nat-langchain==1.9.0",
+    "mcp==1.29.1", "lmdb==3.0.0",
+]
+
+[project.entry-points."nat.components"]
+cuvslam_map_nat = "cuvslam_map_nat.register"
+
+[tool.setuptools]
+packages = ["cuvslam_map_nat"]
