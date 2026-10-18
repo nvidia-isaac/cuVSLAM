@@ -48,3 +48,5 @@ setup_staticlib_project(
         SOURCES ${SOURCES}
         LIBRARIES ${LIBS}
 )
+
+add_subdirectory(test)
