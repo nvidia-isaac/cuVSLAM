@@ -1100,9 +1100,9 @@ NB_MODULE(pycuvslam, m) {
           "    callback: Function to be called when flush is complete (takes bool success parameter)")
       .def(
           "localize_in_map",
-          [](Slam& self, const std::string_view& folder_name, int64_t timestamp_ns,
-             const std::optional<Pose>& guess_pose, const std::vector<nb::ndarray<nb::ro>>& images,
-             const Slam::LocalizationSettings& settings, nb::callable start_cb, nb::callable finish_cb, bool attach) {
+          [](Slam& self, std::string_view folder_name, int64_t timestamp_ns, const Pose* guess_pose,
+             const std::vector<nb::ndarray<nb::ro>>& images, const Slam::LocalizationSettings& settings,
+             nb::callable start_cb, nb::callable finish_cb, bool attach) {
             auto image_set = ImageSetFromNDArrays(images, timestamp_ns, ArrayType::Image);
             self.LocalizeInMap(
                 folder_name, timestamp_ns, guess_pose, image_set, settings,

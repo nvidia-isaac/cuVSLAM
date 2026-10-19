@@ -1261,10 +1261,9 @@ void Slam::FlushMap(std::function<void(bool success)> callback) const { impl->as
   }
 
 // timestamp_ns - localization timestamp
-void Slam::LocalizeInMap(const std::string_view& folder_name, int64_t timestamp_ns,
-                         const std::optional<Pose>& guess_pose, const ImageSet& images,
-                         const LocalizationSettings& settings, LocalizeStartCB start_cb, LocalizeFinishCB finish_cb,
-                         bool attach) {
+void Slam::LocalizeInMap(std::string_view folder_name, int64_t timestamp_ns, const Pose* guess_pose,
+                         const ImageSet& images, const LocalizationSettings& settings, LocalizeStartCB start_cb,
+                         LocalizeFinishCB finish_cb, bool attach) {
   slam::LocalizerOptions localizer_options;
   localizer_options.use_gpu = impl->use_gpu_;
 
@@ -1279,14 +1278,14 @@ void Slam::LocalizeInMap(const std::string_view& folder_name, int64_t timestamp_
     CheckImageMemory(images[i], impl->use_gpu_, "image " + std::to_string(i));
   }
 
-  THROW_INVALID_ARG_IF(!guess_pose.has_value() && !impl->async_slam_->IsVprEnabled(),
+  THROW_INVALID_ARG_IF(guess_pose == nullptr && !impl->async_slam_->IsVprEnabled(),
                        "LocalizeInMap without a guess pose searches the map by appearance, which needs "
                        "Slam::Config::use_vpr and a map saved with it.");
-  THROW_INVALID_ARG_IF(!guess_pose.has_value() && settings.vpr_candidates == 0,
+  THROW_INVALID_ARG_IF(guess_pose == nullptr && settings.vpr_candidates == 0,
                        "LocalizeInMap without a guess pose needs settings.vpr_candidates > 0.");
 
   std::optional<Isometry3T> isometry_guess_pose;
-  if (guess_pose.has_value()) {
+  if (guess_pose != nullptr) {
     isometry_guess_pose = ConvertPoseToIsometry(*guess_pose);
   }
 

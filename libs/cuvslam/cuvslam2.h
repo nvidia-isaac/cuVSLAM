@@ -1024,7 +1024,7 @@ public:
    * @param[in] folder_name Folder containing the saved SLAM map (database)
    * @param[in] timestamp_ns Time in nanoseconds for the localized pose. If all images timestamps are equal, it makes
    *                         sense to use images[0].timestamp_ns.
-   * @param[in] guess_pose Initial guess for rig pose at the images' timestamp, or empty to use place recognition
+   * @param[in] guess_pose Initial guess for rig pose at the images' timestamp, or nullptr to use place recognition
    * @param[in] images Observed images from multicamera (1 - mono, 2 - stereo, etc.)
    * @param[in] settings Localization settings
    * @param[in] start_cb Called when localization starts, may be called in a separate thread
@@ -1034,9 +1034,9 @@ public:
    *                   there. The folder holds a whole map only after that. Nothing else may open the folder while
    *                   it is attached.
    */
-  void LocalizeInMap(const std::string_view& folder_name, int64_t timestamp_ns, const std::optional<Pose>& guess_pose,
-                     const ImageSet& images, const LocalizationSettings& settings, LocalizeStartCB start_cb,
-                     LocalizeFinishCB finish_cb, bool attach = false);
+  void LocalizeInMap(std::string_view folder_name, int64_t timestamp_ns, const Pose* guess_pose, const ImageSet& images,
+                     const LocalizationSettings& settings, LocalizeStartCB start_cb, LocalizeFinishCB finish_cb,
+                     bool attach = false);
 
   /**
    * Get SLAM metrics.
