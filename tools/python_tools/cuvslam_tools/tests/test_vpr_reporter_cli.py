@@ -36,6 +36,16 @@ class TestVprReporterCli(unittest.TestCase):
         self.assertNotIn("--use_vpr", help_text)
         self.assertNotIn("--vpr_modes", help_text)
 
+    def test_tracker_flags_are_rejected(self):
+        # It always runs synchronous SLAM with place recognition; --dataset must not abbreviate --datasets_root.
+        for argv in (["--use_slam", "true"], ["--sync_slam", "false"], ["--async_sba", "true"], ["--dataset", "x"]):
+            with self.subTest(argv=argv):
+                stderr = io.StringIO()
+                with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as cm:
+                    cli.main(["--map_sequence", "map", "--query_sequence", "query"] + argv)
+                self.assertEqual(cm.exception.code, 2)
+                self.assertIn(f"unrecognized arguments: {' '.join(argv)}", stderr.getvalue())
+
 
 class TestVprSummary(unittest.TestCase):
     def test_total_median_error_averages_the_two_middle_errors(self):

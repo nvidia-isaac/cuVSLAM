@@ -325,32 +325,23 @@ def _load_gt_positions(sequence_dir: str, gt_file: str) -> np.ndarray:
     return np.array([transform[:3, 3] for transform in transforms])
 
 
-def _open_sequence(sequence_dir: str, pair: VprPair, args: argparse.Namespace):
+def _open_sequence(sequence_dir: str, pair: VprPair):
     """Open an EDEX sequence with its own ground truth left out; scoring reads it separately."""
     from cuvslam_tools.tracker.edex_reader import EdexReader
 
     reader = EdexReader(sequence_dir,
-                        stereo_edex=os.path.join(sequence_dir, pair.edex_file),
-                        cache_uncompressed=getattr(args, "cache_uncompressed", False))
+                        stereo_edex=os.path.join(sequence_dir, pair.edex_file))
     if not reader.validate_rig():
         raise ValueError(f"Rig parameters are invalid: {os.path.join(sequence_dir, pair.edex_file)}")
     return reader
 
 
-def _odometry_config(vslam, args: argparse.Namespace):
+def _odometry_config(vslam):
     """Odometry configuration for the map pass."""
-    from cuvslam_tools.tracker import conversions as conv
-
     cfg = vslam.Odometry.Config()
-    cfg.odometry_mode = (conv.str2odometry_mode(args.odometry_mode)
-                         if isinstance(args.odometry_mode, str) else args.odometry_mode)
-    cfg.multicam_mode = (conv.str2multicam_mode(args.multicam_mode)
-                         if isinstance(args.multicam_mode, str) else args.multicam_mode)
-    cfg.use_gpu = args.use_gpu
-    cfg.use_motion_model = args.use_motion_model
-    cfg.use_denoising = args.use_denoising
-    cfg.rectified_stereo_camera = args.rectified_stereo_camera
-    cfg.max_frame_delta_s = args.max_frame_delta_s
+    # cuvslam_tracker's defaults.
+    cfg.multicam_mode = vslam.Odometry.MulticameraMode.Performance
+    cfg.max_frame_delta_s = 0.1
     # OdometryWithSlamOffline needs sync SBA; SLAM needs the exports to make keyframes.
     cfg.async_sba = False
     cfg.enable_observations_export = True
@@ -361,7 +352,6 @@ def _odometry_config(vslam, args: argparse.Namespace):
 def _slam_config(vslam, args: argparse.Namespace):
     """SLAM config with place recognition."""
     cfg = vslam.Slam.Config()
-    cfg.use_gpu = args.use_gpu
     cfg.sync_mode = True
     cfg.max_map_size = 0
     cfg.use_vpr = True
@@ -487,8 +477,8 @@ def _build_vpr_map(pair: VprPair, args: argparse.Namespace, map_dir: str) -> tup
     """Phase 1: track the map sequence and save its map to `map_dir`; returns the tracker holding it."""
     vslam = _load_cuvslam()
 
-    reader = _open_sequence(pair.map_sequence, pair, args)
-    odom_cfg = _odometry_config(vslam, args)
+    reader = _open_sequence(pair.map_sequence, pair)
+    odom_cfg = _odometry_config(vslam)
     slam_cfg = _slam_config(vslam, args)
     tracker = vslam.Tracker(reader.rig, vslam.Tracker.Mode.OdometryWithSlamOffline, odom_cfg, slam_cfg)
 
@@ -527,7 +517,7 @@ def _build_vpr_map(pair: VprPair, args: argparse.Namespace, map_dir: str) -> tup
 
 def _query_vpr_map(pair: VprPair, args: argparse.Namespace, tracker) -> _QueryRun:
     """Phase 2: ask the map pass's session where each frame of the query sequence was taken."""
-    reader = _open_sequence(pair.query_sequence, pair, args)
+    reader = _open_sequence(pair.query_sequence, pair)
     querier = _MapQuerier(tracker, args.frame_limit, args.query_stride)
     try:
         reader.replay(querier)

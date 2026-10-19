@@ -22,8 +22,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from cuvslam_tools.tracker.cli import add_tracker_arguments
-
 
 def _resolve_config_path(test_config: str, datasets_root: str) -> Path:
     """Resolve a VPR reporter config path from command-line input."""
@@ -102,10 +100,13 @@ def main(argv: Optional[list[str]] = None) -> int:
         prog="cuvslam_vpr_reporter",
         description="Evaluate Visual Place Recognition: build a map from one sequence, "
                     "recognize places in another, and score both against KITTI-format ground truth.",
+        allow_abbrev=False,
     )
     parser.add_argument("--test_config", type=str, default="", help="VPR reporter config file.")
     parser.add_argument("--datasets_root", type=str, default="", help="Root directory containing datasets.")
     parser.add_argument("--output_root", type=str, default="", help="Root directory for report outputs.")
+    parser.add_argument("--output_dir", type=str, default="",
+                        help="Output directory; defaults to a timestamped folder under --output_root.")
     parser.add_argument("--pdf", action="store_true", help="Generate PDF report in addition to HTML.")
     parser.add_argument("--map_sequence", type=str, default="",
                         help="EDEX sequence the place recognition map is built from, without --test_config.")
@@ -113,6 +114,11 @@ def main(argv: Optional[list[str]] = None) -> int:
                         help="EDEX sequence whose frames are recognized in that map, without --test_config.")
     parser.add_argument("--pair_title", type=str, default="",
                         help="Title of the sequence pair; defaults to the two folder names.")
+    parser.add_argument("--gt_path", type=str, default="",
+                        help="KITTI-format ground truth of both sequences, absolute or relative to each "
+                             "(default: gt.txt), without --test_config.")
+    parser.add_argument("--edex_filename", type=str, default="",
+                        help="EDEX file of both sequences (default: stereo.edex), without --test_config.")
     parser.add_argument("--success_radius", type=float, default=None,
                         help="Distance in meters within which a recognized place counts as correct "
                              "(default: the config's success_radius_m, else 10.0).")
@@ -128,7 +134,6 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--keep_vpr_maps", action="store_true",
                         help="Keep the temporary map folders instead of deleting them; each holds the whole SLAM "
                              "map of its pair, landmark database included, so they are large.")
-    add_tracker_arguments(parser)
 
     args = parser.parse_args(argv)
     args.report_comments = sys.argv[1:] if argv is None else argv

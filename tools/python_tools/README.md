@@ -503,7 +503,6 @@ green for recognized, amber for a false positive, red for unrecognized. Under it
 sequence, evenly spaced over the frames that were queried and bordered green where the frame was recognized correctly
 and red where the robot did not know where it was, false positives included; each frame carries its index.
 
-Beyond the flags above the command accepts every `cuvslam_tracker` flag except `--loop_closure_mode` and `--use_vpr`.
 `--frame_limit` cuts both sequences short for a quick check, `--query_stride`
 queries every Nth frame, `--vpr_score_threshold` raises the similarity a match must reach, and `--keep_vpr_maps` leaves
 the temporary map folders on disk.
