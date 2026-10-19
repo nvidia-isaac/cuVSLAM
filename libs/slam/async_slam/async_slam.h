@@ -82,6 +82,9 @@ public:
   void ProcessInputSynchronously();  // for "blocking" = reproduce_mode without launching background thread
   void Stop();
 
+  // True on the background thread, where callbacks run. The destructor cannot run there, as it joins that thread.
+  bool IsWorkerThread() const { return thread_.get_id() == std::this_thread::get_id(); }
+
   void TrackResult(FrameId frameId, int64_t timestamp_ns, const odom::IVisualOdometry::VOFrameStat& stat,
                    const sof::Images& images, const Isometry3T& delta);
 
@@ -150,11 +153,15 @@ private:
 
   class CopyToDatabaseCmd : public ICommand {
   public:
-    std::string path_;
-    explicit CopyToDatabaseCmd(std::string path) : path_(std::move(path)) {}
+    CopyToDatabaseCmd(std::string path, std::function<void(bool)> callback)
+        : path_(std::move(path)), callback_(std::move(callback)) {}
     ~CopyToDatabaseCmd() override = default;
 
     void Execute(AsyncSlam& async_slam, FrameId, const Isometry3T&) override;
+
+  private:
+    const std::string path_;
+    std::function<void(bool)> callback_;
   };
 
   // --- Immutable after construction; read by both the caller's thread and the background worker thread ---
@@ -182,7 +189,6 @@ private:
   std::shared_ptr<ViewManager<ViewLandmarks>> landmarks_view_;   // TODO: check for raise condition
   std::shared_ptr<ViewManager<ViewLandmarks>> loop_close_view_;  // TODO: check for raise condition
   std::shared_ptr<ViewManager<ViewPoseGraph>> pose_graph_view_;  // TODO: check for raise condition
-  std::function<void(bool)> copy_to_database_callback_;          // TODO: check for raise condition
   const profiler::SLAMProfiler::DomainHelper profiler_domain_ = profiler::SLAMProfiler::DomainHelper("SLAM");
   const uint32_t profiler_color_ = 0x00FF00;
 
