@@ -30,9 +30,8 @@ that node's picture, and the rest cost a `HasImage` lookup. It also bounds the m
 which matters because AnyLoc searches exhaustively.
 
 **The place recognition map is part of the SLAM map.** It is a singleton of the SLAM database next to the spatial
-index, `SlamDatabaseSingleton::VprMap`, written by `SaveMap`, by `FlushMap` and when the map file at `map_path` is
-detached, and read back with the pose graph whose node ids it uses. Without a database it lives in memory, like the
-rest of the map.
+index, `SlamDatabaseSingleton::VprMap`, written by `SaveMap`, by `FlushMap` and when `Slam` is destroyed, and read
+back with the pose graph whose node ids it uses. Without a database it lives in memory, like the rest of the map.
 
 **The default score threshold, 0.68, favors precision.** On KITTI-07 (ViT-S/14 block 9 value facet at 322x322, a
 64 node map of frames 0..299, 68 queries scored against ground truth) every query within 2 m of the node it matched
