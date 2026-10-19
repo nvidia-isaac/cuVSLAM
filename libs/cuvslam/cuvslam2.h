@@ -773,8 +773,9 @@ struct Result {
  * Consumes Odometry::State to maintain a pose graph, detect loop closures, save and load maps, and
  * relocalize in an existing map.
  *
- * Thread safety: all methods must be called from a single thread, except LocalizeInMap(), SaveMap(), AddFrameToVprMap()
- * and RecognizePlaceByFrame(), which may be called concurrently with any other method from another thread.
+ * Thread safety: all methods must be called from a single thread, except SaveMap() and, unless `Config::sync_mode` is
+ * set, LocalizeInMap(), AddFrameToVprMap() and RecognizePlaceByFrame(). These may be called concurrently with any
+ * other method from another thread.
  */
 class CUVSLAM_API Slam {
 public:
