@@ -520,7 +520,8 @@ NB_MODULE(pycuvslam, m) {
            nb::arg("debug_imu_mode") = Odometry::Config{}.debug_imu_mode,
            nb::arg("rgbd_settings") = Odometry::Config{}.rgbd_settings,
            nb::arg("multisensor_settings") = Odometry::Config{}.multisensor_settings,
-           nb::arg("min_depth") = Odometry::Config{}.min_depth, nb::arg("max_depth") = Odometry::Config{}.max_depth)
+           nb::arg("min_depth") = Odometry::Config{}.min_depth, nb::arg("max_depth") = Odometry::Config{}.max_depth,
+           nb::keep_alive<1, 13>())  // debug_dump_directory is a view into its str
       .def_rw("multicam_mode", &Odometry::Config::multicam_mode, "See :class:`Odometry.MulticameraMode`")
       .def_rw("odometry_mode", &Odometry::Config::odometry_mode, "See :class:`Odometry.OdometryMode`")
       .def_rw("use_gpu", &Odometry::Config::use_gpu, "Enable to use GPU acceleration")
@@ -537,7 +538,7 @@ NB_MODULE(pycuvslam, m) {
               "Enable to export final landmarks. Also sets enable_landmarks_export and enable_observations_export.")
       .def_rw("max_frame_delta_s", &Odometry::Config::max_frame_delta_s,
               "Maximum time difference between frames in seconds")
-      .def_rw("debug_dump_directory", &Odometry::Config::debug_dump_directory,
+      .def_rw("debug_dump_directory", &Odometry::Config::debug_dump_directory, nb::for_setter(nb::keep_alive<1, 2>()),
               "Directory for debug data dumps. If empty, no debug data will be dumped")
       .def_rw("debug_imu_mode", &Odometry::Config::debug_imu_mode, "Enable IMU debug mode")
       .def_rw("rgbd_settings", &Odometry::Config::rgbd_settings,
@@ -845,8 +846,9 @@ NB_MODULE(pycuvslam, m) {
            nb::arg("max_map_size") = Slam::Config{}.max_map_size,
            nb::arg("throttling_time_ms") = Slam::Config{}.throttling_time_ms,
            nb::arg("retention_time_ms") = Slam::Config{}.retention_time_ms,
-           nb::arg("delay_warning_queue_size") = Slam::Config{}.delay_warning_queue_size)
-      .def_rw("map_cache_path", &Slam::Config::map_cache_path,
+           nb::arg("delay_warning_queue_size") = Slam::Config{}.delay_warning_queue_size,
+           nb::keep_alive<1, 2>())  // map_cache_path is a view into its str
+      .def_rw("map_cache_path", &Slam::Config::map_cache_path, nb::for_setter(nb::keep_alive<1, 2>()),
               "If empty, map is kept in memory only. Else, map is synced to disk (LMDB) at this path, allowing "
               "large-scale maps; if the path already exists it will be overwritten. To load an existing map, use "
               "LocalizeInMap(). To save map, use SaveMap().")
