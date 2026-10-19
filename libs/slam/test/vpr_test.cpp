@@ -531,6 +531,8 @@ const std::string& StandInEngine(const std::string& name) {
     StandInSpec spec;
     if (name == "wide") {
       spec.tile = 14;
+    } else if (name == "dense") {
+      spec.tile = 2;
     } else if (name == "renamed") {
       spec.input_name = "input";
     } else if (name == "dynamic") {
@@ -710,6 +712,52 @@ TEST(VprAnyLocBackend, VocabularyIsNotFittedBelowTheTrainingMinimum) {
     EXPECT_TRUE(match.found) << "score " << match.score;
     EXPECT_EQ(match.node_id, 0u);
   }
+}
+
+TEST(VprAnyLocBackend, RawPatchesNeverOutgrowTheTrainingSet) {
+  const std::string& engine = StandInEngine("dense");
+  if (engine.empty()) {
+    GTEST_SKIP() << kNoStandIns;
+  }
+  // `exact` maps the most frames the training set holds whole, `longer` one more.
+  const size_t full = VprAnyLoc::kMaxTrainingDescriptors / static_cast<size_t>(AnyLocNetwork(engine).patch_count());
+  std::unique_ptr<IVpr> exact = CreateVpr(AnyLocOptions(engine));
+  std::unique_ptr<IVpr> longer = CreateVpr(AnyLocOptions(engine));
+  ASSERT_NE(exact, nullptr);
+  ASSERT_NE(longer, nullptr);
+  VprImage image;
+  for (size_t i = 0; i <= full; ++i) {
+    image = MakeBlockyImage(256, 256, 8, static_cast<uint32_t>(3000 + i));
+    if (i < full) {
+      exact->AddFrame(i, image);
+    }
+    longer->AddFrame(i, image);
+  }
+  Blob exact_blob;
+  BlobWriter exact_writer(exact_blob);
+  exact->Serialize(exact_writer);
+  Blob longer_blob;
+  BlobWriter longer_writer(longer_blob);
+  longer->Serialize(longer_writer);
+
+  // Same header and centers: `longer` fit on `exact`'s frames before its last one arrived.
+  const BlobReader reader(exact_blob);
+  uint32_t magic = 0;
+  uint32_t version = 0;
+  int32_t clusters = 0;
+  int32_t dim = 0;
+  uint64_t center_count = 0;
+  ASSERT_TRUE(reader.read(magic) && reader.read(version) && reader.read(clusters) && reader.read(dim) &&
+              reader.read(center_count));
+  ASSERT_GT(center_count, 0u);
+  const size_t prefix = exact_blob.size() - reader.remaining() + center_count * sizeof(float);
+  ASSERT_GE(longer_blob.size(), prefix);
+  EXPECT_TRUE(std::equal(exact_blob.begin(), exact_blob.begin() + prefix, longer_blob.begin()));
+
+  // The frame mapped after the fit is recognized.
+  const VprMatch match = longer->Query(image);
+  EXPECT_TRUE(match.found) << "score " << match.score;
+  EXPECT_EQ(match.node_id, full);
 }
 
 TEST(VprAnyLocBackend, SerializeDeserializeKeepsAnswers) {

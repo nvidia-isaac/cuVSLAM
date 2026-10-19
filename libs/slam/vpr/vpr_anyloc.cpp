@@ -22,6 +22,7 @@
 #include <filesystem>
 #include <stdexcept>
 
+#include "common/include_eigen.h"
 #include "common/log.h"
 #include "slam/vpr/anyloc_network.h"
 #include "slam/vpr/vpr_image.h"
@@ -38,11 +39,7 @@ constexpr std::array<float, 3> kPixelMean = {0.485f, 0.456f, 0.406f};
 constexpr std::array<float, 3> kPixelStd = {0.229f, 0.224f, 0.225f};
 
 float Dot(const float* a, const float* b, int size) {
-  float sum = 0.f;
-  for (int i = 0; i < size; ++i) {
-    sum += a[i] * b[i];
-  }
-  return sum;
+  return Eigen::Map<const Eigen::VectorXf>(a, size).dot(Eigen::Map<const Eigen::VectorXf>(b, size));
 }
 
 /// L2 normalize in place; a zero vector is left as is.
@@ -137,23 +134,38 @@ void VprAnyLoc::AddFrame(KeyFrameId node_id, const VprImage& image) {
     return;
   }
 
-  const auto it = index_by_node_.find(node_id);
-  if (it != index_by_node_.end()) {
-    entries_[it->second].patches = std::move(patches);
-    entries_[it->second].vlad.clear();
-    dirty_ = true;
-    return;
+  auto it = index_by_node_.find(node_id);
+  if (it == index_by_node_.end()) {
+    if (max_entries_ != 0 && entries_.size() >= max_entries_) {
+      return;
+    }
+    it = index_by_node_.emplace(node_id, entries_.size()).first;
+    Entry entry;
+    entry.node_id = node_id;
+    entries_.push_back(std::move(entry));
+  }
+  const size_t index = it->second;
+  entries_[index].vlad.clear();
+  entries_[index].patches.clear();
+  entries_[index].patches.shrink_to_fit();
+
+  if (centers_.empty()) {
+    size_t pending = patches.size();
+    for (const auto& entry : entries_) {
+      pending += entry.patches.size();
+    }
+    // Fit before raw patches outgrow the training set.
+    if (pending > kMaxTrainingDescriptors * static_cast<size_t>(descriptor_dim_)) {
+      Finalize();
+    }
   }
 
-  if (max_entries_ != 0 && entries_.size() >= max_entries_) {
+  Entry& entry = entries_[index];
+  if (!centers_.empty()) {
+    Encode(patches, entry.vlad);
     return;
   }
-
-  index_by_node_.emplace(node_id, entries_.size());
-  Entry entry;
-  entry.node_id = node_id;
   entry.patches = std::move(patches);
-  entries_.push_back(std::move(entry));
   dirty_ = true;
 }
 

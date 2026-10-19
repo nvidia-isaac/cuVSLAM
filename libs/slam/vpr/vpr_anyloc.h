@@ -34,7 +34,7 @@ public:
   /// Ratio test treats nodes this close in creation order as the same place.
   static constexpr uint64_t kNeighbourGuard = 10;
 
-  /// Cap on patch descriptors used to fit the vocabulary, to bound k-means time.
+  /// Cap on the patch descriptors the vocabulary is fitted to, and on those held until then.
   static constexpr size_t kMaxTrainingDescriptors = 100000;
 
   /// Max spherical k-means iterations; stops early once assignments settle.
@@ -63,7 +63,7 @@ private:
   struct Entry {
     KeyFrameId node_id = InvalidKeyFrameId;
     std::vector<float> vlad;     ///< cluster_count_ * descriptor_dim_ floats
-    std::vector<float> patches;  ///< per-patch descriptors until Finalize() pools them
+    std::vector<float> patches;  ///< per-patch descriptors until the vocabulary is fitted
   };
 
   /// Fill `patches` with the unit norm per-patch descriptors of `image`.

@@ -94,8 +94,9 @@ words' first default was set that way and produced 75% wrong answers on the cros
 Implement `IVpr` and construct it in `CreateVpr`. The tests of `VprMap` and of
 the pose graph bookkeeping run a stand-in backend instead, through `VprMap(options, backend)` and
 `LocalizerAndMapper::SetVprMap`, so they need neither TensorRT nor a GPU. A backend that needs a
-vocabulary builds it in `Finalize()`, which `VprMap` calls before the first query and before serializing; the
-interface is written that way so a backend never has to train anything while a frame is being mapped.
+vocabulary builds it in `Finalize()`, which `VprMap` calls before the first query and before serializing. AnyLoc
+also fits it while mapping, as soon as the raw patches it holds would outgrow its training set, stalling the SLAM
+thread for about 5 s on an i9-10940X; once it has a vocabulary, it pools each frame as it is mapped.
 
 ## Closing loops
 
@@ -151,8 +152,8 @@ against 0.99%), within the overlap of their run-to-run ranges. Two costs come wi
 
 - **Speed.** A place recognition query and up to five verifications per keyframe, on the SLAM thread. `AnyLoc` runs
   DINOv2 twice per keyframe, once to map the frame and once to query it, but on TensorRT that is now the small part:
-  alone on an RTX 4090, KITTI-00 tracked at 232 frames per second with the LSI mode, 203 with `AnyLoc` filling the
-  map and no queries, and 52 in this mode. The rest is the query and the verifications, which a backend with no
+  alone on an RTX 4090, KITTI-00 tracked at 232 frames per second with the LSI mode, 167 with `AnyLoc` filling the
+  map and no queries, and 66 in this mode. The rest is the query and the verifications, which a backend with no
   network pays as well: the in-tree bag of words tracked KITTI-00 at 30 frames per second in this mode. With six runs sharing the machine, this
   mode ran at 22.6 frames per second against 63.3 for the LSI one; on ONNX Runtime's CPU build it ran at 2.7.
 - **Vocabulary.** `AnyLoc` fits its vocabulary once, to the first 8 keyframes; fitting it to the first 100 instead
@@ -192,7 +193,7 @@ landmarks, which means it needs the SLAM map. That split is wired up as:
 2. **`LocalizeInMap` seeds itself.** Its `guess_pose` is optional; without one it asks the loaded map for up to
    `LocalizationSettings::vpr_candidates` places (default 5) that look like the images and runs the existing probe
    search seeded at each in turn, keeping the first whose PnP verification passes.
-3. **`RecognizePlaceByFrame` stays the cheap hint** (on its TensorRT engine AnyLoc answers in 8 ms on an RTX 4090,
+3. **`RecognizePlaceByFrame` stays the cheap hint** (on its TensorRT engine AnyLoc answers in 3 ms on an RTX 4090,
    against 38 ms with DINOv2 on the CPU, over a 300 frame map of KITTI-07), because its job is *detecting* the
    kidnapping, not resolving it.
 

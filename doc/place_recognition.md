@@ -88,7 +88,7 @@ estimate by more than 10 m or 10 degrees, or when verification started from the 
 disagrees with it, since a look-alike stretch of road can pass the geometric check.
 
 It queries place recognition and verifies up to five candidates on every keyframe, so it is slower than the LSI
-search: on KITTI-00 with an RTX 4090, 52 frames per second with `AnyLoc` against 232. To compare the two on a KITTI
+search: on KITTI-00 with an RTX 4090, 66 frames per second with `AnyLoc` against 232. To compare the two on a KITTI
 sequence, with the pose graph unbounded so that no place is merged out of the place recognition map:
 
 ```bash
