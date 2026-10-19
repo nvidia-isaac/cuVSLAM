@@ -17,6 +17,8 @@ import io
 import unittest
 
 from cuvslam_tools.vpr_reporter import cli
+from cuvslam_tools.vpr_reporter import generate_report
+from cuvslam_tools.vpr_reporter.execution import VprStat
 
 
 class TestVprReporterCli(unittest.TestCase):
@@ -33,6 +35,17 @@ class TestVprReporterCli(unittest.TestCase):
         self.assertNotIn("--loop_closure_mode", help_text)
         self.assertNotIn("--use_vpr", help_text)
         self.assertNotIn("--vpr_modes", help_text)
+
+
+class TestVprSummary(unittest.TestCase):
+    def test_total_median_error_averages_the_two_middle_errors(self):
+        # Pooled over pairs, defined like the per-pair median (np.median).
+        stats = [VprStat(n_true_positives=2, errors_m=[4.0, 1.0]),
+                 VprStat(n_true_positives=2, errors_m=[3.0, 2.0])]
+        self.assertEqual(generate_report.calc_summary("Total", stats)["median_error_m"], 2.5)
+
+    def test_total_median_error_without_errors_is_zero(self):
+        self.assertEqual(generate_report.calc_summary("Total", [VprStat()])["median_error_m"], 0.0)
 
 
 if __name__ == "__main__":

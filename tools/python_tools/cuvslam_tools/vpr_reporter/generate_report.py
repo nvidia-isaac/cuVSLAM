@@ -19,6 +19,7 @@ import os
 from dataclasses import asdict
 from datetime import datetime
 
+import numpy as np
 from jinja2 import Environment, FileSystemLoader
 
 from cuvslam_tools.reporter.generate_report import _git_source_metadata, image_to_base64
@@ -89,7 +90,7 @@ def calc_summary(title, stats):
         "false_positive_rate": 100.0 * n_false_positives / n_query_frames if n_query_frames else 0.0,
         "unrecognized_rate": 100.0 * n_unrecognized / n_query_frames if n_query_frames else 0.0,
         "precision": n_true_positives / recognized if recognized else 0.0,
-        "median_error_m": errors[len(errors) // 2] if errors else 0.0,
+        "median_error_m": float(np.median(errors)) if errors else 0.0,
         "mean_error_m": sum(errors) / len(errors) if errors else 0.0,
         "mean_score": weighted_score / recognized if recognized else 0.0,
         "map_build_time_s": map_build_time_s,
