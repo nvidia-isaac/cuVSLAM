@@ -264,8 +264,24 @@ jobs:
         if: matrix.eval
         run: echo "RUNNER_LOCAL_DATASETS_ROOT=${{ matrix.datasets_root || vars.RUNNER_LOCAL_DATASETS_ROOT || '$HOME/.cache/cuvslam' }}" >> "$GITHUB_ENV"
 
+      - name: Build CI tools image
+        if: matrix.eval
+        continue-on-error: ${{ matrix.eval_suite == 'smoke' }}
+        env:
+          AWS_CLI_PUBLIC_KEY: ${{ vars.AWS_CLI_PUBLIC_KEY }}
+        run: |
+          keyfile="$RUNNER_TEMP/aws-cli-public-key.asc"
+          if [ -z "${AWS_CLI_PUBLIC_KEY:-}" ]; then
+            echo "AWS_CLI_PUBLIC_KEY repository variable is not configured" >&2
+            exit 1
+          fi
+          printf '%s\n' "$AWS_CLI_PUBLIC_KEY" > "$keyfile"
+          DOCKER_BUILDKIT=1 docker build -f scripts/Dockerfile.ci . --network host --tag cuvslam-ci:local \
+            --secret id=aws_cli_public_key,src="$keyfile"
+
       # One-off migration for configs that moved their cache off the home default; remove once Orin has run it.
-      # Only complete datasets (with .s3_etag) are kept; staging recreates anything else.
+      # Only complete datasets (with .s3_etag) are kept; staging recreates anything else. Staging runs as root
+      # in the CI tools container, so the old cache is root-owned and has to be deleted from that container.
       - name: Move dataset cache from home default
         if: matrix.eval && matrix.datasets_root
         continue-on-error: ${{ matrix.eval_suite == 'smoke' }}
@@ -284,22 +300,9 @@ jobs:
             fi
           done
           du -sh "$old_root" || true
-          rm -rf "$old_root"
-
-      - name: Build CI tools image
-        if: matrix.eval
-        continue-on-error: ${{ matrix.eval_suite == 'smoke' }}
-        env:
-          AWS_CLI_PUBLIC_KEY: ${{ vars.AWS_CLI_PUBLIC_KEY }}
-        run: |
-          keyfile="$RUNNER_TEMP/aws-cli-public-key.asc"
-          if [ -z "${AWS_CLI_PUBLIC_KEY:-}" ]; then
-            echo "AWS_CLI_PUBLIC_KEY repository variable is not configured" >&2
-            exit 1
-          fi
-          printf '%s\n' "$AWS_CLI_PUBLIC_KEY" > "$keyfile"
-          DOCKER_BUILDKIT=1 docker build -f scripts/Dockerfile.ci . --network host --tag cuvslam-ci:local \
-            --secret id=aws_cli_public_key,src="$keyfile"
+          docker run --rm -v "$(dirname "$old_root"):/old-cache-parent" cuvslam-ci:local \
+            rm -rf "/old-cache-parent/$(basename "$old_root")"
+          [ ! -e "$old_root" ]
 
       # Runs before the build so a broken tool fails in seconds. The package is
       # copied out of the read-only mount before installing, as run_eval.sh does,
