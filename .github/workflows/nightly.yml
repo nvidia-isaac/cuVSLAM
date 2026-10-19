@@ -190,10 +190,11 @@ jobs:
 
           # Jetson configs (CUDA version must match host JetPack driver)
           # Orin uses base_image override; cuda value is not used for the Docker base but kept for artifact naming
-          # Thor runs the smoke eval suite (eval_suite: smoke), reported per device and never aggregated with x86.
-          # Its eval steps are informational (continue-on-error) while runtime and variance are characterized.
-          # Orin does not: staging the smoke datasets filled its disk.
-          - { name: "aarch64 / Orin (JP 6.1)",  runner: '["jetson-orin"]', cuda: "12.6.3", ubuntu: "22.04", archs: "87",  platform: "orin",  wheel: true, benchmark: true, base_image: "nvcr.io/nvidia/12.6.11-devel:12.6.11-devel-aarch64-ubuntu22.04", ports_mirror: "http://mirrors.ocf.berkeley.edu/ubuntu-ports" }
+          # Both run the smoke eval suite (eval_suite: smoke), reported per device and never aggregated with x86.
+          # Their eval steps are informational (continue-on-error) while runtime and variance are characterized.
+          # datasets_root overrides the dataset cache location per config. Orin's home is on a small eMMC; its
+          # runner work directory is on NVMe, and the job-completed hook empties only the per-repo workspace in it.
+          - { name: "aarch64 / Orin (JP 6.1)",  runner: '["jetson-orin"]', cuda: "12.6.3", ubuntu: "22.04", archs: "87",  platform: "orin",  wheel: true, benchmark: true, eval: true, eval_suite: smoke, job_timeout: 240, datasets_root: "/data/github-runner-workspace/cuvslam-cache", base_image: "nvcr.io/nvidia/12.6.11-devel:12.6.11-devel-aarch64-ubuntu22.04", ports_mirror: "http://mirrors.ocf.berkeley.edu/ubuntu-ports" }
           - { name: "aarch64 / Thor (JP 7.1)",  runner: '["jetson-thor"]', cuda: "13.0.1", ubuntu: "24.04", archs: "110", platform: "thor",  wheel: true, benchmark: true, eval: true, eval_suite: smoke, retries: 3, build_timeout: 60, job_timeout: 240, ports_mirror: "http://mirrors.ocf.berkeley.edu/ubuntu-ports" }
     steps:
       - name: Verify GPU
@@ -204,7 +205,7 @@ jobs:
         if: matrix.benchmark
         continue-on-error: true
         env:
-          DATASETS_ROOT: ${{ vars.RUNNER_LOCAL_DATASETS_ROOT }}
+          DATASETS_ROOT: ${{ matrix.datasets_root || vars.RUNNER_LOCAL_DATASETS_ROOT }}
         run: |
           datasets_root="${DATASETS_ROOT:-$HOME/.cache/cuvslam}"
           cache_probe="$datasets_root"
@@ -215,13 +216,32 @@ jobs:
           df -h -x tmpfs -x devtmpfs -x squashfs -x overlay || true
           echo "## Filesystems holding the workspace, home, and dataset cache ($datasets_root)"
           df -h "$GITHUB_WORKSPACE" "$HOME" "$cache_probe" || true
-          echo "## Dataset cache"
-          if [ -d "$datasets_root" ]; then
-            du -sh "$datasets_root"/* 2>/dev/null || true
-            du -sh "$datasets_root" || true
-          else
-            echo "$datasets_root does not exist"
+          echo "## Dataset caches"
+          cache_roots=("$datasets_root")
+          if [ "$HOME/.cache/cuvslam" != "$datasets_root" ] && ! [ "$HOME/.cache/cuvslam" -ef "$datasets_root" ]; then
+            cache_roots+=("$HOME/.cache/cuvslam")
           fi
+          for root in "${cache_roots[@]}"; do
+            if [ -d "$root" ]; then
+              du -sh "$root"/datasets/vslam/* "$root" 2>/dev/null || true
+            else
+              echo "$root does not exist"
+            fi
+          done
+          echo "## Permissions (runner user: $(id -un))"
+          for dir in /data "$(dirname "$RUNNER_WORKSPACE")" "$cache_probe"; do
+            [ -e "$dir" ] || continue
+            ls -ld "$dir" || true
+            if [ -w "$dir" ]; then echo "  writable: $dir"; else echo "  not writable: $dir"; fi
+          done
+          echo "## Job-completed hook"
+          for hook in "${ACTIONS_RUNNER_HOOK_JOB_COMPLETED:-}" /opt/github-runner/hooks/job-completed.sh; do
+            if [ -n "$hook" ] && [ -r "$hook" ]; then
+              echo "### $hook"
+              cat "$hook"
+              break
+            fi
+          done
           echo "## Docker"
           docker system df || true
 
@@ -242,7 +262,29 @@ jobs:
 
       - name: Resolve local datasets root
         if: matrix.eval
-        run: echo "RUNNER_LOCAL_DATASETS_ROOT=${{ vars.RUNNER_LOCAL_DATASETS_ROOT || '$HOME/.cache/cuvslam' }}" >> "$GITHUB_ENV"
+        run: echo "RUNNER_LOCAL_DATASETS_ROOT=${{ matrix.datasets_root || vars.RUNNER_LOCAL_DATASETS_ROOT || '$HOME/.cache/cuvslam' }}" >> "$GITHUB_ENV"
+
+      # One-off migration for configs that moved their cache off the home default; remove once Orin has run it.
+      # Only complete datasets (with .s3_etag) are kept; staging recreates anything else.
+      - name: Move dataset cache from home default
+        if: matrix.eval && matrix.datasets_root
+        continue-on-error: ${{ matrix.eval_suite == 'smoke' }}
+        run: |
+          old_root="$HOME/.cache/cuvslam"
+          [ -d "$old_root" ] || exit 0
+          [ "$(realpath -m "$old_root")" != "$(realpath -m "$RUNNER_LOCAL_DATASETS_ROOT")" ] || exit 0
+          new_dir="$RUNNER_LOCAL_DATASETS_ROOT/datasets/vslam"
+          mkdir -p "$new_dir"
+          for src in "$old_root"/datasets/vslam/*/; do
+            name="$(basename "$src")"
+            if [ -f "$src/.s3_etag" ] && [ "${name%.partial}" = "$name" ] && [ ! -e "$new_dir/$name" ]; then
+              echo "Moving $name to $new_dir"
+              cp -a "$src" "$new_dir/$name.partial"
+              mv "$new_dir/$name.partial" "$new_dir/$name"
+            fi
+          done
+          du -sh "$old_root" || true
+          rm -rf "$old_root"
 
       - name: Build CI tools image
         if: matrix.eval
