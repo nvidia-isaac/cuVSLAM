@@ -44,7 +44,7 @@ if(CUVSLAM_ANYLOC_PYTHON)
     set(_python ${CUVSLAM_ANYLOC_PYTHON})
     set(_python_stamp "")
 else()
-    # The pinned numpy and onnx have wheels up to Python 3.12 only.
+    # The pinned numpy has wheels up to Python 3.12 only.
     find_package(Python3 3.10...<3.13 COMPONENTS Interpreter)
     if(NOT Python3_Interpreter_FOUND)
         message(FATAL_ERROR "The AnyLoc ONNX export needs Python 3.10 to 3.12 for its venv. Install one, point "
