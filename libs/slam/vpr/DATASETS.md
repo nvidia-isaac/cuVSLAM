@@ -24,8 +24,8 @@ they also measure how far wrong a wrong answer was — which is the number a rob
 | [KITTI odometry](https://www.cvlibs.net/datasets/kitti/eval_odometry.php) | within-sequence loop closure | 22 sequences | stereo, GPS/INS | free |
 | [M3ED](https://m3ed.io/) | legged and aggressive motion | 19 SPOT sequences | stereo, event cameras, FasterLIO poses | free |
 
-`prepare_coda`, `prepare_euroc`, `prepare_kitti`, `prepare_m3ed_spot` and `prepare_tartan` already convert the
-last five into the EDEX layout the reporter reads. The first five need a converter written for them.
+`prepare_coda`, `prepare_euroc`, `prepare_kitti` and `prepare_m3ed_spot` already convert the last four into the
+EDEX layout the reporter reads. The rest need a converter written for them.
 
 ## Retrieval-only benchmarks
 
