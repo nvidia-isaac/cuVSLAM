@@ -655,8 +655,8 @@ message whenever more commands are queued to the SLAM thread than the configured
 Note that a single slow command—loading a large map, for example—delays every keyframe queued behind it, so the
 queue length is what matters, not only the number of keyframes.
 
-If you see this warning, reduce the SLAM workload: lower `max_map_size`, increase `throttling_time_ms` to make loop
-closures less frequent, or set `map_cache_path` so a large map is kept on disk instead of in memory.
+If you see this warning, reduce the SLAM workload: lower `max_map_size` or increase `throttling_time_ms` to make loop
+closures less frequent.
 
 **C++ API**
 
