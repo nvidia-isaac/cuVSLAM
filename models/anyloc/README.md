@@ -57,7 +57,7 @@ That is 16,555,008 parameters, 66 MB as an fp32 ONNX file. The blocks after 9, t
 37x37 position table and block 9's query, key, output projection and MLP are never copied into the module, so they
 cannot reach the graph. The export refuses to write a file unless:
 
-1. the module agrees with AnyLoc's own read-out (the full DINOv2 forward, with a hook on block 9) to 1e-5;
+1. the module agrees with AnyLoc's own read-out (the full DINOv2 forward, with a hook on block 9) to 1e-4;
 2. the graph holds exactly the parameter tensors above and only the ops the module uses, no `Conv` and no `Resize`;
 3. onnx's reference evaluator, run on the file, agrees with PyTorch to 1e-4.
 
