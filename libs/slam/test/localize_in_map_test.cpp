@@ -14,6 +14,7 @@
  * of the software or derivative works thereof, you agree to be bound by this License.
  */
 
+#include <csignal>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -32,6 +33,7 @@
 #include "slam/view/map_to_view.h"
 #include "sof/image_context.h"
 
+#include <sys/resource.h>
 #include <unistd.h>
 
 #ifdef USE_LMDB
@@ -383,6 +385,42 @@ TEST_F(LocalizeInMapLandmarks, EndingAnAttachedSessionWritesItsMap) {
   }
   EXPECT_GT(SavedKeyframes(Folder("saved")), 2u);
   EXPECT_EQ(CountSaved(Folder("saved")), std::make_pair(kSavedLandmarks, kSavedLandmarks));
+}
+
+TEST_F(LocalizeInMapLandmarks, EndingASessionReportsAMapFileItFailedToWrite) {
+  AsyncSlamOptions options = SessionOptions();
+  options.map_path = Folder("own");
+  auto slam = std::make_unique<AsyncSlam>(rig_, std::vector<CameraId>{0}, options);
+  Track(*slam, 1, 2000, true);
+
+  // LMDB writes its pages past the first 8 KiB, so every write of the map file fails.
+  rlimit limit{};
+  ASSERT_EQ(getrlimit(RLIMIT_FSIZE, &limit), 0);
+  const rlimit old_limit = limit;
+  limit.rlim_cur = 8192;
+  const auto old_handler = std::signal(SIGXFSZ, SIG_IGN);
+  ::testing::internal::CaptureStdout();
+  const bool limited = setrlimit(RLIMIT_FSIZE, &limit) == 0;
+  slam.reset();
+  setrlimit(RLIMIT_FSIZE, &old_limit);
+  std::signal(SIGXFSZ, old_handler);
+  const std::string output = ::testing::internal::GetCapturedStdout();
+  if (!limited) {
+    GTEST_SKIP() << "setrlimit(RLIMIT_FSIZE) was refused";
+  }
+  EXPECT_TRUE(Contains(output, "Failed to write the map file"));
+}
+
+TEST_F(LocalizeInMapLandmarks, EndingASessionThatWritesItsMapReportsNoFailure) {
+  AsyncSlamOptions options = SessionOptions();
+  options.map_path = Folder("own");
+  auto slam = std::make_unique<AsyncSlam>(rig_, std::vector<CameraId>{0}, options);
+  Track(*slam, 1, 2000, true);
+  ::testing::internal::CaptureStdout();
+  slam.reset();
+  const std::string output = ::testing::internal::GetCapturedStdout();
+  EXPECT_FALSE(Contains(output, "Failed to write the map file"));
+  EXPECT_GE(SavedKeyframes(Folder("own")), 1u);
 }
 
 TEST_F(LocalizeInMapLandmarks, NotAttachedSessionLeavesTheLoadedMapAlone) {

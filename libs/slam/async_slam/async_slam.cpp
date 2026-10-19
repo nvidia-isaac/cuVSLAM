@@ -420,8 +420,8 @@ void AsyncSlam::Shutdown() {
   }
   // The database stays open, so SaveMap after Stop() still sees a loaded map.
   std::lock_guard slam_guard(slam_mutex_);
-  if (slam_->HasWritableDatabase()) {
-    slam_->FlushMapToDatabase();
+  if (slam_->HasWritableDatabase() && !slam_->FlushMapToDatabase()) {
+    SlamStderr("Failed to write the map file at shutdown; it may be incomplete.\n");
   }
 }
 
