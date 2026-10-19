@@ -199,6 +199,32 @@ jobs:
       - name: Verify GPU
         run: nvidia-smi
 
+      # Diagnostics only: Jetson root filesystems are small, and filling one kills the runner agent mid-job.
+      - name: Report Jetson disk usage
+        if: matrix.benchmark
+        continue-on-error: true
+        env:
+          DATASETS_ROOT: ${{ vars.RUNNER_LOCAL_DATASETS_ROOT }}
+        run: |
+          datasets_root="${DATASETS_ROOT:-$HOME/.cache/cuvslam}"
+          cache_probe="$datasets_root"
+          while [ ! -e "$cache_probe" ]; do cache_probe="$(dirname "$cache_probe")"; done
+          echo "## Block devices"
+          lsblk -e 7 -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINTS || true
+          echo "## Mounted filesystems"
+          df -h -x tmpfs -x devtmpfs -x squashfs -x overlay || true
+          echo "## Filesystems holding the workspace, home, and dataset cache ($datasets_root)"
+          df -h "$GITHUB_WORKSPACE" "$HOME" "$cache_probe" || true
+          echo "## Dataset cache"
+          if [ -d "$datasets_root" ]; then
+            du -sh "$datasets_root"/* 2>/dev/null || true
+            du -sh "$datasets_root" || true
+          else
+            echo "$datasets_root does not exist"
+          fi
+          echo "## Docker"
+          docker system df || true
+
       - uses: actions/checkout@v5
         with:
           lfs: false
