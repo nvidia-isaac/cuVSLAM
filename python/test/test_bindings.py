@@ -578,6 +578,30 @@ class TestBindings(unittest.TestCase):
         self.assertEqual(cfg.max_map_size, 1000)
         self.assertEqual(cfg.throttling_time_ms, 500)
 
+    def test_configs_keep_their_path_strs_alive(self):
+        # Path fields are views, so configs keep the strs they were given alive
+        freed = []
+
+        class TrackedStr(str):
+            def __del__(self):
+                freed.append(str(self))
+
+        expected = ["/tmp/a", "/tmp/b", "/tmp/c", "/tmp/d"]
+        slam_cfg = vslam.Slam.Config(map_cache_path=TrackedStr("/tmp/a"))
+        odom_cfg = vslam.Odometry.Config(debug_dump_directory=TrackedStr("/tmp/b"))
+        slam_cfg_set, odom_cfg_set = vslam.Slam.Config(), vslam.Odometry.Config()
+        slam_cfg_set.map_cache_path = TrackedStr("/tmp/c")
+        odom_cfg_set.debug_dump_directory = TrackedStr("/tmp/d")
+        freed_early = sorted(freed)
+        # Reading a field whose str is gone reads freed memory
+        paths = None if freed_early else [slam_cfg.map_cache_path, odom_cfg.debug_dump_directory,
+                                          slam_cfg_set.map_cache_path, odom_cfg_set.debug_dump_directory]
+        del slam_cfg, odom_cfg, slam_cfg_set, odom_cfg_set
+
+        self.assertEqual(freed_early, [])
+        self.assertEqual(paths, expected)
+        self.assertEqual(sorted(freed), expected)  # the configs release them
+
     def test_slam_localization_settings(self):
         s = vslam.Slam.LocalizationSettings(
             horizontal_search_radius=1.0,
