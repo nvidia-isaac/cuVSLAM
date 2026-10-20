@@ -160,7 +160,8 @@ using obs_ref = std::reference_wrapper<const camera::Observation>;
 
 bool PNPSolver::solve(Isometry3T& rig_from_world, Matrix6T& static_info_exp,
                       const std::vector<camera::Observation>& observations,
-                      const std::unordered_map<TrackId, Vector3T>& landmarks, const PNPSettings& settings) const {
+                      const std::unordered_map<TrackId, Vector3T>& landmarks, const PNPSettings& settings,
+                      float* final_cost) const {
   TRACE_EVENT ev = profiler_domain_.trace_event("solve");
 
   if (settings.max_iteration < 0 || settings.max_obs_per_camera < 0 || settings.min_observations < 0) {
@@ -229,6 +230,9 @@ bool PNPSolver::solve(Isometry3T& rig_from_world, Matrix6T& static_info_exp,
   if (initial_cost < 5e-3f) {
     // Nothing to minimize. We have a "pendulum" effect on still frames otherwise.
     static_info_exp.setIdentity();
+    if (final_cost) {
+      *final_cost = initial_cost;
+    }
     // log landmark_for_observation_ with final result in rerun visualizer
     RERUN(logLandmarks, landmark_for_observation_, camera_from_world, rig_.intrinsics[0],
           "world/camera_0/images/landmarks_pnp_final", Color(0, 255, 0));
@@ -291,6 +295,9 @@ bool PNPSolver::solve(Isometry3T& rig_from_world, Matrix6T& static_info_exp,
   TraceMessageIf(settings.verbose, "curr_cost = {%f}, init_cost = {%f}", current_cost, initial_cost);
 
   bool status = current_cost < settings.cost_thresh || current_cost < initial_cost;
+  if (final_cost) {
+    *final_cost = current_cost;
+  }
 
   if (status && settings.recalculate_cov) {
     static_info_exp.setZero();
