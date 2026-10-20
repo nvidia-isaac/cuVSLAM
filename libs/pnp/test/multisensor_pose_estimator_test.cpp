@@ -14,6 +14,8 @@
  * of the software or derivative works thereof, you agree to be bound by this License.
  */
 
+#include <iterator>
+#include <optional>
 #include <random>
 
 #include "common/include_gtest.h"
@@ -222,6 +224,73 @@ TEST(MultisensorPoseEstimatorTest, InertialPriorConvergesToPrediction) {
   math::Log(error, expected_rig_from_world.inverse() * rig_from_world);
   EXPECT_LT(error.head<3>().norm(), 1e-3f) << "Angular error too large: " << error.head<3>().norm();
   EXPECT_LT(error.tail<3>().norm(), 1e-3f) << "Translation error too large: " << error.tail<3>().norm();
+}
+
+// An estimator keeps its problem between solves and lets the minimizer reuse its structure. Across solves
+// with different observation counts, and with the inertial factor switching on and off (which rebuilds the
+// problem), each result must match a fresh estimator solving the same input.
+TEST(MultisensorPoseEstimatorTest, RepeatedSolvesMatchFreshEstimator) {
+  auto cam = MakePinhole();
+  auto rig = MakeRig(cam);
+
+  Vector6T rig_from_imu_twist, delta_rotation_twist;
+  rig_from_imu_twist << 0.f, 0.1f, 0.05f, 0.02f, -0.03f, 0.01f;
+  delta_rotation_twist << 0.01f, -0.02f, 0.01f, 0.f, 0.f, 0.f;
+  Isometry3T delta_rotation;
+  math::Exp(delta_rotation, delta_rotation_twist);
+  sba_imu::IMUPreintegration preint;
+  preint.dR = delta_rotation.linear();
+  preint.dP = Vector3T(0.01f, 0.f, -0.01f);
+  preint.dT_s = 0.05f;
+
+  cuvslam::pnp::MultisensorSolverSettings settings;
+  settings.max_iteration = 30;
+  cuvslam::pnp::MultisensorPoseEstimator reused(rig, settings);
+
+  std::mt19937 rng(3);
+  const size_t landmark_counts[] = {40, 120, 60, 200, 25, 90, 150};
+  for (size_t k = 0; k < std::size(landmark_counts); ++k) {
+    Vector6T gt_twist;
+    gt_twist << 0.05f * k, -0.03f * k, 0.02f, 0.2f * k, -0.1f, 0.3f * k;
+    Isometry3T gt_rig_from_world;
+    math::Exp(gt_rig_from_world, gt_twist);
+
+    auto landmarks = GenerateLandmarks(gt_rig_from_world.inverse(), landmark_counts[k], rng);
+    auto observations = ProjectLandmarks(landmarks, gt_rig_from_world);
+
+    std::optional<cuvslam::pnp::InertialPriorInput> imu_in;
+    if (k % 2 == 1) {
+      imu_in.emplace();
+      Vector6T prev_twist = gt_twist;
+      prev_twist[3] -= 0.02f;
+      math::Exp(imu_in->prev_rig_from_world, prev_twist);
+      math::Exp(imu_in->rig_from_imu, rig_from_imu_twist);
+      imu_in->gravity_world = Vector3T(0.f, 0.f, -9.81f);
+      imu_in->preint = &preint;
+    }
+
+    Vector6T perturbation;
+    perturbation << 0.02f, -0.01f, 0.015f, 0.05f, -0.03f, 0.04f;
+    Isometry3T delta;
+    math::Exp(delta, perturbation);
+    const Isometry3T init_rig_from_world = gt_rig_from_world * delta;
+
+    Isometry3T reused_rig_from_world = init_rig_from_world;
+    Isometry3T fresh_rig_from_world = init_rig_from_world;
+    Matrix6T info;
+    ASSERT_TRUE(reused.solve(reused_rig_from_world, info, observations, landmarks, {}, {}, {}, imu_in)) << k;
+    cuvslam::pnp::MultisensorPoseEstimator fresh(rig, settings);
+    ASSERT_TRUE(fresh.solve(fresh_rig_from_world, info, observations, landmarks, {}, {}, {}, imu_in)) << k;
+
+    Vector6T diff;
+    math::Log(diff, fresh_rig_from_world.inverse() * reused_rig_from_world);
+    EXPECT_LT(diff.norm(), 1e-4f) << "solve " << k << " (" << observations.size() << " observations, "
+                                  << (imu_in ? "with" : "without") << " inertial factor)";
+
+    Vector6T error;
+    math::Log(error, gt_rig_from_world.inverse() * reused_rig_from_world);
+    EXPECT_LT(error.norm(), 0.02f) << "solve " << k;
+  }
 }
 
 // Verify solver runs without crashing on empty input.
