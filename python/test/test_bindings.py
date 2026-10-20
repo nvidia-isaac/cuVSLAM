@@ -609,6 +609,17 @@ class TestBindings(unittest.TestCase):
         self.assertEqual(odom_cfg.debug_dump_directory, "/tmp/dump")
         self.assertEqual(slam_cfg.map_cache_path, "/tmp/cache")
 
+    def test_load_empty_path_strings_from_yaml(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "config.yaml")
+            with open(path, "w") as f:
+                f.write("odometry:\n  debug_dump_directory:\nslam:\n  map_cache_path: ~\n")
+            odom_cfg = vslam.utils.try_load_odometry_config_from_file(path)
+            slam_cfg = vslam.utils.try_load_slam_config_from_file(path)
+
+        self.assertEqual(odom_cfg.debug_dump_directory, "")
+        self.assertEqual(slam_cfg.map_cache_path, "")
+
     def test_slam_localization_settings(self):
         s = vslam.Slam.LocalizationSettings(
             horizontal_search_radius=1.0,

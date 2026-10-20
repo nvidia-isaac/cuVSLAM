@@ -767,7 +767,7 @@ struct Result {
   /// Create an error result
   /// @param[in] message error message
   /// @return Result
-  static Result Error(std::string message) { return Result{std::nullopt, std::move(message)}; }
+  static Result Error(std::string_view message) { return Result{std::nullopt, std::string(message)}; }
 };
 
 /**

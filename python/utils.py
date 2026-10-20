@@ -125,7 +125,7 @@ def _apply_odometry_section(config: Odometry.Config, section: dict) -> None:
                     config.multisensor_settings.enable_depth_stereo_tracking = _parse_bool(
                         value["enable_depth_stereo_tracking"])
         elif key == "debug_dump_directory":
-            config.debug_dump_directory = str(value)
+            config.debug_dump_directory = "" if value is None else str(value)
         else:
             warnings.warn(f"try_load_odometry_config_from_file: unknown key {key!r} (ignored)", stacklevel=2)
 
@@ -152,7 +152,7 @@ def _apply_slam_section(config: Slam.Config, section: dict) -> None:
         elif key == "throttling_time_ms":
             config.throttling_time_ms = int(value)
         elif key == "map_cache_path":
-            config.map_cache_path = str(value)
+            config.map_cache_path = "" if value is None else str(value)
         else:
             warnings.warn(f"try_load_slam_config_from_file: unknown key {key!r} (ignored)", stacklevel=2)
 
