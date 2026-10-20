@@ -84,7 +84,7 @@ if [ -n "${EVAL_SUITE+set}" ]; then
   SUITE_ENV=(-e EVAL_SUITE="$EVAL_SUITE")
 fi
 
-docker run --runtime=nvidia --gpus all --rm $TTY_FLAG \
+docker run --runtime=nvidia --gpus all --rm --label "cuvslam.runner=${RUNNER_NAME:-local}" $TTY_FLAG \
   -v "$(pwd):/cuvslam:ro" \
   -v "$OUTPUT_DIR:/output" \
   -v "$DATASET_MOUNT_SRC:/datasets:ro" \
