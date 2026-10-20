@@ -21,6 +21,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -508,7 +509,7 @@ public:
     /// Default: 1.f
     float max_frame_delta_s = 1.f;
     /// Directory where input data will be dumped in edex format.
-    std::string_view debug_dump_directory;
+    std::string debug_dump_directory;
     /// Enable IMU debug mode. Default: false
     bool debug_imu_mode = false;
     /// RGBD odometry settings.
@@ -750,13 +751,13 @@ private:
 /**
  * @brief Result type that can hold either success data or error information.
  *
- * For use in callbacks. Result::error_message should not outlive the callback scope.
+ * For use in callbacks.
  */
 // TODO(C++23): replace with std::expected
 template <typename T>
 struct Result {
-  std::optional<T> data;           ///< data
-  std::string_view error_message;  ///< error message
+  std::optional<T> data;      ///< data
+  std::string error_message;  ///< error message
 
   /// Create a success result
   /// @param[in] value data
@@ -766,7 +767,7 @@ struct Result {
   /// Create an error result
   /// @param[in] message error message
   /// @return Result
-  static Result Error(std::string_view message) { return Result{std::nullopt, message}; }
+  static Result Error(std::string message) { return Result{std::nullopt, std::move(message)}; }
 };
 
 /**
@@ -790,7 +791,7 @@ public:
     /// If empty, map is kept in memory only. Else, map is synced to disk (LMDB) at this path, allowing large-scale
     /// maps; if the path already exists it will be overwritten. To load an existing map, use LocalizeInMap(). To save
     /// map, use SaveMap().
-    std::string_view map_cache_path = "";
+    std::string map_cache_path;
     /// Enable GPU use for SLAM
     bool use_gpu = true;
     /// Synchronous mode (does not run a separate work thread if true)

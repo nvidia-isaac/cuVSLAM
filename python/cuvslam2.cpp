@@ -21,6 +21,7 @@
 #include "nanobind/stl/array.h"
 #include "nanobind/stl/optional.h"
 #include "nanobind/stl/shared_ptr.h"
+#include "nanobind/stl/string.h"
 #include "nanobind/stl/string_view.h"
 #include "nanobind/stl/tuple.h"
 #include "nanobind/stl/unordered_map.h"
@@ -504,7 +505,7 @@ NB_MODULE(pycuvslam, m) {
   nb::class_<Odometry::Config>(odom_cls, "Config", "Odometry configuration parameters")
       // WARNING: the order of init arguments in this definition must coincide with the order in the structure
       .def(nb::init<Odometry::MulticameraMode, Odometry::OdometryMode, bool, bool, bool, bool, bool, bool, bool, bool,
-                    float, std::string_view, bool, const Odometry::RGBDSettings&, const Odometry::MultisensorSettings&,
+                    float, std::string, bool, const Odometry::RGBDSettings&, const Odometry::MultisensorSettings&,
                     float, float>(),
            nb::kw_only(), nb::arg("multicam_mode") = Odometry::Config{}.multicam_mode,
            nb::arg("odometry_mode") = Odometry::Config{}.odometry_mode, nb::arg("use_gpu") = Odometry::Config{}.use_gpu,
@@ -833,8 +834,7 @@ NB_MODULE(pycuvslam, m) {
   // .value("PoseGraph", Slam::DataLayer::PoseGraph, "Pose Graph");
 
   nb::class_<Slam::Config>(slam_cls, "Config", "SLAM configuration parameters")
-      .def(nb::init<std::string_view, bool, bool, bool, bool, bool, float, float, uint32_t, uint32_t, uint32_t,
-                    uint32_t>(),
+      .def(nb::init<std::string, bool, bool, bool, bool, bool, float, float, uint32_t, uint32_t, uint32_t, uint32_t>(),
            nb::kw_only(), nb::arg("map_cache_path") = Slam::Config{}.map_cache_path,
            nb::arg("use_gpu") = Slam::Config{}.use_gpu, nb::arg("sync_mode") = Slam::Config{}.sync_mode,
            nb::arg("enable_reading_internals") = true,  // enable by default; in Python convenience is a priority

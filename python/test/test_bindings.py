@@ -12,6 +12,8 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
+import os
+import tempfile
 import unittest
 import numpy as np
 import cuvslam as vslam
@@ -577,6 +579,35 @@ class TestBindings(unittest.TestCase):
         self.assertEqual(cfg.max_landmarks_distance, 25.0)
         self.assertEqual(cfg.max_map_size, 1000)
         self.assertEqual(cfg.throttling_time_ms, 500)
+
+    def test_configs_own_their_path_strings(self):
+        freed = []
+
+        class TrackedStr(str):
+            def __del__(self):
+                freed.append(str(self))
+
+        expected = ["/tmp/a", "/tmp/b", "/tmp/c", "/tmp/d"]
+        slam_cfg = vslam.Slam.Config(map_cache_path=TrackedStr("/tmp/a"))
+        odom_cfg = vslam.Odometry.Config(debug_dump_directory=TrackedStr("/tmp/b"))
+        slam_cfg_set, odom_cfg_set = vslam.Slam.Config(), vslam.Odometry.Config()
+        slam_cfg_set.map_cache_path = TrackedStr("/tmp/c")
+        odom_cfg_set.debug_dump_directory = TrackedStr("/tmp/d")
+
+        self.assertEqual(sorted(freed), expected)
+        self.assertEqual([slam_cfg.map_cache_path, odom_cfg.debug_dump_directory,
+                          slam_cfg_set.map_cache_path, odom_cfg_set.debug_dump_directory], expected)
+
+    def test_load_path_strings_from_yaml(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "config.yaml")
+            with open(path, "w") as f:
+                f.write("odometry:\n  debug_dump_directory: /tmp/dump\nslam:\n  map_cache_path: /tmp/cache\n")
+            odom_cfg = vslam.utils.try_load_odometry_config_from_file(path)
+            slam_cfg = vslam.utils.try_load_slam_config_from_file(path)
+
+        self.assertEqual(odom_cfg.debug_dump_directory, "/tmp/dump")
+        self.assertEqual(slam_cfg.map_cache_path, "/tmp/cache")
 
     def test_slam_localization_settings(self):
         s = vslam.Slam.LocalizationSettings(
