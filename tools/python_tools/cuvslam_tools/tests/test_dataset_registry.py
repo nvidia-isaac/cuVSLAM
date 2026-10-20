@@ -66,6 +66,13 @@ class TestShippedRegistry(unittest.TestCase):
                 "--async_sba=false --multicam_mode=moderate --use_segments",
             ),
             (
+                "euroc",
+                "EUROC",
+                "euroc/euroc-vio_slam.cfg",
+                "--odometry_mode=multisensor --rectified_stereo_camera=false "
+                "--multicam_mode=moderate --async_sba=false --use_segments",
+            ),
+            (
                 "tum",
                 "TUM",
                 "tum/tum-rgbd_slam.cfg",
@@ -148,7 +155,7 @@ class TestShippedRegistry(unittest.TestCase):
         rows = [line.split("\t") for line in completed.stdout.strip().splitlines()]
         self.assertEqual(
             [row[0] for row in rows],
-            ["kitti", "kitti", "euroc", "tum", "tum", "icl_nuim", "icl_nuim", "m3ed_spot", "tartanair_v1"],
+            ["kitti", "kitti", "euroc", "euroc", "tum", "tum", "icl_nuim", "icl_nuim", "m3ed_spot", "tartanair_v1"],
         )
         self.assertTrue(all(len(row) == 4 for row in rows), rows)
 
