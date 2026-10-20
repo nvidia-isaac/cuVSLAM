@@ -25,10 +25,10 @@
 #define BLOCK_X 16
 #define BLOCK_Y 16
 
-#define RESIDUAL_MAX 5e-1
-#define D_MIN 0.1
+#define RESIDUAL_MAX 5e-1f
+#define D_MIN 0.1f
 #define D_MAX 10.f
-#define GRAD_THRESH 1e-1
+#define GRAD_THRESH 1e-1f
 
 namespace cuvslam::cuda::matcher {
 

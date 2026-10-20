@@ -46,7 +46,7 @@ __global__ void cast_depth_kernel(const uint16_t* __restrict__ src, size_t spitc
 
   uint16_t value = *((uint16_t*)((char*)src + y * spitch) + x);
 
-  *((float*)((char*)dst + y * dpitch) + x) = ((float)value) / (scale + 1e-9);
+  *((float*)((char*)dst + y * dpitch) + x) = ((float)value) / (scale + 1e-9f);
 }
 
 __global__ void cast_image_kernel_rgb(const uint8_t* __restrict__ src, size_t spitch, float* __restrict__ dst,
@@ -64,7 +64,7 @@ __global__ void cast_image_kernel_rgb(const uint8_t* __restrict__ src, size_t sp
   uint8_t green = src[idx + 1];
   uint8_t blue = src[idx + 2];
 
-  float value = 0.299 * red + 0.587 * green + 0.114 * blue;
+  float value = 0.299f * red + 0.587f * green + 0.114f * blue;
 
   *((float*)((char*)dst + y * dpitch) + x) = value;
 }
