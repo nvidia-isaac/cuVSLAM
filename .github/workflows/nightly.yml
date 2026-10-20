@@ -216,32 +216,12 @@ jobs:
           df -h -x tmpfs -x devtmpfs -x squashfs -x overlay || true
           echo "## Filesystems holding the workspace, home, and dataset cache ($datasets_root)"
           df -h "$GITHUB_WORKSPACE" "$HOME" "$cache_probe" || true
-          echo "## Dataset caches"
-          cache_roots=("$datasets_root")
-          if [ "$HOME/.cache/cuvslam" != "$datasets_root" ] && ! [ "$HOME/.cache/cuvslam" -ef "$datasets_root" ]; then
-            cache_roots+=("$HOME/.cache/cuvslam")
+          echo "## Dataset cache"
+          if [ -d "$datasets_root" ]; then
+            du -sh "$datasets_root"/datasets/vslam/* "$datasets_root" 2>/dev/null || true
+          else
+            echo "$datasets_root does not exist"
           fi
-          for root in "${cache_roots[@]}"; do
-            if [ -d "$root" ]; then
-              du -sh "$root"/datasets/vslam/* "$root" 2>/dev/null || true
-            else
-              echo "$root does not exist"
-            fi
-          done
-          echo "## Permissions (runner user: $(id -un))"
-          for dir in /data "$(dirname "$RUNNER_WORKSPACE")" "$cache_probe"; do
-            [ -e "$dir" ] || continue
-            ls -ld "$dir" || true
-            if [ -w "$dir" ]; then echo "  writable: $dir"; else echo "  not writable: $dir"; fi
-          done
-          echo "## Job-completed hook"
-          for hook in "${ACTIONS_RUNNER_HOOK_JOB_COMPLETED:-}" /opt/github-runner/hooks/job-completed.sh; do
-            if [ -n "$hook" ] && [ -r "$hook" ]; then
-              echo "### $hook"
-              cat "$hook"
-              break
-            fi
-          done
           echo "## Docker"
           docker system df || true
 
@@ -278,31 +258,6 @@ jobs:
           printf '%s\n' "$AWS_CLI_PUBLIC_KEY" > "$keyfile"
           DOCKER_BUILDKIT=1 docker build -f scripts/Dockerfile.ci . --network host --tag cuvslam-ci:local \
             --secret id=aws_cli_public_key,src="$keyfile"
-
-      # One-off migration for configs that moved their cache off the home default; remove once Orin has run it.
-      # Only complete datasets (with .s3_etag) are kept; staging recreates anything else. Staging runs as root
-      # in the CI tools container, so the old cache is root-owned and has to be deleted from that container.
-      - name: Move dataset cache from home default
-        if: matrix.eval && matrix.datasets_root
-        continue-on-error: ${{ matrix.eval_suite == 'smoke' }}
-        run: |
-          old_root="$HOME/.cache/cuvslam"
-          [ -d "$old_root" ] || exit 0
-          [ "$(realpath -m "$old_root")" != "$(realpath -m "$RUNNER_LOCAL_DATASETS_ROOT")" ] || exit 0
-          new_dir="$RUNNER_LOCAL_DATASETS_ROOT/datasets/vslam"
-          mkdir -p "$new_dir"
-          for src in "$old_root"/datasets/vslam/*/; do
-            name="$(basename "$src")"
-            if [ -f "$src/.s3_etag" ] && [ "${name%.partial}" = "$name" ] && [ ! -e "$new_dir/$name" ]; then
-              echo "Moving $name to $new_dir"
-              cp -a "$src" "$new_dir/$name.partial"
-              mv "$new_dir/$name.partial" "$new_dir/$name"
-            fi
-          done
-          du -sh "$old_root" || true
-          docker run --rm -v "$(dirname "$old_root"):/old-cache-parent" cuvslam-ci:local \
-            rm -rf "/old-cache-parent/$(basename "$old_root")"
-          [ ! -e "$old_root" ]
 
       # Runs before the build so a broken tool fails in seconds. The package is
       # copied out of the read-only mount before installing, as run_eval.sh does,
