@@ -239,7 +239,7 @@ jobs:
       - name: Run Python tools tests
         if: matrix.tools_tests
         run: |
-          docker run --rm --network host \
+          docker run --rm --network host --label "cuvslam.runner=$RUNNER_NAME" \
             -v "$(pwd):/cuvslam:ro" \
             cuvslam-ci:local \
             bash -c 'set -euo pipefail
@@ -255,7 +255,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_RO_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_RO_SECRET_ACCESS_KEY }}
         run: |
-          docker run --rm --network host \
+          docker run --rm --network host --label "cuvslam.runner=$RUNNER_NAME" \
             -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_DEFAULT_REGION -e S3_DATASETS_BUCKET \
             -e RUNNER_STORAGE_ROOT -e RUNNER_LOCAL_DATASETS_ROOT -e EVAL_SUITE \
             -v "$(pwd):/cuvslam:ro" \
@@ -271,7 +271,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_RO_SECRET_ACCESS_KEY }}
         run: |
           mkdir -p "$RUNNER_LOCAL_DATASETS_ROOT"
-          docker run --rm --network host \
+          docker run --rm --network host --label "cuvslam.runner=$RUNNER_NAME" \
             -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_DEFAULT_REGION -e S3_DATASETS_BUCKET \
             -e RUNNER_LOCAL_DATASETS_ROOT -e EVAL_SUITE \
             -v "$(pwd):/cuvslam:ro" \
@@ -486,6 +486,20 @@ jobs:
           overwrite: true
           retention-days: 30
           if-no-files-found: error
+
+      # On cancel or timeout the runner signals only the step shell, so a hung container keeps running.
+      - name: Remove leftover containers
+        if: always()
+        run: |
+          mapfile -t containers < <(docker ps -aq --filter "label=cuvslam.runner=$RUNNER_NAME")
+          if [ "${#containers[@]}" -eq 0 ]; then
+            exit 0
+          fi
+          image=$(docker inspect --format '{{.Config.Image}}' "${containers[0]}")
+          docker rm -f "${containers[@]}"
+          # Removed containers skip their chown traps, so return the workspace to the runner user.
+          docker run --rm --entrypoint chown -v "$GITHUB_WORKSPACE:/workspace" "$image" \
+            -R "$(id -u):$(id -g)" /workspace
 
   nightly-summary:
     name: >-
