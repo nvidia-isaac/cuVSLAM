@@ -12,31 +12,9 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
-"""Control experiment: rebuild lookup cells while retaining poses, edges, and appearance."""
+"""Run offline map repair with python -m cuvslam_tools.offline_map_repair."""
 
-import asyncio
-import pickle
-
-from map_codec import MapData
-from mcp_client import with_session
-from repair_map import commit
-from workspace import HERE
-
-
-async def run(session):
-    old = pickle.loads((HERE / "baseline/records.pkl").read_bytes())
-    new = MapData(old).encode(reindex=True, update_edges=False)
-    assert old["main"] == new["main"] and old["descriptors"] == new["descriptors"]
-    await commit(
-        session,
-        "baseline/map",
-        "index_only/map",
-        old,
-        new,
-        "Control: rebuild spatial cells and landmark cell references from original poses; "
-        "remove stale cell entries. Preserve all poses, edge measurements, landmarks and descriptors.",
-    )
-
+from cuvslam_tools.offline_map_repair.cli import main
 
 if __name__ == "__main__":
-    asyncio.run(with_session(run))
+    main()

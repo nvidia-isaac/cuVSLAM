@@ -1,19 +1,19 @@
 functions:
   describe_map:
-    _type: cuvslam_map_nat/describe_map
+    _type: cuvslam_tools.offline_map_repair.mcp_server/describe_map
     root: ${CUVSLAM_MAP_ROOT}
   clone_map:
-    _type: cuvslam_map_nat/clone_map
+    _type: cuvslam_tools.offline_map_repair.mcp_server/clone_map
     root: ${CUVSLAM_MAP_ROOT}
   read_records:
-    _type: cuvslam_map_nat/read_records
+    _type: cuvslam_tools.offline_map_repair.mcp_server/read_records
     root: ${CUVSLAM_MAP_ROOT}
   write_records:
-    _type: cuvslam_map_nat/write_records
+    _type: cuvslam_tools.offline_map_repair.mcp_server/write_records
     root: ${CUVSLAM_MAP_ROOT}
 
 # NAT requires a workflow; it is deliberately not exposed as a fifth MCP tool.
 # No LLM service or API key is needed to serve these deterministic functions.
 workflow:
-  _type: cuvslam_map_nat/describe_map
+  _type: cuvslam_tools.offline_map_repair.mcp_server/describe_map
   root: ${CUVSLAM_MAP_ROOT}

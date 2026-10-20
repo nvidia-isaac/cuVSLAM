@@ -20,9 +20,11 @@ import time
 from pathlib import Path
 
 import numpy as np
-from run_sequence import cuvslam, frame_metadata, get_rig, load_frame
 from scipy.spatial.transform import Rotation
-from trajectory_utils import (
+
+from cuvslam_tools.offline_map_repair.euroc import get_rig, load_frame
+from cuvslam_tools.offline_map_repair.run_sequence import frame_metadata
+from cuvslam_tools.offline_map_repair.trajectory_utils import (
     errors,
     ground_truth,
     interpolate,
@@ -30,7 +32,7 @@ from trajectory_utils import (
     matrix,
     pose,
 )
-from workspace import HERE
+from cuvslam_tools.offline_map_repair.workspace import HERE
 
 
 def make_queries(dataset, query_file, start_frame, evenly_spaced=False):
@@ -94,6 +96,8 @@ def make_queries(dataset, query_file, start_frame, evenly_spaced=False):
 
 
 def evaluate(map_name, limit, query_file):
+    import cuvslam
+
     manifest = json.loads(query_file.read_text())
     frames, _ = frame_metadata(Path(manifest["dataset"]))
     rig = get_rig(str(Path(manifest["dataset"]) / "mav0"))
@@ -149,7 +153,7 @@ def evaluate(map_name, limit, query_file):
         del slam
 
 
-if __name__ == "__main__":
+def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("map_name", nargs="?")
     ap.add_argument("--prepare", type=Path)
@@ -157,8 +161,12 @@ if __name__ == "__main__":
     ap.add_argument("--queries", type=Path, default=HERE / "queries.json")
     ap.add_argument("--start-frame", type=int, default=100)
     ap.add_argument("--evenly-spaced", action="store_true")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
     if args.prepare:
         make_queries(args.prepare, args.queries, args.start_frame, args.evenly_spaced)
     else:
         evaluate(args.map_name, args.limit, args.queries)
+
+
+if __name__ == "__main__":
+    main()

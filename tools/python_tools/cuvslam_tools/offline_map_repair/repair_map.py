@@ -18,16 +18,21 @@ No ground-truth files or query manifest are read. The second replay supplies pos
 the original map supplies landmarks, descriptors, observations and graph topology.
 """
 
+import argparse
 import asyncio
 import json
 import pickle
 from pathlib import Path
 
 import numpy as np
-from map_codec import MapData, changes_between
-from mcp_client import call, with_session
-from trajectory_utils import interpolate, load_trajectory
-from workspace import HERE
+
+from cuvslam_tools.offline_map_repair.map_codec import MapData, changes_between
+from cuvslam_tools.offline_map_repair.mcp_client import call, with_session
+from cuvslam_tools.offline_map_repair.trajectory_utils import (
+    interpolate,
+    load_trajectory,
+)
+from cuvslam_tools.offline_map_repair.workspace import HERE
 
 
 async def commit(session, source, destination, old, new, reason):
@@ -119,5 +124,10 @@ def distant_single_observation_landmarks(map_data):
     ]
 
 
-if __name__ == "__main__":
+def main(argv=None):
+    argparse.ArgumentParser(description=__doc__).parse_args(argv)
     asyncio.run(with_session(run))
+
+
+if __name__ == "__main__":
+    main()

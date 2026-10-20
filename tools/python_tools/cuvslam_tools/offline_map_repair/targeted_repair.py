@@ -14,16 +14,21 @@
 
 """Conservative follow-up: edit only poses with large independent-replay disagreement."""
 
+import argparse
 import asyncio
 import json
 import pickle
 
 import numpy as np
-from map_codec import MapData
-from mcp_client import with_session
-from repair_map import commit, distant_single_observation_landmarks
 from scipy.spatial.transform import Rotation
-from workspace import HERE
+
+from cuvslam_tools.offline_map_repair.map_codec import MapData
+from cuvslam_tools.offline_map_repair.mcp_client import with_session
+from cuvslam_tools.offline_map_repair.repair_map import (
+    commit,
+    distant_single_observation_landmarks,
+)
+from cuvslam_tools.offline_map_repair.workspace import HERE
 
 
 async def run(s):
@@ -72,5 +77,10 @@ async def run(s):
     )
 
 
-if __name__ == "__main__":
+def main(argv=None):
+    argparse.ArgumentParser(description=__doc__).parse_args(argv)
     asyncio.run(with_session(run))
+
+
+if __name__ == "__main__":
+    main()

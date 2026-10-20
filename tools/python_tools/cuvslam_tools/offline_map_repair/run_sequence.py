@@ -18,19 +18,12 @@ import argparse
 import hashlib
 import json
 import os
-import subprocess
-import sys
 import time
 from pathlib import Path
 
 import numpy as np
 
-SOURCE = Path(__file__).resolve().parents[2]
-# Reuse the repository's EuRoC calibration/parser code from this checkout.
-sys.path.insert(0, str(SOURCE / "examples/euroc"))
-os.environ.setdefault("RERUN", "0")
-import cuvslam  # noqa: E402
-from dataset_utils import get_rig, load_frame, read_csv_data  # noqa: E402
+from cuvslam_tools.offline_map_repair.euroc import get_rig, load_frame, read_csv_data
 
 
 def frame_metadata(dataset, inertial=False):
@@ -58,13 +51,17 @@ def frame_metadata(dataset, inertial=False):
     return frames, {"cam0": len(cameras[0]), "cam1": len(cameras[1]), "paired": len(timestamps)}
 
 
-def main():
+def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("dataset", type=Path)
     ap.add_argument("output", type=Path)
     ap.add_argument("--mode", choices=["stereo", "inertial"], default="stereo")
     ap.add_argument("--limit", type=int, default=0)
-    args = ap.parse_args()
+    ap.add_argument("--source-commit", help="Commit used to build the installed cuVSLAM binding (optional provenance)")
+    args = ap.parse_args(argv)
+    os.environ.setdefault("RERUN", "0")
+    import cuvslam
+
     args.output.mkdir(parents=True, exist_ok=True)
     if any(args.output.iterdir()):
         raise ValueError("Output directory must be empty")
@@ -129,7 +126,7 @@ def main():
         "frames": len(results),
         "tracked": sum(x["odom"] is not None for x in results),
         "elapsed_s": time.monotonic() - started,
-        "source_commit": subprocess.check_output(["git", "-C", str(SOURCE), "rev-parse", "HEAD"], text=True).strip(),
+        "source_commit": args.source_commit,
         "cuvslam_version": str(cuvslam.get_version()),
         "calibration": "dataset sensor.yaml",
         "map_sha256": hashlib.sha256((args.output / "map/data.mdb").read_bytes()).hexdigest(),

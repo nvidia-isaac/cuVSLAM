@@ -16,40 +16,49 @@
 
 import argparse
 import os
+import subprocess
 import sys
+from importlib import resources
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
 
-
-def main():
+def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--root", type=Path, required=True, help="Directory containing offline map snapshots")
     ap.add_argument("--port", type=int, default=9906)
-    args = ap.parse_args()
+    ap.add_argument(
+        "--nat-python",
+        type=Path,
+        default=Path(sys.executable),
+        help="Python executable in the separate NeMo server environment",
+    )
+    args = ap.parse_args(argv)
     # Keep host ROS Python packages out of the isolated NAT runtime.
     os.environ.pop("PYTHONPATH", None)
     os.environ["PYTHONNOUSERSITE"] = "1"
     os.environ["CUVSLAM_MAP_ROOT"] = str(args.root.resolve())
-    nat = Path(sys.executable).parent / "nat"
+    nat = args.nat_python.absolute().parent / "nat"
     if not nat.is_file():
-        raise SystemExit("Install this project and run this script with that virtual environment’s Python.")
+        raise SystemExit(
+            "Install the mcp_server project in a separate environment and pass its Python with --nat-python."
+        )
     cmd = [
         str(nat),
         "mcp",
         "serve",
-        "--config_file",
-        str(HERE / "workflows/map_records.yaml"),
         "--host",
         "127.0.0.1",
         "--port",
         str(args.port),
         "--runner_class",
-        "cuvslam_map_nat.worker.MapMCPWorker",
+        "cuvslam_tools.offline_map_repair.mcp_server.worker.MapMCPWorker",
     ]
     for tool in ("describe_map", "clone_map", "read_records", "write_records"):
         cmd.extend(["--tool_names", tool])
-    os.execv(str(nat), cmd)
+    config = resources.files("cuvslam_tools.offline_map_repair.mcp_server").joinpath("configs/map_records.yaml")
+    # Keep extracted resources alive until NAT exits, including in a wheel install.
+    with resources.as_file(config) as config_path:
+        raise SystemExit(subprocess.call([*cmd, "--config_file", str(config_path)]))
 
 
 if __name__ == "__main__":

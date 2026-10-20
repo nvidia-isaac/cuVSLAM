@@ -14,14 +14,16 @@
 
 """Integration checks on a disposable copy over the actual MCP transport."""
 
+import argparse
 import asyncio
 import base64
 import hashlib
 import json
 
 import lmdb
-from mcp_client import call, with_session
-from workspace import HERE, MAP_ROOT
+
+from cuvslam_tools.offline_map_repair.mcp_client import call, with_session
+from cuvslam_tools.offline_map_repair.workspace import HERE, MAP_ROOT
 
 
 async def run(s):
@@ -83,5 +85,10 @@ async def run(s):
     print(json.dumps(passed, indent=2))
 
 
-if __name__ == "__main__":
+def main(argv=None):
+    argparse.ArgumentParser(description=__doc__).parse_args(argv)
     asyncio.run(with_session(run))
+
+
+if __name__ == "__main__":
+    main()

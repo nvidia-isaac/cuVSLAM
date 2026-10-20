@@ -14,14 +14,15 @@
 
 """Demonstrate explicit section retirement, not automatic detection of an aged scene."""
 
+import argparse
 import asyncio
 import json
 import pickle
 
-from map_codec import MapData
-from mcp_client import with_session
-from repair_map import commit
-from workspace import HERE
+from cuvslam_tools.offline_map_repair.map_codec import MapData
+from cuvslam_tools.offline_map_repair.mcp_client import with_session
+from cuvslam_tools.offline_map_repair.repair_map import commit
+from cuvslam_tools.offline_map_repair.workspace import HERE
 
 
 async def run(session):
@@ -57,5 +58,10 @@ async def run(session):
     )
 
 
-if __name__ == "__main__":
+def main(argv=None):
+    argparse.ArgumentParser(description=__doc__).parse_args(argv)
     asyncio.run(with_session(run))
+
+
+if __name__ == "__main__":
+    main()

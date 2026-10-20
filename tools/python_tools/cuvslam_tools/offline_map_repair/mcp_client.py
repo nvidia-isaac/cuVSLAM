@@ -14,19 +14,20 @@
 
 """Exercise NAT's Streamable HTTP MCP endpoint and retain a compact transcript."""
 
+import argparse
 import asyncio
 import base64
 import hashlib
 import json
 import os
-import sys
 import time
 from pathlib import Path
 
-from cuvslam_map_nat.store import TABLES
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
-from workspace import HERE, map_name
+
+from cuvslam_tools.offline_map_repair.mcp_server.store import TABLES
+from cuvslam_tools.offline_map_repair.workspace import HERE, map_name
 
 URL = os.environ.get("CUVSLAM_MCP_URL", "http://127.0.0.1:9906/mcp")
 
@@ -96,7 +97,14 @@ async def read_map(session, name):
     return data
 
 
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("tool", choices=["describe_map", "clone_map", "read_records", "write_records"])
+    parser.add_argument("arguments", type=Path, nargs="?", help="JSON file containing tool arguments")
+    args = parser.parse_args(argv)
+    arguments = json.loads(args.arguments.read_text()) if args.arguments else {}
+    print(json.dumps(asyncio.run(with_session(lambda session: call(session, args.tool, arguments))), indent=2))
+
+
 if __name__ == "__main__":
-    tool = sys.argv[1]
-    args = json.loads(Path(sys.argv[2]).read_text()) if len(sys.argv) > 2 else {}
-    print(json.dumps(asyncio.run(with_session(lambda session: call(session, tool, args))), indent=2))
+    main()

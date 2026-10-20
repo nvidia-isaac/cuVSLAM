@@ -14,13 +14,14 @@
 
 """NAT-specific protocol, schema, concurrency, and root boundary checks."""
 
+import argparse
 import asyncio
 import json
 import tempfile
 from pathlib import Path
 
-from mcp_client import call, with_session
-from workspace import HERE, map_name
+from cuvslam_tools.offline_map_repair.mcp_client import call, with_session
+from cuvslam_tools.offline_map_repair.workspace import HERE, map_name
 
 
 async def run(session):
@@ -49,5 +50,10 @@ async def run(session):
     print(json.dumps(checks, indent=2))
 
 
-if __name__ == "__main__":
+def main(argv=None):
+    argparse.ArgumentParser(description=__doc__).parse_args(argv)
     asyncio.run(with_session(run))
+
+
+if __name__ == "__main__":
+    main()

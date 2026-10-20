@@ -23,9 +23,10 @@ import subprocess
 from pathlib import Path
 
 import numpy as np
-from map_codec import MapData
-from mcp_client import read_map, with_session
-from workspace import HERE
+
+from cuvslam_tools.offline_map_repair.map_codec import MapData
+from cuvslam_tools.offline_map_repair.mcp_client import read_map, with_session
+from cuvslam_tools.offline_map_repair.workspace import HERE
 
 
 async def run(session, args):
@@ -65,13 +66,16 @@ async def run(session, args):
             np.linalg.norm(map_data.xyz(lm) - [native_lm[i]["pose"][c] for c in ["x", "y", "z"]])
             for i, lm in map_data.landmarks.items()
         )
-        assert delta == 0, (name, delta)
+        # NumPy/BLAS and Eigen can accumulate float32 transforms in different
+        # orders. Allow 0.1 mm reconstruction roundoff, retaining the measured error.
+        assert np.isfinite(delta) and delta <= 1e-4, (name, delta)
         results[name] = {
             "mcp_readback_equal": equal,
             "references_valid": not issues,
             "preexisting_dangling_cell_references": len(issues),
             "codec_roundtrip_equal": roundtrip,
             "native_max_landmark_error_m": float(delta),
+            "native_landmark_tolerance_m": 1e-4,
             "landmarks": len(map_data.landmarks),
         }
         if args.compare_to:
@@ -86,12 +90,16 @@ async def run(session, args):
     )
 
 
-if __name__ == "__main__":
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "variants", nargs="*", default=["baseline", "repaired", "targeted", "targeted_maintained", "retired_tail"]
     )
     parser.add_argument("--extractor", type=Path, required=True, help="Native map_extractor executable")
     parser.add_argument("--compare-to", type=Path, help="Previous workspace for byte-for-byte regression checks")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     asyncio.run(with_session(lambda session: run(session, args)))
+
+
+if __name__ == "__main__":
+    main()

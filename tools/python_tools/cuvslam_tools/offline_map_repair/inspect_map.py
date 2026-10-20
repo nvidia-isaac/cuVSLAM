@@ -21,9 +21,10 @@ import pickle
 from pathlib import Path
 
 import numpy as np
-from map_codec import MapData
-from mcp_client import call, read_map, with_session
-from workspace import HERE
+
+from cuvslam_tools.offline_map_repair.map_codec import MapData
+from cuvslam_tools.offline_map_repair.mcp_client import call, read_map, with_session
+from cuvslam_tools.offline_map_repair.workspace import HERE
 
 
 async def inspect(session, name):
@@ -56,8 +57,12 @@ async def inspect(session, name):
     print(json.dumps(summary, indent=2), flush=True)
 
 
-if __name__ == "__main__":
+def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("map_name")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
     asyncio.run(with_session(lambda s: inspect(s, args.map_name)))
+
+
+if __name__ == "__main__":
+    main()
