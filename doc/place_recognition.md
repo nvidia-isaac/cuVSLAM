@@ -1,10 +1,10 @@
 # cuVSLAM: Visual Place Recognition
 
 Visual place recognition answers "where am I?" from a single frame and no pose. The
-[root README](../README.md#visual-place-recognition) gives the overview; this page shows how to drive it, how it
+[root README](https://github.com/nvidia-isaac/cuVSLAM/blob/main/README.md#visual-place-recognition) gives the overview; this page shows how to drive it, how it
 closes loops and how to evaluate it. Relocalizing in a saved map with `LocalizeInMap` is covered in
 [load_map.md](load_map.md), and how the module is built, with the measurements behind it, in
-[libs/slam/vpr/README.md](../libs/slam/vpr/README.md).
+[libs/slam/vpr/README.md](https://github.com/nvidia-isaac/cuVSLAM/blob/main/libs/slam/vpr/README.md).
 
 ## The engine
 
@@ -20,7 +20,7 @@ source build/cuvslam_vars.sh   # exports CUVSLAM_ANYLOC_ENGINE, the engine's pat
 
 `Slam::Config::vpr_model_path` (Python: `vpr_model_path`) names the engine, and AnyLoc needs `use_gpu`. An engine
 only loads in the TensorRT version and on the GPU architecture that built it; see
-[models/anyloc](../models/anyloc/README.md).
+[models/anyloc](https://github.com/nvidia-isaac/cuVSLAM/blob/main/models/anyloc/README.md).
 
 ## Mapping and recognizing places
 
