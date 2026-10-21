@@ -254,7 +254,7 @@ jobs:
             exit 0
           fi
           image=$(docker inspect --format '{{.Config.Image}}' "${containers[0]}")
-          docker rm -f "${containers[@]}"
+          docker rm -f "${containers[@]}" || echo "::warning::Failed to remove some leftover containers"
           # Removed containers skip their chown traps, so return the workspace to the runner user.
           docker run --rm --entrypoint chown -v "$GITHUB_WORKSPACE:/workspace" "$image" \
             -R "$(id -u):$(id -g)" /workspace
@@ -346,7 +346,7 @@ jobs:
             exit 0
           fi
           image=$(docker inspect --format '{{.Config.Image}}' "${containers[0]}")
-          docker rm -f "${containers[@]}"
+          docker rm -f "${containers[@]}" || echo "::warning::Failed to remove some leftover containers"
           # Removed containers skip their chown traps, so return the workspace to the runner user.
           docker run --rm --entrypoint chown -v "$GITHUB_WORKSPACE:/workspace" "$image" \
             -R "$(id -u):$(id -g)" /workspace
@@ -452,7 +452,7 @@ jobs:
             exit 0
           fi
           image=$(docker inspect --format '{{.Config.Image}}' "${containers[0]}")
-          docker rm -f "${containers[@]}"
+          docker rm -f "${containers[@]}" || echo "::warning::Failed to remove some leftover containers"
           # Removed containers skip their chown traps, so return the workspace to the runner user.
           docker run --rm --entrypoint chown -v "$GITHUB_WORKSPACE:/workspace" "$image" \
             -R "$(id -u):$(id -g)" /workspace
@@ -494,7 +494,7 @@ jobs:
             exit 0
           fi
           image=$(docker inspect --format '{{.Config.Image}}' "${containers[0]}")
-          docker rm -f "${containers[@]}"
+          docker rm -f "${containers[@]}" || echo "::warning::Failed to remove some leftover containers"
           # Removed containers skip their chown traps, so return the workspace to the runner user.
           docker run --rm --entrypoint chown -v "$GITHUB_WORKSPACE:/workspace" "$image" \
             -R "$(id -u):$(id -g)" /workspace
