@@ -12,7 +12,22 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
-"""Headless EuRoC mapping on main. Ground truth is never read here."""
+"""Run one EuRoC sequence through cuVSLAM headlessly and save a reusable SLAM map.
+
+Called twice per experiment with the same recording:
+
+``--mode stereo``    produces ``baseline/`` - the map to be repaired.
+``--mode inertial``  produces ``replay_inertial/`` - the reference trajectory whose
+                     poses the repair policies adopt.
+
+Both modes run ``OdometryWithSlamOffline``; odometry alone never builds the persistent
+map. Ground truth is never read here, so a map and its replay stay independent of the
+evaluation signal.
+
+Outputs per session: ``map/`` (LMDB), ``tracking.json`` (per-frame odometry and SLAM
+poses), ``optimized_trajectory.json`` (the final optimized SLAM poses, the input to
+repair), and ``summary.json`` (provenance, including the saved map's SHA256).
+"""
 
 import argparse
 import hashlib
@@ -23,10 +38,17 @@ from pathlib import Path
 
 import numpy as np
 
-from cuvslam_tools.offline_map_repair.euroc import get_rig, load_frame, read_csv_data
+from cuvslam_tools.offline_map_repair.sessions.euroc import get_rig, load_frame, read_csv_data
 
 
 def frame_metadata(dataset, inertial=False):
+    """Build the ordered replay list of stereo frames and, optionally, IMU samples.
+
+    Stereo frames are paired by *exact* timestamp; EuRoC cameras are hardware
+    synchronized, so an unpaired timestamp means a missing file rather than a frame
+    needing interpolation, and it is dropped. The returned ``pairing`` counts make
+    that loss visible instead of silent.
+    """
     root = dataset / "mav0"
     cameras = [
         {int(r["timestamp"]): r["filename"] for r in read_csv_data(str(root / f"cam{i}/data.csv"), "camera")}
@@ -65,6 +87,7 @@ def main(argv=None):
     args.output.mkdir(parents=True, exist_ok=True)
     if any(args.output.iterdir()):
         raise ValueError("Output directory must be empty")
+    # Multicamera = stereo visual only; Inertial additionally fuses the IMU stream.
     mode = getattr(cuvslam.Odometry.OdometryMode, "Multicamera" if args.mode == "stereo" else "Inertial")
     rig = get_rig(str(args.dataset / "mav0"))
     odom = cuvslam.Odometry.Config(async_sba=False, rectified_stereo_camera=False, odometry_mode=mode)
@@ -99,6 +122,8 @@ def main(argv=None):
             "slam": pose(slam_pose) if slam_pose else None,
         }
         results.append(row)
+        # Checkpoint progress periodically: a long sequence should not lose everything
+        # if it is interrupted, and the printed counters make stalls obvious.
         if len(results) % 100 == 0:
             print(
                 json.dumps(
@@ -118,6 +143,8 @@ def main(argv=None):
     tracker.slam.save_map(str(args.output / "map"), lambda ok: saved.append(ok))
     if saved != [True]:
         raise RuntimeError(f"Map save failed: {saved}")
+    # The optimized SLAM poses, not the per-frame odometry: these are post loop
+    # closure and pose-graph optimization, and are what a repair policy consumes.
     optimized = [{"timestamp_ns": int(p.timestamp_ns), **pose(p.pose)} for p in tracker.slam.get_all_slam_poses()]
     (args.output / "optimized_trajectory.json").write_text(json.dumps(optimized))
     summary = {
@@ -129,6 +156,7 @@ def main(argv=None):
         "source_commit": args.source_commit,
         "cuvslam_version": str(cuvslam.get_version()),
         "calibration": "dataset sensor.yaml",
+        # Recorded so `verify` can prove afterwards that the baseline was never edited.
         "map_sha256": hashlib.sha256((args.output / "map/data.mdb").read_bytes()).hexdigest(),
         "ground_truth_used": False,
         "pairing": pairing,

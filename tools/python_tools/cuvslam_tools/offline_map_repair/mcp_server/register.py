@@ -12,7 +12,15 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
-"""Expose opaque LMDB operations as four typed NeMo Agent Toolkit functions."""
+"""Expose the four ``MapStore`` operations as typed NeMo Agent Toolkit functions.
+
+Each tool is a thin wrapper: a Pydantic input model (which NAT publishes as the MCP
+input schema, so bad pagination is rejected before any database access), and a call
+into ``MapStore`` whose docstring becomes the tool description an agent reads.
+
+``extra="forbid"`` on the base input model matters - a silently ignored misspelled
+field in a write batch would mean an edit that looks applied but is not.
+"""
 
 import asyncio
 import json
@@ -27,6 +35,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .store import MapStore
 
+# py-lmdb cannot have two open environment handles for the same database in one
+# process, and NAT serves requests concurrently, so every store call is serialized.
+# Map operations are short and offline, so the lost parallelism costs nothing.
 _store_lock = threading.RLock()
 
 

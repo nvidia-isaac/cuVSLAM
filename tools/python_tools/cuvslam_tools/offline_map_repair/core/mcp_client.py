@@ -12,7 +12,17 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
-"""Exercise NAT's Streamable HTTP MCP endpoint and retain a compact transcript."""
+"""Talk to the NAT Streamable HTTP MCP endpoint and keep an auditable transcript.
+
+Every tool call the client makes is appended to ``mcp_transcript.jsonl`` in the
+workspace. Large payloads are never duplicated there: a write is logged as its change
+count and a hash of the changes, and a read as its byte length and result hash. The
+transcript is therefore a complete, cheap record of what was asked of the server,
+which pairs with the durable ``agent_audit`` table recording what the server did.
+
+Also the single place that knows map names must be rewritten relative to the server
+root, so no workflow has to remember it.
+"""
 
 import argparse
 import asyncio
@@ -26,13 +36,20 @@ from pathlib import Path
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
+from cuvslam_tools.offline_map_repair.core.workspace import HERE, map_name
+
+# The table names are the one piece of schema the client and server genuinely share.
 from cuvslam_tools.offline_map_repair.mcp_server.store import TABLES
-from cuvslam_tools.offline_map_repair.workspace import HERE, map_name
 
 URL = os.environ.get("CUVSLAM_MCP_URL", "http://127.0.0.1:9906/mcp")
 
 
 async def with_session(action):
+    """Open one MCP session, log the handshake, and run ``action`` inside it.
+
+    The long timeouts are intentional: a whole-map write is a single request carrying
+    every changed record, and splitting it would risk a half-edited map.
+    """
     async with streamablehttp_client(URL, timeout=300, sse_read_timeout=300) as (reader, writer, _):
         async with ClientSession(reader, writer) as session:
             initialized = await session.initialize()
@@ -52,7 +69,9 @@ async def with_session(action):
 
 
 async def call(session, tool, args):
+    """Invoke one MCP tool, record it in the transcript, and return its parsed result."""
     args = dict(args)
+    # Workspace-relative names in, server-root-relative names out.
     for field in ("map_name", "source", "destination"):
         if field in args:
             args[field] = map_name(args[field])
@@ -82,6 +101,11 @@ async def call(session, tool, args):
 
 
 async def read_map(session, name):
+    """Page every record of all four tables into an in-memory {table: {key: value}}.
+
+    Maps of this size fit comfortably in memory, and having the complete set is what
+    lets the codec compute an exact diff and conditional-write tokens for a commit.
+    """
     data = {}
     for table in TABLES:
         rows, offset = {}, 0

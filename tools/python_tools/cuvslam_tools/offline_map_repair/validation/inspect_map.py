@@ -12,7 +12,17 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
-"""Inspect raw MCP records and cache them for the offline repair scripts."""
+"""Read a map through MCP, cache its records, and report what is in it.
+
+This is the first step of any repair: it pulls every record over the transport,
+pickles them next to the map as ``records.pkl``, and writes an ``inspection.json``
+summary. The repair policies then work from that cache instead of re-reading the
+database, which keeps each policy's input fixed and reproducible.
+
+``roundtrip_equal`` in the summary is the important field. It says whether decoding
+and re-encoding the map reproduces it byte for byte, i.e. whether the codec actually
+understands this map. A False entry there means no edit should be trusted.
+"""
 
 import argparse
 import asyncio
@@ -22,16 +32,17 @@ from pathlib import Path
 
 import numpy as np
 
-from cuvslam_tools.offline_map_repair.map_codec import MapData
-from cuvslam_tools.offline_map_repair.mcp_client import call, read_map, with_session
-from cuvslam_tools.offline_map_repair.workspace import HERE
+from cuvslam_tools.offline_map_repair.core.map_codec import MapData
+from cuvslam_tools.offline_map_repair.core.mcp_client import call, read_map, with_session
+from cuvslam_tools.offline_map_repair.core.workspace import HERE
 
 
 async def inspect(session, name):
     summary = await call(session, "describe_map", {"map_name": name})
     data = await read_map(session, name)
     map_data = MapData(data)
-    # Local cache is only a tool-output artifact. All actual DB writes go through MCP.
+    # The cache is a tool-output artifact only; every actual write still goes through
+    # MCP with compare-and-swap tokens read from the live database.
     cache = HERE / Path(name).parent / "records.pkl"
     cache.write_bytes(pickle.dumps(data))
     roundtrip = map_data.encode()

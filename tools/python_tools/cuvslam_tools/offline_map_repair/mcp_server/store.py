@@ -12,9 +12,24 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
-"""Offline LMDB record operations shared by the NAT tools.
+"""Raw LMDB record operations behind the four NAT tools.
 
-Application blobs remain opaque. Mutation policy belongs to the MCP client.
+The deliberate design choice here is that the server knows *nothing* about cuVSLAM.
+It moves opaque 8-byte-keyed blobs between four named tables and enforces exactly
+three safety properties; everything about what a map means lives in the client codec.
+
+The three properties:
+
+* **The original is immutable.** Writes require an ``agent-copy.json`` marker, which
+  only ``clone_map`` creates, so a baseline map can never be edited in place.
+* **Edits are atomic and conditional.** A write batch carries a SHA256 of each
+  record as it was read; one stale token aborts everything, including the audit
+  entry, so there is no such thing as a half-applied repair.
+* **Edits are undoable and attributable.** The pre-edit bytes and a required
+  human-readable reason are committed to an ``agent_audit`` table in the *same*
+  transaction as the data.
+
+The marker is a workflow guard, not authentication; this is a trusted local service.
 """
 
 import base64
@@ -37,6 +52,8 @@ class MapStore:
         self.root = Path(root).resolve()
 
     def map_path(self, name):
+        """Resolve a root-relative map name, refusing anything that escapes the root."""
+        # Resolve first, then test containment, so symlinks and ".." cannot slip out.
         p = (self.root / name).resolve()
         if not p.is_relative_to(self.root) or not (p / "data.mdb").is_file():
             raise ValueError("Map must be an existing database below the configured root")
@@ -54,6 +71,8 @@ class MapStore:
             create=False,
             lock=True,
             max_dbs=10,
+            # Headroom for a write that grows the database; LMDB cannot resize a map
+            # mid-transaction, and a whole-map reindex can add records.
             map_size=max(1024**3, (p / "data.mdb").stat().st_size * 4),
         )
 
@@ -142,6 +161,8 @@ class MapStore:
                     if len(key) != 8 or (table, key) in seen:
                         raise ValueError("Keys must be unique 64-bit keys")
                     seen.add((table, key))
+                    # Compare-and-swap: the caller must prove it read the current value
+                    # (or, with a null token, that the record was absent).
                     old = txn.get(key, db=handles[table])
                     if digest(old) != change["expected_sha256"]:
                         raise ValueError(f"Stale record: {table}/{key.hex()}")
@@ -160,6 +181,8 @@ class MapStore:
                             "before_base64": base64.b64encode(old).decode() if old is not None else None,
                         }
                     )
+                # Written inside the same transaction, so audit and data commit or
+                # roll back together and the undo bytes can never go missing.
                 audit_id = str(time.time_ns())
                 txn.put(
                     audit_id.encode(), json.dumps({"reason": reason, "changes": audit_changes}).encode(), db=audit_db

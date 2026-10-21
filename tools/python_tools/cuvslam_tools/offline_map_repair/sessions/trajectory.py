@@ -12,7 +12,15 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
-"""Pose interpolation and separate evaluation helpers; quaternions use x, y, z, w."""
+"""Trajectory math: SE(3) conversion, interpolation, alignment, and error metrics.
+
+Quaternions are ``x, y, z, w`` throughout, matching both cuVSLAM and SciPy.
+
+Note the split in intent. ``matrix``/``pose``/``load_trajectory``/``interpolate`` are
+used by the repair policies. ``ground_truth``/``errors``/``align`` are used *only* by
+``validation.evaluate_localization``; no repair policy may call them, or the
+experiment would be scoring itself against its own input.
+"""
 
 import json
 from pathlib import Path
@@ -38,7 +46,12 @@ def load_trajectory(path):
 
 
 def interpolate(timestamps, transforms, query):
-    """Interpolate translation and orientation, clamping outside the trajectory span."""
+    """Interpolate translation (linear) and orientation (Slerp) at ``query`` times.
+
+    Queries outside the trajectory span clamp to the nearest endpoint rather than
+    extrapolating, so a replay that starts slightly late still yields a usable pose for
+    the first keyframes. Supply a replay covering all retained keyframes to avoid it.
+    """
     # Subtract the integer nanosecond origin before converting to floating seconds.
     t0 = int(timestamps[0])
     times = (timestamps - t0).astype(float) * 1e-9
@@ -65,7 +78,11 @@ def align(source, target):
 
 
 def ground_truth(dataset):
-    """Evaluation only: EuRoC T_W_B composed with T_B_cam0; never used to repair maps."""
+    """EVALUATION ONLY. Load EuRoC ground truth expressed in the cam0 frame.
+
+    The CSV gives T_world_body; cuVSLAM poses are in the cam0 rig frame, so compose
+    with cam0's ``T_BS`` to make the two comparable. Never used to compute an edit.
+    """
     import csv
 
     import yaml

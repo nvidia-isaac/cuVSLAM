@@ -12,21 +12,31 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
-"""Control experiment: rebuild lookup cells while retaining poses, edges, and appearance."""
+
+"""Control experiment: rebuild the spatial index only, changing no pose and no landmark.
+
+Both repair policies rebuild the index as a side effect of moving poses, so any
+measured gain could just as well come from the index rebuild - a natively exported
+map can carry stale cell members. This candidate isolates that variable: if
+``index_only`` scores like ``baseline``, the index was not the story.
+"""
 
 import argparse
 import asyncio
 import pickle
 
-from cuvslam_tools.offline_map_repair.map_codec import MapData
-from cuvslam_tools.offline_map_repair.mcp_client import with_session
-from cuvslam_tools.offline_map_repair.repair_map import commit
-from cuvslam_tools.offline_map_repair.workspace import HERE
+from cuvslam_tools.offline_map_repair.core.commit import commit
+from cuvslam_tools.offline_map_repair.core.map_codec import MapData
+from cuvslam_tools.offline_map_repair.core.mcp_client import with_session
+from cuvslam_tools.offline_map_repair.core.workspace import HERE
 
 
 async def run(session):
     old = pickle.loads((HERE / "baseline/records.pkl").read_bytes())
     new = MapData(old).encode(reindex=True, update_edges=False)
+    # The control is only meaningful if nothing but the index moved: `main` holds the
+    # pose graph and hypotheses, `descriptors` holds appearance. Both must be byte
+    # identical, leaving `landmarks` (cell references) and `spatial_cells` as the diff.
     assert old["main"] == new["main"] and old["descriptors"] == new["descriptors"]
     await commit(
         session,

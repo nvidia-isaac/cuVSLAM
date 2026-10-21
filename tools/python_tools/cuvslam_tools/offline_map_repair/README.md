@@ -86,7 +86,7 @@ and `clone_map` refuses an existing destination.
 ```bash
 export CUVSLAM_EXPERIMENT_DIR="${TMPDIR:-/tmp}/cuvslam-map-v2-03"
 export CUVSLAM_MAP_ROOT="$CUVSLAM_EXPERIMENT_DIR"
-export EUROC_SEQUENCE="/mnt/data/home/zhengwang/Downloads/slam_dataset/EuRoC/V2_03_difficult"
+export EUROC_SEQUENCE="/path/to/EuRoC/V2_03_difficult"
 mkdir -p "$CUVSLAM_EXPERIMENT_DIR"
 
 cuvslam_map_repair run-sequence "$EUROC_SEQUENCE" \
@@ -264,7 +264,7 @@ can differ in their final floating-point bits across numerical-library versions.
 
 Package metadata and the client console entry point live in
 `tools/python_tools/pyproject.toml`. Internal imports use the
-`cuvslam_tools.offline_map_repair` namespace. Server configuration is wheel package
+`cuvslam_tools.offline_map_repair.<subpackage>` namespace. Server configuration is wheel package
 data, loaded through `importlib.resources`. Unit tests live alongside the other
 tools' tests in `cuvslam_tools/tests/test_offline_map_repair.py`:
 
@@ -273,19 +273,40 @@ python -m unittest cuvslam_tools.tests.test_offline_map_repair -v
 ```
 
 
-- `mcp_server/store.py`: raw LMDB operations and transaction/audit rules.
-- `mcp_server/register.py`: typed NAT registration; serializes LMDB access
-  because py-lmdb cannot overlap environment handles for the same database.
-- `mcp_server/worker.py`, `mcp_server/configs/`, `mcp_server/server.py`: NAT serving.
-- `cli.py`, `__main__.py`: console and module entry points with lazy workflow imports.
-- `euroc.py`: packaged raw EuRoC calibration, image, and CSV readers.
-- `workspace.py`, `mcp_client.py`: paths, MCP calls, pagination, and transcripts.
-- `map_codec.py`: native binary schema, landmark reconstruction, cell packing,
-  reference maintenance, and conditional edit batches.
-- `repair_map.py`, `targeted_repair.py`, `repair_index.py`, `retire_section.py`:
-  client-side policies. `trajectory_utils.py` supplies interpolation and evaluation helpers.
-- `run_sequence.py`, `inspect_map.py`, `verify_maps.py`, `evaluate_localization.py`:
-  session generation, inspection, structural verification, and native evaluation.
+The package is organized by function. The boundary that matters most is between
+`mcp_server/` (which moves opaque bytes and enforces safety) and everything else
+(which knows what the bytes mean and decides what to change).
+
+```text
+cli.py, __main__.py   Console and module entry points with lazy workflow imports.
+core/                 Reaching and representing a map.
+  workspace.py        Workspace vs. server-root paths and map-name translation.
+  mcp_client.py       MCP session, tool calls, pagination, and the call transcript.
+  map_codec.py        Native binary schema, landmark reconstruction, cell packing,
+                      reference maintenance, and conditional edit batches.
+  commit.py           Validate, clone, and atomically write one candidate map.
+sessions/             Producing the two SLAM sessions the repair compares.
+  euroc.py            Raw EuRoC calibration, image, and CSV readers.
+  trajectory.py       Interpolation and alignment, plus evaluation-only metrics.
+  run_sequence.py     Stereo and inertial SLAM session generation.
+policies/             What to edit, and why. One module per experiment.
+  full_pose_repair.py   Replace every active pose from the inertial replay.
+  targeted_repair.py    Replace only poses with large replay disagreement.
+  index_rebuild.py      Control: rebuild the spatial index and nothing else.
+  section_retirement.py Remove landmarks exclusive to a trailing time section.
+  pruning.py            Landmark-pruning predicates shared by two policies.
+validation/           Is it well formed, is it better, is the server sane?
+  inspect_map.py      Read a map through MCP and cache its records.
+  verify_maps.py      MCP readback, references, codec and native-decoder agreement.
+  evaluate_localization.py  Frozen native relocalization benchmark.
+  check_mcp.py        MCP transaction guarantees over the real transport.
+  check_nat.py        NAT schemas, concurrency, and root confinement.
+mcp_server/           Installed into its own environment; see its pyproject.toml.
+  store.py            Raw LMDB operations and transaction/audit rules.
+  register.py         Typed NAT registration; serializes LMDB access because
+                      py-lmdb cannot overlap environment handles for one database.
+  worker.py, server.py, configs/   NAT serving.
+```
 
 Use stopped sessions or independent snapshots. Native cuVSLAM opens LMDB with
 `MDB_NOLOCK`; the server's locking does not coordinate with a running native

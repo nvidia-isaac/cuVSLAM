@@ -12,7 +12,23 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
-"""Verify actual NAT tool readback, native decoding, and immutable source maps."""
+"""Prove a candidate map is what was intended, structurally and to the native reader.
+
+Four independent checks per candidate:
+
+1. **Readback** - re-read every record over MCP and compare with the cached intent,
+   so the committed database matches what the policy decided, not just what it sent.
+2. **References** - no dangling keyframe, descriptor or cell references. The baseline
+   is exempt from the cell check: native exports can ship stale cell members, which
+   is recorded as a preexisting condition and required to be absent in candidates.
+3. **Codec round trip** - decode/encode is byte identical, so the diff was complete.
+4. **Native agreement** - run the C++ ``map_extractor`` and compare its reconstructed
+   landmark positions with this codec's. This is the check that catches a
+   misunderstanding of the binary schema rather than a mistake in the edit.
+
+Finally it re-hashes ``baseline/map`` and compares with the hash recorded at mapping
+time, proving the source map was never modified by any of this.
+"""
 
 import argparse
 import asyncio
@@ -24,9 +40,9 @@ from pathlib import Path
 
 import numpy as np
 
-from cuvslam_tools.offline_map_repair.map_codec import MapData
-from cuvslam_tools.offline_map_repair.mcp_client import read_map, with_session
-from cuvslam_tools.offline_map_repair.workspace import HERE
+from cuvslam_tools.offline_map_repair.core.map_codec import MapData
+from cuvslam_tools.offline_map_repair.core.mcp_client import read_map, with_session
+from cuvslam_tools.offline_map_repair.core.workspace import HERE
 
 
 async def run(session, args):
@@ -40,6 +56,7 @@ async def run(session, args):
         issues = map_data.validate()
         encoded = map_data.encode()
         roundtrip = {t: encoded[t] == actual[t] for t in actual}
+        # Decode what came back and insist it is self consistent.
         if name == "baseline":
             # Record existing native-export index leftovers; do not alter the control.
             assert all(i.startswith("Dangling cell member ") for i in issues), issues[:5]
@@ -59,6 +76,7 @@ async def run(session, args):
                 stderr=subprocess.STDOUT,
                 check=True,
             )
+        # Cross-check against the native C++ decoder: same landmark ids, same geometry.
         native = json.loads((native_dir / "map.json").read_text())
         native_lm = {r["id"]: r for r in native["landmarks"]}
         assert native_lm.keys() == map_data.landmarks.keys()

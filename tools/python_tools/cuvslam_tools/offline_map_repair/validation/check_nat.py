@@ -12,7 +12,15 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
-"""NAT-specific protocol, schema, concurrency, and root boundary checks."""
+"""Checks specific to the NeMo Agent Toolkit layer rather than the storage layer.
+
+Covers what NAT contributes on top of ``store.py``: that the Pydantic input models are
+published as typed MCP schemas with their bounds intact, that out-of-range pagination
+is refused at the schema boundary before any LMDB access, that the serialization lock
+lets concurrent reads of one map complete consistently (py-lmdb cannot overlap
+environment handles for the same database), and that root confinement holds for a
+database that exists but sits outside the configured root.
+"""
 
 import argparse
 import asyncio
@@ -20,8 +28,8 @@ import json
 import tempfile
 from pathlib import Path
 
-from cuvslam_tools.offline_map_repair.mcp_client import call, with_session
-from cuvslam_tools.offline_map_repair.workspace import HERE, map_name
+from cuvslam_tools.offline_map_repair.core.mcp_client import call, with_session
+from cuvslam_tools.offline_map_repair.core.workspace import HERE, map_name
 
 
 async def run(session):

@@ -12,24 +12,40 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
-"""Console entry point for offline map repair workflows."""
+
+"""Console entry point for offline map repair workflows.
+
+The package is laid out by function, and the command table below is the map:
+
+    core/        reach and represent a map (workspace paths, MCP client, codec, commit)
+    sessions/    EuRoC readers, trajectory math, and SLAM session generation
+    policies/    what to edit in a map, and why
+    validation/  inspection, structural verification, localization scoring, server checks
+    mcp_server/  the NeMo Agent Toolkit MCP service (installed into its own environment)
+
+A typical session runs the commands in this order: ``run-sequence`` twice to produce
+the baseline map and the inertial replay, ``serve`` in another terminal, ``inspect``
+to cache the baseline records, one or more repair policies, then ``verify`` and
+``evaluate`` to decide whether a candidate is actually better.
+"""
 
 import argparse
 from importlib import import_module
 
+# command -> (module under cuvslam_tools.offline_map_repair, help text)
 COMMANDS = {
     "serve": ("mcp_server.server", "Serve raw map records through NeMo MCP"),
-    "inspect": ("inspect_map", "Inspect a map and cache its MCP records"),
-    "repair": ("repair_map", "Replace poses from an inertial replay and make a pruned copy"),
-    "targeted": ("targeted_repair", "Replace only poses with large replay disagreement"),
-    "reindex": ("repair_index", "Rebuild the spatial index without replacing poses or edges"),
-    "retire": ("retire_section", "Remove landmarks exclusive to the trailing time section"),
-    "run-sequence": ("run_sequence", "Create a stereo or inertial EuRoC SLAM session"),
-    "evaluate": ("evaluate_localization", "Prepare queries or evaluate native relocalization"),
-    "verify": ("verify_maps", "Compare MCP records with cached and native map representations"),
-    "check-mcp": ("check_mcp", "Check MCP transactions on a disposable map copy"),
-    "check-nat": ("check_nat", "Check NeMo schemas, concurrent reads, and root confinement"),
-    "call": ("mcp_client", "Call a raw MCP tool with arguments from a JSON file"),
+    "inspect": ("validation.inspect_map", "Inspect a map and cache its MCP records"),
+    "repair": ("policies.full_pose_repair", "Replace poses from an inertial replay and make a pruned copy"),
+    "targeted": ("policies.targeted_repair", "Replace only poses with large replay disagreement"),
+    "reindex": ("policies.index_rebuild", "Rebuild the spatial index without replacing poses or edges"),
+    "retire": ("policies.section_retirement", "Remove landmarks exclusive to the trailing time section"),
+    "run-sequence": ("sessions.run_sequence", "Create a stereo or inertial EuRoC SLAM session"),
+    "evaluate": ("validation.evaluate_localization", "Prepare queries or evaluate native relocalization"),
+    "verify": ("validation.verify_maps", "Compare MCP records with cached and native map representations"),
+    "check-mcp": ("validation.check_mcp", "Check MCP transactions on a disposable map copy"),
+    "check-nat": ("validation.check_nat", "Check NeMo schemas, concurrent reads, and root confinement"),
+    "call": ("core.mcp_client", "Call a raw MCP tool with arguments from a JSON file"),
 }
 
 

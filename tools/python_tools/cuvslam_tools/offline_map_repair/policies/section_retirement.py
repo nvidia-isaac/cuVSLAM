@@ -12,28 +12,46 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
-"""Demonstrate explicit section retirement, not automatic detection of an aged scene."""
+
+"""Policy: retire the visual coverage of a trailing time section of the map.
+
+This demonstrates the deletion path end to end - landmarks, their descriptors, their
+keyframe references and their cell memberships all go in one transaction. It does
+*not* detect that a part of the scene has actually changed; the cutoff is an
+arbitrary, explicit choice standing in for a real maintenance trigger.
+
+The pose graph is deliberately kept: retiring appearance should not disconnect the
+map or move anything that is still valid.
+"""
 
 import argparse
 import asyncio
 import json
 import pickle
 
-from cuvslam_tools.offline_map_repair.map_codec import MapData
-from cuvslam_tools.offline_map_repair.mcp_client import with_session
-from cuvslam_tools.offline_map_repair.repair_map import commit
-from cuvslam_tools.offline_map_repair.workspace import HERE
+from cuvslam_tools.offline_map_repair.core.commit import commit
+from cuvslam_tools.offline_map_repair.core.map_codec import MapData
+from cuvslam_tools.offline_map_repair.core.mcp_client import with_session
+from cuvslam_tools.offline_map_repair.core.workspace import HERE
+
+RETIRED_TAIL_NS = 15_000_000_000
 
 
 async def run(session):
     source = pickle.loads((HERE / "targeted_maintained/records.pkl").read_bytes())
     map_data = MapData(source)
-    cutoff = max(f["timestamp_ns"] for f in map_data.keyframes.values()) - 15_000_000_000
+    cutoff = max(f["timestamp_ns"] for f in map_data.keyframes.values()) - RETIRED_TAIL_NS
+    # Keep any landmark with at least one observation outside the retired section.
+    # An observation can reference a graph node that pose-graph reduction dropped from
+    # `keyframes`; that is not a retained tail keyframe, so it also keeps the landmark.
     removed = [
         i
         for i, lm in map_data.landmarks.items()
         if lm["observations"]
-        and all(map_data.keyframes[o["keyframe"]]["timestamp_ns"] >= cutoff for o in lm["observations"])
+        and all(
+            o["keyframe"] in map_data.keyframes and map_data.keyframes[o["keyframe"]]["timestamp_ns"] >= cutoff
+            for o in lm["observations"]
+        )
     ]
     map_data.remove_landmarks(removed)
     await commit(
@@ -43,7 +61,8 @@ async def run(session):
         source,
         map_data.encode(),
         "Section-retirement experiment: remove landmarks observed exclusively by retained keyframes in the last 15 s, "
-        "plus their descriptors and all references. Keep graph connectivity. The cutoff is an explicit policy, not evidence of scene aging.",
+        "plus their descriptors and all references. Keep graph connectivity. The cutoff is an explicit policy, not "
+        "evidence of scene aging.",
     )
     (HERE / "retired_tail/retirement.json").write_text(
         json.dumps(

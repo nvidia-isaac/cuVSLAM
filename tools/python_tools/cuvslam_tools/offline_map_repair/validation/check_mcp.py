@@ -12,7 +12,20 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
-"""Integration checks on a disposable copy over the actual MCP transport."""
+"""Integration checks of the MCP contract, run over the real transport.
+
+These are not unit tests of ``store.py`` (those live in ``cuvslam_tools/tests``); they
+exercise the guarantees the repair workflow actually relies on, end to end:
+
+* the server exposes exactly the four intended tools and nothing else,
+* the original map cannot be written to, only clones can,
+* a path outside the configured root is rejected,
+* one stale compare-and-swap token rolls back the whole batch, data and audit alike,
+* a binary value survives write, read and restore unchanged.
+
+Needs a workspace containing ``baseline/map``, and creates ``mcp_checks/map``; use a
+fresh workspace for a repeat run, since ``clone_map`` refuses an existing destination.
+"""
 
 import argparse
 import asyncio
@@ -22,8 +35,8 @@ import json
 
 import lmdb
 
-from cuvslam_tools.offline_map_repair.mcp_client import call, with_session
-from cuvslam_tools.offline_map_repair.workspace import HERE, MAP_ROOT
+from cuvslam_tools.offline_map_repair.core.mcp_client import call, with_session
+from cuvslam_tools.offline_map_repair.core.workspace import HERE, MAP_ROOT
 
 
 async def run(s):

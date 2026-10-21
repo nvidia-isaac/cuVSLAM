@@ -27,7 +27,7 @@ from pathlib import Path
 from unittest import mock
 
 from cuvslam_tools.offline_map_repair import cli
-from cuvslam_tools.offline_map_repair.run_sequence import frame_metadata
+from cuvslam_tools.offline_map_repair.sessions.run_sequence import frame_metadata
 
 
 class OfflineMapRepairCliTests(unittest.TestCase):
@@ -48,10 +48,18 @@ class OfflineMapRepairCliTests(unittest.TestCase):
     def test_dispatch_preserves_workflow_arguments(self):
         with mock.patch.object(cli, "import_module") as load:
             cli.main(["verify", "baseline", "repaired", "--extractor", "/opt/bin/map_extractor"])
-        load.assert_called_once_with("cuvslam_tools.offline_map_repair.verify_maps")
+        load.assert_called_once_with("cuvslam_tools.offline_map_repair.validation.verify_maps")
         load.return_value.main.assert_called_once_with(
             ["baseline", "repaired", "--extractor", "/opt/bin/map_extractor"]
         )
+
+    def test_every_command_resolves_to_an_existing_module(self):
+        # The command table carries dotted paths into the functional subpackages, so a
+        # moved or renamed workflow module would otherwise only fail when invoked.
+        for command, (module, _) in cli.COMMANDS.items():
+            with self.subTest(command=command):
+                name = f"cuvslam_tools.offline_map_repair.{module}"
+                self.assertIsNotNone(importlib.util.find_spec(name), name)
 
     def test_server_configuration_is_package_data(self):
         package = resources.files("cuvslam_tools.offline_map_repair.mcp_server")

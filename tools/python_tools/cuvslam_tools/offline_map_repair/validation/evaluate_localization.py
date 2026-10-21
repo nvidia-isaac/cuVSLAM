@@ -12,7 +12,22 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
-"""Frozen same-sequence relocalization benchmark; ground truth is evaluation-only."""
+"""Score candidate maps by running cuVSLAM's native relocalizer against frozen queries.
+
+Run ``--prepare`` once to freeze ``queries.json``, then evaluate every candidate map
+against that same manifest. Freezing matters: query selection, the random pose priors
+and the success thresholds must not vary between candidates, or the comparison means
+nothing.
+
+Each query is one stereo frame plus a deliberately perturbed pose prior (0.15 m and
+0.5 m offsets with a yaw error), simulating a robot that knows roughly where it is.
+``callback_success`` means the relocalizer returned any pose at all;
+``strict_success`` additionally requires it to be within 25 cm and 5 degrees.
+
+Ground truth is used here and only here - to place the queries and to score them.
+It never reaches a repair policy. Note that native RANSAC is randomized, so repeated
+runs on an identical map will not reproduce identical scores exactly.
+"""
 
 import argparse
 import json
@@ -22,9 +37,10 @@ from pathlib import Path
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from cuvslam_tools.offline_map_repair.euroc import get_rig, load_frame
-from cuvslam_tools.offline_map_repair.run_sequence import frame_metadata
-from cuvslam_tools.offline_map_repair.trajectory_utils import (
+from cuvslam_tools.offline_map_repair.core.workspace import HERE
+from cuvslam_tools.offline_map_repair.sessions.euroc import get_rig, load_frame
+from cuvslam_tools.offline_map_repair.sessions.run_sequence import frame_metadata
+from cuvslam_tools.offline_map_repair.sessions.trajectory import (
     errors,
     ground_truth,
     interpolate,
@@ -32,10 +48,15 @@ from cuvslam_tools.offline_map_repair.trajectory_utils import (
     matrix,
     pose,
 )
-from cuvslam_tools.offline_map_repair.workspace import HERE
 
 
 def make_queries(dataset, query_file, start_frame, evenly_spaced=False):
+    """Freeze one query manifest to be shared by every candidate map.
+
+    Queries live in the *map* frame, but ground truth lives in the EuRoC world frame,
+    so the two are tied together by a single rigid transform anchored at one baseline
+    keyframe. Opened with mode "x" so an existing manifest is never silently replaced.
+    """
     frames, _ = frame_metadata(dataset)
     gt_t, gt = ground_truth(dataset)
     base_t, base = load_trajectory(HERE / "baseline/optimized_trajectory.json")
@@ -47,6 +68,8 @@ def make_queries(dataset, query_file, start_frame, evenly_spaced=False):
     map_from_gt = base[anchor_index] @ np.linalg.inv(first_truth)
     rng = np.random.default_rng(20261015)
     queries = []
+    # Default selection: every 100th frame, stopping before the final frames whose
+    # pose prior would clamp against the end of the ground-truth span.
     indices = range(start_frame, min(1901, len(frames)), 100)
     if evenly_spaced:
         eligible = [i for i, f in enumerate(frames) if i >= start_frame and gt_t[0] <= f["timestamp"] <= gt_t[-1]]
@@ -56,6 +79,8 @@ def make_queries(dataset, query_file, start_frame, evenly_spaced=False):
         if not gt_t[0] <= timestamp <= gt_t[-1]:
             continue
         truth = map_from_gt @ interpolate(gt_t, gt, np.array([timestamp]))[0]
+        # Two prior qualities per frame: a good guess and a poor one. A map that only
+        # survives the tight prior has not really improved its searchable coverage.
         for magnitude in [0.15, 0.5]:
             guess = truth.copy()
             offset = rng.normal(size=3)
@@ -96,6 +121,7 @@ def make_queries(dataset, query_file, start_frame, evenly_spaced=False):
 
 
 def evaluate(map_name, limit, query_file):
+    """Run every frozen query against one map and write a per-query result file."""
     import cuvslam
 
     manifest = json.loads(query_file.read_text())

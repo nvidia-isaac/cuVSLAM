@@ -12,10 +12,26 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
-"""Version-specific offline decoder for cuVSLAM main 2a0882c, little-endian x86_64.
+"""Version-specific offline codec for cuVSLAM main 2a0882c, little-endian x86_64.
 
-Kept outside the MCP server: an agent can inspect and edit the raw representation
-using normal code. Descriptor bytes and unknown/padding fields are preserved.
+This is the only module that understands what the bytes in a saved map mean. It is
+deliberately on the *client* side of MCP: the server moves opaque records, and any
+knowledge of the native schema - which is not a stable interchange format - stays
+here where it can be versioned and replaced independently of the service.
+
+The decoder is lossy-by-omission on purpose. Fields it does not need (merged
+transforms, frame metadata, covariances, descriptor payloads, trailing padding) are
+sliced out as raw byte ranges and spliced back unchanged on encode, so a decode ->
+encode round trip of an unedited map is byte identical. `inspect` and `verify`
+assert exactly that, which is what makes an edit's diff trustworthy.
+
+The four tables:
+  main           three fixed keys - 1: spatial-index config, 2: pose graph
+                 (keyframes + edges), 3: pose hypotheses (keyframe id -> T_world_kf)
+  landmarks      per landmark: observations in keyframe coordinates, plus the
+                 spatial cells the landmark is reachable from
+  descriptors    appearance patches, keyed by landmark id, never interpreted here
+  spatial_cells  cell id -> landmark ids, the lookup index the relocalizer searches
 """
 
 import base64
@@ -27,10 +43,12 @@ import numpy as np
 
 
 def key(i):
+    """Pack an id as the native 8-byte little-endian LMDB key / inline u64 field."""
     return struct.pack("<Q", i)
 
 
 def vector(ids):
+    """Encode a native length-prefixed u64 array (std::vector<uint64_t> on the wire)."""
     return key(len(ids)) + np.asarray(ids, dtype="<u8").tobytes()
 
 
@@ -40,6 +58,12 @@ def matrix_bytes(m):
 
 
 class Reader:
+    """Sequential little-endian cursor over one record blob.
+
+    `take` bounds-checks and `done` insists the blob was fully consumed, so a schema
+    drift in the native format surfaces as a parse error rather than silent garbage.
+    """
+
     def __init__(self, data):
         self.data, self.pos = data, 0
 
@@ -66,6 +90,7 @@ class Reader:
         return np.frombuffer(self.take(self.u64() * 8), dtype="<u8").tolist()
 
     def matrix(self):
+        # 4x4 float32 homogeneous transform, column-major as Eigen stores it.
         return np.frombuffer(self.take(64), dtype="<f4").reshape(4, 4, order="F").copy()
 
     def done(self):
@@ -82,6 +107,7 @@ class MapData:
 
     def __init__(self, records):
         self.records = records
+        # --- main/3: pose hypotheses, the absolute T_world_keyframe this map believes in.
         reader = Reader(records["main"][key(3)])
         if reader.string() != "PoseGraphHypothesis v0.0":
             raise ValueError("Unsupported pose hypothesis")
@@ -91,6 +117,7 @@ class MapData:
             identifier = reader.u64()
             self.poses[identifier] = reader.matrix()
         reader.done()
+        # --- main/2: the pose graph itself - keyframes followed by edges.
         reader = Reader(records["main"][key(2)])
         if reader.string() != "PoseGraph v0.00":
             raise ValueError("Unsupported graph")
@@ -103,7 +130,9 @@ class MapData:
                 raise ValueError("Unsupported keyframe")
             identifier = reader.u64()
             prefix = reader.data[start : reader.pos]
-            ids = reader.ids()
+            ids = reader.ids()  # landmark ids observed by this keyframe; editable
+            # Everything from here to the end of the keyframe is opaque to us. Record
+            # the offset so it can be spliced back verbatim in `encode`.
             tail = reader.pos
             reader.take(reader.u64() * 64)  # merged transforms
             reader.string()  # frame metadata
@@ -139,12 +168,17 @@ class MapData:
                 }
             )
         reader.done()
+        # --- main/1: spatial index configuration. Only the cell size matters offline;
+        # the rest of the header is fixed and the per-cell contents live in their
+        # own table, so the record is read for `cell_size` and otherwise untouched.
         reader = Reader(records["main"][key(1)])
         if reader.string() != "LSIGrid v0.03":
             raise ValueError("Unsupported spatial index")
         self.cell_size = reader.unpack("f")[0]
         reader.take(16)
         reader.done()
+        # --- landmarks table. `xyz` is the point in its observing keyframe's frame and
+        # `eye` the observer position in that same frame, so both move with the pose.
         self.landmarks = {}
         for binary_key, blob in records["landmarks"].items():
             reader = Reader(blob)
@@ -169,7 +203,12 @@ class MapData:
             }
 
     def xyz(self, landmark):
-        """Match native landmark reconstruction: average linked observations in world space."""
+        """Reconstruct a landmark's world position the way the native decoder does.
+
+        A landmark has no stored world XYZ: it is the mean of its *linked* observations
+        pushed through their keyframe poses. Moving the pose graph therefore moves the
+        map geometry implicitly, which is why pose edits must be followed by a reindex.
+        """
         values = [
             self.poses[o["keyframe"]][:3, :3] @ o["xyz"] + self.poses[o["keyframe"]][:3, 3]
             for o in landmark["observations"]
@@ -185,6 +224,7 @@ class MapData:
         Even with reindex=False, stale cell members and removed descriptors disappear.
         """
         out = copy.deepcopy(self.records)
+        # Pose hypotheses: prefix (schema string) + count + (id, matrix) pairs.
         out["main"][key(3)] = (
             self.hypothesis_prefix
             + key(len(self.poses))
@@ -193,6 +233,8 @@ class MapData:
         frames = []
         for info in self.keyframes.values():
             frames.append(info["prefix"] + vector(info["landmarks"]) + info["suffix"])
+        # Edges carry a *relative* transform measured between two keyframes. When the
+        # absolute poses are replaced, those measurements no longer match the graph.
         edges = []
         for edge in self.edges:
             raw = edge["raw"]
@@ -200,15 +242,23 @@ class MapData:
                 # Experimental policy: T_a_b = inverse(T_world_a) @ T_world_b.
                 # Preserve covariance/tracks/error bytes; this is not graph optimization.
                 transform = np.linalg.inv(self.poses[edge["a"]]) @ self.poses[edge["b"]]
+                # Bytes 28..92 are the transform; splice it in and keep covariance,
+                # track count and error exactly as the native optimizer left them.
                 raw = raw[:28] + matrix_bytes(transform) + raw[92:]
             edges.append(raw)
         out["main"][key(2)] = (
             self.graph_prefix + key(len(frames)) + b"".join(frames) + key(len(edges)) + b"".join(edges)
         )
+        # Rebuild the landmark records and, from them, the whole spatial index. The
+        # index is derived state: `spatial_cells` is regenerated from what the surviving
+        # landmarks claim, so a deleted landmark cannot leave a dangling cell member.
         out["landmarks"] = {}
         cells = {}
         for identifier, lm in self.landmarks.items():
             if reindex:
+                # Note: this updates lm["cells"] on the live object, so a reindexing
+                # encode also mutates this MapData. Callers decode the encoded result
+                # into a fresh MapData rather than reusing this one.
                 xyz = self.xyz(lm)
                 lm["cells"] = sorted(
                     {
@@ -230,12 +280,18 @@ class MapData:
                 + struct.pack("<4i", *lm["probes"])
             )
         out["spatial_cells"] = {key(c): vector(sorted(set(ids))) for c, ids in cells.items()}
+        # Descriptor bytes are never rewritten, only dropped with their landmark.
         out["descriptors"] = {
             k: v for k, v in out["descriptors"].items() if int.from_bytes(k, "little") in self.landmarks
         }
         return out
 
     def remove_landmarks(self, identifiers):
+        """Drop landmarks and every keyframe reference to them.
+
+        Descriptors and cell memberships follow automatically in `encode`, so this plus
+        an encode is the complete deletion path.
+        """
         ids = set(identifiers)
         for i in ids:
             del self.landmarks[i]
@@ -243,6 +299,11 @@ class MapData:
             frame["landmarks"] = [i for i in frame["landmarks"] if i not in ids]
 
     def validate(self):
+        """Report referential-integrity problems in the *intended* records.
+
+        Called before every commit. The native map has no foreign keys, so a bad edit
+        would be accepted by LMDB and only fail later inside the relocalizer.
+        """
         issues = []
         # cuVSLAM retains pose hypotheses for graph nodes removed by reduction.
         if not set(self.keyframes).issubset(self.poses):
@@ -297,6 +358,12 @@ def cell_id(eye, xyz, size):
 
 
 def changes_between(old, new):
+    """Build the minimal conditional-write batch turning `old` records into `new`.
+
+    `expected_sha256` is the compare-and-swap token: the hash of the record as it was
+    read, or None to assert the record is absent. `value_base64` of None is a delete.
+    The server aborts the entire batch if any token is stale.
+    """
     changes = []
     for table in old:
         for k in sorted(old[table].keys() | new[table].keys()):
