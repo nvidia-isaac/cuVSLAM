@@ -38,9 +38,7 @@ from cuvslam_kpi_report import (COUNT_METRICS, COUNT_MIN_BAND, DEFAULT_BASELINE,
 
 SITE_SUBDIR = "kpi"
 SCHEMA_VERSION = 3
-SITE_SOURCE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kpi_site")
-PAGE_SOURCE = os.path.join(SITE_SOURCE_DIR, "index.html")
-DEFAULT_EXCLUSIONS = os.path.join(SITE_SOURCE_DIR, "exclusions.json")
+PAGE_SOURCE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kpi_site", "index.html")
 # An eval is retired when no config produced a value for it in its last few nights with results; a margin of
 # several nights keeps one broken nightly from retiring everything.
 RETIRED_AFTER_RUNS = 3
@@ -85,44 +83,6 @@ def load_config_runs(path):
     if os.path.isdir(path):
         return load_history_dir(path), None
     return load_report_file(path)
-
-
-def load_exclusions(path):
-    """Validated entries of the exclusions file: {"dataset", "types", "runs", "reason"} each."""
-    data = load_json_object(path, "KPI site exclusions")
-    entries = data.get("exclusions", [])
-    if not isinstance(entries, list):
-        raise ValueError(f"exclusions in {path} must be a list")
-    for index, entry in enumerate(entries):
-        where = f"{path} exclusions[{index}]"
-        if not isinstance(entry, dict) or set(entry) != {"dataset", "types", "runs", "reason"}:
-            raise ValueError(f"{where} must have exactly dataset, types, runs, and reason")
-        if not isinstance(entry["dataset"], str) or not entry["reason"]:
-            raise ValueError(f"{where} needs a dataset name and a reason")
-        for field in ("types", "runs"):
-            if not entry[field] or not all(isinstance(item, str) for item in entry[field]):
-                raise ValueError(f"{where} {field} must be a non-empty list of strings")
-    return entries
-
-
-def apply_exclusions(configs, entries):
-    """Drop the excluded values from every config, in place; warn about entries that match nothing."""
-    for entry in entries:
-        matched = 0
-        for runs in configs.values():
-            for run in entry["runs"]:
-                values = runs.get(run, {})
-                for key in list(values):
-                    parsed = parse_kpi_key(key)
-                    if not parsed:
-                        continue
-                    dataset, mode = parsed[0].split("-", 1)
-                    if dataset == entry["dataset"] and mode.rsplit("_", 1)[0] in entry["types"]:
-                        del values[key]
-                        matched += 1
-        if not matched:
-            print(f"Warning: exclusion for {entry['dataset']} {entry['types']} on {entry['runs']} matches no value",
-                  file=sys.stderr)
 
 
 def retired_keys(data_configs):
@@ -241,8 +201,6 @@ def build_site(args):
             if stored_settings.setdefault(dataset, entry) != entry:
                 raise ValueError(f"report inputs disagree on the baseline settings for {dataset}: "
                                  f"{stored_settings[dataset]} and {entry} ({path})")
-    if args.exclusions:
-        apply_exclusions(configs, load_exclusions(args.exclusions))
     data = build_data(configs, stored_settings, args.kpi_config)
 
     if args.docs_dir:
@@ -269,9 +227,6 @@ def main():
     parser.add_argument("--kpi-config",
                         help="KPI config JSON (scripts/kpi_baseline_ranges.json) for the regression check; required "
                              "for history directories, and checked against the settings stored in reports")
-    parser.add_argument("--exclusions", default=DEFAULT_EXCLUSIONS,
-                        help="JSON list of KPI values to leave out, such as an eval's broken first night "
-                             "(default: %(default)s; pass an empty string for none)")
     parser.add_argument("--docs-dir", help="gh-pages tree to publish unchanged next to kpi/")
     parser.add_argument("--output", required=True, help="new directory to write the site into")
     args = parser.parse_args()

@@ -382,17 +382,24 @@ function tracesFor(s, name) {
   return traces;
 }
 
-function syncX(divs) {
+// The date span of every visible trace, so all charts share one axis and changes line up across datasets.
+function dateSpan(traces) {
+  const times = traces.flatMap((t) => t.x).filter((x) => x !== null).map((x) => (typeof x === "number" ? x : Date.parse(x)));
+  const lo = Math.min(...times) - DAY_MS / 2, hi = Math.max(...times) + DAY_MS / 2;
+  return [new Date(lo).toISOString(), new Date(hi).toISOString()];
+}
+
+function syncX(divs, sharedRange) {
   let syncing = false;
   for (const div of divs) {
     div.on("plotly_relayout", (ev) => {
       if (syncing) return;
-      const range = ev["xaxis.range[0]"] !== undefined ? [ev["xaxis.range[0]"], ev["xaxis.range[1]"]]
-                  : ev["xaxis.autorange"] ? null : undefined;
-      if (range === undefined) return;
+      // A reset (double-click or the home button) returns every chart to the shared range, not each to its own.
+      const zoomed = ev["xaxis.range[0]"] !== undefined;
+      if (!zoomed && !ev["xaxis.autorange"]) return;
+      const range = zoomed ? [ev["xaxis.range[0]"], ev["xaxis.range[1]"]] : sharedRange;
       syncing = true;
-      Promise.all(divs.filter((d) => d !== div).map((d) => Plotly.relayout(d, range ? {"xaxis.range": range}
-                                                                                      : {"xaxis.autorange": true})))
+      Promise.all(divs.filter((d) => zoomed ? d !== div : true).map((d) => Plotly.relayout(d, {"xaxis.range": range})))
         .finally(() => { syncing = false; });
     });
   }
@@ -418,18 +425,19 @@ function update() {
   root.style.gridTemplateColumns = columns ? `repeat(${columns}, minmax(0, 1fr))` : "";
   const height = state.height === "auto" ? (single ? "fill" : "360") : state.height;
   const panelHeight = height === "fill" ? `calc(100vh - ${FILL_OFFSET_PX}px)` : `${height}px`;
+  const sharedRange = dateSpan([...panels.values()].flat());
   const divs = [];
   for (const [panel, traces] of [...panels].sort((a, b) => a[0].localeCompare(b[0]))) {
     const div = document.createElement("div"); div.className = "panel"; div.style.height = panelHeight;
     root.append(div); divs.push(div);
     Plotly.newPlot(div, traces, {
       title: {text: panelTitle(panel), font: {size: 14}, x: 0.01, xanchor: "left"}, margin: {l: 55, r: 10, t: 36, b: 40},
-      xaxis: {type: "date", tickformat: "%b %d"},
+      xaxis: {type: "date", tickformat: "%b %d", range: sharedRange},
       yaxis: {type: state.log && state.yaxis === "abs" ? "log" : "linear", zeroline: state.yaxis === "pct"},
       legend: {font: {size: 10}, orientation: "h", y: -0.18}, hovermode: "closest",
     }, {responsive: true, displaylogo: false, displayModeBar: "hover"});
   }
-  syncX(divs);
+  syncX(divs, sharedRange);
 }
 
 function showError(message) {
