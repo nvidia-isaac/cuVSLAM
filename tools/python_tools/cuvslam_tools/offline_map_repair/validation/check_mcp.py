@@ -32,6 +32,8 @@ import asyncio
 import base64
 import hashlib
 import json
+import tempfile
+from pathlib import Path
 
 import lmdb
 
@@ -66,8 +68,13 @@ async def run(s):
         "write_records", {"map_name": "baseline/map", "changes": [change], "reason": "Check baseline protection"}
     )
     passed.append("Baseline write protection")
-    result = await s.call_tool("describe_map", {"map_name": str(MAP_ROOT.parent / "outside")})
-    assert result.isError
+    # The path must hold a real data.mdb, otherwise map_path rejects it for being a
+    # missing database and the check would pass with the containment guard removed.
+    with tempfile.TemporaryDirectory(prefix="cuvslam-mcp-outside-", dir=MAP_ROOT.parent) as folder:
+        (Path(folder) / "data.mdb").touch()
+        result = await s.call_tool("describe_map", {"map_name": folder})
+        assert result.isError
+        assert "below the configured root" in str(result)
     passed.append("Root confinement")
     await call(s, "clone_map", {"source": "baseline/map", "destination": "mcp_checks/map"})
     stale = {**change, "key_hex": (999999999).to_bytes(8, "little").hex(), "expected_sha256": "wrong"}

@@ -48,9 +48,19 @@ async def commit(session, source, destination, old, new, reason):
     issues = MapData(new).validate()
     if issues:
         raise ValueError(issues[:20])
-    await call(session, "clone_map", {"source": source, "destination": destination})
+    # Compute the diff before cloning. The server rejects an empty batch, and a
+    # policy that selected nothing produces exactly that - pruning zero landmarks
+    # re-encodes to identical bytes. Cloning first would leave an orphaned
+    # destination directory that makes every retry fail on mkdir.
     changes = changes_between(old, new)
-    result = await call(session, "write_records", {"map_name": destination, "changes": changes, "reason": reason})
+    if not changes:
+        raise ValueError(f"No record changes for {destination}; the policy selected nothing to edit")
+    await call(session, "clone_map", {"source": source, "destination": destination})
+    try:
+        result = await call(session, "write_records", {"map_name": destination, "changes": changes, "reason": reason})
+    except Exception as error:
+        # The clone exists but is unedited, and there is no delete tool by design.
+        raise RuntimeError(f"Write failed; remove the orphaned clone {destination} before retrying") from error
     parent = HERE / Path(destination).parent
     (parent / "records.pkl").write_bytes(pickle.dumps(new))
     (parent / "edit.json").write_text(

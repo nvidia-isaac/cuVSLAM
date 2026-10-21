@@ -191,6 +191,8 @@ def main(argv=None):
     if args.prepare:
         make_queries(args.prepare, args.queries, args.start_frame, args.evenly_spaced)
     else:
+        if not args.map_name:
+            ap.error("map_name is required unless --prepare is given")
         evaluate(args.map_name, args.limit, args.queries)
 
 

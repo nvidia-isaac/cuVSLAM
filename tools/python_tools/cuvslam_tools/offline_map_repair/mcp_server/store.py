@@ -35,6 +35,7 @@ The marker is a workflow guard, not authentication; this is a trusted local serv
 import base64
 import hashlib
 import json
+import shutil
 import time
 from pathlib import Path
 
@@ -55,8 +56,13 @@ class MapStore:
         """Resolve a root-relative map name, refusing anything that escapes the root."""
         # Resolve first, then test containment, so symlinks and ".." cannot slip out.
         p = (self.root / name).resolve()
-        if not p.is_relative_to(self.root) or not (p / "data.mdb").is_file():
-            raise ValueError("Map must be an existing database below the configured root")
+        # Two distinct failures, reported distinctly: a caller reaching outside the
+        # root is a confinement violation, a missing database is a typo. One shared
+        # message also made the root-confinement check impossible to assert on.
+        if not p.is_relative_to(self.root):
+            raise ValueError("Map must be below the configured root")
+        if not (p / "data.mdb").is_file():
+            raise ValueError("Map must be an existing database")
         return p
 
     def open_map(self, name, write=False):
@@ -101,17 +107,25 @@ class MapStore:
         if not dst.is_relative_to(self.root) or dst == self.root:
             raise ValueError("Destination must be below the configured root")
         dst.mkdir(parents=True, exist_ok=False)
-        with self.open_map(source) as env:
-            env.copy(str(dst), compact=True)
-        (dst / "agent-copy.json").write_text(
-            json.dumps(
-                {
-                    "source": source,
-                    "source_sha256": digest((src / "data.mdb").read_bytes()),
-                    "created_ns": time.time_ns(),
-                }
+        # A clone is only usable once both the data and its marker are in place. If
+        # either step fails, remove the directory: leaving a partial one behind would
+        # make every retry fail on mkdir, and an unmarked data.mdb is not writable
+        # anyway. Catch BaseException so a cancelled request cleans up too.
+        try:
+            with self.open_map(source) as env:
+                env.copy(str(dst), compact=True)
+            (dst / "agent-copy.json").write_text(
+                json.dumps(
+                    {
+                        "source": source,
+                        "source_sha256": digest((src / "data.mdb").read_bytes()),
+                        "created_ns": time.time_ns(),
+                    }
+                )
             )
-        )
+        except BaseException:
+            shutil.rmtree(dst, ignore_errors=True)
+            raise
         return self.describe_map(destination)
 
     def read_records(self, map_name: str, table: str, offset: int = 0, limit: int = 500) -> dict:
@@ -123,11 +137,18 @@ class MapStore:
             h = self.table_handle(env, table)
             with env.begin(db=h) as txn:
                 total = txn.stat()["entries"]
-                for i, (key, value) in enumerate(txn.cursor()):
-                    if i < offset:
-                        continue
-                    if len(rows) == limit:
+                cursor = txn.cursor()
+                positioned = cursor.first()
+                # Walk to `offset` with cursor moves rather than the (key, value)
+                # iterator: a full table read pages through it repeatedly, and
+                # materializing every skipped value makes that quadratic in the
+                # record bytes. `descriptors` is the bulk of the database.
+                for _ in range(offset):
+                    if not positioned:
                         break
+                    positioned = cursor.next()
+                while positioned and len(rows) < limit:
+                    key, value = cursor.item()
                     rows.append(
                         {
                             "key_hex": key.hex(),
@@ -135,6 +156,7 @@ class MapStore:
                             "sha256": digest(value),
                         }
                     )
+                    positioned = cursor.next()
         return {"records": rows, "total": total, "next_offset": offset + len(rows)}
 
     def write_records(self, map_name: str, changes: list[dict], reason: str) -> dict:

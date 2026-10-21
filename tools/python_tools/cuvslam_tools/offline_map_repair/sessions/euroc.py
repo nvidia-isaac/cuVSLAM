@@ -123,6 +123,16 @@ def _get_sensor_paths(euroc_path: str) -> Tuple[str, str, str, bool]:
     )
 
 
+def calibration_source(euroc_path: str) -> str:
+    """Name the calibration file `get_rig` loads for this sequence.
+
+    Derived from `_get_sensor_paths` rather than repeating its recalibrated-file
+    check, so recorded provenance cannot drift from the rig actually used.
+    """
+    cam0_path, _, _, _ = _get_sensor_paths(euroc_path)
+    return os.path.basename(cam0_path)
+
+
 def _create_camera_from_config(config: dict, is_default: bool) -> cuvslam.Camera:
     """Create camera object from config."""
     import cuvslam

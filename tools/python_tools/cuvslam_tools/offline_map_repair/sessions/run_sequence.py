@@ -38,7 +38,7 @@ from pathlib import Path
 
 import numpy as np
 
-from cuvslam_tools.offline_map_repair.sessions.euroc import get_rig, load_frame, read_csv_data
+from cuvslam_tools.offline_map_repair.sessions.euroc import calibration_source, get_rig, load_frame, read_csv_data
 
 
 def frame_metadata(dataset, inertial=False):
@@ -155,7 +155,9 @@ def main(argv=None):
         "elapsed_s": time.monotonic() - started,
         "source_commit": args.source_commit,
         "cuvslam_version": str(cuvslam.get_version()),
-        "calibration": "dataset sensor.yaml",
+        # A sequence carrying sensor_recalibrated.yaml is rigged from that file, and
+        # this field is the record that mapping and localization used the same rig.
+        "calibration": f"dataset {calibration_source(str(args.dataset / 'mav0'))}",
         # Recorded so `verify` can prove afterwards that the baseline was never edited.
         "map_sha256": hashlib.sha256((args.output / "map/data.mdb").read_bytes()).hexdigest(),
         "ground_truth_used": False,

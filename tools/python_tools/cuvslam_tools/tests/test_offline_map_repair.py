@@ -14,6 +14,7 @@
 
 """Offline map repair packaging, raw EuRoC pairing, and transactional storage."""
 
+import asyncio
 import base64
 import builtins
 import contextlib
@@ -90,6 +91,52 @@ class OfflineMapRepairCliTests(unittest.TestCase):
         self.assertEqual(frames[0]["accel"], [4.0, 5.0, 6.0])
 
 
+class EurocCalibrationProvenanceTests(unittest.TestCase):
+    def sequence(self, recalibrated):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        root = Path(folder.name)
+        for sensor in ("cam0", "cam1", "imu0"):
+            (root / sensor).mkdir()
+            (root / sensor / "sensor.yaml").touch()
+            if recalibrated:
+                (root / sensor / "sensor_recalibrated.yaml").touch()
+        return str(root)
+
+    def test_reports_the_calibration_file_get_rig_would_load(self):
+        from cuvslam_tools.offline_map_repair.sessions.euroc import calibration_source
+
+        self.assertEqual(calibration_source(self.sequence(False)), "sensor.yaml")
+        self.assertEqual(calibration_source(self.sequence(True)), "sensor_recalibrated.yaml")
+
+
+class EvaluateArgumentTests(unittest.TestCase):
+    def test_map_name_is_required_unless_preparing(self):
+        from cuvslam_tools.offline_map_repair.validation import evaluate_localization
+
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as result:
+            evaluate_localization.main([])
+        self.assertEqual(result.exception.code, 2)
+
+
+class CommitGuardTests(unittest.TestCase):
+    def test_empty_change_set_is_refused_before_anything_is_cloned(self):
+        # Pruning zero landmarks re-encodes to identical bytes. Cloning first would
+        # leave an orphaned destination that makes every retry fail on mkdir.
+        from cuvslam_tools.offline_map_repair.core import commit as commit_module
+
+        records = {table: {} for table in ("main", "landmarks", "descriptors", "spatial_cells")}
+        with mock.patch.object(commit_module, "MapData") as decoded, mock.patch.object(commit_module, "call") as tool:
+            decoded.return_value.validate.return_value = []
+            self.assertRaisesRegex(
+                ValueError,
+                "selected nothing to edit",
+                asyncio.run,
+                commit_module.commit(None, "baseline/map", "copy/map", records, records, "No-op"),
+            )
+            tool.assert_not_called()
+
+
 @unittest.skipUnless(importlib.util.find_spec("lmdb"), "Install cuvslam-tools[map-repair] for LMDB tests")
 class OfflineMapStoreTests(unittest.TestCase):
     def setUp(self):
@@ -125,6 +172,9 @@ class OfflineMapStoreTests(unittest.TestCase):
             self.store.write_records("baseline", [self.change(b"new")], "Original must be read-only")
         with self.assertRaisesRegex(ValueError, "below the configured root"):
             self.store.describe_map(str(self.root.parent))
+        # A missing database reports separately, so confinement can be asserted on.
+        with self.assertRaisesRegex(ValueError, "existing database"):
+            self.store.describe_map("no_such_map")
         self.store.clone_map("baseline", "copy")
         with self.assertRaises(FileExistsError):
             self.store.clone_map("baseline", "copy")
@@ -140,6 +190,45 @@ class OfflineMapStoreTests(unittest.TestCase):
             audit = env.open_db(b"agent_audit", create=False)
             with env.begin(db=audit) as txn:
                 self.assertEqual(txn.stat()["entries"], 0)
+
+    def test_failed_clone_leaves_no_directory_behind(self):
+        with (
+            mock.patch.object(type(self.store), "open_map", side_effect=RuntimeError("copy failed")),
+            self.assertRaisesRegex(RuntimeError, "copy failed"),
+        ):
+            self.store.clone_map("baseline", "copy")
+        self.assertFalse((self.root / "copy").exists())
+        # The destination is reusable, so a retry is not blocked by a partial clone.
+        self.store.clone_map("baseline", "copy")
+        self.assertTrue((self.root / "copy" / "agent-copy.json").is_file())
+
+    def test_pagination_returns_every_record_once_for_any_page_size(self):
+        import lmdb
+
+        from cuvslam_tools.offline_map_repair.mcp_server.store import TABLES
+
+        many = self.root / "many"
+        many.mkdir()
+        expected = {(i).to_bytes(8, "little"): bytes([i]) * (i + 1) for i in range(7)}
+        with lmdb.open(str(many), max_dbs=10) as env:
+            handles = {name: env.open_db(name.encode()) for name in TABLES}
+            with env.begin(write=True) as txn:
+                for key, value in expected.items():
+                    txn.put(key, value, db=handles["landmarks"])
+        for limit in (1, 2, 3, 7, 10):
+            with self.subTest(limit=limit):
+                rows, offset = [], 0
+                while True:
+                    page = self.store.read_records("many", "landmarks", offset=offset, limit=limit)
+                    self.assertEqual(page["total"], len(expected))
+                    rows.extend(page["records"])
+                    offset = page["next_offset"]
+                    if offset >= page["total"]:
+                        break
+                self.assertEqual(
+                    {bytes.fromhex(r["key_hex"]): base64.b64decode(r["value_base64"]) for r in rows}, expected
+                )
+                self.assertEqual(len(rows), len(expected))
 
     def test_delete_preserves_undo_bytes_and_original(self):
         self.store.clone_map("baseline", "copy")
