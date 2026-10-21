@@ -246,10 +246,11 @@ public:
   // Predicts the relative cost reduction the step should bring, the denominator of the LM gain
   // ratio, and writes that one float to `prediction` on the device. current_cost is the cost the
   // step starts from and lambda the damping it was computed with, so both must match the
-  // compute_update() call that produced `update`.
+  // compute_update() call that produced `update`. deterministic adds the partial sums in a fixed order.
+  // Returns false, before queueing anything, if the counts exceed the sizes this instance was built with.
   bool predict_reduction(float current_cost, float lambda, const GPUParameterUpdateMeta& update,
                          const GPULinearSystemMeta& full_system, int num_points, int num_poses, float* prediction,
-                         cudaStream_t s);
+                         bool deterministic, cudaStream_t s);
 
   /// @see GPUCholeskySolver::solve_succeeded
   bool solve_succeeded() const;
@@ -263,6 +264,8 @@ private:
   GPUArrayPinned<float> pose_hessian_term_{1};
   // point_hessian_term_, point_scaling_term_, pose_scaling_term_
   GPUArrayPinned<float> hessian_and_scaling_terms_{3};
+  // scratch for the deterministic sums: one float per point coordinate or pose parameter at most
+  GPUOnlyArray<float> partials_;
 };
 
 }  // namespace cuvslam::cuda::sba

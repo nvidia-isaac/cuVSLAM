@@ -60,6 +60,8 @@ struct BundleAdjustmentProblem {
   // solver options
   int32_t max_iterations = 20;
   float robustifier_scale = 1.f;
+  // GPU solver: add partial sums in a fixed order, so equal problems give equal bits
+  bool deterministic = false;
 
   // solver statistic
   int32_t iterations = 0;

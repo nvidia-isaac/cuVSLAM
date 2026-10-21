@@ -531,6 +531,10 @@ public:
     /// 0.4 px for KITTI at 1000 m) is well inside LK's basin. Infinity is therefore unnecessary,
     /// and non-finite values are rejected.
     float max_depth = -1.f;
+    /// Make GPU tracking give the same poses on every run with the same input, build and GPU: tied keypoints are
+    /// ordered by position and GPU sums are added in a fixed order. Covers the Multicamera and Inertial modes with
+    /// async_sba = false. Default: false
+    bool deterministic = false;
   };
 
   // TODO(vikuznetsov): remove when https://gcc.gnu.org/bugzilla/show_bug.cgi?id=88165 is fixed

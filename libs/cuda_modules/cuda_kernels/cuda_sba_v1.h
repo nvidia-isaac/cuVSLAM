@@ -104,8 +104,9 @@ cudaError_t build_full_system(GPULinearSystemMeta system, GPUModelFunctionMeta f
 cudaError_t build_reduced_system(GPULinearSystemMeta full_system, GPULinearSystemMeta reduced_system, int num_points,
                                  int num_poses, float lambda, float threshold, cudaStream_t s);
 
+// partials: nullptr adds with float atomics, else one float per MAX_THREADS observations, added in a fixed order.
 cudaError_t evaluate_cost(float *cost, int *num_skipped, GPUBundleAdjustmentProblemMeta problem_meta,
-                          GPUParameterUpdateMeta update, float robustifier_scale, cudaStream_t s);
+                          GPUParameterUpdateMeta update, float robustifier_scale, float *partials, cudaStream_t s);
 
 cudaError_t calc_update(float *point, float *camera_backsub_block_T, size_t pitch, float *point_rhs, Pose *poses,
                         float6 *twists, int num_points, int num_poses, cudaStream_t s);
@@ -115,13 +116,17 @@ cudaError_t reduce_abs_max(float *array, size_t size, float *result, cudaStream_
 cudaError_t update_parameters(Point *points, float3 *point_update, Pose *poses, Pose *pose_update, int num_points,
                               int num_poses, cudaStream_t s);
 
+// partials: as in evaluate_cost, one float per row, or per column if use_M_transposed.
 cudaError_t v1T_x_M_x_v2(float *v1, float *matrix, size_t pitch, int rows, int cols, float *v2, float *result,
-                         bool use_M_transposed, cudaStream_t s);
+                         bool use_M_transposed, float *partials, cudaStream_t s);
 
+// partials: as in evaluate_cost, one float per MAX_THREADS elements.
 cudaError_t pose_scaling_term(float *vector, float *matrix, size_t matrix_pitch, int vector_size, float *res,
-                              cudaStream_t s);
+                              float *partials, cudaStream_t s);
 
-cudaError_t point_term(float3 *vector, Matf33 *blocks, int num_blocks, int is_scaling, float *res, cudaStream_t s);
+// partials: as in evaluate_cost, one float per MAX_THREADS blocks.
+cudaError_t point_term(float3 *vector, Matf33 *blocks, int num_blocks, int is_scaling, float *res, float *partials,
+                       cudaStream_t s);
 
 cudaError_t make_prediction(float current_cost, float lambda, float *pose_hessian_term_, float *point_hessian_term_,
                             float *pose_scaling_term_, float *point_scaling_term_, float *prediction, cudaStream_t s);

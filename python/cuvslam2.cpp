@@ -505,7 +505,7 @@ NB_MODULE(pycuvslam, m) {
       // WARNING: the order of init arguments in this definition must coincide with the order in the structure
       .def(nb::init<Odometry::MulticameraMode, Odometry::OdometryMode, bool, bool, bool, bool, bool, bool, bool, bool,
                     float, std::string_view, bool, const Odometry::RGBDSettings&, const Odometry::MultisensorSettings&,
-                    float, float>(),
+                    float, float, bool>(),
            nb::kw_only(), nb::arg("multicam_mode") = Odometry::Config{}.multicam_mode,
            nb::arg("odometry_mode") = Odometry::Config{}.odometry_mode, nb::arg("use_gpu") = Odometry::Config{}.use_gpu,
            nb::arg("async_sba") = Odometry::Config{}.async_sba,
@@ -520,7 +520,8 @@ NB_MODULE(pycuvslam, m) {
            nb::arg("debug_imu_mode") = Odometry::Config{}.debug_imu_mode,
            nb::arg("rgbd_settings") = Odometry::Config{}.rgbd_settings,
            nb::arg("multisensor_settings") = Odometry::Config{}.multisensor_settings,
-           nb::arg("min_depth") = Odometry::Config{}.min_depth, nb::arg("max_depth") = Odometry::Config{}.max_depth)
+           nb::arg("min_depth") = Odometry::Config{}.min_depth, nb::arg("max_depth") = Odometry::Config{}.max_depth,
+           nb::arg("deterministic") = Odometry::Config{}.deterministic)
       .def_rw("multicam_mode", &Odometry::Config::multicam_mode, "See :class:`Odometry.MulticameraMode`")
       .def_rw("odometry_mode", &Odometry::Config::odometry_mode, "See :class:`Odometry.OdometryMode`")
       .def_rw("use_gpu", &Odometry::Config::use_gpu, "Enable to use GPU acceleration")
@@ -550,7 +551,10 @@ NB_MODULE(pycuvslam, m) {
               "RGBD, Multisensor); ignored in Mono. Any negative value (e.g. -1) auto-detects from baseline.")
       .def_rw("max_depth", &Odometry::Config::max_depth,
               "Maximum scene depth (meters) sampled along the epipolar curve for L2R tracking. "
-              "Used in the same modes as min_depth. Any negative value (e.g. -1) auto-detects from baseline.");
+              "Used in the same modes as min_depth. Any negative value (e.g. -1) auto-detects from baseline.")
+      .def_rw("deterministic", &Odometry::Config::deterministic,
+              "Enable to get the same poses on every run with the same input, build and GPU. "
+              "Covers the Multicamera and Inertial modes with async_sba=False.");
 
   // Odometry::State binding
   nb::class_<Odometry::State>(odom_cls, "State",

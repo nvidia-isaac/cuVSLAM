@@ -22,6 +22,8 @@
 
 namespace cuvslam::cuda {
 
+GPUSelection::GPUSelection(bool deterministic) : deterministic_(deterministic) {}
+
 GPUSelection::~GPUSelection() { cudaFree(sort_temp_buffer_); }
 
 void GPUSelection::computeGFTTAndSelectFeatures(const GPUGradientPyramid &gradientPyramid, int border_top,
@@ -47,6 +49,9 @@ void GPUSelection::computeGFTTAndSelectFeatures(const GPUGradientPyramid &gradie
         (unsigned)(gftt_size_.x / NUM_BINS_X),
         (unsigned)(gftt_size_.y / NUM_BINS_Y),
     };
+    if (deterministic_) {
+      gftt_tile_sums_ = std::make_unique<GPUOnlyArray<float>>(accumulateGFTT_get_tile_sums_size(gftt_size_));
+    }
   }
 
   if (!downsampled_maximums_) {
@@ -83,7 +88,7 @@ void GPUSelection::computeGFTTAndSelectFeatures(const GPUGradientPyramid &gradie
   }
 
   CUDA_CHECK(accumulateGFTT(gftt_value_->get_texture_filter_point(), gftt_size_, bin_size_, num_bins_,
-                            bins_array_.ptr() + 2, stream));
+                            bins_array_.ptr() + 2, gftt_tile_sums_ ? gftt_tile_sums_->ptr() : nullptr, stream));
 
   CUDA_CHECK(non_max_suppression(gftt_value_->get_texture_filter_point(), gftt_size_, gftt_maximums_->ptr(),
                                  gftt_maximums_->pitch(), stream));
@@ -106,7 +111,8 @@ void GPUSelection::computeGFTTAndSelectFeatures(const GPUGradientPyramid &gradie
 
   {
     TRACE_EVENT ev_gftt = profiler_domain_.trace_event("sort", profiler_color_);
-    sort_keypoints(keypoints_->ptr(), kpCount_host[0], sort_temp_buffer_, sort_temp_buffer_size_, stream);
+    sort_keypoints(keypoints_->ptr(), kpCount_host[0], sort_temp_buffer_, sort_temp_buffer_size_, deterministic_,
+                   stream);
   }
 
   float GFTTSum = 0.f;

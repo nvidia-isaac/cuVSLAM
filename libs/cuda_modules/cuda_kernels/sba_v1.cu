@@ -631,7 +631,7 @@ __global__ void build_full_system_2_kernel(GPULinearSystemMeta system, GPUModelF
 }
 
 __global__ void evaluate_cost_kernel(float *cost, int *num_skipped, GPUBundleAdjustmentProblemMeta problem,
-                                     GPUParameterUpdateMeta update, float robustifier_scale) {
+                                     GPUParameterUpdateMeta update, float robustifier_scale, float *partials) {
   int idx = threadIdx.x + blockIdx.x * blockDim.x;
   float value = 0;
   int skipped_value = 0;
@@ -705,11 +705,49 @@ __global__ void evaluate_cost_kernel(float *cost, int *num_skipped, GPUBundleAdj
       skipped_value += __shfl_down_sync(0xffffffff, skipped_value, offset);
     }
     if (lane == 0) {
-      atomicAdd(cost, value);
+      if (partials) {
+        partials[blockIdx.x] = value;
+      } else {
+        atomicAdd(cost, value);
+      }
       atomicAdd(num_skipped, skipped_value);
     }
   }
 }
+
+namespace {
+
+// Adds partials[0, n) to *result in a fixed order and in double, so equal inputs give equal bits.
+__global__ void add_partials_kernel(const float *partials, int n, float *result) {
+  __shared__ double sums[MAX_THREADS];
+  double sum = 0;
+  for (int i = threadIdx.x; i < n; i += blockDim.x) {
+    sum += partials[i];
+  }
+  sums[threadIdx.x] = sum;
+  __syncthreads();
+  for (int stride = blockDim.x / 2; stride > 0; stride /= 2) {
+    if (threadIdx.x < stride) {
+      sums[threadIdx.x] += sums[threadIdx.x + stride];
+    }
+    __syncthreads();
+  }
+  if (threadIdx.x == 0) {
+    *result = static_cast<float>(*result + sums[0]);
+  }
+}
+
+// Without partials the kernel has already added its block results to `result` with float atomics.
+cudaError_t add_partials(const float *partials, int num_partials, float *result, cudaStream_t s) {
+  cudaError_t error = cudaGetLastError();
+  if (error != cudaSuccess || partials == nullptr) {
+    return error;
+  }
+  add_partials_kernel<<<1, MAX_THREADS, 0, s>>>(partials, num_partials, result);
+  return cudaGetLastError();
+}
+
+}  // namespace
 
 #define CALC_POINT_SHARED_WIDTH 8
 __global__ void calc_point_update_kernel_xavier_special(float *point, float *camera_backsub_block_, size_t pitch,
@@ -854,7 +892,7 @@ __global__ void update_poses_kernel(Pose *poses, Pose *updates, int num_poses) {
 
 // 1 block per row
 __global__ void v1T_x_M_x_v2_kernel(float *v1, float *matrix, size_t pitch, int rows, int cols, float *v2,
-                                    float *result, bool use_M_transposed) {
+                                    float *result, bool use_M_transposed, float *partials) {
   int row_id = blockIdx.x;
   if (row_id >= rows) {
     return;
@@ -888,13 +926,17 @@ __global__ void v1T_x_M_x_v2_kernel(float *v1, float *matrix, size_t pitch, int 
       row_dot += __shfl_down_sync(0xffffffff, row_dot, offset);
     }
     if (lane == 0) {
-      atomicAdd(result, row_dot * v1[row_id]);
+      if (partials) {
+        partials[row_id] = row_dot * v1[row_id];
+      } else {
+        atomicAdd(result, row_dot * v1[row_id]);
+      }
     }
   }
 }
 
 __global__ void v1T_x_M_T_x_v2_kernel(float *v1, float *matrix, size_t pitch, int rows /*6 * num_poses*/,
-                                      int cols /*3 * num_points */, float *v2, float *result) {
+                                      int cols /*3 * num_points */, float *v2, float *result, float *partials) {
   // blockDim.y = rows
   // blockDim.x = CALC_POINT_SHARED_WIDTH
 
@@ -920,12 +962,16 @@ __global__ void v1T_x_M_T_x_v2_kernel(float *v1, float *matrix, size_t pitch, in
     for (int i = 0; i < rows; i++) {
       out += shared_matrix_T[threadIdx.x * rows + i] * shared_v2[i];
     }
-    atomicAdd(result, out * v1[col]);
+    if (partials) {
+      partials[col] = out * v1[col];
+    } else {
+      atomicAdd(result, out * v1[col]);
+    }
   }
 }
 
-__global__ void pose_scaling_term_kernel(float *vector, float *matrix, size_t matrix_pitch, int vector_size,
-                                         float *res) {
+__global__ void pose_scaling_term_kernel(float *vector, float *matrix, size_t matrix_pitch, int vector_size, float *res,
+                                         float *partials) {
   int idx = threadIdx.x + blockIdx.x * blockDim.x;
   float partial_res = 0;
   if (idx < vector_size) {
@@ -955,12 +1001,17 @@ __global__ void pose_scaling_term_kernel(float *vector, float *matrix, size_t ma
       partial_res += __shfl_down_sync(0xffffffff, partial_res, offset);
     }
     if (lane == 0) {
-      atomicAdd(res, partial_res);
+      if (partials) {
+        partials[blockIdx.x] = partial_res;
+      } else {
+        atomicAdd(res, partial_res);
+      }
     }
   }
 }
 
-__global__ void point_term_kernel(float3 *vector, Matf33 *blocks, int num_blocks, bool is_scaling, float *res) {
+__global__ void point_term_kernel(float3 *vector, Matf33 *blocks, int num_blocks, bool is_scaling, float *res,
+                                  float *partials) {
   int idx = threadIdx.x + blockIdx.x * blockDim.x;
   float partial_res = 0;
   if (idx < num_blocks) {
@@ -997,7 +1048,11 @@ __global__ void point_term_kernel(float3 *vector, Matf33 *blocks, int num_blocks
       partial_res += __shfl_down_sync(0xffffffff, partial_res, offset);
     }
     if (lane == 0) {
-      atomicAdd(res, partial_res);
+      if (partials) {
+        partials[blockIdx.x] = partial_res;
+      } else {
+        atomicAdd(res, partial_res);
+      }
     }
   }
 }
@@ -1282,7 +1337,7 @@ cudaError_t build_reduced_system(GPULinearSystemMeta full_system, GPULinearSyste
 }
 
 cudaError_t evaluate_cost(float *cost, int *num_skipped, GPUBundleAdjustmentProblemMeta problem_meta,
-                          GPUParameterUpdateMeta update, float robustifier_scale, cudaStream_t s) {
+                          GPUParameterUpdateMeta update, float robustifier_scale, float *partials, cudaStream_t s) {
   size_t num_blocks = (problem_meta.num_observations + MAX_THREADS - 1) / MAX_THREADS;
 
   cudaError_t error = cudaMemsetAsync(cost, 0, sizeof(float), s);
@@ -1296,8 +1351,8 @@ cudaError_t evaluate_cost(float *cost, int *num_skipped, GPUBundleAdjustmentProb
 
   size_t shared_size = problem_meta.num_cameras * sizeof(Pose);
   evaluate_cost_kernel<<<num_blocks, MAX_THREADS, shared_size, s>>>(cost, num_skipped, problem_meta, update,
-                                                                    robustifier_scale);
-  return cudaGetLastError();
+                                                                    robustifier_scale, partials);
+  return add_partials(partials, static_cast<int>(num_blocks), cost, s);
 }
 
 cudaError_t calc_update(float *point, float *camera_backsub_block_T, size_t pitch, float *point_rhs, Pose *poses,
@@ -1337,10 +1392,11 @@ cudaError_t update_parameters(Point *points, float3 *point_update, Pose *poses, 
 }
 
 cudaError_t v1T_x_M_x_v2(float *v1, float *matrix, size_t pitch, int rows, int cols, float *v2, float *result,
-                         bool use_M_transposed, cudaStream_t s) {
+                         bool use_M_transposed, float *partials, cudaStream_t s) {
   if (!use_M_transposed) {
-    v1T_x_M_x_v2_kernel<<<rows, MAX_THREADS, 0, s>>>(v1, matrix, pitch, rows, cols, v2, result, use_M_transposed);
-    return cudaGetLastError();
+    v1T_x_M_x_v2_kernel<<<rows, MAX_THREADS, 0, s>>>(v1, matrix, pitch, rows, cols, v2, result, use_M_transposed,
+                                                     partials);
+    return add_partials(partials, rows, result, s);
   }
 
   if (USE_XAVIER_OPTIMIZATION && rows <= 6 * MAX_OPTIMAL_POSES) {
@@ -1348,25 +1404,27 @@ cudaError_t v1T_x_M_x_v2(float *v1, float *matrix, size_t pitch, int rows, int c
     dim3 blocks((cols + CALC_POINT_SHARED_WIDTH - 1) / CALC_POINT_SHARED_WIDTH, 1);
     size_t shared_size = rows * (CALC_POINT_SHARED_WIDTH + 1) * sizeof(float);
 
-    v1T_x_M_T_x_v2_kernel<<<blocks, threads, shared_size, s>>>(v1, matrix, pitch, rows, cols, v2, result);
+    v1T_x_M_T_x_v2_kernel<<<blocks, threads, shared_size, s>>>(v1, matrix, pitch, rows, cols, v2, result, partials);
   } else {
-    v1T_x_M_x_v2_kernel<<<cols, MAX_THREADS, 0, s>>>(v1, matrix, pitch, cols, rows, v2, result, use_M_transposed);
+    v1T_x_M_x_v2_kernel<<<cols, MAX_THREADS, 0, s>>>(v1, matrix, pitch, cols, rows, v2, result, use_M_transposed,
+                                                     partials);
   }
-  return cudaGetLastError();
+  return add_partials(partials, cols, result, s);
 }
 
 cudaError_t pose_scaling_term(float *vector, float *matrix, size_t matrix_pitch, int vector_size, float *res,
-                              cudaStream_t s) {
+                              float *partials, cudaStream_t s) {
   size_t num_blocks = (vector_size + MAX_THREADS - 1) / MAX_THREADS;
-  pose_scaling_term_kernel<<<num_blocks, MAX_THREADS, 0, s>>>(vector, matrix, matrix_pitch, vector_size, res);
-  return cudaGetLastError();
+  pose_scaling_term_kernel<<<num_blocks, MAX_THREADS, 0, s>>>(vector, matrix, matrix_pitch, vector_size, res, partials);
+  return add_partials(partials, static_cast<int>(num_blocks), res, s);
 }
 
-cudaError_t point_term(float3 *vector, Matf33 *blocks, int num_blocks, int is_scaling, float *res, cudaStream_t s) {
+cudaError_t point_term(float3 *vector, Matf33 *blocks, int num_blocks, int is_scaling, float *res, float *partials,
+                       cudaStream_t s) {
   size_t cuda_blocks = (num_blocks + MAX_THREADS - 1) / MAX_THREADS;
 
-  point_term_kernel<<<cuda_blocks, MAX_THREADS, 0, s>>>(vector, blocks, num_blocks, is_scaling, res);
-  return cudaGetLastError();
+  point_term_kernel<<<cuda_blocks, MAX_THREADS, 0, s>>>(vector, blocks, num_blocks, is_scaling, res, partials);
+  return add_partials(partials, static_cast<int>(cuda_blocks), res, s);
 }
 
 cudaError_t make_prediction(float current_cost, float lambda, float *pose_hessian_term_, float *point_hessian_term_,

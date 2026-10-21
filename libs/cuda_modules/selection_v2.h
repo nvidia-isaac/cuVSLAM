@@ -28,6 +28,9 @@ namespace cuvslam::cuda {
 
 class GPUSelection {
 public:
+  // deterministic: order tied keypoints by position and add GFTT bins in a fixed order
+  explicit GPUSelection(bool deterministic);
+
   // burnHalfSize and alreadySelectedBurnHalfSize should depend on image width (i.e. aperture in pixels)
   void computeGFTTAndSelectFeatures(const GPUGradientPyramid& gradientPyramid, int border_top, int border_bottom,
                                     int border_left, int border_right, const ImageMatrix<uint8_t>* input_mask,
@@ -52,6 +55,8 @@ private:
   std::unique_ptr<GPUArrayPinned<Keypoint>> keypoints_ = nullptr;
   void* sort_temp_buffer_ = nullptr;
   size_t sort_temp_buffer_size_ = 0;
+  bool deterministic_ = false;
+  std::unique_ptr<GPUOnlyArray<float>> gftt_tile_sums_ = nullptr;  // deterministic only
 
   // profiler
   profiler::VioProfiler::DomainHelper profiler_domain_ = profiler::VioProfiler::DomainHelper("VIO");

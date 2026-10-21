@@ -101,6 +101,8 @@ def _apply_odometry_section(config: Odometry.Config, section: dict) -> None:
             config.max_frame_delta_s = float(value)
         elif key == "debug_imu_mode":
             config.debug_imu_mode = _parse_bool(value)
+        elif key == "deterministic":
+            config.deterministic = _parse_bool(value)
         elif key == "rgbd_settings":
             if isinstance(value, dict):
                 if "depth_scale_factor" in value:

@@ -37,8 +37,8 @@ __device__ __forceinline__ float reduce(float x, int max_iterations = 5) {
 
 // block size 32x32 = warpSize * warpSize
 __launch_bounds__(GFTT_BLOCK_SIZE* GFTT_BLOCK_SIZE) __global__
-    void accumulateGFTT_kernel(cudaTextureObject_t gftt, uint2 size, uint2 bin_size, uint2 num_bins,
-                               float* bins_array) {
+    void accumulateGFTT_kernel(cudaTextureObject_t gftt, uint2 size, uint2 bin_size, uint2 num_bins, float* bins_array,
+                               float* tile_sums) {
   int base_x = blockIdx.x * GFFT_TILE_SIZE + threadIdx.x;
   int base_y = blockIdx.y * GFFT_TILE_SIZE + threadIdx.y;
 
@@ -83,12 +83,38 @@ __launch_bounds__(GFTT_BLOCK_SIZE* GFTT_BLOCK_SIZE) __global__
     float block_sum = reduce(val, 3);
 
     if (lane == 0) {
-      if (bin_coords.x < num_bins.x && bin_coords.y < num_bins.y) {
+      if (tile_sums) {
+        const unsigned tile_x = blockIdx.x * GFFT_ELEMS_PER_THREAD + wid % GFFT_ELEMS_PER_THREAD;
+        const unsigned tile_y = blockIdx.y * GFFT_ELEMS_PER_THREAD + wid / GFFT_ELEMS_PER_THREAD;
+        tile_sums[tile_y * gridDim.x * GFFT_ELEMS_PER_THREAD + tile_x] = block_sum;
+      } else if (bin_coords.x < num_bins.x && bin_coords.y < num_bins.y) {
         int bin_id = bin_coords.y * num_bins.x + bin_coords.x;
         atomicAdd(&bins_array[bin_id], block_sum);
       }
     }
   }
+}
+
+// One thread per bin adds the sums of the tiles centered in it, row by row, so equal images give equal bins.
+__global__ void sum_gftt_tiles_kernel(const float* tile_sums, uint2 num_tiles, uint2 bin_size, uint2 num_bins,
+                                      float* bins_array) {
+  const unsigned bin_x = threadIdx.x;
+  const unsigned bin_y = threadIdx.y;
+  if (bin_x >= num_bins.x || bin_y >= num_bins.y) {
+    return;
+  }
+  double sum = 0;
+  for (unsigned tile_y = 0; tile_y < num_tiles.y; tile_y++) {
+    if ((tile_y * GFTT_BLOCK_SIZE + GFTT_BLOCK_SIZE / 2) / bin_size.y != bin_y) {
+      continue;
+    }
+    for (unsigned tile_x = 0; tile_x < num_tiles.x; tile_x++) {
+      if ((tile_x * GFTT_BLOCK_SIZE + GFTT_BLOCK_SIZE / 2) / bin_size.x == bin_x) {
+        sum += tile_sums[tile_y * num_tiles.x + tile_x];
+      }
+    }
+  }
+  bins_array[bin_y * num_bins.x + bin_x] += static_cast<float>(sum);
 }
 
 template <typename T>
@@ -376,14 +402,28 @@ cudaError_t select_features(float* gftt, uint2 gftt_size, size_t gftt_pitch, flo
 }
 
 cudaError_t accumulateGFTT(cudaTextureObject_t gftt, uint2 size, uint2 bin_size, uint2 num_bins, float* gtff_accum,
-                           cudaStream_t s) {
+                           float* tile_sums, cudaStream_t s) {
   dim3 threads(GFTT_BLOCK_SIZE, GFTT_BLOCK_SIZE);
   size_t num_blocks_x = (size.x + GFFT_TILE_SIZE - 1) / GFFT_TILE_SIZE;
   size_t num_blocks_y = (size.y + GFFT_TILE_SIZE - 1) / GFFT_TILE_SIZE;
   dim3 blocks(num_blocks_x, num_blocks_y);
 
-  accumulateGFTT_kernel<<<blocks, threads, 0, s>>>(gftt, size, bin_size, num_bins, gtff_accum);
+  accumulateGFTT_kernel<<<blocks, threads, 0, s>>>(gftt, size, bin_size, num_bins, gtff_accum, tile_sums);
+  cudaError_t error = cudaGetLastError();
+  if (error != cudaSuccess || tile_sums == nullptr) {
+    return error;
+  }
+  const uint2 num_tiles = {static_cast<unsigned>(num_blocks_x * GFFT_ELEMS_PER_THREAD),
+                           static_cast<unsigned>(num_blocks_y * GFFT_ELEMS_PER_THREAD)};
+  sum_gftt_tiles_kernel<<<1, dim3(num_bins.x, num_bins.y), 0, s>>>(tile_sums, num_tiles, bin_size, num_bins,
+                                                                   gtff_accum);
   return cudaGetLastError();
+}
+
+size_t accumulateGFTT_get_tile_sums_size(uint2 size) {
+  const size_t num_blocks_x = (size.x + GFFT_TILE_SIZE - 1) / GFFT_TILE_SIZE;
+  const size_t num_blocks_y = (size.y + GFFT_TILE_SIZE - 1) / GFFT_TILE_SIZE;
+  return num_blocks_x * num_blocks_y * GFFT_ELEMS_PER_THREAD * GFFT_ELEMS_PER_THREAD;
 }
 
 }  // namespace cuvslam::cuda

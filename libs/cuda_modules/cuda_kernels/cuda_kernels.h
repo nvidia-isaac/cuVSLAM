@@ -126,8 +126,11 @@ cudaError_t select_features(float* gftt, uint2 gftt_size, size_t gftt_pitch, flo
                             size_t measure_pitch, uint2* indices, size_t indices_pitch, Keypoint* kp, size_t kpCapacity,
                             int* kpCount, int* kpIndex, cudaStream_t s);
 
+// tile_sums: nullptr adds tiles to the bins with float atomics, else scratch for adding them in a fixed order.
 cudaError_t accumulateGFTT(cudaTextureObject_t gftt, uint2 size, uint2 bin_size, uint2 num_bins, float* gtff_accum,
-                           cudaStream_t s);
+                           float* tile_sums, cudaStream_t s);
+
+size_t accumulateGFTT_get_tile_sums_size(uint2 size);
 
 cudaError_t cast_image(const uint8_t* src, size_t spitch, float* dst, size_t dpitch, uint2 size, cudaStream_t s);
 
@@ -141,7 +144,9 @@ cudaError_t cast_image_rgb(const uint8_t* src, size_t spitch, float* dst, size_t
 cudaError_t resize_mask(const uint8_t* src, uint2 src_size, size_t spitch, uint8_t* dst, uint2 dst_size, size_t dpitch,
                         cudaStream_t s);
 
-void sort_keypoints(Keypoint* kp, size_t size, void* temp_buffer, size_t temp_buffer_size, cudaStream_t s);
+// Sorts by strength, strongest first. ties_by_position orders equal strengths by position, not by input order.
+void sort_keypoints(Keypoint* kp, size_t size, void* temp_buffer, size_t temp_buffer_size, bool ties_by_position,
+                    cudaStream_t s);
 
 size_t sort_keypoints_get_temp_buffer_size(size_t size);
 

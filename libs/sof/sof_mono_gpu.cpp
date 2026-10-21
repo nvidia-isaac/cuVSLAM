@@ -28,8 +28,10 @@ const size_t FAILED_ACTIVE_TRACK_COUNT = 20;
 const float RANSAC_ACCURACY_THRESHOLD = 0.002f;
 
 MonoSOFGPU::MonoSOFGPU(CameraId cam_id, const camera::ICameraModel &intrinsics, std::unique_ptr<ISelector> selector,
-                       FeaturePredictorPtr feature_predictor, [[maybe_unused]] const Settings &sof_settings)
-    : MonoSOFBase(cam_id, std::move(selector), feature_predictor), intrinsics_(intrinsics) {}
+                       FeaturePredictorPtr feature_predictor, const Settings &sof_settings)
+    : MonoSOFBase(cam_id, std::move(selector), feature_predictor),
+      intrinsics_(intrinsics),
+      detector_(sof_settings.deterministic) {}
 
 void MonoSOFGPU::launch(ImageContextPtr curr_image, const ImageContextPtr &prev_image,
                         const Isometry3T &predicted_world_from_rig) {
