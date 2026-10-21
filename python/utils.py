@@ -151,7 +151,7 @@ def _apply_slam_section(config: Slam.Config, section: dict) -> None:
             config.max_map_size = int(value)
         elif key == "throttling_time_ms":
             config.throttling_time_ms = int(value)
-        elif key == "map_cache_path":
+        elif key == "map_path":
             config.map_cache_path = "" if value is None else str(value)
         else:
             warnings.warn(f"try_load_slam_config_from_file: unknown key {key!r} (ignored)", stacklevel=2)

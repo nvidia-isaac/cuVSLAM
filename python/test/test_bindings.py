@@ -516,7 +516,7 @@ class TestBindings(unittest.TestCase):
 
     def test_slam_config_default(self):
         cfg = vslam.Slam.Config()
-        self.assertEqual(cfg.map_cache_path, "")
+        self.assertEqual(cfg.map_path, "")
         self.assertTrue(cfg.use_gpu)
         self.assertFalse(cfg.sync_mode)
         self.assertTrue(cfg.enable_reading_internals)
@@ -530,7 +530,7 @@ class TestBindings(unittest.TestCase):
     def test_slam_config_constructor(self):
         # Adjacent bools alternate to catch ordering bugs
         cfg = vslam.Slam.Config(
-            map_cache_path="/tmp/cache",
+            map_path="/tmp/map",
             use_gpu=False,
             sync_mode=True,
             enable_reading_internals=False,
@@ -541,7 +541,7 @@ class TestBindings(unittest.TestCase):
             max_map_size=500,
             throttling_time_ms=100,
         )
-        self.assertEqual(cfg.map_cache_path, "/tmp/cache")
+        self.assertEqual(cfg.map_path, "/tmp/map")
         self.assertFalse(cfg.use_gpu)
         self.assertTrue(cfg.sync_mode)
         self.assertFalse(cfg.enable_reading_internals)
@@ -558,7 +558,7 @@ class TestBindings(unittest.TestCase):
 
     def test_slam_config_modifiers(self):
         cfg = vslam.Slam.Config()
-        cfg.map_cache_path = "/tmp/test"
+        cfg.map_path = "/tmp/test"
         cfg.use_gpu = False
         cfg.sync_mode = True
         cfg.enable_reading_internals = False
@@ -569,7 +569,7 @@ class TestBindings(unittest.TestCase):
         cfg.max_map_size = 1000
         cfg.throttling_time_ms = 500
 
-        self.assertEqual(cfg.map_cache_path, "/tmp/test")
+        self.assertEqual(cfg.map_path, "/tmp/test")
         self.assertFalse(cfg.use_gpu)
         self.assertTrue(cfg.sync_mode)
         self.assertFalse(cfg.enable_reading_internals)
