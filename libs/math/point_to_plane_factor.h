@@ -28,10 +28,10 @@ namespace cuvslam::math {
 // samples depth, lifts to world, finds the closest plane, and computes the point-to-plane
 // signed distance as the residual.
 //
-// The state is rig_from_world. cam_from_rig is always provided (device pointer to a single
-// 4x4 SE3, identity when the depth camera coincides with the rig origin); the kernel composes
-// cam_from_world = cam_from_rig * rig_from_world internally before lifting the sampled depth
-// pixel into the world frame where the planes live.
+// The state is world_from_rig (the cuNLS pose convention). cam_from_rig is always provided (device
+// pointer to a single 4x4 SE3, identity when the depth camera coincides with the rig origin); the
+// kernel composes world_from_cam = world_from_rig * cam_from_rig^-1 internally to lift the sampled
+// depth pixel into the world frame where the planes live.
 class PointToPlaneCostFunctionBatch : public cunls::SizedFactorBatch<1, 6> {
 public:
   PointToPlaneCostFunctionBatch(const cuda::GPUPlane* d_planes, int num_planes, int stride,
@@ -51,15 +51,19 @@ public:
     num_factors_ = static_cast<size_t>(grid_w) * grid_h;
   }
 
-  bool Evaluate(float* residuals, float* jacobians, float const* const* state_pointers,
-                cudaStream_t stream) const final {
+  bool Evaluate(float* residuals, float* jacobians, float const* const* state_pointers, cudaStream_t stream,
+                const int* factor_ids, size_t num_factor_ids) const final {
+    // cuNLS passes the resolved item count; only plain evaluation (item t is factor t) is supported.
+    if (factor_ids != nullptr || (num_factor_ids != 0 && num_factor_ids != num_factors_)) {
+      return false;
+    }
     CUDA_CHECK(cuda::point_to_plane_evaluate(d_planes_, num_planes_, stride_, depth_tex_, focal_, principal_,
                                              image_size_, state_pointers, d_cam_from_rig_, residuals, jacobians,
                                              num_factors_, stream));
     return true;
   }
 
-  size_t NumFactors() const final { return num_factors_; }
+  size_t NumActiveFactors() const final { return num_factors_; }
 
 private:
   const cuda::GPUPlane* d_planes_;
