@@ -190,13 +190,6 @@ class TestVprOff(unittest.TestCase):
         odom_cfg, slam_cfg = make_configs(False)
         self.tracker = vslam.Tracker(self.rig, vslam.Tracker.Mode.OdometryWithSlamOffline, odom_cfg, slam_cfg)
 
-    def test_add_frame_is_a_no_op(self):
-        # Must not raise, nor enable place recognition for the query below.
-        self.tracker.slam.add_frame_to_vpr_map(self.images, FRAME_PERIOD_NS)
-
-        _, error = recognize_place(self.tracker.slam, self.images, FRAME_PERIOD_NS)
-        self.assertIn("use_vpr", error)
-
     def test_recognize_reports_an_error_instead_of_a_result(self):
         result, error = recognize_place(self.tracker.slam, self.images, FRAME_PERIOD_NS)
 
@@ -422,15 +415,6 @@ class TestVprAnyLoc(unittest.TestCase):
                 localized_at = timestamp
                 break
         self.assertIsNotNone(localized_at, "no frame relocalized in the saved map")
-
-        # The newest node, added by the localization, still takes a picture.
-        rng = np.random.RandomState(98)
-        noise = [np.ascontiguousarray(rng.randint(0, 256, image.shape).astype(image.dtype))
-                 for image in self.frames[0][1]]
-        session.slam.add_frame_to_vpr_map(noise, localized_at + 1)
-        place = recognize_match(session.slam, noise, localized_at + 1)
-        self.assertIsNotNone(place)
-        self.assertGreater(place.score, 0.99)
 
         # Same node ids and timestamps: the VPR map came with the pose graph its ids refer to.
         images_by_timestamp = dict(self.frames)
@@ -683,7 +667,6 @@ class _VprReplay:
     def process_images(self, frame_id, timestamps, images, masks, depths=None):
         timestamp = max(timestamps)
         self.tracker.track(timestamp, images, masks, depths)
-        self.tracker.slam.add_frame_to_vpr_map(images, timestamp)
         self.timestamps.append(timestamp)
         self.n_frames += 1
 
@@ -728,7 +711,6 @@ class _PrefixReplay:
             raise _StopReplay()
         timestamp = max(timestamps)
         self.tracker.track(timestamp, images, masks, depths)
-        self.tracker.slam.add_frame_to_vpr_map(images, timestamp)
         # The reader reuses its images list, so copy kept frames.
         if self.n_tracked % self.stride == 0:
             self.kept.append((timestamp, [np.array(image, copy=True) for image in images]))

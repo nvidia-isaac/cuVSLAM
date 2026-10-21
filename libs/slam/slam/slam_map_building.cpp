@@ -82,14 +82,15 @@ void LocalizerAndMapper::AddKeyframe(const Isometry3T& from_last_keyframe, const
       keyframe_sources_[keyFrameId] = frame_data.frame_id;
     }
 
-    // Store the node's VPR image now if its pixels are still alive; Slam::AddFrameToVprMap covers recycled ones.
     if (vpr_map_ && vpr_map_->Enabled()) {
       vpr_map_->OnKeyframeAdded(keyFrameId, static_cast<int64_t>(timestamp_ns));
-      if (!vpr_map_->HasImage(keyFrameId)) {
-        const vpr::VprImage vpr_image = vpr::MakeVprImageFromImages(images);
-        if (!vpr_image.Empty()) {
-          vpr_map_->AddFrame(keyFrameId, static_cast<int64_t>(timestamp_ns), vpr_image);
-        }
+      vpr::VprImage from_pixels;
+      if (frame_data.vpr_image.Empty()) {
+        from_pixels = vpr::MakeVprImageFromImages(images);
+      }
+      const vpr::VprImage& vpr_image = frame_data.vpr_image.Empty() ? from_pixels : frame_data.vpr_image;
+      if (!vpr_image.Empty()) {
+        vpr_map_->AddFrame(keyFrameId, static_cast<int64_t>(timestamp_ns), vpr_image);
       }
     }
 

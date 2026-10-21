@@ -132,29 +132,6 @@ bool LocalizerAndMapper::IsVprEnabled() const { return vpr_map_ && vpr_map_->Ena
 
 size_t LocalizerAndMapper::GetVprMapSize() const { return vpr_map_ ? vpr_map_->Size() : 0; }
 
-bool LocalizerAndMapper::VprHeadNeedsImage() const {
-  if (!IsVprEnabled()) {
-    return false;
-  }
-  KeyFrameId head = InvalidKeyFrameId;
-  if (!map_.pose_graph_.GetHeadKeyframe(head) || head == InvalidKeyFrameId) {
-    return false;
-  }
-  return !vpr_map_->HasImage(head);
-}
-
-bool LocalizerAndMapper::AddVprFrame(const vpr::VprImage& image, const int64_t timestamp_ns) {
-  if (!IsVprEnabled()) {
-    return false;
-  }
-  KeyFrameId head = InvalidKeyFrameId;
-  if (!map_.pose_graph_.GetHeadKeyframe(head) || head == InvalidKeyFrameId) {
-    // Nothing mapped yet; drop the frame, the caller offers one every frame.
-    return false;
-  }
-  return vpr_map_->AddFrame(head, timestamp_ns, image);
-}
-
 vpr::VprPlace LocalizerAndMapper::RecognizePlace(const vpr::VprImage& image) {
   const std::vector<vpr::VprPlace> places = RecognizePlaces(image, 1);
   return places.empty() ? vpr::VprPlace{} : places.front();

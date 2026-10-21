@@ -60,6 +60,7 @@ struct VOFrameData {
   };
   std::vector<Track2DXY> tracks2d_norm;
   std::map<TrackId, Vector3T> tracks3d_rel;
+  vpr::VprImage vpr_image;  // the node's place recognition frame; empty falls back to the images
 };
 
 // Core SLAM system that performs visual localization and mapping.
@@ -305,11 +306,6 @@ public:
   bool IsVprEnabled() const;
 
   size_t GetVprMapSize() const;
-
-  bool VprHeadNeedsImage() const;
-
-  // Attach `image` to the newest pose graph node unless it already has one; true if stored.
-  bool AddVprFrame(const vpr::VprImage& image, int64_t timestamp_ns);
 
   // Best-matching pose graph node for `image`, with its current world pose.
   vpr::VprPlace RecognizePlace(const vpr::VprImage& image);

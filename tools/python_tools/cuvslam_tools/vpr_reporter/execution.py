@@ -125,7 +125,6 @@ class VprStat:
     map_build_time_s: float = 0.0
     # Averaged over mapped frames, except the search time, which is over queries.
     map_build_time_ms_per_frame: float = 0.0
-    mean_add_time_ms: float = 0.0
     mean_search_time_ms: float = 0.0
     # Match pose vs. map pose at its timestamp: checks the lookup, not recognition.
     node_pose_gap_m: float = 0.0
@@ -152,7 +151,6 @@ class _MapBuild:
 
     n_frames: int = 0
     build_time_s: float = 0.0
-    add_time_s: float = 0.0
     map_bytes: int = 0
     frame_index_from_ts: dict = field(default_factory=dict)
     sorted_timestamps: Any = None
@@ -373,7 +371,7 @@ def _rig_pose(odom_pose, slam_pose):
 
 
 class _MapBuilder:
-    """Track the map sequence and offer every tracked frame to the place recognition map."""
+    """Track the map sequence; tracking maps each keyframe's frame for place recognition."""
 
     def __init__(self, tracker, frame_limit: int):
         """Store the tracker to drive and the frame budget to stop at."""
@@ -383,20 +381,15 @@ class _MapBuilder:
         self.world_from_rig: dict[int, Any] = {}
         self.n_frames = 0
         self.build_time_s = 0.0
-        self.add_time_s = 0.0
 
     def process_images(self, frame_id, timestamps, images, masks, depths=None):
-        """Track one frame, then hand it to the map."""
+        """Track one frame."""
         if self.frame_limit and self.n_frames >= self.frame_limit:
             raise _ReplayLimitReached
         timestamp = max(timestamps)
         start = time.perf_counter()
         odom_pose, slam_pose = self.tracker.track(timestamp, images, masks, depths)
-        add_start = time.perf_counter()
-        self.tracker.slam.add_frame_to_vpr_map(images, timestamp)
-        done = time.perf_counter()
-        self.add_time_s += done - add_start
-        self.build_time_s += done - start
+        self.build_time_s += time.perf_counter() - start
         self.frame_index_from_ts[timestamp] = frame_id
         pose = _rig_pose(odom_pose, slam_pose)
         if pose is not None:
@@ -511,7 +504,6 @@ def _build_vpr_map(pair: VprPair, args: argparse.Namespace, map_dir: str) -> tup
     build = _MapBuild(
         n_frames=builder.n_frames,
         build_time_s=builder.build_time_s,
-        add_time_s=builder.add_time_s,
         map_bytes=_folder_bytes(map_dir),
         frame_index_from_ts=builder.frame_index_from_ts,
         sorted_timestamps=np.array(sorted(builder.frame_index_from_ts), dtype=np.int64),
@@ -562,7 +554,6 @@ def _score_pair(pair: VprPair, build: _MapBuild, hits: list[_QueryHit],
                    map_build_time_s=build.build_time_s, map_bytes=build.map_bytes)
     if build.n_frames:
         stat.map_build_time_ms_per_frame = 1e3 * build.build_time_s / build.n_frames
-        stat.mean_add_time_ms = 1e3 * build.add_time_s / build.n_frames
         stat.map_mb_per_frame = build.map_bytes / 1e6 / build.n_frames
     classified = []
     scores = []

@@ -131,7 +131,6 @@
         <th>Unrecognized [%]</th>
         <th>Precision</th>
         <th>Map build [ms/frame]</th>
-        <th>Add to map [ms/frame]</th>
         <th>Search [ms/frame]</th>
         <th>Saved map [MB/frame]</th>
     </tr>
@@ -145,7 +144,6 @@
             <td>{{ '%0.2f' % s.unrecognized_rate }}</td>
             <td>{{ '%0.3f' % s.precision }}</td>
             <td>{{ '%0.2f' % s.map_build_time_ms_per_frame }}</td>
-            <td>{{ '%0.3f' % s.mean_add_time_ms }}</td>
             <td>{{ '%0.2f' % s.mean_search_time_ms }}</td>
             <td>{{ '%0.4f' % s.map_mb_per_frame }}</td>
         </tr>
@@ -159,7 +157,6 @@
         <td>{{ '%0.2f' % total.unrecognized_rate }}</td>
         <td>{{ '%0.3f' % total.precision }}</td>
         <td>{{ '%0.2f' % total.map_build_time_ms_per_frame }}</td>
-        <td>{{ '%0.3f' % total.mean_add_time_ms }}</td>
         <td>{{ '%0.2f' % total.mean_search_time_ms }}</td>
         <td>{{ '%0.4f' % total.map_mb_per_frame }}</td>
     </tr>

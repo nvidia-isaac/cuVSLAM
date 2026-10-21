@@ -446,8 +446,8 @@ Both flags accept any case, and `cuvslam_tracker` rejects a non-default value of
 ## Visual Place Recognition
 
 `cuvslam_vpr_reporter` answers "would this map let a robot recognize where it is?". It takes two EDEX sequences of one
-route: a map sequence, and a query sequence driven through the same place later. It tracks the map sequence, offers
-every frame to the place recognition map and saves the map, then asks the same session where each frame of the query
+route: a map sequence, and a query sequence driven through the same place later. It tracks the map sequence, which
+maps each keyframe's frame for place recognition, and saves the map, then asks the same session where each frame of the query
 sequence was taken, without tracking those frames, so they never enter the map, and scores every answer against
 KITTI-format ground truth. The place recognition map is part of the SLAM map, so the saved folder holds one LMDB
 database with the landmarks too; those folders are large and are deleted after each pair unless `--keep_vpr_maps` asks
@@ -525,8 +525,7 @@ of that query, and it decides the classification:
 | False positive [%] | query frames matched to a mapped place further away than that |
 | Unrecognized [%] | query frames the backend reported no match for |
 | Precision | successes over all map matches |
-| Map build [ms/frame] | wall time of the map pass, `track` plus `add_frame_to_vpr_map`, over the mapped frames |
-| Add to map [ms/frame] | wall time of one `add_frame_to_vpr_map` call, over the frames of the map pass |
+| Map build [ms/frame] | wall time of the map pass's `track` calls, over the mapped frames |
 | Search [ms/frame] | wall time of one `recognize_place_by_frame` call, over the queried frames |
 | Saved map [MB/frame] | size of the saved map folder, one LMDB database with the landmarks and the place recognition map, over the mapped frames |
 | Skipped | queried frames with no ground-truth row, which are scored as nothing |

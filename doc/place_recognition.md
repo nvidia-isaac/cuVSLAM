@@ -38,13 +38,11 @@ def on_place(place, error):
     else:
         print(place.node_id, place.pose, place.score)
 
-# Mapping run: offer every frame. The map keeps one frame per pose graph node, so the calls that
-# land on an already mapped node cost almost nothing.
+# Mapping run: tracking maps each keyframe's frame, one per pose graph node.
 slam_cfg = vslam.Slam.Config(use_vpr=True, vpr_model_path=engine, sync_mode=True)
 tracker = vslam.Tracker(rig, vslam.Tracker.Mode.OdometryWithSlamOffline, odom_cfg, slam_cfg)
 for timestamp, images in sequence:
     tracker.track(timestamp, images)
-    tracker.slam.add_frame_to_vpr_map(images, timestamp)
 tracker.slam.save_map('/path/to/map', lambda saved: print('map saved' if saved else 'map not saved'))
 
 # Later run, starting from an unknown pose: localize in the saved map without a guess pose. On success the
@@ -73,7 +71,7 @@ thread and their callbacks run when it finishes, possibly on that thread. `sync_
 `Tracker.Mode`'s offline modes require anyway, runs the work before the call returns, so the callback has already
 fired by the time it does.
 
-In C++ the same calls are `Slam::AddFrameToVprMap`, `Slam::SaveMap`, `Slam::LocalizeInMap` and
+In C++ the same calls are `Slam::SaveMap`, `Slam::LocalizeInMap` and
 `Slam::RecognizePlaceByFrame`, with `Slam::Config::use_vpr = true` and the engine in `Slam::Config::vpr_model_path`.
 
 ## Closing loops with it

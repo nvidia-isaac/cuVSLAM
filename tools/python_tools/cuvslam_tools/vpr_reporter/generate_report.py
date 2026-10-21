@@ -30,7 +30,7 @@ ALIGNMENT_NOTE = (
 )
 
 HOW_TO_READ_NOTE = (
-    "The map sequence is tracked first and every frame of it is offered to the place recognition map. The query "
+    "The map sequence is tracked first, which maps each keyframe's frame for place recognition. The query "
     "sequence is replayed afterwards without tracking, so its frames never enter the map. Each queried frame "
     "asks the map where it was taken; the answer "
     "names a map frame, and the query is scored by the distance between the ground truth position of that map "
@@ -76,7 +76,6 @@ def calc_summary(title, stats):
     n_queries = sum(s.n_queries for s in stats)
     map_bytes = sum(s.map_bytes for s in stats)
     map_build_time_s = sum(s.map_build_time_s for s in stats)
-    add_time_ms = sum(s.mean_add_time_ms * s.n_map_frames for s in stats)
     search_time_ms = sum(s.mean_search_time_ms * s.n_queries for s in stats)
 
     return {
@@ -95,7 +94,6 @@ def calc_summary(title, stats):
         "mean_score": weighted_score / recognized if recognized else 0.0,
         "map_build_time_s": map_build_time_s,
         "map_build_time_ms_per_frame": 1e3 * map_build_time_s / n_map_frames if n_map_frames else 0.0,
-        "mean_add_time_ms": add_time_ms / n_map_frames if n_map_frames else 0.0,
         "mean_search_time_ms": search_time_ms / n_queries if n_queries else 0.0,
         "map_mb_per_frame": map_bytes / 1e6 / n_map_frames if n_map_frames else 0.0,
     }

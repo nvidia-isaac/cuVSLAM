@@ -776,7 +776,7 @@ struct Result {
  * relocalize in an existing map.
  *
  * Thread safety: all methods must be called from a single thread, except SaveMap() and, unless `Config::sync_mode` is
- * set, LocalizeInMap(), AddFrameToVprMap() and RecognizePlaceByFrame(). These may be called concurrently with any
+ * set, LocalizeInMap() and RecognizePlaceByFrame(). These may be called concurrently with any
  * other method from another thread.
  */
 class CUVSLAM_API Slam {
@@ -833,7 +833,7 @@ public:
     /// requires verbosity Warning or higher (see SetVerbosity). Default: 10 queued commands.
     uint32_t delay_warning_queue_size = 10;
     /// Enable visual place recognition (AnyLoc); needs a USE_TENSORRT build, `use_gpu` and `vpr_model_path`.
-    /// Its map is part of the SLAM map: one frame per pose graph node, bounded by `max_map_size`.
+    /// Its map is part of the SLAM map: Track() adds one frame per pose graph node, bounded by `max_map_size`.
     bool use_vpr = false;
     /// AnyLoc TensorRT engine, built by the `anyloc_engine` target.
     /// The engine runs only on the GPU and TensorRT version that built it; otherwise the constructor throws.
@@ -1076,13 +1076,6 @@ public:
    * @return Pose graph
    */
   std::shared_ptr<const PoseGraph> ReadPoseGraph();
-
-  /**
-   * Offer the current frame to the place recognition map.
-   * Call it on every frame; the map keeps one frame per pose graph node.
-   * @param[in] images Observed images; only the first one from a primary camera is used
-   */
-  void AddFrameToVprMap(const ImageSet& images);
 
   /**
    * Find the pose graph node whose mapped frame looks most like `images`, without geometric verification.

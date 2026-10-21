@@ -132,7 +132,6 @@ class Tracker:
                 self.slam_cfg.max_map_size = args.max_map_size
             if args.visualize_rerun:
                 self.slam_cfg.enable_reading_internals = True
-            # Not calling add_frame_to_vpr_map(): redundant with sync SLAM, stalls async SLAM.
 
         self.mode = self._tracker_mode(self.slam_cfg is not None, self.odom_cfg.async_sba)
 

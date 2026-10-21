@@ -1353,26 +1353,6 @@ void Slam::LocalizeInMap(std::string_view folder_name, int64_t timestamp_ns, con
                                    start_cb, finish_cb);
 }
 
-void Slam::AddFrameToVprMap(const ImageSet& images) {
-  if (!impl->async_slam_->IsVprEnabled() || images.empty()) {
-    return;
-  }
-  // Lock-free check first: most offered frames have nowhere to go, so they skip the image copy.
-  if (!impl->async_slam_->VprNeedsFrame()) {
-    return;
-  }
-
-  const Image* image = SelectVprImage(images, impl->primary_cameras_);
-  if (image == nullptr) {
-    return;
-  }
-  slam::vpr::VprImage vpr_image = MakeVprImage(*image, impl->use_gpu_);
-  if (vpr_image.Empty()) {
-    return;
-  }
-  impl->async_slam_->AddFrameToVprMap(std::move(vpr_image), image->timestamp_ns);
-}
-
 void Slam::RecognizePlaceByFrame(const ImageSet& images, RecognizePlaceFinishCB finish_cb) {
   if (!finish_cb) {
     return;

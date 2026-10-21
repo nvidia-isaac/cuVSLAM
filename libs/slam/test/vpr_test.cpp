@@ -26,6 +26,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <optional>
 #include <random>
 #include <stdexcept>
 #include <string>
@@ -33,6 +34,7 @@
 
 #include "common/include_gtest.h"
 #include "common/vector_3t.h"
+#include "slam/async_slam/async_slam.h"
 #include "slam/map/database/lmdb_slam_database.h"
 #include "slam/slam/slam.h"
 #include "slam/vpr/ivpr.h"
@@ -213,11 +215,12 @@ Isometry3T MakePose(float x, float y, float z) {
 uint8_t PixelAt(const VprImage& image, int x, int y) { return image.row[static_cast<size_t>(y) * image.width + x]; }
 
 /// Image context filled like the host pipeline does; `image` need not outlive it.
-sof::ImageContextPtr MakeCpuContext(const VprImage& image) {
+sof::ImageContextPtr MakeCpuContext(const VprImage& image, FrameId frame_id = 0) {
   const ImageShape shape{image.width, image.height};
   auto context = std::make_shared<sof::ImageContext>(shape, false, false);
   ImageMeta meta;
   meta.shape = shape;
+  meta.frame_id = frame_id;
   context->set_image_meta(meta);
 
   ImageSource source;
@@ -1156,24 +1159,26 @@ protected:
     return mapper;
   }
 
-  /// Appends a picture-less node `step_x` m along X. Returns its timestamp.
-  int64_t AppendKeyframe(int index, float step_x, int64_t frame_delta_ns = kFrameDeltaNs) {
+  /// Appends a node `step_x` m along X, with `image` as its picture if given. Returns its timestamp.
+  int64_t AppendKeyframe(int index, float step_x, int64_t frame_delta_ns = kFrameDeltaNs, VprImage image = {},
+                         const Images& images = {}) {
     Isometry3T step = Isometry3T::Identity();
     step.translation().x() = step_x;
 
     VOFrameData frame_data;
     frame_data.frame_id = index;
     frame_data.timestamp_ns = static_cast<uint64_t>(index) * frame_delta_ns;
-    mapper_->AddKeyframe(step, frame_data, Images());
+    frame_data.vpr_image = std::move(image);
+    mapper_->AddKeyframe(step, frame_data, images);
     return static_cast<int64_t>(frame_data.timestamp_ns);
   }
 
   /// Maps `count` keyframes along X, one picture each.
   void BuildChain(int count, float step_x, int64_t frame_delta_ns = kFrameDeltaNs) {
     for (int i = 0; i < count; ++i) {
-      const int64_t timestamp_ns = AppendKeyframe(i, step_x, frame_delta_ns);
       images_.push_back(MakeBlockyImage(64, 64, 8, static_cast<uint32_t>(800 + i)));
-      ASSERT_TRUE(mapper_->AddVprFrame(images_.back(), timestamp_ns)) << "keyframe " << i;
+      AppendKeyframe(i, step_x, frame_delta_ns, images_.back());
+      ASSERT_EQ(mapper_->GetVprMapSize(), static_cast<size_t>(i) + 1) << "keyframe " << i;
     }
   }
 
@@ -1394,8 +1399,8 @@ TEST_F(VprPoseGraph, DetectLoopClosureKeepsPlacesAnotherSessionMappedLater) {
   ASSERT_TRUE(mapper_->AttachToExistingReadOnlyDatabase(Folder()));
   ASSERT_EQ(mapper_->GetVprMapSize(), static_cast<size_t>(kKeyframes));
   // This session maps on, still early by the saving session's clock.
-  const int64_t head_timestamp_ns = AppendKeyframe(kKeyframes, 1.f, /*frame_delta_ns=*/1);
-  ASSERT_TRUE(mapper_->AddVprFrame(MakeBlockyImage(64, 64, 8, 990), head_timestamp_ns));
+  AppendKeyframe(kKeyframes, 1.f, /*frame_delta_ns=*/1, MakeBlockyImage(64, 64, 8, 990));
+  ASSERT_EQ(mapper_->GetVprMapSize(), static_cast<size_t>(kKeyframes) + 1);
 
   RecordingLoopClosureSolver solver;
   LocalizerAndMapper::LoopClosureStatus status;
@@ -1445,9 +1450,9 @@ TEST_F(VprPoseGraph, DetectLoopClosureWithAnyLocHandsOverOldPlacesBestFirst) {
     // Enough keyframes to fit the vocabulary, at the other AnyLoc tests' picture size.
     constexpr int kKeyframes = 12;
     for (int i = 0; i < kKeyframes; ++i) {
-      const int64_t timestamp_ns = AppendKeyframe(i, 1.f, kLoopClosureSpacingNs);
       images_.push_back(MakeBlockyImage(256, 256, 8, static_cast<uint32_t>(1200 + i)));
-      ASSERT_TRUE(mapper_->AddVprFrame(images_.back(), timestamp_ns)) << "keyframe " << i;
+      AppendKeyframe(i, 1.f, kLoopClosureSpacingNs, images_.back());
+      ASSERT_EQ(mapper_->GetVprMapSize(), static_cast<size_t>(i) + 1) << "keyframe " << i;
     }
 
     // An old node's picture, so the best match is old enough to close a loop to.
@@ -1467,33 +1472,67 @@ TEST_F(VprPoseGraph, DetectLoopClosureWithAnyLocHandsOverOldPlacesBestFirst) {
   }
 }
 
+TEST_F(VprPoseGraph, AsyncSlamMapsEveryKeyframeQueuedWhileItWasBehind) {
+  if (StandInEngine("valid").empty()) {
+    GTEST_SKIP() << kNoStandIns;
+  }
+  AsyncSlamOptions options;
+  options.use_gpu = false;
+  options.reproduce_mode = true;
+  options.loop_closure_solver_type = LoopClosureSolverType::kDummy;
+  options.vpr_options = AnyLocOptions(StandInEngine("valid"));
+  AsyncSlam slam(rig_, {0}, options);
+
+  // All keyframes queue before the worker runs, by which time it has only the newest one's pixels.
+  constexpr int kKeyframes = static_cast<int>(VprAnyLoc::kMinTrainingFrames);
+  Isometry3T step = Isometry3T::Identity();
+  step.translation().x() = 1.f;
+  for (int i = 0; i < kKeyframes; ++i) {
+    images_.push_back(MakeBlockyImage(256, 256, 8, static_cast<uint32_t>(1400 + i)));
+    odom::IVisualOdometry::VOFrameStat stat;
+    stat.keyframe = true;
+    slam.TrackResult(i, (i + 1) * kFrameDeltaNs, stat, Images{MakeCpuContext(images_.back(), i)}, step);
+  }
+  slam.ProcessInputSynchronously();
+
+  for (int i = 0; i < kKeyframes; ++i) {
+    std::optional<int64_t> timestamp_ns;
+    slam.RecognizePlace(images_[i], [&](const Result<cuvslam::Slam::PlaceRecognition>& result) {
+      if (result.data) {
+        timestamp_ns = result.data->timestamp_ns;
+      }
+    });
+    ASSERT_TRUE(timestamp_ns.has_value()) << "keyframe " << i;
+    EXPECT_EQ(*timestamp_ns, (i + 1) * kFrameDeltaNs) << "keyframe " << i;
+  }
+}
+
 #endif  // USE_TENSORRT
 
-TEST_F(VprPoseGraph, TheHeadNodeNeedsAPictureUntilItHasOne) {
+TEST_F(VprPoseGraph, AKeyframeMapsTheFrameItCarries) {
   EXPECT_TRUE(mapper_->IsVprEnabled());
-  // No node yet: the frame is dropped, not queued, as the caller offers one every frame.
-  EXPECT_FALSE(mapper_->VprHeadNeedsImage());
-  EXPECT_FALSE(mapper_->AddVprFrame(MakeBlockyImage(64, 64, 8, 900), 0));
+  // Neither a copied frame nor pixels: the node stays out of the map.
+  AppendKeyframe(0, 1.f);
   EXPECT_EQ(mapper_->GetVprMapSize(), 0u);
 
-  const int64_t timestamp_ns = AppendKeyframe(0, 1.f);
-  EXPECT_TRUE(mapper_->VprHeadNeedsImage());
-
-  const VprImage first = MakeBlockyImage(64, 64, 8, 901);
-  EXPECT_TRUE(mapper_->AddVprFrame(first, timestamp_ns));
+  const VprImage copied = MakeBlockyImage(64, 64, 8, 901);
+  const int64_t copied_ns = AppendKeyframe(1, 1.f, kFrameDeltaNs, copied);
   EXPECT_EQ(mapper_->GetVprMapSize(), 1u);
-  // One picture per node; later offers are ignored, so a caller may offer every frame.
-  EXPECT_FALSE(mapper_->VprHeadNeedsImage());
-  EXPECT_FALSE(mapper_->AddVprFrame(MakeBlockyImage(64, 64, 8, 902), timestamp_ns));
-  EXPECT_EQ(mapper_->GetVprMapSize(), 1u);
+  EXPECT_EQ(mapper_->RecognizePlace(copied).timestamp_ns, copied_ns);
 
-  // A new node needs one again, and gets its own.
-  const int64_t next_ns = AppendKeyframe(1, 1.f);
-  EXPECT_TRUE(mapper_->VprHeadNeedsImage());
-  const VprImage second = MakeBlockyImage(64, 64, 8, 903);
-  EXPECT_TRUE(mapper_->AddVprFrame(second, next_ns));
+  // The copy wins over the pixels, which may belong to a later frame by now.
+  const VprImage later = MakeBlockyImage(64, 64, 8, 902);
+  const VprImage own = MakeBlockyImage(64, 64, 8, 903);
+  const int64_t own_ns = AppendKeyframe(2, 1.f, kFrameDeltaNs, own, Images{MakeCpuContext(later)});
   EXPECT_EQ(mapper_->GetVprMapSize(), 2u);
-  EXPECT_EQ(mapper_->RecognizePlace(second).timestamp_ns, next_ns);
+  EXPECT_EQ(mapper_->RecognizePlace(own).timestamp_ns, own_ns);
+  EXPECT_NE(mapper_->RecognizePlace(later).timestamp_ns, own_ns);
+
+  // Without a copy, the pixels are mapped.
+  const VprImage pixels = MakeBlockyImage(64, 64, 8, 904);
+  const int64_t pixels_ns = AppendKeyframe(3, 1.f, kFrameDeltaNs, {}, Images{MakeCpuContext(pixels)});
+  EXPECT_EQ(mapper_->GetVprMapSize(), 3u);
+  EXPECT_EQ(mapper_->RecognizePlace(pixels).timestamp_ns, pixels_ns);
 }
 
 TEST_F(VprPoseGraph, RecognizePlacesRanksSeveralNodesAgainstTheLivePoseGraph) {
@@ -1549,9 +1588,7 @@ TEST_F(VprPoseGraph, TheSavedSlamMapCarriesThePlaceRecognitionMap) {
 
   // It keeps mapping on the loaded graph.
   std::swap(mapper_, reader);
-  const int64_t timestamp_ns = AppendKeyframe(kKeyframes, kStep);
-  EXPECT_TRUE(mapper_->VprHeadNeedsImage());
-  EXPECT_TRUE(mapper_->AddVprFrame(MakeBlockyImage(64, 64, 8, 990), timestamp_ns));
+  AppendKeyframe(kKeyframes, kStep, kFrameDeltaNs, MakeBlockyImage(64, 64, 8, 990));
   EXPECT_EQ(mapper_->GetVprMapSize(), static_cast<size_t>(kKeyframes) + 1);
 }
 
@@ -1653,8 +1690,8 @@ TEST_F(VprPoseGraph, TurningVprOffLeavesEveryEntryPointInert) {
 
   EXPECT_FALSE(mapper_->IsVprEnabled());
   EXPECT_EQ(mapper_->GetVprMapSize(), 0u);
-  EXPECT_FALSE(mapper_->VprHeadNeedsImage());
-  EXPECT_FALSE(mapper_->AddVprFrame(images_.front(), 0));
+  AppendKeyframe(2, 1.f, kFrameDeltaNs, images_.front());
+  EXPECT_EQ(mapper_->GetVprMapSize(), 0u);
   EXPECT_FALSE(mapper_->RecognizePlace(images_.front()).found);
   EXPECT_TRUE(mapper_->RecognizePlaces(images_.front(), 3).empty());
   EXPECT_TRUE(mapper_->RecognizeLoopClosurePlaces(images_.front()).empty());

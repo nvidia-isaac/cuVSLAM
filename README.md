@@ -77,7 +77,6 @@ Both APIs expose it the same way:
 | Task | C++ (`cuvslam::Slam`) | Python (`cuvslam.Slam`) |
 |------|-----------------------|-------------------------|
 | Turn it on | `Config::use_vpr = true` and `Config::vpr_model_path` | `Config(use_vpr=True, vpr_model_path=...)` |
-| Add a frame to the map | `AddFrameToVprMap` | `add_frame_to_vpr_map` |
 | Ask where a frame was taken | `RecognizePlaceByFrame` | `recognize_place_by_frame` |
 | Save it with the SLAM map | `SaveMap` | `save_map` |
 | Relocalize without a guess pose | `LocalizeInMap` with no `guess_pose` | `localize_in_map(..., guess_pose=None)` |

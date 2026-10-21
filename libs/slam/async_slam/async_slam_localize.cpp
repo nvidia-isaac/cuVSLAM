@@ -203,7 +203,6 @@ void AsyncSlam::LocalizeInMapCmd::Execute(AsyncSlam& async_slam, FrameId, const 
       AddFakeKeyframeForLocalizedPose(*async_slam.slam_, result.from_keyframe_id, result.pose_in_slam, timestamp_ns_,
                                       images_, FrameInformationString(images_));
       AddFakeKeyframeForLastTailPose(*async_slam.slam_, async_slam.tail_);
-      async_slam.vpr_wants_frame_ = async_slam.slam_->VprHeadNeedsImage();
     }
   }
   CALLBACK_AND_RETURN_IF(!flushed, finish_cb_, Pose, "Failed to write the session's map file; the session keeps it.");

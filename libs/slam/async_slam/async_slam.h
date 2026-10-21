@@ -17,7 +17,6 @@
 
 #pragma once
 
-#include <atomic>
 #include <functional>
 #include <limits>
 #include <map>
@@ -119,11 +118,7 @@ public:
 
   bool IsVprEnabled() const { return vpr_enabled_; }
 
-  // True when the newest pose graph node has no VPR image yet; lock-free, so cheap to poll every frame.
-  bool VprNeedsFrame() const { return vpr_wants_frame_; }
-
   // Queued for the worker like other commands (run inline in reproduce mode).
-  void AddFrameToVprMap(vpr::VprImage image, int64_t timestamp_ns);
   void RecognizePlace(vpr::VprImage image, Slam::RecognizePlaceFinishCB finish_cb);
 
 private:
@@ -188,19 +183,6 @@ private:
     std::function<void(bool)> callback_;
   };
 
-  class AddFrameToVprMapCmd : public ICommand {
-  public:
-    AddFrameToVprMapCmd(vpr::VprImage image, int64_t timestamp_ns)
-        : image_(std::move(image)), timestamp_ns_(timestamp_ns) {}
-    ~AddFrameToVprMapCmd() override = default;
-
-    void Execute(AsyncSlam& async_slam, FrameId, const Isometry3T&) override;
-
-  private:
-    const vpr::VprImage image_;
-    const int64_t timestamp_ns_;
-  };
-
   class RecognizePlaceCmd : public ICommand {
   public:
     RecognizePlaceCmd(vpr::VprImage image, Slam::RecognizePlaceFinishCB finish_cb)
@@ -219,9 +201,6 @@ private:
   const std::vector<CameraId> cameras_;
   const AsyncSlamOptions options_;
   const bool vpr_enabled_;
-
-  // Set by the worker under slam_mutex_, read lock-free by the caller; a stale read costs one no-op command.
-  std::atomic<bool> vpr_wants_frame_{false};
 
   // --- Accessed only from the caller's thread (e.g. TrackResult(), GetPoseForFrame() callers) ---
   bool reproduce_mode_ = false;

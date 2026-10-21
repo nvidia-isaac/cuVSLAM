@@ -891,7 +891,7 @@ NB_MODULE(pycuvslam, m) {
               "verbosity Warning or higher, see set_verbosity). Default: 10 queued commands.")
       .def_rw("use_vpr", &Slam::Config::use_vpr,
               "Enable visual place recognition (AnyLoc); needs a USE_TENSORRT build, `use_gpu` and `vpr_model_path`. "
-              "Its map is part of the SLAM map: one frame per pose graph node, bounded by `max_map_size`.")
+              "Its map is part of the SLAM map: `track` adds one frame per pose graph node, bounded by `max_map_size`.")
       .def_rw("vpr_model_path", &Slam::Config::vpr_model_path,
               "AnyLoc TensorRT engine, built by the `anyloc_engine` target. The engine runs only on the GPU and "
               "TensorRT version that built it; otherwise constructing Slam raises.")
@@ -1163,17 +1163,6 @@ NB_MODULE(pycuvslam, m) {
           "Get pose graph consisting of all keyframes and their connections including loop closures.\n\n"
           "Returns:\n"
           "    Pose graph with nodes and edges")
-      .def(
-          "add_frame_to_vpr_map",
-          [](Slam& self, const std::vector<nb::ndarray<nb::ro>>& images, int64_t timestamp_ns) {
-            self.AddFrameToVprMap(ImageSetFromNDArrays(images, timestamp_ns, ArrayType::Image));
-          },
-          nb::arg("images"), nb::arg("timestamp_ns") = 0,
-          "Offer the current frame to the place recognition map.\n\n"
-          "Call it on every frame, after `track`; the map keeps one frame per pose graph node.\n\n"
-          "Parameters:\n"
-          "    images: List of numpy arrays containing the camera images\n"
-          "    timestamp_ns: Timestamp of the frame in nanoseconds")
       .def(
           "recognize_place_by_frame",
           [](Slam& self, const std::vector<nb::ndarray<nb::ro>>& images, int64_t timestamp_ns, nb::callable finish_cb) {

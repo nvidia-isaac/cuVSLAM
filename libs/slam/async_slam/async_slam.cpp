@@ -35,6 +35,7 @@
 #include "slam/slam/loop_closure_solver/iloop_closure_solver.h"
 #include "slam/slam/slam.h"
 #include "slam/view/view_landmarks.h"
+#include "slam/vpr/vpr_sof_image.h"
 #include "sof/image_manager.h"
 #include "visualizer/visualizer.hpp"
 
@@ -203,6 +204,10 @@ void AsyncSlam::TrackResult(const FrameId frameId, const int64_t timestamp_ns,
       }
     }
     if (tail_.UpdateTimeByOdometry(timestamp_ns, current_pose)) {
+      if (vpr_enabled_) {
+        // Copy now: the worker may run after the image pool recycled these contexts.
+        vo_keyframe->frame_data.vpr_image = vpr::MakeVprImageFromImages(images);
+      }
       input_queue_.Push(vo_keyframe);
       const size_t queue_size = input_queue_.Size();
       TraceWarningIf(queue_size > options_.delay_warning_queue_size,
@@ -224,24 +229,6 @@ void AsyncSlam::TrackResult(const FrameId frameId, const int64_t timestamp_ns,
           TrajectoryType::GT);
   }
 #endif
-}
-
-void AsyncSlam::AddFrameToVprMap(vpr::VprImage image, const int64_t timestamp_ns) {
-  if (!vpr_enabled_ || image.Empty()) {
-    return;
-  }
-  const auto vo_keyframe = std::make_shared<VOKeyframeInfo>(VOKeyframeInfo());
-  vo_keyframe->command = std::make_shared<AddFrameToVprMapCmd>(std::move(image), timestamp_ns);
-  input_queue_.Push(vo_keyframe);
-  if (reproduce_mode_) {
-    ProcessInputSynchronously();
-  }
-}
-
-void AsyncSlam::AddFrameToVprMapCmd::Execute(AsyncSlam& async_slam, FrameId, const Isometry3T&) {
-  const std::lock_guard slam_guard(async_slam.slam_mutex_);
-  async_slam.slam_->AddVprFrame(image_, timestamp_ns_);
-  async_slam.vpr_wants_frame_ = async_slam.slam_->VprHeadNeedsImage();
 }
 
 void AsyncSlam::RecognizePlace(vpr::VprImage image, Slam::RecognizePlaceFinishCB finish_cb) {

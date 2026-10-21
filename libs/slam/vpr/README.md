@@ -24,10 +24,8 @@ vpr_sof_image.* bridge from the tracker's sof::ImageContext to a VprImage
 after a loop closure therefore reports the *corrected* position, not the drifted one that was current when the
 frame was mapped. `VprMap` stores no poses at all.
 
-**Exactly one frame per node.** `VprMap::AddFrame` is a no-op when the node already has one, which is what lets
-`Slam::AddFrameToVprMap` be called on every single frame: whichever frame happens to follow a new keyframe becomes
-that node's picture, and the rest cost a `HasImage` lookup. It also bounds the map to the size of the pose graph,
-which matters because AnyLoc searches exhaustively.
+**Exactly one frame per node**, the keyframe's own. This bounds the map to the size of the pose graph, which
+matters because AnyLoc searches exhaustively.
 
 **The place recognition map is part of the SLAM map.** It is a singleton of the SLAM database next to the spatial
 index, `SlamDatabaseSingleton::VprMap`, written by `SaveMap`, by `FlushMap` and when `Slam` is destroyed, and read
@@ -47,15 +45,11 @@ leaves it at 0, off), AnyLoc's winner has to beat the best match from a differen
 Between two candidates that look equally much like the query, reporting either is a coin flip, and a wrong pose
 costs a relocalizer more than a missing one.
 
-**Two paths feed the map, and they cover each other.**
+**The frame is copied when the keyframe is queued.** `AsyncSlam::TrackResult` copies it into
+`VOFrameData::vpr_image` on the caller's thread, and `LocalizerAndMapper::AddKeyframe` maps it. The worker may run
+after the image pool recycled the frame's context, so the copy cannot wait for it.
 
-- `LocalizerAndMapper::AddKeyframe` calls `VprMap::OnKeyframeAdded` and attaches pixels when the frame's image
-  context still holds them. This is the path that works in asynchronous mode, where the caller has no way to know a
-  keyframe was just created.
-- `Slam::AddFrameToVprMap` converts a caller's frame on the caller's thread and binds it to the newest node. This
-  is the path that works when SLAM has fallen behind odometry and the worker found the image context recycled.
-
-Neither path ever retains an `sof::ImageContextPtr`. The tracker's image pool holds four contexts per camera and
+Nothing retains an `sof::ImageContextPtr` for this. The tracker's image pool holds four contexts per camera and
 hands out a slot only when its use count drops to one, so keeping a reference for even one extra frame can starve
 `Odometry::Track`. Pixels are copied into a `VprImage` and the context is released immediately.
 
