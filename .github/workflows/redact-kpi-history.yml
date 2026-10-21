@@ -1,0 +1,100 @@
+name: Redact KPI history
+
+# One-off redaction, run from this branch and never merged: drops the TUM and
+# ICL-NUIM RGBD KPIs from the 2026-09-09 history files. That night was the
+# first evaluation of both datasets, and it ran before #156 fixed the RGBD
+# depth solver reading uninitialised memory, so its RGBD values are noise. A
+# push that changes this file runs it; push with DRY_RUN "true" to review the
+# plan in the job summary, then with "false".
+
+on:
+  push:
+    branches: [vikuznetsov/redact-kpi-history]
+    paths: [.github/workflows/redact-kpi-history.yml]
+
+concurrency:
+  group: redact-kpi-history
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  redact:
+    name: Redact KPI history
+    if: github.ref == 'refs/heads/vikuznetsov/redact-kpi-history'
+    runs-on: [gpu]
+    timeout-minutes: 15
+    env:
+      DRY_RUN: "true"
+    steps:
+      - name: Redact the 2026-09-09 TUM and ICL-NUIM RGBD KPIs
+        env:
+          RUNNER_STORAGE_ROOT: ${{ vars.RUNNER_STORAGE_ROOT }}
+        run: |
+          set -euo pipefail
+          history="${RUNNER_STORAGE_ROOT:?RUNNER_STORAGE_ROOT must be set}/cuvslam-ci/kpi-history"
+          # Runner storage is mounted asynchronously after a fresh runner boots.
+          waited=0
+          while [ ! -d "$history" ] && [ "$waited" -lt 300 ]; do
+            sleep 5
+            waited=$((waited + 5))
+          done
+          if [ ! -d "$history" ]; then
+            echo "::error::No KPI history at $history after waiting ${waited}s"
+            exit 1
+          fi
+          backup="$RUNNER_TEMP/kpi-history-backup"
+          rm -rf "$backup"
+          mkdir -p "$backup"
+          {
+            echo "## KPI history redaction$([ "$DRY_RUN" = "true" ] && echo " (dry run)")"
+            echo ""
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          docker run --rm -i --network host --user "$(id -u):$(id -g)" \
+            -v "$history:/kpi-history" -v "$backup:/backup" \
+            python:3.12-slim python3 - /kpi-history "$DRY_RUN" <<'EOF' | tee -a "$GITHUB_STEP_SUMMARY"
+          import json, os, re, sys
+
+          root, dry_run = sys.argv[1], sys.argv[2] == "true"
+          night = "2026-09-09"
+          rgbd = re.compile(r"^(TUM|ICL_NUIM)_[A-Za-z]+_RGBD_(ODOM|SLAM)$")
+          changed = 0
+          for slug in sorted(os.listdir(root)):
+              path = os.path.join(root, slug, f"kpi_{night}.json")
+              if not os.path.isfile(path):
+                  print(f"{slug}: no {night} file")
+                  continue
+              with open(path, encoding="utf-8") as file:
+                  data = json.load(file)
+              removed = sorted(key for key in data if rgbd.match(key))
+              if not removed:
+                  print(f"{slug}: no TUM or ICL-NUIM RGBD keys")
+                  continue
+              verb = "would remove" if dry_run else "removed"
+              print(f"{slug}: {verb} {len(removed)} of {len(data)} keys: {', '.join(removed)}")
+              changed += 1
+              if dry_run:
+                  continue
+              for target, content in ((os.path.join("/backup", slug, f"kpi_{night}.json"), data),
+                                      (path, {key: value for key, value in data.items() if key not in removed})):
+                  os.makedirs(os.path.dirname(target), exist_ok=True)
+                  with open(target, "w", encoding="utf-8") as file:
+                      json.dump(content, file, indent=2, sort_keys=True)
+                      file.write("\n")
+          print(f"{'Would change' if dry_run else 'Changed'} {changed} history file(s).")
+          EOF
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the original files
+        if: env.DRY_RUN != 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: kpi-history-backup-2026-09-09
+          path: ${{ runner.temp }}/kpi-history-backup/
+          retention-days: 30
+          if-no-files-found: error
