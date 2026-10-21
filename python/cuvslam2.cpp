@@ -1068,7 +1068,7 @@ NB_MODULE(pycuvslam, m) {
           "This call could be blocked by slam thread.")
       .def(
           "save_map",
-          [](Slam& self, const std::string_view& folder_name, nb::callable callback) {
+          [](Slam& self, std::string_view folder_name, nb::callable callback) {
             self.SaveMap(folder_name, [callback = GilSafeCallable(std::move(callback))](bool success) {
               nb::gil_scoped_acquire gil;
               (*callback)(success);

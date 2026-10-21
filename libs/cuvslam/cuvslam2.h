@@ -1000,7 +1000,7 @@ public:
    * @param[in] folder_name Folder name, where SLAM database (map) will be saved
    * @param[in] callback Callback function to be called when save is complete, may be called in a separate thread
    */
-  void SaveMap(const std::string_view& folder_name, std::function<void(bool success)> callback) const;
+  void SaveMap(std::string_view folder_name, std::function<void(bool success)> callback) const;
 
   /**
    * Write all unsaved data of the map to its map file asynchronously: `Config::map_path`, or the folder that
