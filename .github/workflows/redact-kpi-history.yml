@@ -29,7 +29,7 @@ jobs:
     runs-on: [gpu]
     timeout-minutes: 15
     env:
-      DRY_RUN: "true"
+      DRY_RUN: "false"
     steps:
       - name: Redact the 2026-09-09 TUM and ICL-NUIM RGBD KPIs
         env:
