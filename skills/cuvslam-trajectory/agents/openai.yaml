@@ -1,0 +1,4 @@
+interface:
+  display_name: "cuVSLAM Trajectory"
+  short_description: "Replay datasets and export validated trajectories"
+  default_prompt: "Use $cuvslam-trajectory to replay this dataset and save a validated trajectory."
