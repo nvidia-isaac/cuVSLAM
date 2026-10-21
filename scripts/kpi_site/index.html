@@ -76,6 +76,9 @@
     <div id="types"></div>
     <h2>Modes</h2>
     <div id="modes"></div>
+    <label><input type="checkbox" id="retired"> Include retired evals</label>
+    <div class="hint">Evals that no configuration has run in its last three nightlies, such as KITTI stereo, are
+      hidden unless this is on.</div>
     <h2 id="yaxis-heading">Y axis</h2>
     <select id="yaxis" aria-labelledby="yaxis-heading">
       <option value="abs">Absolute value</option>
@@ -106,9 +109,9 @@
 const PALETTE = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22",
                  "#17becf", "#76b900", "#003f5c", "#bc5090", "#ffa600", "#58508d", "#ff6361"];
 const DEFAULTS = {panel: "row", columns: "auto", height: "auto", combine: "each", yaxis: "abs", style: "lines+markers",
-                  log: false, gaps: false, band: false, metrics: ["ATE"], from: "", to: ""};
+                  log: false, gaps: false, band: true, retired: false, metrics: ["ATE"], from: "", to: ""};
 const SELECTS = ["panel", "columns", "height", "combine", "yaxis", "style", "from", "to"];
-const TOGGLES = ["log", "gaps", "band"];
+const TOGGLES = ["log", "gaps", "band", "retired"];
 const GROUPS = ["configs", "metrics", "datasets", "types", "modes"];
 // Header height plus the panel grid padding, so a "fill" chart fits the window without scrolling.
 const FILL_OFFSET_PX = 72;
@@ -150,9 +153,17 @@ function readHash(opts) {
 function writeHash() {
   const p = new URLSearchParams();
   for (const k of SELECTS) if (state[k] !== DEFAULTS[k]) p.set(k, state[k]);
-  for (const k of TOGGLES) if (state[k]) p.set(k, "1");
+  for (const k of TOGGLES) if (state[k] !== DEFAULTS[k]) p.set(k, state[k] ? "1" : "0");
   for (const g of GROUPS) p.set(g, state[g].join(","));
   history.replaceState(null, "", "#" + p.toString());
+}
+
+// Whether every KPI of a dataset or tracking type is retired, to mark it in the filter lists.
+function allRetired(group, value) {
+  const match = {datasets: (k) => k.dataset === value, types: (k) => splitMode(k.mode)[0] === value}[group];
+  if (!match) return false;
+  const kpis = Object.values(DATA.kpis).filter(match);
+  return kpis.length > 0 && kpis.every((k) => k.retired);
 }
 
 function buildControls(opts) {
@@ -164,7 +175,7 @@ function buildControls(opts) {
       input.addEventListener("change", () => {
         state[g] = [...box.querySelectorAll("input:checked")].map((i) => i.value); update();
       });
-      label.append(input, " " + (g === "metrics" ? DATA.metrics[v].label : v));
+      label.append(input, " " + (g === "metrics" ? DATA.metrics[v].label : v) + (allRetired(g, v) ? " (retired)" : ""));
       label.title = v;
       box.append(label);
     }
@@ -200,8 +211,8 @@ function collectSeries() {
   const series = [];
   for (const [key, kpi] of Object.entries(DATA.kpis)) {
     const [type, mode] = splitMode(kpi.mode);
-    if (!state.metrics.includes(kpi.metric) || !state.datasets.includes(kpi.dataset) ||
-        !state.types.includes(type) || !state.modes.includes(mode)) continue;
+    if ((kpi.retired && !state.retired) || !state.metrics.includes(kpi.metric) ||
+        !state.datasets.includes(kpi.dataset) || !state.types.includes(type) || !state.modes.includes(mode)) continue;
     const perConfig = state.configs.filter((c) => DATA.configs[c].values[key])
       .map((c) => ({config: c, runs: DATA.configs[c].runs, values: DATA.configs[c].values[key]}));
     if (!perConfig.length) continue;
@@ -335,7 +346,10 @@ function levelBand(runs, results, y) {
 }
 
 function tracesFor(s, name) {
-  const color = colorFor(name), idx = s.runs.map((r, i) => i).filter((i) => inRange(s.runs[i]));
+  // Nights before an eval existed (or after it was retired) are null; leaving them in stretches the date axis.
+  const first = s.values.findIndex((v) => v !== null), last = s.values.length - 1 - [...s.values].reverse().findIndex((v) => v !== null);
+  const idx = s.runs.map((r, i) => i).filter((i) => i >= first && i <= last && inRange(s.runs[i]));
+  const color = colorFor(name);
   const ref = state.yaxis === "pct" ? median(idx.map((i) => s.values[i]).filter((v) => v !== null)) : null;
   const y = (v) => (v === null ? null : ref !== null ? (ref ? (v / ref - 1) * 100 : null) : v);
   const x = idx.map((i) => s.runs[i]), unit = DATA.metrics[s.kpi.metric].unit;

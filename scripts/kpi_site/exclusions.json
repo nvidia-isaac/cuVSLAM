@@ -1,0 +1,34 @@
+{
+    "_comment": [
+        "KPI values the trend site leaves out, in every configuration. Each entry drops",
+        "every metric of the dataset's listed tracking types (both ODOM and SLAM) on the",
+        "listed nights. Only the published site reads this; the KPI history and the nightly",
+        "regression check are unchanged."
+    ],
+    "exclusions": [
+        {
+            "dataset": "TUM",
+            "types": ["RGBD"],
+            "runs": ["2026-09-09"],
+            "reason": "First night of the eval; ATE and Kabsch are up to 10x off the following nights."
+        },
+        {
+            "dataset": "ICL_NUIM",
+            "types": ["RGBD"],
+            "runs": ["2026-09-09"],
+            "reason": "First night of the eval; ATE and Kabsch are up to 10x off the following nights."
+        },
+        {
+            "dataset": "TUM",
+            "types": ["MSF"],
+            "runs": ["2026-09-18"],
+            "reason": "First night of the eval."
+        },
+        {
+            "dataset": "ICL_NUIM",
+            "types": ["MSF"],
+            "runs": ["2026-09-18"],
+            "reason": "First night of the eval; ATE is about 50% off the following nights."
+        }
+    ]
+}
