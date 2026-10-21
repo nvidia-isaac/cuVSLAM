@@ -935,7 +935,6 @@ public:
    * @brief Result of `RecognizePlaceByFrame`
    */
   struct PlaceRecognition {
-    bool found;            ///< false when no mapped place matched; the other fields are then meaningless
     uint64_t node_id;      ///< pose graph node of the matched frame
     Pose pose;             ///< current world pose of that node
     float score;           ///< similarity in [0, 1]
@@ -1088,7 +1087,8 @@ public:
   /**
    * Find the pose graph node whose mapped frame looks most like `images`, without geometric verification.
    * @param[in] images Observed images; only the first one from a primary camera is used
-   * @param[in] finish_cb Called when the search completes, may be called in a separate thread
+   * @param[in] finish_cb Called when the search completes, with an error if no mapped place matched; may be called in
+   * a separate thread
    */
   void RecognizePlaceByFrame(const ImageSet& images, RecognizePlaceFinishCB finish_cb);
 

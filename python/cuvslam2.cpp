@@ -1024,15 +1024,13 @@ NB_MODULE(pycuvslam, m) {
 
   nb::class_<Slam::PlaceRecognition>(slam_cls, "PlaceRecognition", "Result of :meth:`Slam.recognize_place_by_frame`")
       .def(nb::init<>())
-      .def_rw("found", &Slam::PlaceRecognition::found,
-              "False when no mapped place matched; the other fields are then meaningless")
       .def_rw("node_id", &Slam::PlaceRecognition::node_id, "Pose graph node of the matched frame")
       .def_rw("pose", &Slam::PlaceRecognition::pose, "Current world pose of that node")
       .def_rw("score", &Slam::PlaceRecognition::score, "Similarity in [0, 1]")
       .def_rw("timestamp_ns", &Slam::PlaceRecognition::timestamp_ns, "Timestamp of the matched frame in nanoseconds")
       .def("__repr__", [](const Slam::PlaceRecognition& p) {
-        return nb::str("cuvslam.Slam.PlaceRecognition(found={}, node_id={}, pose={}, score={}, timestamp_ns={})")
-            .format(p.found, p.node_id, p.pose, p.score, p.timestamp_ns);
+        return nb::str("cuvslam.Slam.PlaceRecognition(node_id={}, pose={}, score={}, timestamp_ns={})")
+            .format(p.node_id, p.pose, p.score, p.timestamp_ns);
       });
 
   // Slam class methods
@@ -1191,7 +1189,8 @@ NB_MODULE(pycuvslam, m) {
           "Parameters:\n"
           "    images: List of numpy arrays containing the camera images\n"
           "    timestamp_ns: Timestamp of the frame in nanoseconds\n"
-          "    finish_cb: Called on completion, possibly on another thread (receives the result and an error message)")
+          "    finish_cb: Called on completion, possibly on another thread (receives the result and an error message,\n"
+          "        which is set when no mapped place matched)")
       .def(
           "get_slam_metrics",
           [](const Slam& self) -> Slam::Metrics {

@@ -41,6 +41,7 @@ DEFAULT_SUCCESS_RADIUS_M = 10.0
 TRUE_POSITIVE = "true_positive"
 FALSE_POSITIVE = "false_positive"
 UNRECOGNIZED = "unrecognized"
+_NO_MATCH = "No mapped place matched."  # error of recognize_place_by_frame when nothing matched
 
 # Colorblind-checked colors.
 _CLASS_STYLE = {
@@ -449,13 +450,17 @@ class _MapQuerier:
             raise RuntimeError(f"recognize_place_by_frame returned before answering frame {frame_id}; "
                                "the reporter needs Slam.Config.sync_mode to collect its result")
         place, error_message = answers[0]
-        if error_message or place is None:
+        if place is None and error_message == _NO_MATCH:
+            self.hits.append(_QueryHit(frame_index=frame_id, found=False, node_id=0, score=0.0, timestamp_ns=0,
+                                       position=None))
+            return
+        if place is None:
             self.n_errors += 1
             self.last_error = error_message or "no result and no error message"
             return
         self.hits.append(_QueryHit(
             frame_index=frame_id,
-            found=place.found,
+            found=True,
             node_id=place.node_id,
             score=place.score,
             timestamp_ns=place.timestamp_ns,

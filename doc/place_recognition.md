@@ -33,9 +33,9 @@ import cuvslam as vslam
 engine = os.environ['CUVSLAM_ANYLOC_ENGINE']
 
 def on_place(place, error):
-    if error:
-        print(error)   # no answer at all, for example use_vpr is off
-    elif place.found:
+    if place is None:
+        print(error)   # no mapped place matched, or no answer at all, for example use_vpr is off
+    else:
         print(place.node_id, place.pose, place.score)
 
 # Mapping run: offer every frame. The map keeps one frame per pose graph node, so the calls that

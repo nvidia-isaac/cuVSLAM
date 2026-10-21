@@ -268,8 +268,12 @@ void AsyncSlam::RecognizePlaceCmd::Execute(AsyncSlam& async_slam, FrameId, const
     place = async_slam.slam_->RecognizePlace(image_);
   }
 
+  if (!place.found) {
+    finish_cb_(Result<Slam::PlaceRecognition>::Error("No mapped place matched."));
+    return;
+  }
+
   Slam::PlaceRecognition result{};
-  result.found = place.found;
   result.node_id = static_cast<uint64_t>(place.node_id);
   result.pose = ConvertIsometryToPose(place.pose);
   result.score = place.score;

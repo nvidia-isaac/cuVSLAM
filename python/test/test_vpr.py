@@ -29,6 +29,7 @@ W, H = 640, 480         # Image size of tracked images
 BASELINE = 0.25         # Baseline distance between cameras (m)
 STEPS = 30              # Number of tracked frames
 FRAME_PERIOD_NS = 1_000_000
+NO_MATCH = "No mapped place matched."  # error of a place recognition query that matched nothing
 
 # Real loop-closing imagery for the KITTI-07 tests, which skip without it.
 KITTI_07_DIR = os.environ.get("CUVSLAM_KITTI_07_DIR") or os.path.join(
@@ -72,6 +73,13 @@ def recognize_place(slam, images, timestamp_ns):
     if len(answers) != 1:
         raise AssertionError(f"sync_mode must call the callback exactly once, it ran {len(answers)} times")
     return answers[0]
+
+def recognize_match(slam, images, timestamp_ns):
+    """Return the matched place, or None when no mapped place matched; fail on any other error."""
+    place, error = recognize_place(slam, images, timestamp_ns)
+    if place is None and error != NO_MATCH:
+        raise AssertionError(f"place recognition failed: {error}")
+    return place
 
 def localization_settings(**kwargs):
     """Localization settings with the small probe grid the synthetic map needs."""
@@ -150,15 +158,11 @@ class TestVprBindings(unittest.TestCase):
 
     def test_place_recognition_fields(self):
         place = vslam.Slam.PlaceRecognition()
-        self.assertFalse(place.found)
-
-        place.found = True
         place.node_id = 7
         place.pose = vslam.Pose(translation=[1.0, 2.0, 3.0], rotation=[0.0, 0.0, 0.0, 1.0])
         place.score = 0.875
         place.timestamp_ns = 123456789
 
-        self.assertTrue(place.found)
         self.assertEqual(place.node_id, 7)
         self.assertEqual(list(place.pose.translation), [1.0, 2.0, 3.0])
         self.assertAlmostEqual(place.score, 0.875, places=5)
@@ -196,7 +200,7 @@ class TestVprOff(unittest.TestCase):
     def test_recognize_reports_an_error_instead_of_a_result(self):
         result, error = recognize_place(self.tracker.slam, self.images, FRAME_PERIOD_NS)
 
-        # A "not found" result would hide the misconfiguration.
+        # A no-match error would hide the misconfiguration.
         self.assertIsNone(result)
         self.assertIn("use_vpr", error)
 
@@ -210,7 +214,7 @@ class TestVprOff(unittest.TestCase):
 
 @needs_anyloc
 class TestVprFrameSelection(unittest.TestCase):
-    """A frame without a primary camera image is refused."""
+    """A frame without a primary camera image is refused, and one matching nothing gets the no-match error."""
 
     def setUp(self):
         self.rig, _ = make_rig()
@@ -226,13 +230,21 @@ class TestVprFrameSelection(unittest.TestCase):
         self.assertIn("primary camera", error)
 
     def test_a_frame_from_no_primary_camera_reports_an_error(self):
-        # Only primary cameras are mapped; others would yield a misleading "not found".
+        # Only primary cameras are mapped; others would yield a misleading no-match error.
         slam = vslam.Slam(self.rig, [1], self.slam_cfg)
 
         result, error = recognize_place(slam, self.images[:1], FRAME_PERIOD_NS)
 
         self.assertIsNone(result)
         self.assertIn("primary camera", error)
+
+    def test_an_empty_map_reports_no_match(self):
+        slam = vslam.Slam(self.rig, [0, 1], self.slam_cfg)
+
+        result, error = recognize_place(slam, self.images, FRAME_PERIOD_NS)
+
+        self.assertIsNone(result)
+        self.assertEqual(error, NO_MATCH)
 
 
 class TestVprLoopClosureModeConfig(unittest.TestCase):
@@ -368,9 +380,8 @@ class TestVprAnyLoc(unittest.TestCase):
         """Query every kept frame and return the confidently recognized ones."""
         recognized = []
         for timestamp, images in frames:
-            place, error = recognize_place(slam, images, timestamp)
-            self.assertEqual(error, "")
-            if place.found and place.score > 0.9:
+            place = recognize_match(slam, images, timestamp)
+            if place is not None and place.score > 0.9:
                 recognized.append((timestamp, place))
         return recognized
 
@@ -392,9 +403,9 @@ class TestVprAnyLoc(unittest.TestCase):
         rng = np.random.RandomState(99)
         noise = [np.ascontiguousarray(rng.randint(0, 256, image.shape).astype(image.dtype)) for image in images]
 
-        place, error = recognize_place(self.tracker.slam, noise, timestamp + 1)
-        self.assertEqual(error, "")
-        self.assertTrue(not place.found or place.score < 0.9, f"unrelated image scored {place.score}")
+        place = recognize_match(self.tracker.slam, noise, timestamp + 1)
+        if place is not None:
+            self.assertLess(place.score, 0.9, "an unrelated image was recognized")
 
     def test_a_new_session_gets_the_places_by_localizing_in_the_saved_map(self):
         # One LMDB database holds both maps, so localizing in it brings the places along.
@@ -417,9 +428,8 @@ class TestVprAnyLoc(unittest.TestCase):
         noise = [np.ascontiguousarray(rng.randint(0, 256, image.shape).astype(image.dtype))
                  for image in self.frames[0][1]]
         session.slam.add_frame_to_vpr_map(noise, localized_at + 1)
-        place, error = recognize_place(session.slam, noise, localized_at + 1)
-        self.assertEqual(error, "")
-        self.assertTrue(place.found)
+        place = recognize_match(session.slam, noise, localized_at + 1)
+        self.assertIsNotNone(place)
         self.assertGreater(place.score, 0.99)
 
         # Same node ids and timestamps: the VPR map came with the pose graph its ids refer to.
@@ -427,9 +437,8 @@ class TestVprAnyLoc(unittest.TestCase):
         for timestamp, place in mapped:
             if timestamp == localized_at:
                 continue  # its own frame was just added to the map again
-            reloaded, error = recognize_place(session.slam, images_by_timestamp[timestamp], timestamp)
-            self.assertEqual(error, "")
-            self.assertTrue(reloaded.found)
+            reloaded = recognize_match(session.slam, images_by_timestamp[timestamp], timestamp)
+            self.assertIsNotNone(reloaded)
             self.assertGreater(reloaded.score, 0.9)
             self.assertEqual(reloaded.node_id, place.node_id)
             self.assertEqual(reloaded.timestamp_ns, place.timestamp_ns)
@@ -548,9 +557,8 @@ class TestVprFollowsPoseGraph(unittest.TestCase):
         n_checked = 0
         far = []
         for frame_id, (timestamp, images, tracked_pose) in sorted(replay.kept_frames.items()):
-            place, error = recognize_place(self.tracker.slam, images, timestamp)
-            self.assertEqual(error, "")
-            if not place.found:
+            place = recognize_match(self.tracker.slam, images, timestamp)
+            if place is None:
                 continue
             self.assertIn(place.node_id, nodes, "a match named a node the pose graph does not have")
             place_t, place_q = pose_arrays(place.pose)
@@ -577,9 +585,8 @@ class TestVprFollowsPoseGraph(unittest.TestCase):
         # (b) The optimization did move those nodes.
         displacements = {}
         for frame_id, (timestamp, images, first) in sorted(replay.early_results.items()):
-            again, error = recognize_place(self.tracker.slam, images, timestamp)
-            self.assertEqual(error, "")
-            if not again.found or again.node_id != first.node_id:
+            again = recognize_match(self.tracker.slam, images, timestamp)
+            if again is None or again.node_id != first.node_id:
                 # Matched another node, so the pose difference is meaningless.
                 continue
             displacements[frame_id] = float(
@@ -686,9 +693,8 @@ class _VprReplay:
                                           [np.array(image, copy=True) for image in images],
                                           self.tracker.slam.get_pose())
         if frame_id in TestVprFollowsPoseGraph.EARLY_FRAMES:
-            place, error = recognize_place(self.tracker.slam, images, timestamp)
-            self.test.assertEqual(error, "")
-            if place.found:
+            place = recognize_match(self.tracker.slam, images, timestamp)
+            if place is not None:
                 self.early_results[frame_id] = (
                     timestamp, [np.array(image, copy=True) for image in images], place)
 
