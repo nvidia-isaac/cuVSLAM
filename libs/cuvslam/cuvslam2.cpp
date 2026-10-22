@@ -1105,7 +1105,7 @@ public:
     THROW_INVALID_ARG_IF(config.use_vpr && !config.use_gpu,
                          "use_vpr runs AnyLoc as a TensorRT engine on the GPU, so it needs use_gpu.");
     options.vpr_options.enabled = config.use_vpr;
-    options.vpr_options.model_path = std::string{config.vpr_model_path};
+    options.vpr_options.model_path = config.vpr_model_path;
     THROW_INVALID_ARG_IF(!(config.vpr_score_threshold >= 0.f && config.vpr_score_threshold <= 1.f),
                          "vpr_score_threshold must be in [0, 1].");
     options.vpr_options.score_threshold = config.vpr_score_threshold;

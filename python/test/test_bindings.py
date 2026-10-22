@@ -587,38 +587,40 @@ class TestBindings(unittest.TestCase):
             def __del__(self):
                 freed.append(str(self))
 
-        expected = ["/tmp/a", "/tmp/b", "/tmp/c", "/tmp/d"]
-        slam_cfg = vslam.Slam.Config(map_cache_path=TrackedStr("/tmp/a"))
-        odom_cfg = vslam.Odometry.Config(debug_dump_directory=TrackedStr("/tmp/b"))
+        expected = ["/tmp/a", "/tmp/b", "/tmp/c", "/tmp/d", "/tmp/e", "/tmp/f"]
+        slam_cfg = vslam.Slam.Config(map_path=TrackedStr("/tmp/a"), vpr_model_path=TrackedStr("/tmp/b"))
+        odom_cfg = vslam.Odometry.Config(debug_dump_directory=TrackedStr("/tmp/c"))
         slam_cfg_set, odom_cfg_set = vslam.Slam.Config(), vslam.Odometry.Config()
-        slam_cfg_set.map_cache_path = TrackedStr("/tmp/c")
-        odom_cfg_set.debug_dump_directory = TrackedStr("/tmp/d")
+        slam_cfg_set.map_path = TrackedStr("/tmp/d")
+        slam_cfg_set.vpr_model_path = TrackedStr("/tmp/e")
+        odom_cfg_set.debug_dump_directory = TrackedStr("/tmp/f")
 
         self.assertEqual(sorted(freed), expected)
-        self.assertEqual([slam_cfg.map_cache_path, odom_cfg.debug_dump_directory,
-                          slam_cfg_set.map_cache_path, odom_cfg_set.debug_dump_directory], expected)
+        self.assertEqual([slam_cfg.map_path, slam_cfg.vpr_model_path, odom_cfg.debug_dump_directory,
+                          slam_cfg_set.map_path, slam_cfg_set.vpr_model_path, odom_cfg_set.debug_dump_directory],
+                         expected)
 
     def test_load_path_strings_from_yaml(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "config.yaml")
             with open(path, "w") as f:
-                f.write("odometry:\n  debug_dump_directory: /tmp/dump\nslam:\n  map_cache_path: /tmp/cache\n")
+                f.write("odometry:\n  debug_dump_directory: /tmp/dump\nslam:\n  map_path: /tmp/map\n")
             odom_cfg = vslam.utils.try_load_odometry_config_from_file(path)
             slam_cfg = vslam.utils.try_load_slam_config_from_file(path)
 
         self.assertEqual(odom_cfg.debug_dump_directory, "/tmp/dump")
-        self.assertEqual(slam_cfg.map_cache_path, "/tmp/cache")
+        self.assertEqual(slam_cfg.map_path, "/tmp/map")
 
     def test_load_empty_path_strings_from_yaml(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "config.yaml")
             with open(path, "w") as f:
-                f.write("odometry:\n  debug_dump_directory:\nslam:\n  map_cache_path: ~\n")
+                f.write("odometry:\n  debug_dump_directory:\nslam:\n  map_path: ~\n")
             odom_cfg = vslam.utils.try_load_odometry_config_from_file(path)
             slam_cfg = vslam.utils.try_load_slam_config_from_file(path)
 
         self.assertEqual(odom_cfg.debug_dump_directory, "")
-        self.assertEqual(slam_cfg.map_cache_path, "")
+        self.assertEqual(slam_cfg.map_path, "")
 
     def test_slam_localization_settings(self):
         s = vslam.Slam.LocalizationSettings(
