@@ -49,8 +49,11 @@ void PublishAllLandmarksToView(const Map& map, int64_t timestamp_ns, ViewLandmar
       }
     }
     ++index;
-    const Vector3T xyz = landmarks_spatial_index->GetLandmarkOrStagedCoords(id, pose_graph_hypothesis);
-    view.landmarks.push_back({id, 1, ToArray<float, 3>(xyz)});
+    // Not kept in memory, since the map in the database can be bigger than memory.
+    Vector3T xyz;
+    if (landmarks_spatial_index->PeekLandmarkOrStagedCoords(id, pose_graph_hypothesis, xyz)) {
+      view.landmarks.push_back({id, 1, ToArray<float, 3>(xyz)});
+    }
     return true;  // continue to the next landmark
   });
   view.timestamp_ns = timestamp_ns;

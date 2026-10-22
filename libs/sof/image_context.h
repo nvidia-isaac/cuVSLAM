@@ -50,6 +50,10 @@ public:
   const ImagePyramidU8& cpu_image_pyramid_u8() const;
   const GradientPyramidT& cpu_gradient_pyramid() const;
 
+  // Only one of the CPU and GPU pyramids is filled and the CPU getters assert, so check here first.
+  bool has_cpu_image() const;
+  bool has_gpu_image() const;
+
   bool support_depth() const;
 
   void reset();
