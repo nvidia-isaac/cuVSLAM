@@ -172,14 +172,20 @@ struct ProblemLayout {
   bool point_to_plane = false;
   bool inertial = false;
   std::vector<CameraId> depth_cameras;
+  // Factors per ICP batch; the depth points beyond the frame's count are padding.
+  size_t icp_capacity = 0;
 
   bool HasFactors() const { return pnp || icp || point_to_plane || inertial; }
 
   bool operator==(const ProblemLayout& other) const {
     return pnp == other.pnp && icp == other.icp && point_to_plane == other.point_to_plane &&
-           inertial == other.inertial && depth_cameras == other.depth_cameras;
+           inertial == other.inertial && depth_cameras == other.depth_cameras && icp_capacity == other.icp_capacity;
   }
 };
+
+// ICP batches are sized in steps of this many depth points, and their capacity only grows, so a depth point
+// count that changes from frame to frame keeps the cached problem.
+constexpr size_t kIcpCapacityStep = 1024;
 
 }  // namespace
 
@@ -274,6 +280,13 @@ bool MultisensorPoseEstimator::solve(Isometry3T& rig_from_world, Matrix6T& stati
   if (!layout.depth_cameras.empty() && !layout.icp && !layout.point_to_plane) {
     layout.depth_cameras.clear();
   }
+  if (layout.icp) {
+    const size_t rounded = (num_dp + kIcpCapacityStep - 1) / kIcpCapacityStep * kIcpCapacityStep;
+    layout.icp_capacity = std::min(rounded, kMaxDepthPoints);
+    if (cached_problem_ && cached_problem_->layout.icp) {
+      layout.icp_capacity = std::max(layout.icp_capacity, cached_problem_->layout.icp_capacity);
+    }
+  }
 
   // Depth cameras or an inertial prior do not guarantee residuals (no depth points, no planes yet, failed IMU
   // prediction), and cuNLS cannot minimize a problem without factors.
@@ -312,8 +325,9 @@ bool MultisensorPoseEstimator::solve(Isometry3T& rig_from_world, Matrix6T& stati
         const CameraParams params = extract_camera_params(rig_, cam_id, *depth_infos[cam_id]);
         cp.icp.push_back(std::make_unique<math::PointToPointICPBatch>(
             reinterpret_cast<const float3*>(d_depth_points_.ptr()), d_depth_cam_from_rig + idx * 16, params.depth_tex,
-            params.focal, params.principal, params.img_size, kMaxDepthPoints));
-        cp.problem.AddFactorBatch(cp.icp.back().get(), &*cp.icp_loss, std::vector<float*>(kMaxDepthPoints, pose_ptr));
+            params.focal, params.principal, params.img_size, layout.icp_capacity));
+        cp.problem.AddFactorBatch(cp.icp.back().get(), &*cp.icp_loss,
+                                  std::vector<float*>(layout.icp_capacity, pose_ptr));
       }
     }
 

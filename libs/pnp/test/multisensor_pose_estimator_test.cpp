@@ -237,8 +237,8 @@ TEST(MultisensorPoseEstimatorTest, InertialPriorConvergesToPrediction) {
 // An estimator keeps its problem between solves and lets the minimizer reuse its structure. Over a sequence
 // of solves that keeps the same factor batches for several solves in a row (so the cached structure is
 // reused) and then switches the inertial, ICP and point-to-plane factors on and off (which rebuilds it), with
-// different observation and depth point counts and alternating depth images, each result must match a fresh
-// estimator solving the same input.
+// different observation and depth point counts (including one that grows the ICP capacity) and alternating
+// depth images, each result must match a fresh estimator solving the same input.
 TEST(MultisensorPoseEstimatorTest, RepeatedSolvesMatchFreshEstimator) {
   auto cam = MakePinhole();
   auto rig = MakeRig(cam);
@@ -275,11 +275,12 @@ TEST(MultisensorPoseEstimatorTest, RepeatedSolvesMatchFreshEstimator) {
     bool inertial;
   };
   const SolveInput solves[] = {
-      {40, 300, true, false}, {120, 50, true, false},  {200, 800, true, false},  // reused
-      {60, 0, true, false},                                                      // no ICP
-      {25, 120, true, true},  {150, 600, true, true},                            // inertial, reused
-      {90, 200, false, true},                                                    // no point-to-plane
-      {70, 400, true, false}, {180, 100, true, false},                           // reused
+      {40, 300, true, false},   {120, 50, true, false},   // reused
+      {200, 1500, true, false},                           // more depth points than the ICP capacity: grows it
+      {60, 0, true, false},                               // no ICP
+      {25, 120, true, true},    {150, 600, true, true},   // inertial, reused
+      {90, 200, false, true},                             // no point-to-plane
+      {70, 400, true, false},   {180, 100, true, false},  // reused with the grown ICP capacity
   };
 
   cuvslam::pnp::MultisensorSolverSettings settings;
@@ -303,12 +304,16 @@ TEST(MultisensorPoseEstimatorTest, RepeatedSolvesMatchFreshEstimator) {
     const cuvslam::pnp::RGBDInfos rgbd_infos{&depth_infos[k % 2]};
     std::uniform_real_distribution<float> u_dist(10.f, width - 10.f);
     std::uniform_real_distribution<float> v_dist(10.f, height - 10.f);
+    // The first half of the depth points projects outside the image and has no ICP residual. The second half
+    // lies slightly behind the wall, within the ICP gate, so it pulls the pose: an ICP batch that dropped the
+    // trailing points would move the result.
     std::vector<Vector3T> depth_points;
     for (size_t i = 0; i < in.num_depth_points; ++i) {
-      const float u = u_dist(rng);
+      const bool in_view = i >= in.num_depth_points / 2;
+      const float u = in_view ? u_dist(rng) : -100.f - u_dist(rng);
       const float v = v_dist(rng);
-      const Vector3T p_cam((u - kPrincipal.x()) / kFocal.x() * wall_depth,
-                           (v - kPrincipal.y()) / kFocal.y() * wall_depth, wall_depth);
+      const float depth = in_view ? wall_depth * 1.003f : wall_depth;
+      const Vector3T p_cam((u - kPrincipal.x()) / kFocal.x() * depth, (v - kPrincipal.y()) / kFocal.y() * depth, depth);
       depth_points.push_back(gt_world_from_cam * p_cam);
     }
     std::vector<map::Plane> planes;
