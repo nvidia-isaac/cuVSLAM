@@ -47,6 +47,9 @@ struct Settings {
   Mode mode = OriginalCPU;
 
   bool use_sba_winsorizer = false;
+
+  // GPU bundler: add partial sums in a fixed order, so equal problems give equal bits
+  bool deterministic = false;
 };
 
 }  // namespace cuvslam::sba

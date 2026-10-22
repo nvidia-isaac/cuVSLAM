@@ -16,6 +16,10 @@
 
 #include "cuda_modules/cuda_kernels/cuda_kernels.h"
 
+#include <algorithm>
+#include <cstdint>
+#include <cstring>
+
 #if CUDART_VERSION >= 11060
 #include <cub/cub.cuh>
 #else
@@ -29,12 +33,51 @@ struct KeypointGreater {
   __host__ __device__ bool operator()(const Keypoint& lhs, const Keypoint& rhs) { return lhs.strength > rhs.strength; }
 };
 
-void sort_keypoints(Keypoint* kp, size_t size, void* temp_buffer, size_t temp_buffer_size, cudaStream_t s) {
+// Mixes the position bits, so ties do not favor one part of the image.
+__host__ __device__ inline uint32_t PositionHash(const Keypoint& kp) {
+  uint32_t x, y;
+  memcpy(&x, &kp.x, sizeof(x));
+  memcpy(&y, &kp.y, sizeof(y));
+  uint32_t h = (x * 0x9E3779B1u) ^ ((y + 0x7F4A7C15u) * 0x85EBCA77u);
+  h ^= h >> 15;
+  h *= 0x2C1B3C6Du;
+  h ^= h >> 12;
+  return h;
+}
+
+// Orders equal strengths by position, so the order does not depend on how the keypoints were appended.
+struct KeypointGreaterTiesByPosition {
+  __host__ __device__ bool operator()(const Keypoint& lhs, const Keypoint& rhs) {
+    if (lhs.strength != rhs.strength) {
+      return lhs.strength > rhs.strength;
+    }
+    const uint32_t lhs_hash = PositionHash(lhs);
+    const uint32_t rhs_hash = PositionHash(rhs);
+    if (lhs_hash != rhs_hash) {
+      return lhs_hash < rhs_hash;
+    }
+    if (lhs.y != rhs.y) {
+      return lhs.y < rhs.y;
+    }
+    return lhs.x < rhs.x;
+  }
+};
+
+void sort_keypoints(Keypoint* kp, size_t size, void* temp_buffer, size_t temp_buffer_size, bool ties_by_position,
+                    cudaStream_t s) {
 #if CUDART_VERSION >= 11060
-  cub::DeviceMergeSort::SortKeys(temp_buffer, temp_buffer_size, kp, size, KeypointGreater(), s);
+  if (ties_by_position) {
+    cub::DeviceMergeSort::SortKeys(temp_buffer, temp_buffer_size, kp, size, KeypointGreaterTiesByPosition(), s);
+  } else {
+    cub::DeviceMergeSort::SortKeys(temp_buffer, temp_buffer_size, kp, size, KeypointGreater(), s);
+  }
 #else
   thrust::device_ptr<Keypoint> t_devPtr(kp);
-  thrust::stable_sort(t_devPtr, t_devPtr + size, KeypointGreater());
+  if (ties_by_position) {
+    thrust::stable_sort(t_devPtr, t_devPtr + size, KeypointGreaterTiesByPosition());
+  } else {
+    thrust::stable_sort(t_devPtr, t_devPtr + size, KeypointGreater());
+  }
 #endif
 }
 
@@ -42,7 +85,10 @@ size_t sort_keypoints_get_temp_buffer_size(size_t size) {
 #if CUDART_VERSION >= 11060
   std::size_t temp_storage_bytes = 0;
   cub::DeviceMergeSort::SortKeys(nullptr, temp_storage_bytes, (Keypoint*)nullptr, size, KeypointGreater());
-  return temp_storage_bytes;
+  std::size_t ties_by_position_bytes = 0;
+  cub::DeviceMergeSort::SortKeys(nullptr, ties_by_position_bytes, (Keypoint*)nullptr, size,
+                                 KeypointGreaterTiesByPosition());
+  return std::max(temp_storage_bytes, ties_by_position_bytes);
 #else
   return 1;
 #endif

@@ -17,6 +17,8 @@
 
 #include "cuda_modules/sba.h"
 
+#include <algorithm>
+
 #include "common/vector_3t.h"
 #include "cuda_modules/culib_helper.h"
 
@@ -642,7 +644,10 @@ void GPUCholeskySolver::solve(const float* A, size_t A_pitch, const float* b, fl
 bool GPUCholeskySolver::solve_succeeded() const { return factorization_status_[0] == 0; }
 
 GPULevenbergMarquardtStep::GPULevenbergMarquardtStep(int max_points, int max_poses)
-    : max_points_(max_points), max_poses_(max_poses), solver_(6 * max_poses) {}
+    : max_points_(max_points),
+      max_poses_(max_poses),
+      solver_(6 * max_poses),
+      partials_(std::max(3 * max_points, 6 * max_poses)) {}
 
 bool GPULevenbergMarquardtStep::compute_update(const GPUParameterUpdateMeta& update,
                                                const GPULinearSystemMeta& reduced_system, int num_points, int num_poses,
@@ -688,7 +693,11 @@ bool GPULevenbergMarquardtStep::solve_succeeded() const { return solver_.solve_s
 bool GPULevenbergMarquardtStep::predict_reduction(float current_cost, float lambda,
                                                   const GPUParameterUpdateMeta& update,
                                                   const GPULinearSystemMeta& full_system, int num_points, int num_poses,
-                                                  float* prediction, cudaStream_t s) {
+                                                  float* prediction, bool deterministic, cudaStream_t s) {
+  if (max_poses_ < num_poses || max_points_ < num_points) {
+    return false;
+  }
+  float* partials = deterministic ? partials_.ptr() : nullptr;
   float* point_hessian_term_ = hessian_and_scaling_terms_.ptr();
   float* point_scaling_term_ = point_hessian_term_ + 1;
   float* pose_scaling_term_ = point_hessian_term_ + 2;
@@ -697,7 +706,7 @@ bool GPULevenbergMarquardtStep::predict_reduction(float current_cost, float lamb
 
   CUDA_CHECK(v1T_x_M_x_v2((float*)update.points_step, full_system.point_pose_block_transposed,
                           full_system.point_pose_block_transposed_pitch, 6 * num_poses, 3 * num_points,
-                          (float*)update.pose_step, point_hessian_term_, true, s));
+                          (float*)update.pose_step, point_hessian_term_, true, partials, s));
 
   {
     CUDA_CHECK(
@@ -705,18 +714,22 @@ bool GPULevenbergMarquardtStep::predict_reduction(float current_cost, float lamb
     // update.pose_step.dot(system.pose_block * update.pose_step)
     CUDA_CHECK(v1T_x_M_x_v2((float*)update.pose_step, full_system.pose_block, full_system.pose_block_pitch,
                             6 * num_poses, 6 * num_poses, (float*)update.pose_step, pose_hessian_term_.ptr(), false,
-                            s));
+                            partials, s));
 
-    CUDA_CHECK(point_term(update.points_step, full_system.point_block, num_points, false, point_hessian_term_, s));
+    CUDA_CHECK(
+        point_term(update.points_step, full_system.point_block, num_points, false, point_hessian_term_, partials, s));
   }
 
   {
     // float pose_term = update.pose_step.dot(system.pose_block.diagonal().asDiagonal() * update.pose_step);
     CUDA_CHECK(pose_scaling_term((float*)update.pose_step, full_system.pose_block, full_system.pose_block_pitch,
-                                 6 * num_poses, pose_scaling_term_, s));
+                                 6 * num_poses, pose_scaling_term_, partials, s));
   }
 
-  { CUDA_CHECK(point_term(update.points_step, full_system.point_block, num_points, true, point_scaling_term_, s)); }
+  {
+    CUDA_CHECK(
+        point_term(update.points_step, full_system.point_block, num_points, true, point_scaling_term_, partials, s));
+  }
 
   {
     CUDA_CHECK(make_prediction(current_cost, lambda, pose_hessian_term_.ptr(), point_hessian_term_, pose_scaling_term_,

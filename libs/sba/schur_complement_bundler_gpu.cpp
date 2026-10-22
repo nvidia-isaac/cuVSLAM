@@ -78,6 +78,7 @@ private:
   const int max_observations = max_points * max_poses * 2;
 
   cuda::sba::GPUBundleAdjustmentProblem gpu_problem_{max_points, max_poses, max_observations};
+  cuda::GPUOnlyArray<float> gpu_partial_costs_{static_cast<size_t>((max_observations + MAX_THREADS - 1) / MAX_THREADS)};
   cuda::sba::GPUModelFunction gpu_function_{max_observations};
   cuda::sba::GPUParameterUpdate gpu_update_{max_points, max_poses};
   cuda::sba::GPULinearSystem gpu_full_system_{max_points, max_poses};
@@ -121,6 +122,7 @@ bool SchurComplementBundlerGpu::Impl::solve(BundleAdjustmentProblem& problem) {
   if (num_points == 0 || num_poses == 0 || num_observations == 0) {
     return false;
   }
+  float* partial_costs = problem.deterministic ? gpu_partial_costs_.ptr() : nullptr;
 
   gpu_problem_.set_rig(problem.rig);
   RETURN_IF_FALSE(gpu_problem_.set(problem, stream_.get_stream()));
@@ -147,7 +149,7 @@ bool SchurComplementBundlerGpu::Impl::solve(BundleAdjustmentProblem& problem) {
                                      problem.num_fixed_points, problem.num_fixed_key_frames, stream_.get_stream()));
 
   RETURN_IF_FAILED(evaluate_cost(gpu_cost_.ptr(), gpu_num_skipped_.ptr(), gpu_problem_.meta(), gpu_update_.meta(),
-                                 problem.robustifier_scale, stream_.get_stream()));
+                                 problem.robustifier_scale, partial_costs, stream_.get_stream()));
 
   gpu_cost_.copy(cuda::GPUCopyDirection::ToCPU, stream_.get_stream());
   gpu_num_skipped_.copy(cuda::GPUCopyDirection::ToCPU, stream_.get_stream());
@@ -189,11 +191,12 @@ bool SchurComplementBundlerGpu::Impl::solve(BundleAdjustmentProblem& problem) {
         gpu_problem_.num_poses() - problem.num_fixed_key_frames, points_poses_update_max_, stream_.get_stream()));
 
     RETURN_IF_FAILED(evaluate_cost(gpu_cost_.ptr(), gpu_num_skipped_.ptr(), gpu_problem_.meta(), gpu_update_.meta(),
-                                   problem.robustifier_scale, stream_.get_stream()));
+                                   problem.robustifier_scale, partial_costs, stream_.get_stream()));
 
-    RETURN_IF_FALSE(lm_step_.predict_reduction(
-        current_cost, lambda, gpu_update_.meta(), gpu_full_system_.meta(), num_points - problem.num_fixed_points,
-        num_poses - problem.num_fixed_key_frames, predicted_reduction_.ptr(), stream_.get_stream()));
+    RETURN_IF_FALSE(lm_step_.predict_reduction(current_cost, lambda, gpu_update_.meta(), gpu_full_system_.meta(),
+                                               num_points - problem.num_fixed_points,
+                                               num_poses - problem.num_fixed_key_frames, predicted_reduction_.ptr(),
+                                               problem.deterministic, stream_.get_stream()));
     points_poses_update_max_.copy(cuda::GPUCopyDirection::ToCPU, stream_.get_stream());
     predicted_reduction_.copy(cuda::GPUCopyDirection::ToCPU, stream_.get_stream());
     gpu_cost_.copy(cuda::GPUCopyDirection::ToCPU, stream_.get_stream());

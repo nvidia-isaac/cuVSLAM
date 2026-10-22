@@ -169,6 +169,7 @@ void run_sba(const UnifiedMap::SubMap& recent_map, const camera::Rig& rig, const
 
   problem.max_iterations = sba_settings.num_sba_iterations;
   problem.robustifier_scale = sba_settings.robustifier_scale;
+  problem.deterministic = sba_settings.deterministic;
   bool res = bundler.solve(problem);
 
   // copy data back

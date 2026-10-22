@@ -374,6 +374,7 @@ class TestBindings(unittest.TestCase):
         self.assertEqual(cfg.max_frame_delta_s, 1.0)
         self.assertEqual(cfg.debug_dump_directory, "")
         self.assertFalse(cfg.debug_imu_mode)
+        self.assertFalse(cfg.deterministic)
 
         # Test constructor with keyword arguments
         # Adjacent bool params must alternate True/False to catch any ordering bugs
@@ -391,6 +392,7 @@ class TestBindings(unittest.TestCase):
             max_frame_delta_s=0.5,
             debug_dump_directory="/tmp/debug",
             debug_imu_mode=True,
+            deterministic=True,
         )
         self.assertEqual(cfg.multicam_mode, vslam.Odometry.MulticameraMode.Performance)
         self.assertEqual(cfg.odometry_mode, vslam.Odometry.OdometryMode.Inertial)
@@ -405,6 +407,7 @@ class TestBindings(unittest.TestCase):
         self.assertEqual(cfg.max_frame_delta_s, 0.5)
         self.assertEqual(cfg.debug_dump_directory, "/tmp/debug")
         self.assertTrue(cfg.debug_imu_mode)
+        self.assertTrue(cfg.deterministic)
 
         # test rgbd_settings passthrough
         cfg2 = vslam.Odometry.Config(
@@ -438,6 +441,7 @@ class TestBindings(unittest.TestCase):
         cfg.max_frame_delta_s = 2.0
         cfg.debug_dump_directory = "/tmp/test"
         cfg.debug_imu_mode = True
+        cfg.deterministic = True
         cfg.rgbd_settings = vslam.Odometry.RGBDSettings(
             depth_scale_factor=5000.0, depth_camera_id=0, enable_depth_stereo_tracking=True)
 
@@ -454,6 +458,7 @@ class TestBindings(unittest.TestCase):
         self.assertEqual(cfg.max_frame_delta_s, 2.0)
         self.assertEqual(cfg.debug_dump_directory, "/tmp/test")
         self.assertTrue(cfg.debug_imu_mode)
+        self.assertTrue(cfg.deterministic)
         self.assertEqual(cfg.rgbd_settings.depth_scale_factor, 5000.0)
         self.assertEqual(cfg.rgbd_settings.depth_camera_id, 0)
         self.assertTrue(cfg.rgbd_settings.enable_depth_stereo_tracking)

@@ -579,6 +579,7 @@ Odometry::Odometry(const Rig& rig, const Config& cfg) {
   svo_settings.verbose = Trace::GetVerbosity() > Trace::Verbosity::None;
 
   svo_settings.sba_settings.async = cfg.async_sba;
+  svo_settings.sba_settings.deterministic = cfg.deterministic;
   // Auto-pick SBA mode: inertial-CPU when IMU fusion is on (Inertial mode, or Multisensor with IMU),
   // otherwise the standard GPU bundler.
   svo_settings.sba_settings.mode = (cfg.odometry_mode == OdometryMode::Inertial || multisensor_with_imu)
@@ -594,6 +595,7 @@ Odometry::Odometry(const Rig& rig, const Config& cfg) {
   svo_settings.sof_settings.box3_prefilter = cfg.use_denoising;
   svo_settings.sof_settings.min_depth = cfg.min_depth;
   svo_settings.sof_settings.max_depth = cfg.max_depth;
+  svo_settings.sof_settings.deterministic = cfg.deterministic;
   if (cfg.rectified_stereo_camera) {
     CheckRectifiedStereoCamera(rig);
     svo_settings.sof_settings.lr_tracker = sof::TrackerType::LKHorizontal;

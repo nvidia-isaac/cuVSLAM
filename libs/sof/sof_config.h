@@ -59,6 +59,9 @@ struct Settings {
 
   camera::MulticameraMode multicam_mode = camera::MulticameraMode::Moderate;
   camera::MulticamManualSetup multicam_setup;
+
+  // GPU: order tied keypoints by position and add GFTT bins in a fixed order, so equal images give equal tracks
+  bool deterministic = false;
 };
 
 void OverrideMulticameraSettings(Settings& settings, const std::optional<camera::MulticameraMode>& multicam_mode,

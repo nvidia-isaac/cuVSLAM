@@ -187,7 +187,7 @@ class Tracker:
             'use_motion_model', 'use_denoising', 'rectified_stereo_camera',
             'enable_observations_export', 'enable_landmarks_export',
             'enable_final_landmarks_export', 'max_frame_delta_s',
-            'debug_dump_directory', 'debug_imu_mode'
+            'debug_dump_directory', 'debug_imu_mode', 'deterministic'
         ]
 
         for attr in config_attrs:

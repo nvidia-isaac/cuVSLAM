@@ -758,7 +758,7 @@ TEST(Cuda, SBAEvaluateCostSpeedUp) {
 
   auto lambda = [&](cudaStream_t s_) {
     CUDA_CHECK(evaluate_cost(gpu_cost.ptr(), gpu_num_skipped.ptr(), gpu_problem.meta(), gpu_update.meta(),
-                             problem_input_gpu.robustifier_scale, s_));
+                             problem_input_gpu.robustifier_scale, nullptr, s_));
   };
   graph.launch(lambda, s.get_stream());
   cudaStreamSynchronize(s.get_stream());
@@ -832,7 +832,7 @@ TEST(Cuda, SBAEvaluateCost) {
 
             ASSERT_TRUE(gpu_update.set(update_temp, s_));
             CUDA_CHECK(evaluate_cost(gpu_cost.ptr(), gpu_num_skipped.ptr(), gpu_problem.meta(), gpu_update.meta(),
-                                     problem_input_gpu.robustifier_scale, s_));
+                                     problem_input_gpu.robustifier_scale, nullptr, s_));
           },
           s.get_stream());
 
@@ -849,6 +849,52 @@ TEST(Cuda, SBAEvaluateCost) {
     if (isfinite(cpu_result_cost)) {
       ASSERT_TRUE(std::abs(cpu_result_cost - gpu_result_cost) < thresh);
     }
+  }
+}
+
+// With partials the per-block costs are added in a fixed order; float atomics add them in completion order.
+TEST(Cuda, SBAEvaluateCostWithPartialsIsReproducible) {
+  camera::Rig rig = MakeDefaultRig();
+  const int max_points = 1000;
+  const int max_poses = 9;
+  constexpr int num_cameras = 2;
+  const int max_observations = max_points * max_poses * num_cameras;
+
+  sba::BundleAdjustmentProblem problem;
+  GenerateProblem(problem, rig, Matrix2T::Identity(), max_points, max_poses);
+  ASSERT_GT(problem.observation_xys.size(), 16u * MAX_THREADS);
+
+  ParameterUpdate update;
+  update.point.resize(max_points, Vector3T::Zero());
+  update.pose.resize(max_poses, Isometry3T::Identity());
+
+  cuda::sba::GPUBundleAdjustmentProblem gpu_problem(max_points, max_poses, max_observations);
+  cuda::sba::GPUModelFunction gpu_function(max_observations);
+  cuda::sba::GPUParameterUpdate gpu_update(max_points, max_poses);
+  gpu_problem.set_rig(rig);
+
+  cuda::GPUArrayPinned<float> gpu_cost{1};
+  cuda::GPUArrayPinned<int> gpu_num_skipped{1};
+  cuda::GPUOnlyArray<float> partials((max_observations + MAX_THREADS - 1) / MAX_THREADS);
+  cuda::Stream s;
+
+  ASSERT_TRUE(gpu_problem.set(problem, s.get_stream()));
+  CUDA_CHECK(update_model(gpu_function.meta(), gpu_problem.meta(), problem.robustifier_scale, s.get_stream()));
+  cuda::sba::temporary::ParameterUpdate update_temp = to_temporary(update);
+  ASSERT_TRUE(gpu_update.set(update_temp, s.get_stream()));
+
+  const auto evaluate = [&](float* partials_ptr) {
+    CUDA_CHECK(evaluate_cost(gpu_cost.ptr(), gpu_num_skipped.ptr(), gpu_problem.meta(), gpu_update.meta(),
+                             problem.robustifier_scale, partials_ptr, s.get_stream()));
+    gpu_cost.copy(cuda::GPUCopyDirection::ToCPU, s.get_stream());
+    CUDA_CHECK(cudaStreamSynchronize(s.get_stream()));
+    return gpu_cost[0];
+  };
+
+  const float cost = evaluate(partials.ptr());
+  EXPECT_NEAR(cost, evaluate(nullptr), 1e-5f * cost);
+  for (int i = 0; i < 200; i++) {
+    ASSERT_EQ(evaluate(partials.ptr()), cost) << "launch " << i;
   }
 }
 
@@ -1179,7 +1225,7 @@ TEST(Cuda, SBAComputePredictedRelativeReductionSpeedUp) {
   ASSERT_TRUE(gpu_full_system.set(full_system_2, s.get_stream()));
   auto lambda = [&](cudaStream_t s_) {
     ASSERT_TRUE(lm_step.predict_reduction(10, 0.01, gpu_update.meta(), gpu_full_system.meta(), num_points, num_poses,
-                                          prediction.ptr(), s_));
+                                          prediction.ptr(), false, s_));
   };
   graph.launch(lambda, s.get_stream());
   cudaStreamSynchronize(s.get_stream());
@@ -1251,7 +1297,7 @@ TEST(Cuda, SBAComputePredictedRelativeReduction) {
       graph.launch(
           [&](cudaStream_t s_) {
             ASSERT_TRUE(lm_step.predict_reduction(10, 0.01, gpu_update.meta(), gpu_full_system.meta(), num_points,
-                                                  num_poses, prediction.ptr(), s_));
+                                                  num_poses, prediction.ptr(), false, s_));
           },
           s.get_stream());
       CUDA_CHECK(
@@ -1306,7 +1352,7 @@ TEST(Cuda, SBARelativeReductionRequiresPositiveCost) {
   const auto predict = [&](float current_cost) {
     float result = 0.f;
     EXPECT_TRUE(lm_step.predict_reduction(current_cost, 0.01f, gpu_update.meta(), gpu_full_system.meta(), num_points,
-                                          num_poses, prediction.ptr(), s.get_stream()));
+                                          num_poses, prediction.ptr(), false, s.get_stream()));
     CUDA_CHECK(cudaMemcpyAsync(&result, prediction.ptr(), sizeof(float), cudaMemcpyDeviceToHost, s.get_stream()));
     cudaStreamSynchronize(s.get_stream());
     return result;
@@ -1314,6 +1360,118 @@ TEST(Cuda, SBARelativeReductionRequiresPositiveCost) {
 
   EXPECT_TRUE(std::isfinite(predict(10.f)));
   EXPECT_FALSE(std::isfinite(predict(0.f)));
+}
+
+// The predicted reduction sums over every point coordinate and pose parameter, so it needs the same treatment.
+TEST(Cuda, SBAPredictedReductionWithDeterministicSumsIsReproducible) {
+  camera::Rig rig = MakeDefaultRig();
+  const int max_points = 2000;
+  const int max_poses = 10;
+  cuda::sba::GPULinearSystem gpu_full_system(max_points, max_poses);
+  cuda::sba::GPUParameterUpdate gpu_update(max_points, max_poses);
+  cuda::sba::GPULevenbergMarquardtStep lm_step(max_points, max_poses);
+  cuda::GPUArrayPinned<float> prediction{1};
+  cuda::Stream s;
+
+  sba::BundleAdjustmentProblem problem;
+  GenerateProblem(problem, rig, Matrix2T::Identity(), max_points, max_poses);
+  const int num_points = static_cast<int>(problem.points.size()) - problem.num_fixed_points;
+  const int num_poses = static_cast<int>(problem.rig_from_world.size()) - problem.num_fixed_key_frames;
+
+  ModelFunction model;
+  sba::schur_complement_bundler_cpu_internal::FullSystem full_system;
+  ReducedSystem reduced_system;
+  ParameterUpdate update;
+  update.point.resize(num_points, Vector3T::Zero());
+  update.pose.resize(num_poses, Isometry3T::Identity());
+
+  UpdateModel(model, problem);
+  BuildFullSystem(full_system, model, problem);
+  BuildReducedSystem(reduced_system, full_system, 0.1f);
+  ComputeUpdate(update, reduced_system, full_system);
+  const float cpu_prediction = ComputePredictedRelativeReduction(10, 0.01, update, full_system);
+
+  cuda::sba::temporary::FullSystem full_system_gpu = to_temporary(full_system);
+  cuda::sba::temporary::ParameterUpdate update_gpu = to_temporary(update);
+  ASSERT_TRUE(gpu_update.set(update_gpu, s.get_stream()));
+  ASSERT_TRUE(gpu_full_system.set(full_system_gpu, s.get_stream()));
+
+  const auto predict = [&](bool deterministic) {
+    float result = 0.f;
+    EXPECT_TRUE(lm_step.predict_reduction(10.f, 0.01f, gpu_update.meta(), gpu_full_system.meta(), num_points, num_poses,
+                                          prediction.ptr(), deterministic, s.get_stream()));
+    CUDA_CHECK(cudaMemcpyAsync(&result, prediction.ptr(), sizeof(float), cudaMemcpyDeviceToHost, s.get_stream()));
+    CUDA_CHECK(cudaStreamSynchronize(s.get_stream()));
+    return result;
+  };
+
+  const float gpu_prediction = predict(true);
+  EXPECT_NEAR(gpu_prediction, cpu_prediction, 1e-3f * std::abs(cpu_prediction));
+  EXPECT_NEAR(gpu_prediction, predict(false), 1e-4f * std::abs(gpu_prediction));
+  for (int i = 0; i < 200; i++) {
+    ASSERT_EQ(predict(true), gpu_prediction) << "launch " << i;
+  }
+}
+
+// Checks v1T_x_M_x_v2 with use_M_transposed against a double sum, with and without partials.
+void VectorMatrixVectorWithPartialsIsReproducible(int rows) {
+  const int cols = 3 * 2000;
+  std::mt19937 rng(3);
+  std::uniform_real_distribution<float> value(-1.f, 1.f);
+
+  cuda::GPUArrayPinned<float> v1(cols);
+  cuda::GPUArrayPinned<float> v2(rows);
+  cuda::GPUArrayPinned<float> matrix(rows * cols);
+  for (int i = 0; i < cols; i++) {
+    v1[i] = value(rng);
+  }
+  for (int i = 0; i < rows; i++) {
+    v2[i] = value(rng);
+  }
+  for (int i = 0; i < rows * cols; i++) {
+    matrix[i] = value(rng);
+  }
+  double expected = 0;
+  double magnitude = 0;
+  for (int col = 0; col < cols; col++) {
+    double column = 0;
+    for (int row = 0; row < rows; row++) {
+      column += static_cast<double>(matrix[row * cols + col]) * v2[row];
+    }
+    expected += column * v1[col];
+    magnitude += std::abs(column * v1[col]);
+  }
+
+  cuda::GPUArrayPinned<float> result(1);
+  cuda::GPUOnlyArray<float> partials(cols);
+  cuda::Stream s;
+  v1.copy(cuda::GPUCopyDirection::ToGPU, s.get_stream());
+  v2.copy(cuda::GPUCopyDirection::ToGPU, s.get_stream());
+  matrix.copy(cuda::GPUCopyDirection::ToGPU, s.get_stream());
+  const auto multiply = [&](float* partials_ptr) {
+    CUDA_CHECK(cudaMemsetAsync(result.ptr(), 0, sizeof(float), s.get_stream()));
+    CUDA_CHECK(cuda::sba::v1T_x_M_x_v2(v1.ptr(), matrix.ptr(), cols * sizeof(float), rows, cols, v2.ptr(), result.ptr(),
+                                       true, partials_ptr, s.get_stream()));
+    result.copy(cuda::GPUCopyDirection::ToCPU, s.get_stream());
+    CUDA_CHECK(cudaStreamSynchronize(s.get_stream()));
+    return result[0];
+  };
+
+  const float product = multiply(partials.ptr());
+  EXPECT_NEAR(product, expected, 1e-5 * magnitude);
+  EXPECT_NEAR(multiply(nullptr), expected, 1e-4 * magnitude);
+  for (int i = 0; i < 200; i++) {
+    ASSERT_EQ(multiply(partials.ptr()), product) << "launch " << i;
+  }
+}
+
+// The predicted reduction's cross term adds one product per point coordinate, so its atomic order varies most.
+TEST(Cuda, SBAVectorMatrixVectorWithPartialsIsReproducible) {
+  // 9 poses take the shared-memory kernel, 23 the one-block-per-column fallback
+  for (const int rows : {6 * 9, 6 * 23}) {
+    SCOPED_TRACE(rows);
+    VectorMatrixVectorWithPartialsIsReproducible(rows);
+  }
 }
 
 // Exact observations put the optimum at zero cost, which is what drives current_cost below
@@ -1352,6 +1510,34 @@ TEST(Cuda, SBASolverConvergesOnExactObservations) {
   EXPECT_TRUE(std::isfinite(problem.last_cost));
   EXPECT_LT(problem.last_cost, problem.initial_cost);
   EXPECT_LT(problem.iterations, problem.max_iterations);
+}
+
+// A deterministic solve repeats bit for bit, accepted and rejected steps included.
+TEST(Cuda, SBASolverWithDeterministicSumsIsReproducible) {
+  std::srand(2);
+  camera::Rig rig = MakeDefaultRig();
+
+  sba::BundleAdjustmentProblem problem;
+  GenerateProblem(problem, rig, Matrix2T::Identity(), 1000, 7);
+  problem.max_iterations = 20;
+  problem.deterministic = true;
+
+  sba::SchurComplementBundlerGpu bundler;
+  sba::BundleAdjustmentProblem first = problem;
+  ASSERT_TRUE(bundler.solve(first));
+  for (int run = 0; run < 20; run++) {
+    sba::BundleAdjustmentProblem again = problem;
+    ASSERT_TRUE(bundler.solve(again));
+    ASSERT_EQ(again.iterations, first.iterations) << "run " << run;
+    ASSERT_EQ(again.last_cost, first.last_cost) << "run " << run;
+    for (size_t i = 0; i < first.rig_from_world.size(); i++) {
+      ASSERT_TRUE(again.rig_from_world[i].matrix() == first.rig_from_world[i].matrix())
+          << "run " << run << ", pose " << i;
+    }
+    for (size_t i = 0; i < first.points.size(); i++) {
+      ASSERT_TRUE(again.points[i] == first.points[i]) << "run " << run << ", point " << i;
+    }
+  }
 }
 
 // The visual bundlers used to skip anything closer than a hard-coded 1 m while the rest of the
@@ -1438,7 +1624,7 @@ TEST(Cuda, SBAObservationsInsideTheNearPlaneAreSkipped) {
   cuda::sba::temporary::ParameterUpdate update_temp = to_temporary(update);
   ASSERT_TRUE(gpu_update.set(update_temp, s.get_stream()));
   CUDA_CHECK(evaluate_cost(gpu_cost.ptr(), gpu_num_skipped.ptr(), gpu_problem.meta(), gpu_update.meta(),
-                           gpu_side.robustifier_scale, s.get_stream()));
+                           gpu_side.robustifier_scale, nullptr, s.get_stream()));
 
   gpu_cost.copy(cuda::GPUCopyDirection::ToCPU, s.get_stream());
   gpu_num_skipped.copy(cuda::GPUCopyDirection::ToCPU, s.get_stream());

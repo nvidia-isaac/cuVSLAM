@@ -213,6 +213,13 @@ def add_tracker_arguments(parser: argparse.ArgumentParser) -> None:
         default=False,
         help="Enable IMU debug mode.",
     )
+    parser.add_argument(
+        "--deterministic",
+        type=_str2bool,
+        default=False,
+        help="Give the same poses on every run with the same input (multicamera and inertial modes, "
+             "--async_sba=false).",
+    )
     parser.add_argument("--use_slam", type=_str2bool, default=False, help="Enable SLAM mode.")
     parser.add_argument("--sync_slam", type=_str2bool, default=True,
                         help="Run SLAM in the calling thread. Must be the opposite of --async_sba.")
