@@ -28,6 +28,7 @@
 #include "slam/map/descriptor/feature_descriptor.h"
 #include "slam/map/pose_graph/pose_graph.h"
 #include "slam/slam/slam.h"
+#include "slam/vpr/vpr_sof_image.h"
 
 namespace cuvslam::slam {
 
@@ -80,6 +81,19 @@ void LocalizerAndMapper::AddKeyframe(const Isometry3T& from_last_keyframe, const
     if (keep_track_poses_) {
       keyframe_sources_[keyFrameId] = frame_data.frame_id;
     }
+
+    if (vpr_map_ && vpr_map_->Enabled()) {
+      vpr_map_->OnKeyframeAdded(keyFrameId, static_cast<int64_t>(timestamp_ns));
+      vpr::VprImage from_pixels;
+      if (frame_data.vpr_image.Empty()) {
+        from_pixels = vpr::MakeVprImageFromImages(images);
+      }
+      const vpr::VprImage& vpr_image = frame_data.vpr_image.Empty() ? from_pixels : frame_data.vpr_image;
+      if (!vpr_image.Empty()) {
+        vpr_map_->AddFrame(keyFrameId, static_cast<int64_t>(timestamp_ns), vpr_image);
+      }
+    }
+
     MoveReadyStagedLandmarksToLSI(timestamp_ns);
   }
 

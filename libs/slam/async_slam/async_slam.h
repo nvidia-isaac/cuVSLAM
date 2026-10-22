@@ -21,6 +21,7 @@
 #include <limits>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <utility>
@@ -40,7 +41,7 @@
 namespace cuvslam::slam {
 
 struct AsyncSlamOptions {
-  std::string map_cache_path;  // if non-empty, connect to LMDB at this path
+  std::string map_path;  // if non-empty, connect to LMDB at this path
   bool use_gpu = true;
   bool reproduce_mode = true;            // allow to repeat results: ransac.seed(0), sync=true
   bool pose_for_frame_required = false;  // set true for calling GetPoseForFrame()
@@ -55,6 +56,7 @@ struct AsyncSlamOptions {
   float max_landmarks_distance = std::numeric_limits<float>::max();
   LoopClosureSolverType loop_closure_solver_type = LoopClosureSolverType::kTwoStepsEasy;
   bool planar_constraints = false;
+  vpr::VprOptions vpr_options;  // visual place recognition
 };
 
 struct AsyncSlamLCTelemetry {
@@ -85,9 +87,12 @@ public:
   void TrackResult(FrameId frameId, int64_t timestamp_ns, const odom::IVisualOdometry::VOFrameStat& stat,
                    const sof::Images& images, const Isometry3T& delta);
 
-  void LocalizeInMap(const std::string_view& folder_name, int64_t timestamp_ns, const Isometry3T& guess_pose,
-                     const sof::Images& images, const Slam::LocalizationSettings& settings,
-                     Slam::LocalizeStartCB start_cb, Slam::LocalizeFinishCB finish_cb);
+  // Without `guess_pose`, the saved map's place recognition proposes the poses to verify.
+  // With `attach`, a successful localization makes the session write into the loaded folder.
+  void LocalizeInMap(const std::string_view& folder_name, int64_t timestamp_ns,
+                     const std::optional<Isometry3T>& guess_pose, const sof::Images& images,
+                     const Slam::LocalizationSettings& settings, bool attach, Slam::LocalizeStartCB start_cb,
+                     Slam::LocalizeFinishCB finish_cb);
 
   Isometry3T GetSlamPose() const;
 
@@ -101,12 +106,20 @@ public:
 
   void CopyToDatabase(const std::string& path, const std::function<void(bool)>& callback = nullptr);
 
+  // Writes all unsaved data to the session's map file: AsyncSlamOptions::map_path, or a folder LocalizeInMap attached.
+  void FlushMap(const std::function<void(bool)>& callback);
+
   // Set landmarks view
   void SetLandmarksView(std::shared_ptr<ViewManager<ViewLandmarks>> view);
   // Set loop closure view
   void SetLoopClosureView(std::shared_ptr<ViewManager<ViewLandmarks>> view);
   // Set pose graph view
   void SetPoseGraphView(std::shared_ptr<ViewManager<ViewPoseGraph>> view);
+
+  bool IsVprEnabled() const { return vpr_enabled_; }
+
+  // Queued for the worker like other commands (run inline in reproduce mode).
+  void RecognizePlace(vpr::VprImage image, Slam::RecognizePlaceFinishCB finish_cb);
 
 private:
   struct VOTrackData {
@@ -131,9 +144,10 @@ private:
 
   class LocalizeInMapCmd : public ICommand {
   public:
-    LocalizeInMapCmd(const std::string_view& folder_name, int64_t timestamp_ns, const Isometry3T& guess_pose,
-                     const sof::Images& images, const Slam::LocalizationSettings& settings,
-                     Slam::LocalizeStartCB start_cb, Slam::LocalizeFinishCB finish_cb);
+    LocalizeInMapCmd(const std::string_view& folder_name, int64_t timestamp_ns,
+                     const std::optional<Isometry3T>& guess_pose, const sof::Images& images,
+                     const Slam::LocalizationSettings& settings, bool attach, Slam::LocalizeStartCB start_cb,
+                     Slam::LocalizeFinishCB finish_cb);
 
     ~LocalizeInMapCmd() override = default;
     void Execute(AsyncSlam& async_slam, FrameId, const Isometry3T&) override;
@@ -141,9 +155,10 @@ private:
   private:
     const std::string folder_name_;
     const int64_t timestamp_ns_;
-    const Isometry3T guess_pose_;
+    const std::optional<Isometry3T> guess_pose_;
     const sof::Images images_;
     const Slam::LocalizationSettings settings_;
+    const bool attach_;
     Slam::LocalizeStartCB start_cb_;
     Slam::LocalizeFinishCB finish_cb_;
   };
@@ -157,10 +172,35 @@ private:
     void Execute(AsyncSlam& async_slam, FrameId, const Isometry3T&) override;
   };
 
+  class FlushMapCmd : public ICommand {
+  public:
+    explicit FlushMapCmd(std::function<void(bool)> callback) : callback_(std::move(callback)) {}
+    ~FlushMapCmd() override = default;
+
+    void Execute(AsyncSlam& async_slam, FrameId, const Isometry3T&) override;
+
+  private:
+    std::function<void(bool)> callback_;
+  };
+
+  class RecognizePlaceCmd : public ICommand {
+  public:
+    RecognizePlaceCmd(vpr::VprImage image, Slam::RecognizePlaceFinishCB finish_cb)
+        : image_(std::move(image)), finish_cb_(std::move(finish_cb)) {}
+    ~RecognizePlaceCmd() override = default;
+
+    void Execute(AsyncSlam& async_slam, FrameId, const Isometry3T&) override;
+
+  private:
+    const vpr::VprImage image_;
+    Slam::RecognizePlaceFinishCB finish_cb_;
+  };
+
   // --- Immutable after construction; read by both the caller's thread and the background worker thread ---
   const camera::Rig rig_;
   const std::vector<CameraId> cameras_;
   const AsyncSlamOptions options_;
+  const bool vpr_enabled_;
 
   // --- Accessed only from the caller's thread (e.g. TrackResult(), GetPoseForFrame() callers) ---
   bool reproduce_mode_ = false;
