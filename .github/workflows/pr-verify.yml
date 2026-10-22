@@ -67,7 +67,7 @@ jobs:
     name: "Build + Test (x86_64)"
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [gpu]
-    timeout-minutes: 120
+    timeout-minutes: 60
     env:
       EXTRA_CMAKE_ARGS: "-DCMAKE_CUDA_ARCHITECTURES=native"
     steps:
@@ -107,6 +107,7 @@ jobs:
           PY
 
       - name: Pull LFS test data
+        timeout-minutes: 10
         run: git lfs pull --include="test_data/"
 
       - name: Resolve runner storage root
@@ -117,6 +118,7 @@ jobs:
         run: echo "RUNNER_LOCAL_DATASETS_ROOT=${{ vars.RUNNER_LOCAL_DATASETS_ROOT || '$HOME/.cache/cuvslam' }}" >> "$GITHUB_ENV"
 
       - name: Build CI tools image
+        timeout-minutes: 15
         env:
           AWS_CLI_PUBLIC_KEY: ${{ vars.AWS_CLI_PUBLIC_KEY }}
         run: |
@@ -133,6 +135,7 @@ jobs:
       # copied out of the read-only mount before installing, as run_eval.sh does,
       # to keep pip build artifacts out of the runner workspace.
       - name: Run Python tools tests
+        timeout-minutes: 10
         run: |
           docker run --rm --network host \
             -v "$(pwd):/cuvslam:ro" \
@@ -144,6 +147,7 @@ jobs:
               PYTHONPATH="$src" python3 -m unittest discover -v -s "$src/cuvslam_tools/tests"'
 
       - name: Verify eval prerequisites
+        timeout-minutes: 10
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_RO_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_RO_SECRET_ACCESS_KEY }}
@@ -157,6 +161,7 @@ jobs:
             cuvslam-ci:local ./scripts/check_eval_prerequisites.sh
 
       - name: Stage eval datasets
+        timeout-minutes: 30
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_RO_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_RO_SECRET_ACCESS_KEY }}
@@ -171,15 +176,19 @@ jobs:
             cuvslam-ci:local ./scripts/stage_eval_datasets.sh
 
       - name: Build
+        timeout-minutes: 45
         run: ./scripts/build_cuvslam_in_docker.sh Release ./output
 
       - name: Run C++ tests
+        timeout-minutes: 15
         run: ./scripts/test_cuvslam_in_docker.sh ./output
 
       - name: Run Python tests
+        timeout-minutes: 15
         run: ./scripts/test_pycuvslam_in_docker.sh ./output
 
       - name: Run cuVSLAM evaluation
+        timeout-minutes: 30
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_RO_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_RO_SECRET_ACCESS_KEY }}
@@ -197,6 +206,7 @@ jobs:
             --output output/eval/kpi-report.md
 
       - name: Build documentation
+        timeout-minutes: 15
         run: ./scripts/build_docs_in_docker.sh ./output
 
       - name: Upload documentation
@@ -249,7 +259,7 @@ jobs:
     name: "Build + Test (Orin)"
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [jetson-orin]
-    timeout-minutes: 120
+    timeout-minutes: 60
     # Orin uses BASE_IMAGE override; CUDA_VERSION is not used for the Docker base
     env:
       BASE_IMAGE: "nvcr.io/nvidia/12.6.11-devel:12.6.11-devel-aarch64-ubuntu22.04"
@@ -295,15 +305,19 @@ jobs:
           PY
 
       - name: Pull LFS test data
+        timeout-minutes: 10
         run: git lfs pull --include="test_data/"
 
       - name: Build
+        timeout-minutes: 45
         run: ./scripts/build_cuvslam_in_docker.sh Release ./output
 
       - name: Run C++ tests
+        timeout-minutes: 15
         run: ./scripts/test_cuvslam_in_docker.sh ./output
 
       - name: Run Python tests
+        timeout-minutes: 15
         run: ./scripts/test_pycuvslam_in_docker.sh ./output
 
       - name: Generate test summary
@@ -327,7 +341,7 @@ jobs:
     name: "Build + Test (Thor)"
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [jetson-thor]
-    timeout-minutes: 180
+    timeout-minutes: 60
     env:
       CUDA_VERSION: "13.0.1"
       UBUNTU_VERSION: "24.04"
@@ -372,13 +386,14 @@ jobs:
           PY
 
       - name: Pull LFS test data
+        timeout-minutes: 10
         run: git lfs pull --include="test_data/"
 
       - name: Build
         uses: nick-fields/retry@v3
         with:
           max_attempts: 3
-          timeout_minutes: 60
+          timeout_minutes: 45
           retry_wait_seconds: 30
           command: ./scripts/build_cuvslam_in_docker.sh Release ./output
 
@@ -386,7 +401,7 @@ jobs:
         uses: nick-fields/retry@v3
         with:
           max_attempts: 3
-          timeout_minutes: 30
+          timeout_minutes: 15
           retry_wait_seconds: 30
           command: ./scripts/test_cuvslam_in_docker.sh ./output
 
@@ -394,7 +409,7 @@ jobs:
         uses: nick-fields/retry@v3
         with:
           max_attempts: 3
-          timeout_minutes: 30
+          timeout_minutes: 15
           retry_wait_seconds: 30
           command: ./scripts/test_pycuvslam_in_docker.sh ./output
 
@@ -422,7 +437,7 @@ jobs:
     name: "Build + Test (USE_RERUN, x86_64)"
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [gpu]
-    timeout-minutes: 120
+    timeout-minutes: 60
     steps:
       - name: Verify GPU
         run: nvidia-smi
@@ -432,15 +447,18 @@ jobs:
           lfs: false
 
       - name: Pull LFS test data
+        timeout-minutes: 10
         run: git lfs pull --include="test_data/"
 
       - name: Build with USE_RERUN
+        timeout-minutes: 45
         env:
           # PR binaries are built and tested on the same GPU runner.
           EXTRA_CMAKE_ARGS: "-DUSE_RERUN=ON -DCMAKE_CUDA_ARCHITECTURES=native"
         run: ./scripts/build_cuvslam_in_docker.sh Release ./output-rerun
 
       - name: Run C++ tests
+        timeout-minutes: 15
         run: ./scripts/test_cuvslam_in_docker.sh ./output-rerun
 
   test-report:
@@ -566,6 +584,7 @@ jobs:
   pr-status:
     name: "PR status"
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     if: always()
     needs: [lint, build-test-x86, build-test-orin, build-test-thor, build-rerun-x86]
     steps:
