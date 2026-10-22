@@ -250,6 +250,99 @@ void LSIGrid::SyncDatabaseReverse() {
                            });
 }
 
+bool LSIGrid::SaveToDatabase(ISlamDatabase& database, const PoseGraphHypothesis& pose_graph_hypothesis) const {
+  std::vector<LandmarkId> dead_landmarks = dead_landmarks_;
+  std::sort(dead_landmarks.begin(), dead_landmarks.end());
+  const auto is_dead = [&](LandmarkId landmark_id) {
+    return std::binary_search(dead_landmarks.begin(), dead_landmarks.end(), landmark_id);
+  };
+
+  bool saved = true;
+  const auto save_landmark = [&](LandmarkId landmark_id, const GridLandmark& landmark) {
+    // Descriptors that are not in memory are in the copy already.
+    if (landmark.fd) {
+      saved &= database.SetRecord(SlamDatabaseTable::Descriptors, landmark_id, 0, [&](BlobWriter& blob_writer) {
+        feature_descriptor_ops_.ToBlob(landmark.fd, blob_writer);
+        return true;
+      });
+    }
+    saved &= database.SetRecord(SlamDatabaseTable::Landmarks, landmark_id, 0, [&](BlobWriter& blob_writer) {
+      LandmarkToBlob(landmark, blob_writer);
+      return true;
+    });
+  };
+  for (const auto& [landmark_id, landmark] : landmarks_) {
+    if (!is_dead(landmark_id)) {
+      save_landmark(landmark_id, landmark);
+    }
+  }
+  // Staged landmarks are saved into their cells, as SyncDatabase() does; without keyframes they have none.
+  std::map<HashCellId, std::vector<LandmarkId>> staged_in_cells;
+  for (const auto& [landmark_id, staged_landmark] : staged_landmarks_) {
+    if (is_dead(landmark_id) || staged_landmark.keyframes.empty()) {
+      continue;
+    }
+    GridLandmark landmark = staged_landmark;
+    std::vector<HashCellId> hash_cell_ids;
+    GetKeyframeCells(landmark, InvalidKeyFrameId, hash_cell_ids, pose_graph_hypothesis);
+    for (const HashCellId hash_cell_id : hash_cell_ids) {
+      staged_in_cells[hash_cell_id].push_back(landmark_id);
+    }
+    landmark.cells = std::move(hash_cell_ids);
+    save_landmark(landmark_id, landmark);
+  }
+  const auto delete_landmark = [&](LandmarkId landmark_id) {
+    saved &= database.TryDelRecord(SlamDatabaseTable::Landmarks, landmark_id);
+    saved &= database.TryDelRecord(SlamDatabaseTable::Descriptors, landmark_id);
+  };
+  for (const LandmarkId landmark_id : dead_landmarks) {
+    delete_landmark(landmark_id);
+  }
+  for (const LandmarkId landmark_id : read_only_removals_) {
+    delete_landmark(landmark_id);
+  }
+
+  const auto save_cell = [&](HashCellId hash_cell_id, const Cell& cell) {
+    saved &= database.SetRecord(SlamDatabaseTable::SpatialCells, hash_cell_id, 0, [&](BlobWriter& blob_writer) {
+      blob_writer.write_std(cell.landmarks_in_cell);
+      return true;
+    });
+  };
+  for (const auto& [hash_cell_id, in_memory_cell] : cells_) {
+    Cell cell = in_memory_cell;
+    const auto staged = staged_in_cells.find(hash_cell_id);
+    if (staged != staged_in_cells.end()) {
+      for (const LandmarkId landmark_id : staged->second) {
+        cell.Add(landmark_id);
+      }
+      staged_in_cells.erase(staged);
+    }
+    save_cell(hash_cell_id, cell);
+  }
+  // The other cells of staged landmarks are in the copy, if anywhere.
+  for (const auto& [hash_cell_id, landmark_ids] : staged_in_cells) {
+    Cell cell;
+    database.TryGetRecord(SlamDatabaseTable::SpatialCells, hash_cell_id,
+                          [&](const BlobReader& blob_reader) { return blob_reader.read_std(cell.landmarks_in_cell); });
+    for (const LandmarkId landmark_id : landmark_ids) {
+      cell.Add(landmark_id);
+    }
+    save_cell(hash_cell_id, cell);
+  }
+
+  saved &= database.SetSingleton(SlamDatabaseSingleton::SpatialIndex, 0,
+                                 [&](BlobWriter& blob_writer) { return ToBlob(blob_writer); });
+  return saved;
+}
+
+bool LSIGrid::FlushToDatabase(const PoseGraphHypothesis& pose_graph_hypothesis) {
+  if (!database_ || !SaveToDatabase(*database_, pose_graph_hypothesis)) {
+    return false;
+  }
+  read_only_removals_.clear();
+  return true;
+}
+
 // add or update landmark
 LandmarkId LSIGrid::AddLandmark(const FeatureDescriptor& fd, int64_t timestamp_ns) {
   if (!fd) {
@@ -432,14 +525,13 @@ void LSIGrid::MoveReadyStagedLandmarksToLSI(const Isometry3T& world_from_rig, co
     // activate
     GridLandmark& landmark = landmarks_[id];  // add new landmark
     landmark = staged_landmark;
-    // move descriptor to DB
-    if (database_) {
-      database_->SetRecord(SlamDatabaseTable::Descriptors, id, 0, [&](BlobWriter& blob_writer) {
-        feature_descriptor_ops_.ToBlob(landmark.fd, blob_writer);
-        landmark.have_to_get_descriptor_from_db = true;
-        landmark.fd.pull_memory = nullptr;  // free descriptor memory
-        return true;
-      });
+    // move descriptor to DB; it stays in memory unless the write succeeds
+    if (database_ && database_->SetRecord(SlamDatabaseTable::Descriptors, id, 0, [&](BlobWriter& blob_writer) {
+          feature_descriptor_ops_.ToBlob(landmark.fd, blob_writer);
+          return true;
+        })) {
+      landmark.have_to_get_descriptor_from_db = true;
+      landmark.fd.pull_memory = nullptr;  // free descriptor memory
     }
 
     it = staged_landmarks_.erase(it);
@@ -466,8 +558,12 @@ void LSIGrid::MoveReadyStagedLandmarksToLSI(const Isometry3T& world_from_rig, co
 void LSIGrid::RemoveLandmarks(const std::vector<LandmarkId>& landmarks_to_remove,
                               std::function<void(LandmarkId, KeyFrameId)>& func_remove_from_keyframe) {
   for (auto landmark_id : landmarks_to_remove) {
-    if (database_) {
+    if (database_ && !database_->IsReadOnly()) {
       database_->TryDelRecord(SlamDatabaseTable::Landmarks, landmark_id);
+      database_->TryDelRecord(SlamDatabaseTable::Descriptors, landmark_id);
+    } else if (database_ && database_->TryGetRecord(SlamDatabaseTable::Landmarks, landmark_id,
+                                                    [](const BlobReader&) { return true; })) {
+      read_only_removals_.insert(landmark_id);
     }
 
     auto it = this->landmarks_.find(landmark_id);
@@ -633,15 +729,15 @@ size_t LSIGrid::ReduceLandmarksInCell(HashCellId hash_cell_id, LandmarkQualityFu
   for (size_t i = 0; i < cell.landmarks_in_cell.size(); i++) {
     auto& landmark_weight = landmark_weights[i];
     landmark_weight.landmark_id = cell.landmarks_in_cell[i];
-    auto landmarks_it = this->landmarks_.find(landmark_weight.landmark_id);
-    if (landmarks_it == this->landmarks_.end()) {
+    GridLandmark* landmark_ptr = GetLandmark(landmark_weight.landmark_id);  // read from the database if needed
+    if (!landmark_ptr) {
       // it is dead landmark
       landmark_weight.weight = -1;  // to remove fast
       landmark_weight.landmark = 0;
       continue;
     }
 
-    auto& landmark = landmarks_it->second;
+    auto& landmark = *landmark_ptr;
 
     // landmark_weight
     landmark_weight.weight = func(landmark);
@@ -676,7 +772,7 @@ size_t LSIGrid::ReduceLandmarksInCell(HashCellId hash_cell_id, LandmarkQualityFu
     // remove cell
     auto it_cells = std::lower_bound(landmark->cells.begin(), landmark->cells.end(), hash_cell_id);
     if (it_cells != landmark->cells.end() && *it_cells == hash_cell_id) {
-      landmark->cells.erase(it_cells, landmark->cells.end());
+      landmark->cells.erase(it_cells);
     }
 
     // to list of dead landmarks
@@ -756,6 +852,9 @@ bool LSIGrid::QueryV(const std::function<bool(LandmarkId)>& func) const {
     }
     if (staged_landmarks_.find(id) != staged_landmarks_.end()) {
       return true;  // continue ForEach to the next landmark
+    }
+    if (read_only_removals_.count(id) != 0) {
+      return true;  // removed
     }
     if (!func(id)) {
       return false;  // stop ForEach processing
@@ -1056,6 +1155,31 @@ bool LSIGrid::GetLandmarkOrStagedCoords(LandmarkId landmark_id, const PoseGraphH
     return false;
   }
   xyz = GetLandmarkCoords(pg_hypo, *landmark_ptr);
+  return true;
+}
+
+bool LSIGrid::PeekLandmarkOrStagedCoords(LandmarkId landmark_id, const PoseGraphHypothesis& pg_hypo,
+                                         Vector3T& xyz) const {
+  const auto it = landmarks_.find(landmark_id);
+  if (it != landmarks_.end()) {
+    xyz = GetLandmarkCoords(pg_hypo, it->second);
+    return true;
+  }
+  const auto staged = staged_landmarks_.find(landmark_id);
+  if (staged != staged_landmarks_.end()) {
+    xyz = GetLandmarkCoords(pg_hypo, staged->second);
+    return true;
+  }
+  if (!database_ || read_only_removals_.count(landmark_id) != 0) {
+    return false;
+  }
+  GridLandmark landmark;
+  if (!database_->TryGetRecord(SlamDatabaseTable::Landmarks, landmark_id, [&](const BlobReader& blob_reader) {
+        return LandmarkFromBlob(blob_reader, landmark);
+      })) {
+    return false;
+  }
+  xyz = GetLandmarkCoords(pg_hypo, landmark);
   return true;
 }
 

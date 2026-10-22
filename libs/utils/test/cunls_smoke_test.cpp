@@ -21,7 +21,7 @@
 
 #include <cunls/common/cuda_stream.h>
 #include <cunls/common/types.h>
-#include <cunls/factor/prior_vector_factor_batch.h>
+#include <cunls/factor/prior/prior_vector_factor_batch.h>
 #include <cunls/minimizer/gauss_newton_minimizer.h>
 #include <cunls/minimizer/levenberg_marquardt_minimizer.h>
 #include <cunls/minimizer/problem.h>
@@ -50,10 +50,12 @@ TEST(CuNLSSmokeTest, ProblemConsistency) {
 
   cunls::VectorStateBatch<kDim> states(reinterpret_cast<const float*>(d_values.data()), kNumVectors);
   cunls::PriorVectorFactorBatch<kDim> factors(d_observations.data(), kNumVectors);
+  states.SetNumActiveStates(kNumVectors);
+  factors.SetNumActiveFactors(kNumVectors);
 
   std::vector<float*> state_ptrs;
   for (size_t i = 0; i < kNumVectors; i++) {
-    state_ptrs.push_back(states.StateBlockDevicePtr(i));
+    state_ptrs.push_back(states.StateDevicePtr(i));
   }
 
   cunls::Problem problem;
@@ -81,10 +83,12 @@ TEST(CuNLSSmokeTest, GaussNewtonMinimize) {
 
   cunls::VectorStateBatch<kDim> states(reinterpret_cast<const float*>(d_values.data()), kNumVectors);
   cunls::PriorVectorFactorBatch<kDim> factors(d_observations.data(), kNumVectors);
+  states.SetNumActiveStates(kNumVectors);
+  factors.SetNumActiveFactors(kNumVectors);
 
   std::vector<float*> state_ptrs;
   for (size_t i = 0; i < kNumVectors; i++) {
-    state_ptrs.push_back(states.StateBlockDevicePtr(i));
+    state_ptrs.push_back(states.StateDevicePtr(i));
   }
 
   cunls::Problem problem;
@@ -130,10 +134,12 @@ TEST(CuNLSSmokeTest, LevenbergMarquardtMinimize) {
 
   cunls::VectorStateBatch<kDim> states(reinterpret_cast<const float*>(d_values.data()), kNumVectors);
   cunls::PriorVectorFactorBatch<kDim> factors(d_observations.data(), kNumVectors);
+  states.SetNumActiveStates(kNumVectors);
+  factors.SetNumActiveFactors(kNumVectors);
 
   std::vector<float*> state_ptrs;
   for (size_t i = 0; i < kNumVectors; i++) {
-    state_ptrs.push_back(states.StateBlockDevicePtr(i));
+    state_ptrs.push_back(states.StateDevicePtr(i));
   }
 
   cunls::Problem problem;

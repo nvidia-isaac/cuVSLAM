@@ -51,6 +51,7 @@ macro(setup_cuvslam_settings)
         $<$<BOOL:${USE_CUDA}>:USE_CUDA>
         $<$<BOOL:${USE_RERUN}>:USE_RERUN>
         $<$<BOOL:${USE_CUNLS}>:USE_CUNLS>
+        $<$<BOOL:${USE_TENSORRT}>:USE_TENSORRT>
     )
 
     # Add 'libs/' as the root directory for all cuvslam includes

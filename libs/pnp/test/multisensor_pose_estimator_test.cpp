@@ -25,6 +25,8 @@
 #include "camera/camera.h"
 #include "camera/observation.h"
 #include "camera/rig.h"
+#include "imu/imu_preintegration.h"
+#include "imu/imu_sba_problem.h"
 #include "math/twist.h"
 
 #include "pnp/multisensor_pose_estimator.h"
@@ -124,6 +126,102 @@ TEST(MultisensorPoseEstimatorTest, ReprojectionConvergence) {
 
   EXPECT_LT(angular_err, 0.01f) << "Angular error too large: " << angular_err;
   EXPECT_LT(trans_err, 0.02f) << "Translation error too large: " << trans_err;
+}
+
+// Recover a pose far from the world origin, with non-identity camera_from_rig. With an
+// identity ground truth rig_from_world and world_from_rig coincide, so only a pose like this
+// one checks that the estimator hands cuNLS the pose convention its factors expect.
+TEST(MultisensorPoseEstimatorTest, ReprojectionConvergenceAwayFromOrigin) {
+  auto cam = MakePinhole();
+  auto rig = MakeRig(cam);
+  Vector6T extrinsic_twist;
+  extrinsic_twist << 0.05f, -0.1f, 0.02f, 0.1f, 0.05f, -0.02f;
+  math::Exp(rig.camera_from_rig[0], extrinsic_twist);
+
+  Vector6T gt_twist;
+  gt_twist << 0.3f, -0.5f, 0.2f, 3.f, -2.f, 5.f;
+  Isometry3T gt_rig_from_world;
+  math::Exp(gt_rig_from_world, gt_twist);
+  const Isometry3T gt_cam_from_world = rig.camera_from_rig[0] * gt_rig_from_world;
+
+  std::mt19937 rng(7);
+  auto landmarks = GenerateLandmarks(gt_cam_from_world.inverse(), 100, rng);
+  auto observations = ProjectLandmarks(landmarks, gt_cam_from_world);
+  ASSERT_GT(observations.size(), 10u);
+
+  Vector6T perturbation;
+  perturbation << 0.02f, -0.01f, 0.015f, 0.05f, -0.03f, 0.04f;
+  Isometry3T delta;
+  math::Exp(delta, perturbation);
+
+  cuvslam::pnp::MultisensorSolverSettings settings;
+  settings.max_iteration = 30;
+  cuvslam::pnp::MultisensorPoseEstimator estimator(rig, settings);
+
+  Isometry3T rig_from_world = gt_rig_from_world * delta;
+  Matrix6T info;
+  ASSERT_TRUE(estimator.solve(rig_from_world, info, observations, landmarks));
+
+  Vector6T error;
+  math::Log(error, gt_rig_from_world.inverse() * rig_from_world);
+  EXPECT_LT(error.head<3>().norm(), 0.01f) << "Angular error too large: " << error.head<3>().norm();
+  EXPECT_LT(error.tail<3>().norm(), 0.02f) << "Translation error too large: " << error.tail<3>().norm();
+}
+
+// The inertial factor alone must pull the pose to the IMU prediction from a previous pose away
+// from the origin, with non-identity rig_from_imu and a preintegration that rotates and translates.
+TEST(MultisensorPoseEstimatorTest, InertialPriorConvergesToPrediction) {
+  auto cam = MakePinhole();
+  auto rig = MakeRig(cam);
+
+  Vector6T prev_twist, rig_from_imu_twist, delta_rotation_twist;
+  prev_twist << 0.4f, 0.2f, -0.3f, 1.f, 2.f, -3.f;
+  rig_from_imu_twist << 0.f, 0.1f, 0.05f, 0.02f, -0.03f, 0.01f;
+  delta_rotation_twist << 0.05f, -0.08f, 0.03f, 0.f, 0.f, 0.f;
+
+  cuvslam::pnp::InertialPriorInput imu_in;
+  math::Exp(imu_in.prev_rig_from_world, prev_twist);
+  math::Exp(imu_in.rig_from_imu, rig_from_imu_twist);
+  imu_in.prev_velocity = Vector3T(0.5f, -0.2f, 0.1f);
+  imu_in.gravity_world = Vector3T(0.f, 0.f, -9.81f);
+
+  Isometry3T delta_rotation;
+  math::Exp(delta_rotation, delta_rotation_twist);
+  sba_imu::IMUPreintegration preint;
+  preint.dR = delta_rotation.linear();
+  preint.dP = Vector3T(0.03f, 0.01f, -0.02f);
+  preint.dT_s = 0.1f;
+  imu_in.preint = &preint;
+
+  sba_imu::Pose prev_pose_imu;
+  prev_pose_imu.w_from_imu = imu_in.prev_rig_from_world.inverse() * imu_in.rig_from_imu;
+  prev_pose_imu.velocity = imu_in.prev_velocity;
+  sba_imu::Pose predicted;
+  ASSERT_TRUE(prev_pose_imu.predict_pose(imu_in.gravity_world, preint, predicted));
+  const Isometry3T expected_rig_from_world = (predicted.w_from_imu * imu_in.rig_from_imu.inverse()).inverse();
+
+  Vector6T perturbation;
+  perturbation << 0.02f, -0.01f, 0.015f, 0.05f, -0.03f, 0.04f;
+  Isometry3T delta;
+  math::Exp(delta, perturbation);
+
+  // The default inertial weight puts this problem's initial cost below the minimizer's absolute
+  // cost_tolerance, which would end the solve before the first step.
+  cuvslam::pnp::MultisensorSolverSettings settings;
+  settings.max_iteration = 30;
+  settings.factor_weights.inertial = 1.f;
+  cuvslam::pnp::MultisensorPoseEstimator estimator(rig, settings);
+
+  Isometry3T rig_from_world = expected_rig_from_world * delta;
+  Matrix6T info;
+  std::unordered_map<TrackId, Vector3T> landmarks;
+  std::vector<camera::Observation> obs;
+  ASSERT_TRUE(estimator.solve(rig_from_world, info, obs, landmarks, {}, {}, {}, imu_in));
+
+  Vector6T error;
+  math::Log(error, expected_rig_from_world.inverse() * rig_from_world);
+  EXPECT_LT(error.head<3>().norm(), 1e-3f) << "Angular error too large: " << error.head<3>().norm();
+  EXPECT_LT(error.tail<3>().norm(), 1e-3f) << "Translation error too large: " << error.tail<3>().norm();
 }
 
 // Verify solver runs without crashing on empty input.

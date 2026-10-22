@@ -21,17 +21,20 @@
 #include "common/vector_3t.h"
 
 #include "slam/map/spatial_index/lsi_grid.h"
+#include "slam/vpr/vpr_map.h"
 
 namespace cuvslam::slam {
 
 enum class RansacType { kNone, kFundamental, kPnP };
-enum class LoopClosureSolverType { kDummy, kSimple, kSimplePoint, kTwoStepsEasy };
+enum class LoopClosureSolverType { kDummy, kSimple, kSimplePoint, kTwoStepsEasy, kVpr };
 
 struct LoopClosureTask {
   std::shared_ptr<PoseGraphHypothesis> pose_graph_hypothesis;
   Isometry3T guess_world_from_rig;
   KeyFrameId pose_graph_head = InvalidKeyFrameId;
   Images current_images;
+  // VPR places that look like current_images, best first, recent past excluded; set only if WantsVprCandidates().
+  std::vector<vpr::VprPlace> vpr_candidates;
 };
 
 struct LandmarkInSolver {
@@ -45,6 +48,10 @@ public:
 
   using DiscardLandmarkCB = std::function<void(LandmarkId, LandmarkProbe)>;
   using KeyframeInSightCB = std::function<void(KeyFrameId)>;
+
+  // True if Solve() reads LoopClosureTask::vpr_candidates; otherwise the caller skips place recognition.
+  virtual bool WantsVprCandidates() const { return false; }
+
   virtual bool Solve(const LoopClosureTask& task, const LSIGrid& landmarks_spatial_index,
                      const IFeatureDescriptorOps* feature_descriptor_ops, Isometry3T& pose, Matrix6T& pose_covariance,
                      std::vector<LandmarkInSolver>* landmarks, DiscardLandmarkCB* discard_landmark_cb,
@@ -62,6 +69,8 @@ ILoopClosureSolverPtr CreateLoopClosureSolverTwoSteps(const camera::Rig& rig, Ra
 // 2-steps LC with easy filtering
 ILoopClosureSolverPtr CreateLoopClosureSolverTwoStepsEasy(const camera::Rig& rig, RansacType ransac_type,
                                                           bool randomized);
+// VPR LC: verifies place recognition candidates instead of searching around the guess pose
+ILoopClosureSolverPtr CreateLoopClosureSolverVpr(const camera::Rig& rig, RansacType ransac_type, bool randomized);
 
 ILoopClosureSolver* CreateLoopClosureSolver(LoopClosureSolverType solver_type, RansacType ransac_type, bool randomized,
                                             const camera::Rig& rig);

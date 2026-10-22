@@ -16,7 +16,9 @@
 
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -35,6 +37,11 @@ using Mode = Tracker::Mode;
 
 static_assert(std::is_same_v<decltype(std::declval<Tracker&>().GetOdometry()), const Odometry&>);
 static_assert(std::is_same_v<decltype(std::declval<Tracker&>().GetSlam()), Slam&>);
+// The folder goes by value and the guess pose as a nullable pointer, like Slam::Track's gt_pose.
+static_assert(std::is_same_v<decltype(&Slam::LocalizeInMap),
+                             void (Slam::*)(std::string_view, int64_t, const cuvslam::Pose*, const Slam::ImageSet&,
+                                            const Slam::LocalizationSettings&, Slam::LocalizeStartCB,
+                                            Slam::LocalizeFinishCB, bool)>);
 
 constexpr int32_t kWidth = 640;
 constexpr int32_t kHeight = 480;
@@ -98,6 +105,17 @@ OfflineConfig MakeOfflineConfig() {
   cfg.slam.sync_mode = true;
   cfg.slam.enable_reading_internals = true;
   return cfg;
+}
+
+/// A small search grid; zero steps never finish building the localization probes.
+Slam::LocalizationSettings MakeLocalizationSettings() {
+  Slam::LocalizationSettings settings{};
+  settings.horizontal_search_radius = 1.5f;
+  settings.vertical_search_radius = 0.5f;
+  settings.horizontal_step = 0.5f;
+  settings.vertical_step = 0.25f;
+  settings.angular_step_rads = 0.1f;
+  return settings;
 }
 
 class TrackerTest : public testing::Test {
@@ -327,6 +345,36 @@ TEST_F(TrackerTest, MoveKeepsComponentsUsable) {
   EXPECT_NO_THROW(moved.GetSlam());
   EXPECT_FALSE(moved.GetOdometry().GetPrimaryCameras().empty());
   EXPECT_NO_THROW(moved.Track(NextFrame()));
+}
+
+// A null guess pose asks the map's place recognition for candidates, which needs use_vpr.
+TEST_F(TrackerTest, LocalizeInMapWithoutGuessPoseNeedsVpr) {
+  OfflineConfig cfg = MakeOfflineConfig();
+  Slam slam{rig, {0}, cfg.slam};
+
+  try {
+    slam.LocalizeInMap("/nonexistent/map", 0, nullptr, NextFrame(), MakeLocalizationSettings(), nullptr, nullptr);
+    FAIL() << "LocalizeInMap without a guess pose was accepted without use_vpr";
+  } catch (const std::invalid_argument& e) {
+    EXPECT_NE(std::string_view{e.what()}.find("use_vpr"), std::string_view::npos) << e.what();
+  }
+}
+
+// A guess pose needs no place recognition, so the call reaches the map and reports it missing.
+TEST_F(TrackerTest, LocalizeInMapWithGuessPoseReportsAMissingMap) {
+  OfflineConfig cfg = MakeOfflineConfig();
+  Slam slam{rig, {0}, cfg.slam};
+  const cuvslam::Pose guess;
+  std::optional<std::string> error;
+
+  slam.LocalizeInMap("/nonexistent/map", 0, &guess, NextFrame(), MakeLocalizationSettings(), nullptr,
+                     [&error](const cuvslam::Result<cuvslam::Pose>& result) {
+                       EXPECT_FALSE(result.data.has_value());
+                       error = std::string{result.error_message};
+                     });
+
+  ASSERT_TRUE(error.has_value());  // sync_mode localizes before returning
+  EXPECT_NE(error->find("database"), std::string::npos) << *error;
 }
 
 }  // namespace
