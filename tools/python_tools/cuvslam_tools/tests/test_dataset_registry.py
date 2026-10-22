@@ -374,6 +374,7 @@ class TestSuiteSelection(unittest.TestCase):
                 ("kitti", "multicamera"),
                 ("kitti", "multisensor"),
                 ("euroc", "inertial"),
+                ("euroc", "multisensor"),
                 ("icl_nuim", "rgbd"),
                 ("icl_nuim", "multisensor"),
             ],

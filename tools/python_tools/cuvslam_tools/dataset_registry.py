@@ -236,12 +236,13 @@ DATASETS: dict[str, DatasetSpec] = {
             ),
             # Same config as the record above, so the two KPI rows compare the cuNLS
             # solver against stereo-inertial odometry. The rig's IMU turns on
-            # multi-sensor IMU fusion; the fisheye cameras carry no depth. Full only:
-            # KITTI already covers depth-less multi-sensor pre-merge.
+            # multi-sensor IMU fusion; the fisheye cameras carry no depth. In smoke
+            # because it is the only pre-merge coverage of multi-sensor IMU fusion
+            # and of distorted cameras in that mode.
             EvalSpec(
                 config="euroc-vio_slam.cfg",
                 args=_multisensor_args("--rectified_stereo_camera=false", "--multicam_mode=moderate"),
-                suites=frozenset({FULL_SUITE}),
+                suites=frozenset(SUITES),
                 gating="informational",
             ),
         ),
