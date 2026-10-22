@@ -14,6 +14,7 @@
  * of the software or derivative works thereof, you agree to be bound by this License.
  */
 
+#include <array>
 #include <iterator>
 #include <optional>
 #include <random>
@@ -207,31 +208,55 @@ TEST(MultisensorPoseEstimatorTest, InertialPriorConvergesToPrediction) {
   Isometry3T delta;
   math::Exp(delta, perturbation);
 
-  // The default inertial weight puts this problem's initial cost below the minimizer's absolute
-  // cost_tolerance, which would end the solve before the first step.
-  cuvslam::pnp::MultisensorSolverSettings settings;
-  settings.max_iteration = 30;
-  settings.factor_weights.inertial = 1.f;
-  cuvslam::pnp::MultisensorPoseEstimator estimator(rig, settings);
+  // With min_observations = 0 the solve must still leave out the PnP factor, whose loss is normalized by the
+  // (zero) observation count.
+  for (const size_t min_observations : {size_t{5}, size_t{0}}) {
+    // The default inertial weight puts this problem's initial cost below the minimizer's absolute
+    // cost_tolerance, which would end the solve before the first step.
+    cuvslam::pnp::MultisensorSolverSettings settings;
+    settings.max_iteration = 30;
+    settings.factor_weights.inertial = 1.f;
+    settings.min_observations = min_observations;
+    cuvslam::pnp::MultisensorPoseEstimator estimator(rig, settings);
 
-  Isometry3T rig_from_world = expected_rig_from_world * delta;
-  Matrix6T info;
-  std::unordered_map<TrackId, Vector3T> landmarks;
-  std::vector<camera::Observation> obs;
-  ASSERT_TRUE(estimator.solve(rig_from_world, info, obs, landmarks, {}, {}, {}, imu_in));
+    Isometry3T rig_from_world = expected_rig_from_world * delta;
+    Matrix6T info;
+    std::unordered_map<TrackId, Vector3T> landmarks;
+    std::vector<camera::Observation> obs;
+    ASSERT_TRUE(estimator.solve(rig_from_world, info, obs, landmarks, {}, {}, {}, imu_in)) << min_observations;
 
-  Vector6T error;
-  math::Log(error, expected_rig_from_world.inverse() * rig_from_world);
-  EXPECT_LT(error.head<3>().norm(), 1e-3f) << "Angular error too large: " << error.head<3>().norm();
-  EXPECT_LT(error.tail<3>().norm(), 1e-3f) << "Translation error too large: " << error.tail<3>().norm();
+    Vector6T error;
+    math::Log(error, expected_rig_from_world.inverse() * rig_from_world);
+    EXPECT_LT(error.head<3>().norm(), 1e-3f)
+        << "min_observations " << min_observations << ": angular error " << error.head<3>().norm();
+    EXPECT_LT(error.tail<3>().norm(), 1e-3f)
+        << "min_observations " << min_observations << ": translation error " << error.tail<3>().norm();
+  }
 }
 
-// An estimator keeps its problem between solves and lets the minimizer reuse its structure. Across solves
-// with different observation counts, and with the inertial factor switching on and off (which rebuilds the
-// problem), each result must match a fresh estimator solving the same input.
+// An estimator keeps its problem between solves and lets the minimizer reuse its structure. Over a sequence
+// of solves that keeps the same factor batches for several solves in a row (so the cached structure is
+// reused) and then switches the inertial, ICP and point-to-plane factors on and off (which rebuilds it), with
+// different observation and depth point counts and alternating depth images, each result must match a fresh
+// estimator solving the same input.
 TEST(MultisensorPoseEstimatorTest, RepeatedSolvesMatchFreshEstimator) {
   auto cam = MakePinhole();
   auto rig = MakeRig(cam);
+
+  // Two depth images of a fronto-parallel wall, used on alternating solves so the depth factors are rebound to
+  // a different texture each time. The depths are close enough that a stale texture stays within the ICP and
+  // point-to-plane gates and biases the pose instead of being rejected.
+  const int width = static_cast<int>(kResolution.x());
+  const int height = static_cast<int>(kResolution.y());
+  const float wall_depths[] = {2.f, 2.02f};
+  std::array<cuvslam::cuda::GaussianGPUImagePyramid, 2> depth_pyramids;
+  for (size_t i = 0; i < depth_pyramids.size(); ++i) {
+    depth_pyramids[i].init(width, height);
+    std::vector<float> depth_host(width * height, wall_depths[i]);
+    depth_pyramids[i][0].copy(cuvslam::cuda::ToGPU, depth_host.data(), nullptr);
+  }
+  CUDA_CHECK(cudaDeviceSynchronize());
+  const cuvslam::pnp::RGBDInfo depth_infos[] = {{CameraId{0}, depth_pyramids[0]}, {CameraId{0}, depth_pyramids[1]}};
 
   Vector6T rig_from_imu_twist, delta_rotation_twist;
   rig_from_imu_twist << 0.f, 0.1f, 0.05f, 0.02f, -0.03f, 0.01f;
@@ -243,23 +268,59 @@ TEST(MultisensorPoseEstimatorTest, RepeatedSolvesMatchFreshEstimator) {
   preint.dP = Vector3T(0.01f, 0.f, -0.01f);
   preint.dT_s = 0.05f;
 
+  struct SolveInput {
+    size_t num_landmarks;
+    size_t num_depth_points;  // 0 drops the ICP factors
+    bool planes;              // false drops the point-to-plane factors
+    bool inertial;
+  };
+  const SolveInput solves[] = {
+      {40, 300, true, false}, {120, 50, true, false},  {200, 800, true, false},  // reused
+      {60, 0, true, false},                                                      // no ICP
+      {25, 120, true, true},  {150, 600, true, true},                            // inertial, reused
+      {90, 200, false, true},                                                    // no point-to-plane
+      {70, 400, true, false}, {180, 100, true, false},                           // reused
+  };
+
   cuvslam::pnp::MultisensorSolverSettings settings;
   settings.max_iteration = 30;
   cuvslam::pnp::MultisensorPoseEstimator reused(rig, settings);
 
   std::mt19937 rng(3);
-  const size_t landmark_counts[] = {40, 120, 60, 200, 25, 90, 150};
-  for (size_t k = 0; k < std::size(landmark_counts); ++k) {
+  for (size_t k = 0; k < std::size(solves); ++k) {
+    const SolveInput& in = solves[k];
     Vector6T gt_twist;
     gt_twist << 0.05f * k, -0.03f * k, 0.02f, 0.2f * k, -0.1f, 0.3f * k;
     Isometry3T gt_rig_from_world;
     math::Exp(gt_rig_from_world, gt_twist);
+    const Isometry3T gt_world_from_cam = gt_rig_from_world.inverse();
 
-    auto landmarks = GenerateLandmarks(gt_rig_from_world.inverse(), landmark_counts[k], rng);
+    auto landmarks = GenerateLandmarks(gt_world_from_cam, in.num_landmarks, rng);
     auto observations = ProjectLandmarks(landmarks, gt_rig_from_world);
 
+    // The wall seen in this solve's depth image, in world coordinates.
+    const float wall_depth = wall_depths[k % 2];
+    const cuvslam::pnp::RGBDInfos rgbd_infos{&depth_infos[k % 2]};
+    std::uniform_real_distribution<float> u_dist(10.f, width - 10.f);
+    std::uniform_real_distribution<float> v_dist(10.f, height - 10.f);
+    std::vector<Vector3T> depth_points;
+    for (size_t i = 0; i < in.num_depth_points; ++i) {
+      const float u = u_dist(rng);
+      const float v = v_dist(rng);
+      const Vector3T p_cam((u - kPrincipal.x()) / kFocal.x() * wall_depth,
+                           (v - kPrincipal.y()) / kFocal.y() * wall_depth, wall_depth);
+      depth_points.push_back(gt_world_from_cam * p_cam);
+    }
+    std::vector<map::Plane> planes;
+    if (in.planes) {
+      map::Plane wall;
+      wall.centroid = gt_world_from_cam * Vector3T(0.f, 0.f, wall_depth);
+      wall.normal = gt_world_from_cam.linear() * Vector3T(0.f, 0.f, 1.f);
+      planes.push_back(wall);
+    }
+
     std::optional<cuvslam::pnp::InertialPriorInput> imu_in;
-    if (k % 2 == 1) {
+    if (in.inertial) {
       imu_in.emplace();
       Vector6T prev_twist = gt_twist;
       prev_twist[3] -= 0.02f;
@@ -278,13 +339,18 @@ TEST(MultisensorPoseEstimatorTest, RepeatedSolvesMatchFreshEstimator) {
     Isometry3T reused_rig_from_world = init_rig_from_world;
     Isometry3T fresh_rig_from_world = init_rig_from_world;
     Matrix6T info;
-    ASSERT_TRUE(reused.solve(reused_rig_from_world, info, observations, landmarks, {}, {}, {}, imu_in)) << k;
+    ASSERT_TRUE(
+        reused.solve(reused_rig_from_world, info, observations, landmarks, rgbd_infos, planes, depth_points, imu_in))
+        << k;
     cuvslam::pnp::MultisensorPoseEstimator fresh(rig, settings);
-    ASSERT_TRUE(fresh.solve(fresh_rig_from_world, info, observations, landmarks, {}, {}, {}, imu_in)) << k;
+    ASSERT_TRUE(
+        fresh.solve(fresh_rig_from_world, info, observations, landmarks, rgbd_infos, planes, depth_points, imu_in))
+        << k;
 
     Vector6T diff;
     math::Log(diff, fresh_rig_from_world.inverse() * reused_rig_from_world);
     EXPECT_LT(diff.norm(), 1e-4f) << "solve " << k << " (" << observations.size() << " observations, "
+                                  << depth_points.size() << " depth points, " << planes.size() << " planes, "
                                   << (imu_in ? "with" : "without") << " inertial factor)";
 
     Vector6T error;

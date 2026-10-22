@@ -153,7 +153,9 @@ public:
     if (num_losses <= 0) {
       return true;
     }
-    loss_.Evaluate(s, out, num_losses, stream);
+    if (!loss_.Evaluate(s, out, num_losses, stream)) {
+      return false;
+    }
     cunls::ApplyScaling(scale_, out, num_losses, stream);
     return true;
   }
@@ -259,7 +261,7 @@ bool MultisensorPoseEstimator::solve(Isometry3T& rig_from_world, Matrix6T& stati
   }
 
   ProblemLayout layout;
-  layout.pnp = n >= settings_.min_observations;
+  layout.pnp = n > 0 && n >= settings_.min_observations;
   for (CameraId cam_id = 0; cam_id < depth_infos.size(); ++cam_id) {
     if (depth_infos[cam_id] != nullptr) {
       layout.depth_cameras.push_back(cam_id);
