@@ -190,14 +190,40 @@ jobs:
 
           # Jetson configs (CUDA version must match host JetPack driver)
           # Orin uses base_image override; cuda value is not used for the Docker base but kept for artifact naming
-          # Thor runs the smoke eval suite (eval_suite: smoke), reported per device and never aggregated with x86.
-          # Its eval steps are informational (continue-on-error) while runtime and variance are characterized.
-          # Orin does not: staging the smoke datasets filled its disk.
-          - { name: "aarch64 / Orin (JP 6.1)",  runner: '["jetson-orin"]', cuda: "12.6.3", ubuntu: "22.04", archs: "87",  platform: "orin",  wheel: true, benchmark: true, base_image: "nvcr.io/nvidia/12.6.11-devel:12.6.11-devel-aarch64-ubuntu22.04", ports_mirror: "http://mirrors.ocf.berkeley.edu/ubuntu-ports" }
+          # Both run the smoke eval suite (eval_suite: smoke), reported per device and never aggregated with x86.
+          # Their eval steps are informational (continue-on-error) while runtime and variance are characterized.
+          # datasets_root overrides the dataset cache location per config. Orin's home is on a small eMMC; its
+          # runner work directory is on NVMe, and the job-completed hook empties only the per-repo workspace in it.
+          - { name: "aarch64 / Orin (JP 6.1)",  runner: '["jetson-orin"]', cuda: "12.6.3", ubuntu: "22.04", archs: "87",  platform: "orin",  wheel: true, benchmark: true, eval: true, eval_suite: smoke, job_timeout: 240, datasets_root: "/data/github-runner-workspace/cuvslam-cache", base_image: "nvcr.io/nvidia/12.6.11-devel:12.6.11-devel-aarch64-ubuntu22.04", ports_mirror: "http://mirrors.ocf.berkeley.edu/ubuntu-ports" }
           - { name: "aarch64 / Thor (JP 7.1)",  runner: '["jetson-thor"]', cuda: "13.0.1", ubuntu: "24.04", archs: "110", platform: "thor",  wheel: true, benchmark: true, eval: true, eval_suite: smoke, retries: 3, build_timeout: 60, job_timeout: 240, ports_mirror: "http://mirrors.ocf.berkeley.edu/ubuntu-ports" }
     steps:
       - name: Verify GPU
         run: nvidia-smi
+
+      # Diagnostics only: Jetson root filesystems are small, and filling one kills the runner agent mid-job.
+      - name: Report Jetson disk usage
+        if: matrix.benchmark
+        continue-on-error: true
+        env:
+          DATASETS_ROOT: ${{ matrix.datasets_root || vars.RUNNER_LOCAL_DATASETS_ROOT }}
+        run: |
+          datasets_root="${DATASETS_ROOT:-$HOME/.cache/cuvslam}"
+          cache_probe="$datasets_root"
+          while [ ! -e "$cache_probe" ]; do cache_probe="$(dirname "$cache_probe")"; done
+          echo "## Block devices"
+          lsblk -e 7 -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINTS || true
+          echo "## Mounted filesystems"
+          df -h -x tmpfs -x devtmpfs -x squashfs -x overlay || true
+          echo "## Filesystems holding the workspace, home, and dataset cache ($datasets_root)"
+          df -h "$GITHUB_WORKSPACE" "$HOME" "$cache_probe" || true
+          echo "## Dataset cache"
+          if [ -d "$datasets_root" ]; then
+            du -sh "$datasets_root"/datasets/vslam/* "$datasets_root" 2>/dev/null || true
+          else
+            echo "$datasets_root does not exist"
+          fi
+          echo "## Docker"
+          docker system df || true
 
       - uses: actions/checkout@v5
         with:
@@ -216,7 +242,7 @@ jobs:
 
       - name: Resolve local datasets root
         if: matrix.eval
-        run: echo "RUNNER_LOCAL_DATASETS_ROOT=${{ vars.RUNNER_LOCAL_DATASETS_ROOT || '$HOME/.cache/cuvslam' }}" >> "$GITHUB_ENV"
+        run: echo "RUNNER_LOCAL_DATASETS_ROOT=${{ matrix.datasets_root || vars.RUNNER_LOCAL_DATASETS_ROOT || '$HOME/.cache/cuvslam' }}" >> "$GITHUB_ENV"
 
       - name: Build CI tools image
         if: matrix.eval

@@ -109,6 +109,7 @@
         <th>ATE [%/m]</th>
         <th>ARE [deg/m]</th>
         <th>Kabsch RMS [m]</th>
+        <th>Loop closures</th>
     </tr>
     {% for s in stats %}
         <tr>
@@ -117,7 +118,8 @@
             <td>{% if s.average_fps > 0 %}{{ '%0.8f' % s.average_fps }}{% endif %}</td>
             <td>{% if s.gt_av_translation_error > 0 %}{{ '%0.8f' % s.gt_av_translation_error }}{% endif %}</td>
             <td>{% if s.gt_av_rotation_error > 0 %}{{ '%0.8f' % s.gt_av_rotation_error }}{% endif %}</td>
-            <td>{% if s.gt_simple_error > 0 %}{{ '%0.8f' % s.gt_simple_error }}{% endif %}
+            <td>{% if s.gt_simple_error > 0 %}{{ '%0.8f' % s.gt_simple_error }}{% endif %}</td>
+            <td>{% if s.loop_closure_mode %}{{ s.num_loop_closures }} ({{ s.loop_closure_mode }}){% endif %}</td>
         </tr>
     {% endfor %}
     <tr class="summary">
@@ -127,6 +129,7 @@
         <td><strong>{{ '%0.8f' % total.summary_av_gt_translation_error }}</strong></td>
         <td><strong>{{ '%0.8f' % total.summary_av_gt_rotation_error }}</strong></td>
         <td><strong>{{ '%0.8f' % total.summary_av_gt_simple_error }}</strong></td>
+        <td></td>
     </tr>
     </table>
 

@@ -21,8 +21,8 @@
 
 #include <cunls/common/device_vector.h>
 #include <cunls/common/log.h>
+#include <cunls/factor/between/se3_between_factor_batch.h>
 #include <cunls/factor/pnp_factor_batch.h>
-#include <cunls/factor/se3_between_factor_batch.h>
 #include <cunls/minimizer/levenberg_marquardt_minimizer.h>
 #include <cunls/minimizer/problem.h>
 #include <cunls/robustifier/cauchy_loss_function_batch.h>
@@ -191,14 +191,16 @@ bool MultisensorPoseEstimator::solve(Isometry3T& rig_from_world, Matrix6T& stati
   using PnPFactor = cunls::PnPFactorBatch;
   using ScaledCauchy = cunls::ScaledLossFunctionBatch<cunls::CauchyLossFunctionBatch>;
 
-  cunls::SE3Transform rig_from_world_se3;
-  IsometryToSE3Transform(rig_from_world, rig_from_world_se3);
+  // cuNLS pose states are world_from_rig; the estimator's interface stays rig_from_world.
+  cunls::SE3Transform world_from_rig_se3;
+  IsometryToSE3Transform(rig_from_world.inverse(), world_from_rig_se3);
 
-  d_pose_[0] = rig_from_world_se3;
+  d_pose_[0] = world_from_rig_se3;
   d_pose_.copy(cuda::ToGPU, s);
   CUDA_CHECK(cudaStreamSynchronize(s));
 
-  cunls::SE3StateBatch se3_states(cublas_handle_, reinterpret_cast<const float*>(d_pose_.ptr()), 1);
+  cunls::SE3StateBatch se3_states(reinterpret_cast<const float*>(d_pose_.ptr()), 1);
+  se3_states.SetNumActiveStates(1);
 
   const auto& fw = settings_.factor_weights;
 
@@ -218,10 +220,11 @@ bool MultisensorPoseEstimator::solve(Isometry3T& rig_from_world, Matrix6T& stati
     const float z_threshold = 1e-3f;
 
     pnp_cost.emplace(obs_ptr, cam_from_rig_ptr, lm_world_ptr, n, z_threshold);
+    pnp_cost->SetNumActiveFactors(n);
     // Per-residual normalization: scale = weight / num_residuals, so the total loss
     // contribution is independent of the observation count.
     loss_reproj.emplace(fw.reprojection / static_cast<float>(n), 1, fw.robust_reprojection);
-    pose_state_ptrs_.assign(n, se3_states.StateBlockDevicePtr(0));
+    pose_state_ptrs_.assign(n, se3_states.StateDevicePtr(0));
     problem.AddFactorBatch(&*pnp_cost, &*loss_reproj, pose_state_ptrs_);
     ++num_factor_batches;
   }
@@ -258,7 +261,7 @@ bool MultisensorPoseEstimator::solve(Isometry3T& rig_from_world, Matrix6T& stati
 
     const float icp_scale = fw.point_to_point / static_cast<float>(num_dp);
     loss_icp_scaled.emplace(icp_scale, 1, fw.robust_point_to_point);
-    icp_state_ptrs_.assign(num_dp, se3_states.StateBlockDevicePtr(0));
+    icp_state_ptrs_.assign(num_dp, se3_states.StateDevicePtr(0));
 
     size_t idx = 0;
     for (CameraId cam_id = 0; cam_id < depth_infos.size(); ++cam_id) {
@@ -323,9 +326,9 @@ bool MultisensorPoseEstimator::solve(Isometry3T& rig_from_world, Matrix6T& stati
         if (depth_infos[cam_id] == nullptr) {
           continue;
         }
-        const size_t nf = p2p_costs[cam_idx]->NumFactors();
+        const size_t nf = p2p_costs[cam_idx]->NumActiveFactors();
         loss_p2p[cam_idx].emplace(p2p_scale, 1, fw.robust_point_to_plane);
-        p2p_state_ptrs_[cam_idx].assign(nf, se3_states.StateBlockDevicePtr(0));
+        p2p_state_ptrs_[cam_idx].assign(nf, se3_states.StateDevicePtr(0));
         problem.AddFactorBatch(&*p2p_costs[cam_idx], &*loss_p2p[cam_idx], p2p_state_ptrs_[cam_idx]);
         ++num_factor_batches;
         ++cam_idx;
@@ -357,12 +360,13 @@ bool MultisensorPoseEstimator::solve(Isometry3T& rig_from_world, Matrix6T& stati
 
     if (pred_ok) {
       const Isometry3T pred_rig_from_world = (predicted.w_from_imu * imu_in->rig_from_imu.inverse()).inverse();
-      // The inertial residual is Log(Delta * T_left^{-1} * T_right).  For zero residual at the
-      // IMU prediction we want Delta * T_i^{-1} * T_j_pred = I, i.e. Delta = T_j_pred^{-1} * T_i.
-      const Isometry3T delta = pred_rig_from_world.inverse() * imu_in->prev_rig_from_world;
+      // The inertial residual is Log(Delta * T_left^{-1} * T_right) on world_from_rig states.  For
+      // zero residual at the IMU prediction we want Delta * T_i^{-1} * T_j_pred = I, i.e.
+      // Delta = T_j_pred^{-1} * T_i = pred_rig_from_world * prev_rig_from_world^{-1}.
+      const Isometry3T delta = pred_rig_from_world * imu_in->prev_rig_from_world.inverse();
 
       cunls::SE3Transform prev_se3, delta_se3;
-      IsometryToSE3Transform(imu_in->prev_rig_from_world, prev_se3);
+      IsometryToSE3Transform(imu_in->prev_rig_from_world.inverse(), prev_se3);
       IsometryToSE3Transform(delta, delta_se3);
       d_prev_pose_[0] = prev_se3;
       d_imu_delta_[0] = delta_se3;
@@ -372,16 +376,18 @@ bool MultisensorPoseEstimator::solve(Isometry3T& rig_from_world, Matrix6T& stati
       d_const_id_.copy(cuda::ToGPU, s);
       CUDA_CHECK(cudaStreamSynchronize(s));
 
-      prev_pose_state = std::make_unique<cunls::SE3StateBatch>(
-          cublas_handle_, reinterpret_cast<const float*>(d_prev_pose_.ptr()), 1, d_const_id_.ptr(), 1);
+      prev_pose_state = std::make_unique<cunls::SE3StateBatch>(reinterpret_cast<const float*>(d_prev_pose_.ptr()), 1,
+                                                               d_const_id_.ptr(), 1);
+      prev_pose_state->SetNumActiveStates(1, 1);
       problem.AddStateBatch(prev_pose_state.get());
 
       inertial_cost = std::make_unique<cunls::SE3BetweenFactorBatch>(d_imu_delta_.ptr(), 1);
+      inertial_cost->SetNumActiveFactors(1);
       // 6 = SE3 DOF, normalising the weight per-residual to match the other factor scaling.
       inertial_loss.emplace(fw.inertial / 6.0f, 1, fw.robust_inertial);
       inertial_state_ptrs_.clear();
-      inertial_state_ptrs_.push_back(prev_pose_state->StateBlockDevicePtr(0));
-      inertial_state_ptrs_.push_back(se3_states.StateBlockDevicePtr(0));
+      inertial_state_ptrs_.push_back(prev_pose_state->StateDevicePtr(0));
+      inertial_state_ptrs_.push_back(se3_states.StateDevicePtr(0));
       problem.AddFactorBatch(inertial_cost.get(), &*inertial_loss, inertial_state_ptrs_);
       ++num_factor_batches;
     }
@@ -399,10 +405,12 @@ bool MultisensorPoseEstimator::solve(Isometry3T& rig_from_world, Matrix6T& stati
 
   d_pose_.copy(cuda::ToCPU, s);
   CUDA_CHECK(cudaStreamSynchronize(s));
-  rig_from_world = IsometryFromSE3Transform(d_pose_[0]);
+  Isometry3T world_from_rig = IsometryFromSE3Transform(d_pose_[0]);
 
-  // Project to SO(3) via SVD to correct numerical drift from iterative optimization.
-  rig_from_world.linear() = common::CalculateRotationFromSVD(rig_from_world.matrix());
+  // Project to SO(3) via SVD to correct numerical drift from iterative optimization. Done before
+  // inverting, since Isometry3T::inverse() assumes an orthonormal rotation.
+  world_from_rig.linear() = common::CalculateRotationFromSVD(world_from_rig.matrix());
+  rig_from_world = world_from_rig.inverse();
 
   // Posterior inertial state.  The inertial factor uses prev_velocity / biases as baked-in
   // constants, so this LM does not refine them — surface the input values unchanged and let the
