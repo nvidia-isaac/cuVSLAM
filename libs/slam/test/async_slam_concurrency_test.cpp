@@ -73,8 +73,8 @@ cuvslam::Slam::LocalizationSettings MakeLocalizationSettings() {
 
 }  // namespace
 
-// Note: propagation of PoseGraphOptimizerOptions, spatial-index settings, and active cameras
-// (async_slam_localize.cpp L143-156) requires a real map database and cannot be covered here.
+// Note: propagation of PoseGraphOptimizerOptions and active cameras
+// (LocalizeInMapCmd::Execute) requires a real map database and cannot be covered here.
 
 TEST(AsyncSlam, LocalizeInMap_ReproduceMode_BothCallbacksCalledSynchronously) {
   // In reproduce_mode LocalizeInMap calls ProcessInputSynchronously() before returning,
@@ -101,8 +101,8 @@ TEST(AsyncSlam, LocalizeInMap_ReproduceMode_BothCallbacksCalledSynchronously) {
   const std::string missing_map_path = "/tmp/cuvslam_missing_localization_map_repro_" +
                                        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
 
-  slam.LocalizeInMap(missing_map_path, 1'000, cuvslam::Isometry3T::Identity(), {}, MakeLocalizationSettings(), start_cb,
-                     finish_cb);
+  slam.LocalizeInMap(missing_map_path, 1'000, cuvslam::Isometry3T::Identity(), {}, MakeLocalizationSettings(),
+                     /*attach=*/false, start_cb, finish_cb);
 
   EXPECT_TRUE(start_called);
   EXPECT_TRUE(finish_called);
@@ -111,9 +111,9 @@ TEST(AsyncSlam, LocalizeInMap_ReproduceMode_BothCallbacksCalledSynchronously) {
 
 TEST(AsyncSlam, LocalizeInMap_AsyncMode_GetSlamPoseRemainsFiniteWhileLocalizationIsInFlight) {
   // Verifies that GetSlamPose() (caller thread) is safe while the worker thread is executing
-  // LocalizeInMapCmd::Execute(). With a missing map the worker returns at OpenDatabase() and
-  // never reaches the slam_mutex_-protected section (async_slam_localize.cpp L143-150);
-  // testing that path requires a real map database which is not available here.
+  // LocalizeInMapCmd::Execute(). With a missing map the worker returns at OpenDatabase(), having
+  // taken slam_mutex_ only for the own map file check; the slam_mutex_-protected sections after it
+  // require a real map database which is not available here.
   std::unique_ptr<cuvslam::camera::ICameraModel> camera;
   const cuvslam::camera::Rig rig = MakeSingleCameraRig(camera);
   cuvslam::slam::AsyncSlamOptions options;
@@ -143,8 +143,8 @@ TEST(AsyncSlam, LocalizeInMap_AsyncMode_GetSlamPoseRemainsFiniteWhileLocalizatio
                                        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
 
   cuvslam::slam::AsyncSlam slam(rig, {0}, options);
-  slam.LocalizeInMap(missing_map_path, 1'000, cuvslam::Isometry3T::Identity(), {}, MakeLocalizationSettings(), start_cb,
-                     finish_cb);
+  slam.LocalizeInMap(missing_map_path, 1'000, cuvslam::Isometry3T::Identity(), {}, MakeLocalizationSettings(),
+                     /*attach=*/false, start_cb, finish_cb);
 
   {
     std::unique_lock<std::mutex> lock(mutex);
@@ -205,8 +205,8 @@ TEST(AsyncSlam, TrackResultCanRunWhileLocalizeInMapIsInFlight) {
 
   cuvslam::slam::AsyncSlam slam(rig, {0}, options);
 
-  slam.LocalizeInMap(missing_map_path, 1'000, cuvslam::Isometry3T::Identity(), {}, MakeLocalizationSettings(), start_cb,
-                     finish_cb);
+  slam.LocalizeInMap(missing_map_path, 1'000, cuvslam::Isometry3T::Identity(), {}, MakeLocalizationSettings(),
+                     /*attach=*/false, start_cb, finish_cb);
 
   {
     std::unique_lock<std::mutex> lock(mutex);

@@ -111,6 +111,6 @@ void LaunchLoadMapAndLocalize(slam::AsyncSlam& slam, int64_t timestamp_ns, const
 
   slam.LocalizeInMap(FLAGS_slam_input_database, timestamp_ns, guess_pose,
                      user_provide_image ? user_provided_images : current_images, GetDefaultLocalizationSettings(),
-                     start_cb, nullptr);
+                     /*attach=*/false, start_cb, nullptr);
 }
 }  // namespace cuvslam::launcher
