@@ -418,28 +418,16 @@ jobs:
         run: git lfs pull --include="test_data/"
 
       - name: Build
-        uses: nick-fields/retry@v3
-        with:
-          max_attempts: 3
-          timeout_minutes: 45
-          retry_wait_seconds: 30
-          command: ./scripts/build_cuvslam_in_docker.sh Release ./output
+        timeout-minutes: 45
+        run: ./scripts/build_cuvslam_in_docker.sh Release ./output
 
       - name: Run C++ tests
-        uses: nick-fields/retry@v3
-        with:
-          max_attempts: 3
-          timeout_minutes: 15
-          retry_wait_seconds: 30
-          command: ./scripts/test_cuvslam_in_docker.sh ./output
+        timeout-minutes: 15
+        run: ./scripts/test_cuvslam_in_docker.sh ./output
 
       - name: Run Python tests
-        uses: nick-fields/retry@v3
-        with:
-          max_attempts: 3
-          timeout_minutes: 15
-          retry_wait_seconds: 30
-          command: ./scripts/test_pycuvslam_in_docker.sh ./output
+        timeout-minutes: 15
+        run: ./scripts/test_pycuvslam_in_docker.sh ./output
 
       - name: Generate test summary
         if: always()
