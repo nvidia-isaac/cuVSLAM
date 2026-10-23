@@ -593,13 +593,13 @@ public:
    *
    * The track will output poses in the same coordinate system until a loss of tracking.
    *
-   * Image timestamps have to match. cuVSLAM will use timestamp from the camera 0 image.
+   * Image timestamps have to match. cuVSLAM will use the timestamp of images[0].
    * If a camera rig provides "almost synchronized" frames, the timestamps should be within 1 millisecond.
    * The number of images for tracker should not exceed rig->num_cameras.
    *
    * @param[in]  images  an array of synchronized images no more than rig->num_cameras.
-   * Must use ImageData::DataType::UINT8. Partial ImageSet is supported, for example due to frame drops. Corresponding
-   * cameras are identified by Image::camera_index.
+   * Must use ImageData::DataType::UINT8. Partial ImageSet is supported, for example due to frame drops, but cycling
+   * through cameras or camera groups across calls is not. Corresponding cameras are identified by Image::camera_index.
    * @param[in]  masks  (Optional) an array of corresponding masks no more than rig->num_cameras.
    * Must use ImageData::DataType::UINT8 and ImageData::Encoding::MONO. Non-zero pixels are excluded: no features are
    * selected or kept there, and in OdometryMode::RGBD and OdometryMode::Multisensor the depth at those pixels is
