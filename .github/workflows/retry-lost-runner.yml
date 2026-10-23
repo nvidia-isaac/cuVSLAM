@@ -4,11 +4,12 @@ name: Retry lost runner
 # GitHub mid-job, and reports every such event. This workflow never checks out
 # or executes code from the run it inspects.
 
+# A `branches` filter would match PR Verify runs against the PR head branch,
+# which a fork can name `main`, so the job condition does the filtering.
 on:
   workflow_run:
-    workflows: ["Nightly Build & Test"]
+    workflows: ["Nightly Build & Test", "PR Verify"]
     types: [completed]
-    branches: [main, "release/**"]
 
 concurrency:
   group: retry-lost-runner-${{ github.event.workflow_run.id }}
@@ -25,13 +26,21 @@ env:
 jobs:
   retry:
     name: Retry if a runner was lost
-    if: github.event.workflow_run.conclusion == 'failure'
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      ((github.event.workflow_run.name == 'Nightly Build & Test' &&
+        (github.event.workflow_run.head_branch == 'main' ||
+         startsWith(github.event.workflow_run.head_branch, 'release/'))) ||
+       (github.event.workflow_run.name == 'PR Verify' &&
+        github.event.workflow_run.event == 'pull_request'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       actions: write
       checks: read
       issues: write
+      pull-requests: read
     steps:
       - name: Inspect run, re-run, and notify
         uses: actions/github-script@v7
@@ -63,10 +72,32 @@ jobs:
               return;
             }
 
+            const pr = (run.pull_requests || [])[0];
+            let prState = null;
+            if (pr) {
+              try {
+                const { data } = await github.rest.pulls.get({ owner, repo, pull_number: pr.number });
+                prState = data.state;
+              } catch (error) {
+                core.warning(`Could not read PR #${pr.number}: ${error.message}`);
+              }
+            }
+
+            // Both workflows cancel in-progress runs of their concurrency group, so
+            // re-running a superseded run would cancel the newer one.
+            const { data: latest } = await github.rest.actions.listWorkflowRuns({
+              owner, repo, workflow_id: run.workflow_id, branch: run.head_branch, per_page: 1,
+            });
+            const newerRun = latest.workflow_runs.find(r => r.id !== run.id && r.created_at > run.created_at);
+
             let action;
             let rerunError = null;
             if (attempt >= maxAttempts) {
               action = `Not retried: attempt ${attempt} of ${maxAttempts} was the last one allowed.`;
+            } else if (newerRun) {
+              action = `Not retried: superseded by [run ${newerRun.id}](${newerRun.html_url}).`;
+            } else if (prState && prState !== 'open') {
+              action = `Not retried: PR #${pr.number} is ${prState}.`;
             } else {
               try {
                 await github.rest.actions.reRunWorkflowFailedJobs({ owner, repo, run_id: run.id });
@@ -79,7 +110,8 @@ jobs:
 
             const runUrl = `${run.html_url}/attempts/${attempt}`;
             const jobLines = lost.map(j => `- [${j.name}](${j.html_url}) on runner \`${j.runner_name || 'unknown'}\``);
-            const header = `**${run.name}** on \`${run.head_branch}\` (${run.event}), [attempt ${attempt}](${runUrl})`;
+            const prLink = pr ? `, PR #${pr.number}` : '';
+            const header = `**${run.name}** on \`${run.head_branch}\` (${run.event}${prLink}), [attempt ${attempt}](${runUrl})`;
             const body = [header, '', 'Runner lost communication in:', ...jobLines, '', action].join('\n');
 
             await core.summary.addRaw(body).write();
@@ -114,7 +146,7 @@ jobs:
             if (process.env.SLACK_WEBHOOK_URL) {
               const slackJobs = lost.map(j => `• <${j.html_url}|${j.name}> on \`${j.runner_name || 'unknown'}\``);
               const text = [
-                `:warning: CI runner lost communication: *${run.name}* on \`${run.head_branch}\`, <${runUrl}|attempt ${attempt}>`,
+                `:warning: CI runner lost communication: *${run.name}* on \`${run.head_branch}\`${prLink}, <${runUrl}|attempt ${attempt}>`,
                 ...slackJobs,
                 action,
               ].join('\n');
