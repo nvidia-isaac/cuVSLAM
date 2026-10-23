@@ -125,7 +125,26 @@ CMAKE_ARGS="-DUSE_RERUN=$USE_RERUN -DCMAKE_BUILD_TYPE=$BUILD_TYPE"
 if [ -n "$CUDA_ARCH" ]; then
   CMAKE_ARGS="$CMAKE_ARGS -DCMAKE_CUDA_ARCHITECTURES=$CUDA_ARCH"
 fi
-cmake $CMAKE_ARGS ${EXTRA_CMAKE_ARGS:-} -S $SRC -B $DST
+# FetchContent downloads run at configure time, and CMake retries them only for
+# DNS and connection-refused errors. Retry configure on other download failures
+# (HTTP errors, timeouts, TLS) so a transient outage does not fail the build.
+CONFIGURE_ATTEMPTS=3
+CONFIGURE_LOG="$DST/cmake-configure.log"
+attempt=1
+while :; do
+  { if cmake $CMAKE_ARGS ${EXTRA_CMAKE_ARGS:-} -S $SRC -B $DST 2>&1; then rc=0; else rc=$?; fi
+    echo "$rc" > "$CONFIGURE_LOG.rc"; } | tee "$CONFIGURE_LOG"
+  rc=$(cat "$CONFIGURE_LOG.rc")
+  if [ "$rc" -eq 0 ]; then
+    break
+  fi
+  if [ "$attempt" -ge "$CONFIGURE_ATTEMPTS" ] || ! grep -q "error: downloading '" "$CONFIGURE_LOG"; then
+    exit "$rc"
+  fi
+  echo "CMake configure failed to download a dependency; retrying in $((attempt * 60))s (attempt $((attempt + 1)) of $CONFIGURE_ATTEMPTS)."
+  sleep $((attempt * 60))
+  attempt=$((attempt + 1))
+done
 # Build all CMake targets regardless of the flags
 cmake --build "$DST" --parallel "$MAKE_JOBS" --config "$BUILD_TYPE"
 

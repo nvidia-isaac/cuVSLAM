@@ -13,6 +13,10 @@ RUN echo "Base image: ${BASE_IMAGE:-default}" && \
 ARG DEBIAN_FRONTEND=noninteractive
 ARG UBUNTU_PORTS_MIRROR=""
 
+# APT's default of 3 retries spans only a few seconds of backoff, too short to
+# outlast a mirror sync ("Hash Sum mismatch"); 10 spans about three minutes.
+RUN echo 'Acquire::Retries "10";' > /etc/apt/apt.conf.d/80-retries
+
 COPY scripts/ubuntu-ports-mirror.conf /tmp/ubuntu-ports-mirror.conf
 
 RUN if [ -n "${UBUNTU_PORTS_MIRROR}" ]; then \
