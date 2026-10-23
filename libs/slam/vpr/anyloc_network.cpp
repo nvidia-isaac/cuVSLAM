@@ -25,6 +25,7 @@
 
 #include <NvInfer.h>
 #include <cuda_runtime_api.h>
+#include <dlfcn.h>
 
 #include "common/log.h"
 #include "cuda_modules/cuda_helper.h"
@@ -38,6 +39,10 @@ constexpr char kOutputName[] = "patch_descriptors";
 
 const std::string kTensorRtVersion = std::to_string(NV_TENSORRT_MAJOR) + "." + std::to_string(NV_TENSORRT_MINOR) + "." +
                                      std::to_string(NV_TENSORRT_PATCH);
+const std::string kTensorRtLibrary = "libnvinfer.so." + std::to_string(NV_TENSORRT_MAJOR);
+
+// What nvinfer1::createInferRuntime() calls
+using CreateInferRuntime = void* (*)(void* logger, int32_t version);
 
 /// One per process, as TensorRT expects. Remembers the last error per thread.
 class TensorRtLogger : public nvinfer1::ILogger {
@@ -140,6 +145,18 @@ std::vector<char> ReadFile(const std::string& path) {
 
 }  // namespace
 
+void* LoadTensorRtSymbol(const std::string& library, const char* symbol) {
+  void* handle = dlopen(library.c_str(), RTLD_NOW | RTLD_LOCAL);
+  if (!handle) {
+    throw std::runtime_error("VPR AnyLoc needs TensorRT " + std::to_string(NV_TENSORRT_MAJOR) + ": " + dlerror());
+  }
+  void* address = dlsym(handle, symbol);
+  if (!address) {
+    throw std::runtime_error("VPR AnyLoc: " + library + " has no " + symbol + ": " + dlerror());
+  }
+  return address;
+}
+
 struct AnyLocNetwork::Impl {
   // Order matters: members are destroyed in reverse, as TensorRT requires.
   cuda::Stream stream{false, ICudaStreamProvider::StreamType::Slam};
@@ -163,7 +180,9 @@ AnyLocNetwork::AnyLocNetwork(const std::string& engine_path) : impl_(std::make_u
 
   TensorRtLogger& logger = Logger();
   logger.TakeLastError();
-  impl.runtime.reset(nvinfer1::createInferRuntime(logger));
+  static const auto create_runtime =
+      reinterpret_cast<CreateInferRuntime>(LoadTensorRtSymbol(kTensorRtLibrary, "createInferRuntime_INTERNAL"));
+  impl.runtime.reset(static_cast<nvinfer1::IRuntime*>(create_runtime(&logger, NV_TENSORRT_VERSION)));
   if (!impl.runtime) {
     throw std::runtime_error("VPR AnyLoc: could not create the TensorRT " + kTensorRtVersion + " runtime.");
   }

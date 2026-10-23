@@ -22,6 +22,10 @@
 
 namespace cuvslam::slam::vpr {
 
+/// `symbol` of the shared `library`, loaded and never unloaded, so only AnyLoc needs TensorRT installed.
+/// @throws std::runtime_error if either is missing.
+void* LoadTensorRtSymbol(const std::string& library, const char* symbol);
+
 /// AnyLoc's TensorRT engine (see models/anyloc). Not thread safe.
 class AnyLocNetwork {
 public:

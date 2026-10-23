@@ -30,3 +30,10 @@ setup_test_project(
     SOURCES ${SOURCES}
     LIBRARIES ${LIBS}
     )
+
+if(USE_TENSORRT AND CUVSLAM_BUILD_SHARED_LIB)
+    # Only VPR AnyLoc needs TensorRT, which it loads at run time
+    add_test(NAME cuvslam_does_not_link_tensorrt
+        COMMAND ${CMAKE_COMMAND} -DOBJDUMP=${CMAKE_OBJDUMP} -DLIBRARY=$<TARGET_FILE:cuvslam>
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/check_no_tensorrt_link.cmake)
+endif()

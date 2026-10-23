@@ -14,7 +14,8 @@
 
 # Found, not fetched: an engine only loads in the TensorRT version that built it.
 # Defines
-#   TensorRT::nvinfer       runtime, the only part libcuvslam links; needs no cuBLAS or cuDNN
+#   TensorRT::headers       headers only; libcuvslam loads the runtime with dlopen()
+#   TensorRT::nvinfer       runtime; needs no cuBLAS or cuDNN
 #   TensorRT::nvonnxparser  ONNX parser for the engine builder, with CUVSLAM_BUILD_ANYLOC_ENGINE; needs cuBLAS, cuDNN
 #   TensorRT_VERSION        e.g. 8.6.1
 
@@ -59,6 +60,13 @@ endif()
 message(STATUS "Found TensorRT ${TensorRT_VERSION}: ${TensorRT_nvinfer_LIBRARY}")
 
 get_filename_component(_tensorrt_library_dir "${TensorRT_nvinfer_LIBRARY}" DIRECTORY)
+
+if(NOT TARGET TensorRT::headers)
+    add_library(TensorRT::headers INTERFACE IMPORTED GLOBAL)
+    set_target_properties(TensorRT::headers PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES "${TensorRT_INCLUDE_DIR};${CUDAToolkit_INCLUDE_DIRS}"
+    )
+endif()
 
 if(NOT TARGET TensorRT::nvinfer)
     add_library(TensorRT::nvinfer SHARED IMPORTED GLOBAL)
