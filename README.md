@@ -55,7 +55,7 @@ Notes:
 ## Multisensor mode
 
 Multisensor tracking is experimental: tracking may be inaccurate or fail for some sensor configurations and scenes.
-The current implementation supports pinhole cameras only.
+RGB-D cameras must use the pinhole model; cameras without depth support every distortion model.
 
 # Visual place recognition
 
