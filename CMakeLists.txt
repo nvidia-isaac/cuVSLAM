@@ -69,11 +69,10 @@ option(CUVSLAM_LOG_ENABLE "Enable root cuvslam::Log." OFF)
 option(CUVSLAM_BUILD_SHARED_LIB "Build shared library version of cuVSLAM" TRUE)
 option(USE_RERUN "Use Rerun for visualization" OFF)
 # Needed for VPR AnyLoc
-option(USE_TENSORRT "Build the AnyLoc visual place recognition backend (requires USE_CUDA and TensorRT 8.6+)" OFF)
+option(USE_TENSORRT "Build the AnyLoc visual place recognition backend (requires TensorRT 8.6+)" ON)
 # ONNX export in a Python venv, then a TensorRT engine build; see models/anyloc
-include(CMakeDependentOption)
-cmake_dependent_option(CUVSLAM_BUILD_ANYLOC_ENGINE
-    "Build the AnyLoc TensorRT engine (needs Python 3.10+, network access and a GPU)" ON "USE_TENSORRT" OFF)
+option(CUVSLAM_BUILD_ANYLOC_ENGINE
+    "Build the AnyLoc TensorRT engine (needs network access and a GPU)" OFF)
 
 include(cmake/cuVSLAMUtils.cmake)
 setup_cuvslam_settings()

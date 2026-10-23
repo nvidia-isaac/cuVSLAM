@@ -70,8 +70,8 @@ kidnapping is `LocalizeInMap`'s job: called without a guess pose, it takes candi
 recognition map and verifies them against that map's landmarks, instead of searching a grid around a guess the robot
 does not have.
 
-Place recognition runs [AnyLoc](https://anyloc.github.io/), a VLAD aggregation of DINOv2 features, on the GPU. It needs
-a `USE_TENSORRT` build, which also makes its TensorRT engine (see [models/anyloc](models/anyloc/README.md)).
+Place recognition runs [AnyLoc](https://anyloc.github.io/), a VLAD aggregation of DINOv2 features, on the GPU, from a
+TensorRT engine that [models/anyloc](models/anyloc/README.md) builds.
 Both APIs expose it the same way:
 
 | Task | C++ (`cuvslam::Slam`) | Python (`cuvslam.Slam`) |
@@ -253,8 +253,7 @@ All flags have defaults; override with `-DFLAG=VALUE`.
 | `USE_LMDB` | ON | LMDB map database |
 | `USE_RERUN` | OFF | Rerun SDK visualization |
 | `USE_NVTX` | OFF | NVIDIA NVTX profiling |
-| `USE_TENSORRT` | OFF | AnyLoc place recognition backend; requires `USE_CUDA` and TensorRT 8.6+ |
-| `CUVSLAM_BUILD_ANYLOC_ENGINE` | ON with `USE_TENSORRT` | builds AnyLoc's TensorRT engine: an ONNX export in a Python venv, then a TensorRT build (needs network access); see [models/anyloc](models/anyloc/README.md) |
+| `USE_TENSORRT` | ON | AnyLoc place recognition backend; requires TensorRT 8.6+ |
 
 Build types: `Release` (default), `Debug`, `RelWithDebInfo`, `MinSizeRel`. Do not mix types in the same build directory.
 
