@@ -72,6 +72,7 @@ bool SolverSfMMulti::solveNextFrame(int64_t time_ns, const sof::FrameState& fram
                                     std::vector<Track2D>* tracks2d, Tracks3DMap* tracks3d) {
   TRACE_EVENT ev = profiler_domain_.trace_event("SolverSfMMulti::solveNextFrame()", profiler_color_);
 
+  const Isometry3T predicted_rig_from_w = world_from_rig.inverse();
   // let keep this as a single place of using prev_...
   Isometry3T rig_from_w = prev_rig_from_world_;
   world_from_rig = rig_from_w.inverse();
@@ -99,7 +100,22 @@ bool SolverSfMMulti::solveNextFrame(int64_t time_ns, const sof::FrameState& fram
     RERUN(logLandmarks3D, recent_landmarks_, "world/camera_0/images/sba_landmarks", Color(255, 255, 0), 0.01f);
 
     Isometry3T pose = rig_from_w;  // try to optimize copy, use result if success only
-    if (pnp_.solve(pose, static_info_exp, obs_vector_, recent_landmarks_, solver_settings.vo_pnp)) {
+    float cost = 0;
+    bool solved = pnp_.solve(pose, static_info_exp, obs_vector_, recent_landmarks_, solver_settings.vo_pnp, &cost);
+    // At speed the solve from the previous pose can settle in a spurious minimum; the prediction avoids it
+    Isometry3T predicted_pose = predicted_rig_from_w;
+    Matrix6T predicted_info;
+    float predicted_cost = 0;
+    const bool predicted_solved = pnp_.solve(predicted_pose, predicted_info, obs_vector_, recent_landmarks_,
+                                             solver_settings.vo_pnp, &predicted_cost);
+    // Zero cost means no landmark in front of the predicted pose
+    constexpr float kClearlyBetter = 0.5f;  // otherwise keep the usual solve
+    if (predicted_solved && predicted_cost > 0.f && predicted_cost < (solved ? kClearlyBetter : 1.f) * cost) {
+      pose = predicted_pose;
+      static_info_exp = predicted_info;
+      solved = true;
+    }
+    if (solved) {
       world_from_rig = pose.inverse();
       rig_from_w = pose;
       prev_rig_from_world_ = rig_from_w;

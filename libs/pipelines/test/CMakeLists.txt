@@ -15,6 +15,7 @@
 set(SOURCES
     service_sba_test.cpp
     tracker_state_machine_test.cpp
+    track_online_multi_test.cpp
 )
 
 set(LIBS
