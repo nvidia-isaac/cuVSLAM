@@ -54,6 +54,8 @@ def _normalize_tracker_binding_args(args: argparse.Namespace) -> None:
         args.multicam_mode = conv.str2multicam_mode(args.multicam_mode)
     if isinstance(args.odometry_mode, str):
         args.odometry_mode = conv.str2odometry_mode(args.odometry_mode)
+    if isinstance(getattr(args, 'loop_closure_mode', None), str):
+        args.loop_closure_mode = conv.str2loop_closure_mode(args.loop_closure_mode)
 
 
 def add_tracker_arguments(parser: argparse.ArgumentParser) -> None:
@@ -236,6 +238,52 @@ def add_tracker_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def add_loop_closure_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add SLAM loop closure and place recognition arguments to a parser."""
+    parser.add_argument(
+        "--loop_closure_mode",
+        type=str.lower,
+        choices=["lsi", "vpr"],
+        default="lsi",
+        help="Loop closure search: lsi (landmark spatial index around the pose estimate) or vpr (visual place "
+             "recognition candidates). Case insensitive.",
+    )
+    parser.add_argument(
+        "--use_vpr",
+        type=_str2bool,
+        default=False,
+        help="Enable visual place recognition (AnyLoc). Required when --loop_closure_mode=vpr.",
+    )
+    parser.add_argument(
+        "--vpr_model_path",
+        type=str,
+        default=os.environ.get("CUVSLAM_ANYLOC_ENGINE", ""),
+        help="AnyLoc TensorRT engine for --use_vpr, the one the anyloc_engine "
+             "CMake target builds from here (default: $CUVSLAM_ANYLOC_ENGINE, which cuvslam_vars.sh sets).",
+    )
+    parser.add_argument(
+        "--max_map_size",
+        type=int,
+        default=None,
+        help="Maximum number of pose graph nodes SLAM keeps, 0 for no limit; by default the SLAM default. A node "
+             "merged away also leaves the place recognition map, so compare --loop_closure_mode vpr with 0.",
+    )
+
+
+def validate_loop_closure_arguments(parser: argparse.ArgumentParser, args: argparse.Namespace,
+                                    require_use_slam: bool = True) -> None:
+    """Reject unusable loop closure flags with parser.error() before tracking starts."""
+    if args.loop_closure_mode == "vpr" and not args.use_vpr:
+        parser.error("--loop_closure_mode vpr needs place recognition; set --use_vpr true")
+    if require_use_slam and not args.use_slam and (args.loop_closure_mode != "lsi" or args.use_vpr):
+        parser.error("--loop_closure_mode and --use_vpr only affect SLAM; add --use_slam true")
+    if args.use_vpr and not os.path.isfile(args.vpr_model_path):
+        parser.error("--use_vpr needs the AnyLoc TensorRT engine; set --vpr_model_path to the one the "
+                     "anyloc_engine CMake target builds, or source cuvslam_vars.sh of that build")
+    if args.max_map_size is not None and args.max_map_size < 0:
+        parser.error("--max_map_size must be 0 (no limit) or a positive number of pose graph nodes")
+
+
 def stat_to_dict(stat: Any) -> dict:
     """Convert a tracker Stat object to a JSON-serializable dictionary."""
     return {
@@ -250,6 +298,8 @@ def stat_to_dict(stat: Any) -> dict:
         "gt_simple_error": stat.gt_simple_error,
         "num_tracking_losts": stat.num_tracking_losts,
         "odometry_mode": stat.odometry_mode,
+        "num_loop_closures": stat.num_loop_closures,
+        "loop_closure_mode": stat.loop_closure_mode,
         "seg_err_points": getattr(stat, "seg_err_points", []),
     }
 
@@ -268,7 +318,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     """Parse tracker CLI arguments, run tracking, and print or save stats."""
     parser = argparse.ArgumentParser(prog="cuvslam_tracker")
     add_tracker_arguments(parser)
+    add_loop_closure_arguments(parser)
     args = parser.parse_args(argv)
+    validate_loop_closure_arguments(parser, args)
 
     if args.edex:
         if args.dataset and _normalized_path(args.dataset) != _normalized_path(args.edex):
@@ -290,7 +342,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     try:
         _normalize_tracker_binding_args(args)
         tracker_results = track(args)
-    except (FileNotFoundError, ValueError) as exc:
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
         parser.error(str(exc))
     if args.output_dir:
         save_tracker_stats(tracker_results.stat, args.output_dir)

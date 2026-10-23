@@ -37,12 +37,13 @@ __device__ __forceinline__ void TransformPoint(const float* M, float3 p, float3&
   result.z = M[8] * p.x + M[9] * p.y + M[10] * p.z + M[11];
 }
 
-__device__ __forceinline__ void ComposeSE3(const float* A, const float* B, float* C) {
+// Inverse of a row-major SE(3) matrix (upper 3x4 block only): [R t]^-1 = [R^T, -R^T t].
+__device__ __forceinline__ void InvertSE3(const float* A, float* C) {
   for (int r = 0; r < 3; r++) {
-    for (int c = 0; c < 4; c++) {
-      C[r * 4 + c] = A[r * 4 + 0] * B[0 * 4 + c] + A[r * 4 + 1] * B[1 * 4 + c] + A[r * 4 + 2] * B[2 * 4 + c] +
-                     A[r * 4 + 3] * (c == 3 ? 1.f : 0.f);
+    for (int c = 0; c < 3; c++) {
+      C[r * 4 + c] = A[c * 4 + r];
     }
+    C[r * 4 + 3] = -(A[0 * 4 + r] * A[3] + A[1 * 4 + r] * A[7] + A[2 * 4 + r] * A[11]);
   }
 }
 
@@ -58,7 +59,7 @@ __device__ __forceinline__ void ComposeSE3(const float* A, const float* B, float
 // Both residual (1) and Jacobian (1x6) have the same compact per-factor stride.
 //
 // landmarks_world: world-frame 3D reference points from DepthPointMap.
-// state_ptrs: per-factor pointers to rig_from_world (SE3, row-major 4x4).
+// state_ptrs: per-factor pointers to world_from_rig (SE3, row-major 4x4).
 // cam_from_rig: device pointer to a single 4x4 SE3 (always provided).
 __global__ void point_to_point_icp_evaluate_kernel(const float3* landmarks_world, float const* const* state_ptrs,
                                                    const float* cam_from_rig, cudaTextureObject_t depth_tex,
@@ -80,14 +81,15 @@ __global__ void point_to_point_icp_evaluate_kernel(const float3* landmarks_world
     }
   };
 
-  float M_buf[12];
-  ComposeSE3(cam_from_rig, state_ptrs[tid], M_buf);
-  const float* M = M_buf;
+  float rig_from_world[12];
+  InvertSE3(state_ptrs[tid], rig_from_world);
 
   const float3 p_w = landmarks_world[tid];
 
+  float3 p_rig;
+  TransformPoint(rig_from_world, p_w, p_rig);
   float3 p_cam;
-  TransformPoint(M, p_w, p_cam);
+  TransformPoint(cam_from_rig, p_rig, p_cam);
 
   if (p_cam.z < kDepthMin) {
     zero_output();
@@ -127,23 +129,19 @@ __global__ void point_to_point_icp_evaluate_kernel(const float3* landmarks_world
   }
 
   if (jacobians) {
-    // dr/dxi = d(p_cam.z)/dxi for right-perturbation T' = T * Exp(delta).
-    // p_cam = M * p_w where M = cam_from_rig * rig_from_world.
-    // dp_cam/dxi = R * [-[p_w]x | I] where R is the 3x3 rotation of M.
-    // We only need the z-row of that 3x6 block.
+    // dr/dxi = d(p_cam.z)/dxi for the right perturbation W' = W * Exp(xi) of W = world_from_rig.
+    // p_rig = W^-1 * p_w moves as p_rig' = p_rig - omega x p_rig - t, and p_cam = cam_from_rig * p_rig,
+    // so with e = z-row of the cam_from_rig rotation: dr/domega = e x p_rig, dr/dt = -e.
     //
     // Layout: 1x6 row-major, cols = (omega0, omega1, omega2, t0, t1, t2).
-    // Rotation columns: col k = R_z . (e_k x p_w) = R * (-p_w x e_k)
-    //   col 0 (e_0 x p_w) = (0, -p_w.z, p_w.y)
-    //   col 1 (e_1 x p_w) = (p_w.z, 0, -p_w.x)
-    //   col 2 (e_2 x p_w) = (-p_w.y, p_w.x, 0)
+    const float3 e = {cam_from_rig[8], cam_from_rig[9], cam_from_rig[10]};
 
-    jacobians[tid * 6 + 0] = M[10] * p_w.y - M[9] * p_w.z;
-    jacobians[tid * 6 + 1] = M[8] * p_w.z - M[10] * p_w.x;
-    jacobians[tid * 6 + 2] = M[9] * p_w.x - M[8] * p_w.y;
-    jacobians[tid * 6 + 3] = M[8];
-    jacobians[tid * 6 + 4] = M[9];
-    jacobians[tid * 6 + 5] = M[10];
+    jacobians[tid * 6 + 0] = e.y * p_rig.z - e.z * p_rig.y;
+    jacobians[tid * 6 + 1] = e.z * p_rig.x - e.x * p_rig.z;
+    jacobians[tid * 6 + 2] = e.x * p_rig.y - e.y * p_rig.x;
+    jacobians[tid * 6 + 3] = -e.x;
+    jacobians[tid * 6 + 4] = -e.y;
+    jacobians[tid * 6 + 5] = -e.z;
   }
 }
 

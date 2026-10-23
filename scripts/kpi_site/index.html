@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<!-- Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cuVSLAM nightly KPI trends</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+<style>
+  :root { --fg: #1d1d1f; --muted: #6e6e73; --line: #d2d2d7; --accent: #76b900; --bg-side: #f5f5f7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--fg); }
+  header { display: flex; align-items: baseline; gap: 16px; padding: 10px 18px; border-bottom: 3px solid var(--accent); }
+  header h1 { font-size: 18px; margin: 0; }
+  header .meta { color: var(--muted); font-size: 12px; }
+  header a { margin-left: auto; color: var(--fg); }
+  main { display: flex; min-height: calc(100vh - 50px); }
+  aside { width: 270px; flex: none; padding: 12px 14px; background: var(--bg-side); border-right: 1px solid var(--line);
+          overflow-y: auto; max-height: calc(100vh - 50px); position: sticky; top: 0; }
+  aside h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 14px 0 4px; }
+  aside h2 .all { float: right; font: inherit; font-weight: normal; letter-spacing: normal; text-transform: none;
+                  cursor: pointer; color: #0066cc; background: none; border: 0; margin: 0; padding: 0; width: auto; }
+  aside label { display: block; padding: 1px 0; cursor: pointer; white-space: nowrap; overflow: hidden;
+                text-overflow: ellipsis; }
+  aside select, aside input[type=date] { width: 100%; padding: 3px; }
+  aside button { margin-top: 12px; width: 100%; padding: 6px; cursor: pointer; }
+  #panels { flex: 1; display: grid; grid-template-columns: repeat(auto-fill, minmax(560px, 1fr)); gap: 8px;
+            padding: 10px; align-content: start; }
+  .panel { border: 1px solid var(--line); border-radius: 6px; }
+  #empty { padding: 40px; color: var(--muted); }
+  #error { padding: 40px; color: #b00020; max-width: 760px; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>cuVSLAM nightly KPI trends</h1>
+  <span class="meta" id="meta"></span>
+  <a href="../">Documentation</a>
+</header>
+<main>
+  <aside>
+    <h2 id="panel-heading">Panels</h2>
+    <select id="panel" aria-labelledby="panel-heading">
+      <option value="row">One per dataset / mode</option>
+      <option value="metric">One per metric</option>
+      <option value="config">One per configuration</option>
+    </select>
+    <h2>Layout</h2>
+    <select id="columns" aria-label="Layout columns">
+      <option value="auto">Columns: auto</option>
+      <option value="1">1 column</option>
+      <option value="2">2 columns</option>
+      <option value="3">3 columns</option>
+      <option value="4">4 columns</option>
+    </select>
+    <select id="height" aria-label="Chart height">
+      <option value="auto">Height: auto</option>
+      <option value="260">Small</option>
+      <option value="360">Medium</option>
+      <option value="540">Large</option>
+      <option value="fill">Fill screen</option>
+    </select>
+    <div class="hint">Auto uses one full-screen chart when only one panel is left.</div>
+    <h2 id="combine-heading">Configurations</h2>
+    <select id="combine" aria-labelledby="combine-heading">
+      <option value="each">Show each configuration</option>
+      <option value="mean">Combine (mean; max for counts)</option>
+    </select>
+    <div id="configs"></div>
+    <h2>Metrics <button type="button" class="all" data-group="metrics">all / none</button></h2>
+    <div id="metrics"></div>
+    <h2>Datasets <button type="button" class="all" data-group="datasets">all / none</button></h2>
+    <div id="datasets"></div>
+    <h2>Tracking types <button type="button" class="all" data-group="types">all / none</button></h2>
+    <div id="types"></div>
+    <h2>Modes</h2>
+    <div id="modes"></div>
+    <h2 id="yaxis-heading">Y axis</h2>
+    <select id="yaxis" aria-labelledby="yaxis-heading">
+      <option value="abs">Absolute value</option>
+      <option value="pct">% change vs series median</option>
+    </select>
+    <label><input type="checkbox" id="log"> Log scale</label>
+    <h2 id="style-heading">Style</h2>
+    <select id="style" aria-labelledby="style-heading">
+      <option value="lines+markers">Lines and markers</option>
+      <option value="lines">Lines</option>
+      <option value="markers">Markers</option>
+    </select>
+    <label><input type="checkbox" id="gaps"> Connect across missing values</label>
+    <div class="hint">A gap means the nightly ran but produced no value for that KPI. Nights without a nightly
+      run have no point and are always connected.</div>
+    <label><input type="checkbox" id="band"> Known levels (regression check)</label>
+    <div class="hint">Shades the known levels from the previous nightlies, plus their tolerance, as the nightly
+      report judges them. ✕ marks a regression (both Ubuntu builds of a CUDA version off every known level and
+      worse), ▲ a new better level. FPS is only checked on Jetson.</div>
+    <h2>Dates</h2>
+    <input type="date" id="from" aria-label="From date"> <input type="date" id="to" aria-label="To date">
+    <button id="share">Copy link to this view</button>
+  </aside>
+  <section id="panels"></section>
+</main>
+<script>
+"use strict";
+const PALETTE = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22",
+                 "#17becf", "#76b900", "#003f5c", "#bc5090", "#ffa600", "#58508d", "#ff6361"];
+const DEFAULTS = {panel: "row", columns: "auto", height: "auto", combine: "each", yaxis: "abs", style: "lines+markers",
+                  log: false, gaps: false, band: false, metrics: ["ATE"], from: "", to: ""};
+const SELECTS = ["panel", "columns", "height", "combine", "yaxis", "style", "from", "to"];
+const TOGGLES = ["log", "gaps", "band"];
+const GROUPS = ["configs", "metrics", "datasets", "types", "modes"];
+// Header height plus the panel grid padding, so a "fill" chart fits the window without scrolling.
+const FILL_OFFSET_PX = 72;
+let DATA, state, colorMap = new Map();
+
+const $ = (id) => document.getElementById(id);
+const median = (xs) => { const s = [...xs].sort((a, b) => a - b), m = s.length >> 1;
+                         return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+const splitMode = (mode) => { const i = mode.lastIndexOf("_"); return [mode.slice(0, i), mode.slice(i + 1)]; };
+
+function colorFor(name) {
+  if (!colorMap.has(name)) colorMap.set(name, PALETTE[colorMap.size % PALETTE.length]);
+  return colorMap.get(name);
+}
+
+function options() {
+  const kpis = Object.values(DATA.kpis);
+  const uniq = (f) => [...new Set(kpis.map(f))].sort();
+  return {
+    configs: Object.keys(DATA.configs).sort(),
+    metrics: Object.keys(DATA.metrics).filter((m) => kpis.some((k) => k.metric === m)),
+    datasets: uniq((k) => k.dataset),
+    types: uniq((k) => splitMode(k.mode)[0]),
+    modes: uniq((k) => splitMode(k.mode)[1]),
+  };
+}
+
+function readHash(opts) {
+  const p = new URLSearchParams(location.hash.slice(1));
+  const s = {...DEFAULTS};
+  for (const k of SELECTS) if (p.has(k)) s[k] = p.get(k);
+  for (const k of TOGGLES) if (p.has(k)) s[k] = p.get(k) === "1";
+  for (const g of GROUPS) {
+    s[g] = p.has(g) ? p.get(g).split(",").filter((v) => opts[g].includes(v)) : (DEFAULTS[g] || opts[g]);
+  }
+  return s;
+}
+
+function writeHash() {
+  const p = new URLSearchParams();
+  for (const k of SELECTS) if (state[k] !== DEFAULTS[k]) p.set(k, state[k]);
+  for (const k of TOGGLES) if (state[k]) p.set(k, "1");
+  for (const g of GROUPS) p.set(g, state[g].join(","));
+  history.replaceState(null, "", "#" + p.toString());
+}
+
+function buildControls(opts) {
+  for (const g of GROUPS) {
+    const box = $(g);
+    for (const v of opts[g]) {
+      const label = document.createElement("label"), input = document.createElement("input");
+      input.type = "checkbox"; input.value = v; input.checked = state[g].includes(v);
+      input.addEventListener("change", () => {
+        state[g] = [...box.querySelectorAll("input:checked")].map((i) => i.value); update();
+      });
+      label.append(input, " " + (g === "metrics" ? DATA.metrics[v].label : v));
+      label.title = v;
+      box.append(label);
+    }
+  }
+  document.querySelectorAll(".all").forEach((el) => el.addEventListener("click", () => {
+    const g = el.dataset.group, inputs = [...$(g).querySelectorAll("input")];
+    const on = inputs.some((i) => !i.checked);
+    inputs.forEach((i) => { i.checked = on; });
+    state[g] = on ? inputs.map((i) => i.value) : []; update();
+  }));
+  for (const k of SELECTS) {
+    $(k).value = state[k];
+    $(k).addEventListener("change", () => { state[k] = $(k).value; update(); });
+  }
+  for (const k of TOGGLES) {
+    $(k).checked = state[k];
+    $(k).addEventListener("change", () => { state[k] = $(k).checked; update(); });
+  }
+  $("share").addEventListener("click", async () => {
+    try {
+      // navigator.clipboard is only defined on HTTPS and localhost pages, and writeText can be denied.
+      await navigator.clipboard.writeText(location.href);
+    } catch (e) {
+      window.prompt("Copy the link to this view:", location.href);
+      return;
+    }
+    $("share").textContent = "Link copied"; setTimeout(() => { $("share").textContent = "Copy link to this view"; }, 1500);
+  });
+}
+
+// One series per (KPI key, configuration), or per KPI key when configurations are combined.
+function collectSeries() {
+  const series = [];
+  for (const [key, kpi] of Object.entries(DATA.kpis)) {
+    const [type, mode] = splitMode(kpi.mode);
+    if (!state.metrics.includes(kpi.metric) || !state.datasets.includes(kpi.dataset) ||
+        !state.types.includes(type) || !state.modes.includes(mode)) continue;
+    const perConfig = state.configs.filter((c) => DATA.configs[c].values[key])
+      .map((c) => ({config: c, runs: DATA.configs[c].runs, values: DATA.configs[c].values[key]}));
+    if (!perConfig.length) continue;
+    if (state.combine === "mean") {
+      const byRun = new Map();
+      for (const s of perConfig) s.runs.forEach((r, i) => {
+        if (s.values[i] === null) return;
+        if (!byRun.has(r)) byRun.set(r, []);
+        byRun.get(r).push(s.values[i]);
+      });
+      const runs = [...byRun.keys()].sort();
+      const reduce = DATA.metrics[kpi.metric].count ? (xs) => Math.max(...xs)
+                                                   : (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
+      series.push({key, kpi, config: `mean of ${perConfig.length}`, configs: perConfig.map((s) => s.config), runs,
+                   values: runs.map((r) => reduce(byRun.get(r)))});
+    } else {
+      for (const s of perConfig) series.push({key, kpi, ...s});
+    }
+  }
+  return series;
+}
+
+function inRange(run) { return (!state.from || run >= state.from) && (!state.to || run <= state.to); }
+
+const DAY_MS = 86400000;
+const levelCache = new Map();
+
+// Mirrors classify_levels() in cuvslam_kpi_report.py. tonight holds the night's value of every build of the group;
+// reference pools their [date, value] history. Returns null while no level is known yet.
+function classifyLevels(meta, tonight, reference, today, settings) {
+  if (reference.length < DATA.baseline.min_runs) return null;
+  const values = reference.map(([, v]) => v);
+  const center = median(values), spread = median(values.map((v) => Math.abs(v - center)));
+  let tolerance = Math.max(settings.baseline_level_pct / 100 * Math.abs(center), DATA.baseline.level_mad_factor * spread);
+  if (meta.count) tolerance = Math.max(tolerance, DATA.baseline.count_min_band);
+  const known = (value) => {
+    // Every build of a group adds a value per night, so count nights, not values.
+    const dates = new Set(reference.filter(([, other]) => Math.abs(other - value) <= tolerance).map(([d]) => d));
+    if (dates.size < settings.baseline_level_min_runs) return false;
+    const earliest = [...dates].sort()[0];
+    return (Date.parse(today) - Date.parse(earliest)) / DAY_MS >= settings.baseline_level_min_age_days;
+  };
+  const levels = values.filter(known);
+  if (!levels.length) return null;
+  const hib = meta.higher_is_better;
+  const worst = hib ? Math.min(...levels) : Math.max(...levels), best = hib ? Math.max(...levels) : Math.min(...levels);
+  let status = "known";
+  if (!tonight.some(known)) {
+    if (tonight.every((v) => (hib ? v < worst - tolerance : v > worst + tolerance))) status = "regressed";
+    else if (tonight.every((v) => (hib ? v > best + tolerance : v < best - tolerance))) status = "better";
+  }
+  return {status, lo: Math.min(...levels) - tolerance, hi: Math.max(...levels) + tolerance};
+}
+
+// Per-night results of the nightly regression check for one KPI and group, each night judged against the history
+// before it, as baseline_results() does with the reports of that night's builds.
+function levelResults(key, group) {
+  const cacheKey = `${key}|${group}`;
+  if (levelCache.has(cacheKey)) return levelCache.get(cacheKey);
+  const results = new Map(), kpi = DATA.kpis[key], meta = DATA.metrics[kpi.metric];
+  const settings = DATA.baseline.settings[kpi.dataset];
+  const members = Object.values(DATA.configs).filter((c) => c.group === group && c.values[key]);
+  if (settings && !(kpi.metric === "FPS" && !members.every((c) => c.flag_fps))) {
+    const files = Math.max(...Object.values(DATA.baseline.settings).map((s) => s.baseline_window));
+    for (const night of [...new Set(members.flatMap((c) => c.runs))].sort()) {
+      const ran = members.filter((c) => c.runs.includes(night));
+      const tonight = ran.map((c) => c.values[key][c.runs.indexOf(night)]);
+      if (tonight.some((v) => v === null)) continue;
+      // Like load_history() and history_values(): the last `files` runs before tonight, then their values.
+      const reference = ran.flatMap((c) => {
+        const end = c.runs.indexOf(night), start = Math.max(0, end - files);
+        return c.runs.slice(start, end).map((run, i) => [run, c.values[key][start + i]])
+          .filter(([, v]) => v !== null).slice(-settings.baseline_window);
+      });
+      const result = classifyLevels(meta, tonight, reference, night, settings);
+      if (result) results.set(night, result);
+    }
+  }
+  levelCache.set(cacheKey, results);
+  return results;
+}
+
+// A combined series is flagged on a night when any group of its configurations is, like the nightly aggregate.
+function seriesLevels(s) {
+  if (!s.configs) return levelResults(s.key, DATA.configs[s.config].group);
+  const groups = [...new Set(s.configs.map((c) => DATA.configs[c].group))].map((g) => levelResults(s.key, g));
+  const merged = new Map();
+  for (const run of s.runs) {
+    const statuses = groups.map((g) => g.get(run)?.status).filter(Boolean);
+    if (statuses.length) {
+      merged.set(run, {status: statuses.includes("regressed") ? "regressed" : statuses.includes("better") ? "better"
+                                                                                                       : "known"});
+    }
+  }
+  return merged;
+}
+
+function panelOf(s) {
+  if (state.panel === "metric") return [s.kpi.metric, `${s.kpi.dataset}-${s.kpi.mode} · ${s.config}`];
+  if (state.panel === "config") return [s.config, `${s.kpi.dataset}-${s.kpi.mode} ${DATA.metrics[s.kpi.metric].label}`];
+  return [`${s.kpi.dataset}-${s.kpi.mode}`, `${DATA.metrics[s.kpi.metric].label} · ${s.config}`];
+}
+
+function panelTitle(panel) {
+  const meta = DATA.metrics[panel];
+  if (!meta) return panel;
+  const unit = state.yaxis === "pct" ? "% vs median" : meta.unit;
+  return `${meta.label}${unit ? ` (${unit})` : ""} — ${meta.higher_is_better ? "higher" : "lower"} is better`;
+}
+
+// One flat block per night from that night to the next, since each night has its own known levels, joined into a
+// polygon per run of consecutive nights with results. Filling between two edge traces breaks across gaps.
+function levelBand(runs, results, y) {
+  const xs = [], ys = [];
+  let segment = [];
+  const flush = () => {
+    if (!segment.length) return;
+    const upper = segment.flatMap(([a, b, r]) => [[a, y(r.hi)], [b, y(r.hi)]]);
+    const lower = segment.slice().reverse().flatMap(([a, b, r]) => [[b, y(r.lo)], [a, y(r.lo)]]);
+    for (const [px, py] of [...upper, ...lower, upper[0]]) { xs.push(px); ys.push(py); }
+    xs.push(null); ys.push(null);
+    segment = [];
+  };
+  runs.forEach((run, i) => {
+    if (!results[i]) { flush(); return; }
+    const start = Date.parse(run), end = i + 1 < runs.length ? Date.parse(runs[i + 1]) : start + DAY_MS;
+    segment.push([start, end, results[i]]);
+  });
+  flush();
+  return {x: xs, y: ys};
+}
+
+function tracesFor(s, name) {
+  const color = colorFor(name), idx = s.runs.map((r, i) => i).filter((i) => inRange(s.runs[i]));
+  const ref = state.yaxis === "pct" ? median(idx.map((i) => s.values[i]).filter((v) => v !== null)) : null;
+  const y = (v) => (v === null ? null : ref !== null ? (ref ? (v / ref - 1) * 100 : null) : v);
+  const x = idx.map((i) => s.runs[i]), unit = DATA.metrics[s.kpi.metric].unit;
+  const traces = [{
+    x, y: idx.map((i) => y(s.values[i])), name, mode: state.style, type: "scatter", line: {color, width: 1.6},
+    marker: {size: 5}, legendgroup: name, connectgaps: state.gaps,
+    customdata: idx.map((i) => s.values[i]),
+    hovertemplate: `%{x}<br>${name}<br>%{customdata:.4g} ${unit}<extra></extra>`,
+  }];
+  if (state.band) {
+    const levels = seriesLevels(s);
+    if (!s.configs) {
+      traces.unshift({...levelBand(idx.map((i) => s.runs[i]), idx.map((i) => levels.get(s.runs[i])), y),
+                      type: "scatter", mode: "lines", line: {width: 0}, fill: "toself", fillcolor: color + "26",
+                      legendgroup: name, showlegend: false, hoverinfo: "skip"});
+    }
+    const flagged = (status) => idx.filter((i) => levels.get(s.runs[i])?.status === status);
+    for (const [status, marker, text] of [
+      ["regressed", {symbol: "x", size: 10, color: "#d62728"}, "regression: off every known level, worse"],
+      ["better", {symbol: "triangle-up", size: 10, color: "#2ca02c"}, "new better level"],
+    ]) {
+      const points = flagged(status);
+      if (points.length) {
+        traces.push({x: points.map((i) => s.runs[i]), y: points.map((i) => y(s.values[i])), type: "scatter",
+                     mode: "markers", marker, legendgroup: name, showlegend: false,
+                     hovertemplate: `%{x}<br>${name}<br>${text}<extra></extra>`});
+      }
+    }
+  }
+  return traces;
+}
+
+function syncX(divs) {
+  let syncing = false;
+  for (const div of divs) {
+    div.on("plotly_relayout", (ev) => {
+      if (syncing) return;
+      const range = ev["xaxis.range[0]"] !== undefined ? [ev["xaxis.range[0]"], ev["xaxis.range[1]"]]
+                  : ev["xaxis.autorange"] ? null : undefined;
+      if (range === undefined) return;
+      syncing = true;
+      Promise.all(divs.filter((d) => d !== div).map((d) => Plotly.relayout(d, range ? {"xaxis.range": range}
+                                                                                      : {"xaxis.autorange": true})))
+        .finally(() => { syncing = false; });
+    });
+  }
+}
+
+function update() {
+  writeHash();
+  const panels = new Map();
+  for (const s of collectSeries()) {
+    const [panel, name] = panelOf(s);
+    if (!panels.has(panel)) panels.set(panel, []);
+    panels.get(panel).push(...tracesFor(s, name));
+  }
+  const root = $("panels");
+  root.querySelectorAll(".panel").forEach((d) => Plotly.purge(d));
+  root.replaceChildren();
+  if (!panels.size) {
+    const p = document.createElement("div"); p.id = "empty"; p.textContent = "No KPIs match the current filters.";
+    root.append(p); return;
+  }
+  const single = panels.size === 1;
+  const columns = state.columns === "auto" ? (single ? "1" : "") : state.columns;
+  root.style.gridTemplateColumns = columns ? `repeat(${columns}, minmax(0, 1fr))` : "";
+  const height = state.height === "auto" ? (single ? "fill" : "360") : state.height;
+  const panelHeight = height === "fill" ? `calc(100vh - ${FILL_OFFSET_PX}px)` : `${height}px`;
+  const divs = [];
+  for (const [panel, traces] of [...panels].sort((a, b) => a[0].localeCompare(b[0]))) {
+    const div = document.createElement("div"); div.className = "panel"; div.style.height = panelHeight;
+    root.append(div); divs.push(div);
+    Plotly.newPlot(div, traces, {
+      title: {text: panelTitle(panel), font: {size: 14}, x: 0.01, xanchor: "left"}, margin: {l: 55, r: 10, t: 36, b: 40},
+      xaxis: {type: "date", tickformat: "%b %d"},
+      yaxis: {type: state.log && state.yaxis === "abs" ? "log" : "linear", zeroline: state.yaxis === "pct"},
+      legend: {font: {size: 10}, orientation: "h", y: -0.18}, hovermode: "closest",
+    }, {responsive: true, displaylogo: false, displayModeBar: "hover"});
+  }
+  syncX(divs);
+}
+
+function showError(message) {
+  const p = document.createElement("div"); p.id = "error"; p.textContent = message;
+  $("panels").replaceChildren(p);
+}
+
+async function loadData() {
+  try {
+    const response = await fetch("data.json", {cache: "no-cache"});
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.json();
+  } catch (e) {
+    const hint = location.protocol === "file:"
+      ? " Browsers block reading data.json from a page opened as a file; serve the site over HTTP, for example" +
+        " with python3 -m http.server in the site directory."
+      : "";
+    throw new Error(`Failed to load KPI data (data.json): ${e.message}.${hint}`);
+  }
+}
+
+async function main() {
+  if (typeof Plotly === "undefined") {
+    showError("Failed to load the Plotly charting library from cdn.plot.ly. Check the network connection and any " +
+              "content blockers, then reload the page.");
+    return;
+  }
+  DATA = await loadData();
+  const runs = Object.values(DATA.configs).flatMap((c) => c.runs).sort();
+  $("meta").textContent = `${Object.keys(DATA.configs).length} configurations · nightlies ${runs[0]} to ` +
+                          `${runs[runs.length - 1]} · generated ${DATA.generated}`;
+  const opts = options();
+  state = readHash(opts);
+  buildControls(opts);
+  update();
+}
+main().catch((e) => showError(e.message));
+</script>
+</body>
+</html>
