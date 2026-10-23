@@ -39,7 +39,7 @@ KITTI_07_DIR = os.environ.get("CUVSLAM_KITTI_07_DIR") or os.path.join(
 # AnyLoc TensorRT engine of a USE_TENSORRT build; cuvslam_vars.sh exports its path.
 ANYLOC_ENGINE = os.environ.get("CUVSLAM_ANYLOC_ENGINE", "")
 needs_anyloc = unittest.skipUnless(
-    os.path.isfile(ANYLOC_ENGINE), "needs the AnyLoc engine of a USE_TENSORRT build in CUVSLAM_ANYLOC_ENGINE")
+    os.path.isfile(ANYLOC_ENGINE), "needs the AnyLoc engine in CUVSLAM_ANYLOC_ENGINE")
 
 def make_rig():
     cameras = data.generate_stereo_camera(W, H, BASELINE)

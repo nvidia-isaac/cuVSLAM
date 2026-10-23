@@ -40,6 +40,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
        libgdk-pixbuf-2.0-0 libffi8 shared-mime-info fonts-dejavu-core \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+COPY scripts/install_tensorrt.sh /tmp/install_tensorrt.sh
+RUN /tmp/install_tensorrt.sh && rm /tmp/install_tensorrt.sh
+
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 

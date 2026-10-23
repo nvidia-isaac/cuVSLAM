@@ -435,7 +435,7 @@ Every sequence in a reporter config names its reference explicitly, and a sequen
 `--loop_closure_mode` picks how SLAM sequences (`--use_slam true` for `cuvslam_tracker`, `"use_slam": true` in a reporter config) find loop closures:
 
 - `lsi` (the default) — a search of the landmark spatial index around the current pose estimate.
-- `vpr` — geometric verification of visual place recognition candidates. Needs `--use_vpr true`, which needs a build with `USE_TENSORRT` and the AnyLoc TensorRT engine that build makes in `--vpr_model_path`, which defaults to it once the build's `cuvslam_vars.sh` is sourced (see `models/anyloc/README.md`).
+- `vpr` — geometric verification of visual place recognition candidates. Needs `--use_vpr true` and the AnyLoc engine (see `models/anyloc/README.md`).
 
 Both flags accept any case, and `cuvslam_tracker` rejects a non-default value of either without `--use_slam true`. The stats JSON of both tools records `loop_closure_mode` and `num_loop_closures`, and the report shows the number of loop closures of each SLAM sequence.
 
