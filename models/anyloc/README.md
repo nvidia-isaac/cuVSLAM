@@ -6,14 +6,7 @@ part of the cuVSLAM build, in two steps, from pinned inputs.
 
 ## Building it
 
-```bash
-cmake -S . -B build -DUSE_TENSORRT=ON
-cmake --build build
-```
-
-`USE_TENSORRT` needs `USE_CUDA` and TensorRT 8.6 or newer, found next to CUDA or under `TENSORRT_ROOT`. It turns on
-`CUVSLAM_BUILD_ANYLOC_ENGINE`, which needs Python 3.10 to 3.12 and network access, builds `anyloc_engine_builder`, and
-has the default build target make:
+With `CUVSLAM_BUILD_ANYLOC_ENGINE` (see Options), the default build target makes:
 
 | Target | Makes, in the build tree | Takes |
 |--------|--------------------------|-------|
@@ -21,8 +14,7 @@ has the default build target make:
 | `anyloc_onnx` | `anyloc/anyloc_vits14_l9_value_322.onnx`, and the reference arrays both steps check against | seconds |
 | `anyloc_engine` | `bin/anyloc_vits14_l9_value_322_fp16_trt<TensorRT version>_sm<GPU>.engine` | about 20 seconds |
 
-The engine is what `Slam::Config::vpr_model_path` takes. `cuvslam_vars.sh` exports its path as
-`CUVSLAM_ANYLOC_ENGINE`, which `cuvslam_tracker` and `cuvslam_vpr_reporter` use as their default `--vpr_model_path`:
+`cuvslam_tracker` and `cuvslam_vpr_reporter` take `CUVSLAM_ANYLOC_ENGINE` as their default `--vpr_model_path`:
 
 ```bash
 source build/cuvslam_vars.sh
@@ -87,8 +79,7 @@ The build makes the engine for one of two GPUs, which `CUVSLAM_ANYLOC_TARGET` na
 default on x86_64, and `orin_nano`, a Jetson Orin Nano (sm_87), the default on aarch64. TensorRT can only build an
 engine on the GPU it is for, so each one is built on its own device: the `orin_nano` engine by a build on the Orin
 Nano, with the TensorRT of its JetPack. A build on any other GPU stops at the engine: build only the builder there
-and make the engine by hand as below, or turn `CUVSLAM_BUILD_ANYLOC_ENGINE` off, which leaves out the model and the
-builder.
+and make the engine by hand as below.
 
 A serialized engine only loads into the TensorRT version, and only runs on the GPU architecture, that built it, and
 `VprAnyLoc` refuses any other with an error that says to rebuild it. The engine's name records both, so building with
@@ -109,7 +100,7 @@ anyloc_engine_builder --onnx=anyloc_vits14_l9_value_322.onnx \
 
 | CMake variable | Default | Purpose |
 |----------------|---------|---------|
-| `CUVSLAM_BUILD_ANYLOC_ENGINE` | ON with `USE_TENSORRT` | OFF builds the backend without its model or `anyloc_engine_builder` |
+| `CUVSLAM_BUILD_ANYLOC_ENGINE` | OFF | builds the model, the engine and `anyloc_engine_builder`; needs network access |
 | `CUVSLAM_ANYLOC_LAYER` | 9 | DINOv2 block whose value facet AnyLoc reads |
 | `CUVSLAM_ANYLOC_INPUT_SIZE` | 322 | square input size, a multiple of 14 |
 | `CUVSLAM_ANYLOC_TARGET` | `rtx4090` on x86_64, `orin_nano` on aarch64 | the GPU the engine is built for: `rtx4090` (sm_89) or `orin_nano` (Jetson Orin Nano, sm_87); the build machine has to have that GPU |
