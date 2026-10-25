@@ -11,15 +11,15 @@ Uses the `cuvslam-tools` Python package (`tools/python_tools/`). Supports all RO
 ```bash
 cd tools/python_tools
 ./create_env.sh
-source .env/bin/activate
+source .venv/bin/activate
 ```
 
 Or manually:
 
 ```bash
 cd tools/python_tools
-python3 -m venv .env
-source .env/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e .
 ```
 
