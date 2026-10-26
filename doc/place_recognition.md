@@ -18,7 +18,6 @@ import os
 
 import cuvslam as vslam
 
-# The AnyLoc TensorRT engine the USE_TENSORRT build made; build/cuvslam_vars.sh exports its path.
 engine = os.environ['CUVSLAM_ANYLOC_ENGINE']
 
 def on_place(place, error):
