@@ -277,10 +277,11 @@ TEST(MultisensorPoseEstimatorTest, RepeatedSolvesMatchFreshEstimator) {
   const SolveInput solves[] = {
       {40, 300, true, false},   {120, 50, true, false},   // reused
       {200, 1500, true, false},                           // more depth points than the ICP capacity: grows it
+      {110, 700, true, false},                            // reused with the grown ICP capacity
       {60, 0, true, false},                               // no ICP
       {25, 120, true, true},    {150, 600, true, true},   // inertial, reused
       {90, 200, false, true},                             // no point-to-plane
-      {70, 400, true, false},   {180, 100, true, false},  // reused with the grown ICP capacity
+      {70, 400, true, false},   {180, 100, true, false},  // reused
   };
 
   cuvslam::pnp::MultisensorSolverSettings settings;
