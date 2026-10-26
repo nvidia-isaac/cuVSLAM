@@ -487,6 +487,7 @@ class TestMap(unittest.TestCase):
             # There is no map, so localizing and flushing fail, but their callbacks still run
             slam.localize_in_map("/nonexistent/cuvslam/map", 0, vslam.Pose(), images, settings, fail, fail)
             slam.flush_map(fail)
+            slam.recognize_place_by_frame(images, 0, fail)  # use_vpr is off, so it reports an error
             slam.save_map(self.map_path('map'), fail_last)
             self.assertTrue(done.wait(60), "the callbacks did not run")
             del slam  # joins the SLAM thread, which reports the last exception after setting done
@@ -494,6 +495,7 @@ class TestMap(unittest.TestCase):
             (ValueError, "Slam.flush_map callback"),
             (ValueError, "Slam.localize_in_map finish_cb"),
             (ValueError, "Slam.localize_in_map start_cb"),
+            (ValueError, "Slam.recognize_place_by_frame finish_cb"),
             (ValueError, "Slam.save_map callback"),
         ])
 

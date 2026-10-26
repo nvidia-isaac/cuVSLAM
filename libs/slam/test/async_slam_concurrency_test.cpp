@@ -271,10 +271,17 @@ TEST(AsyncSlam, CopyToDatabase_AsyncMode_EachQueuedCopyCallsItsOwnCallback) {
         cv.wait(lock, [&] { return release_worker; });
       },
       [](const cuvslam::Result<cuvslam::Pose>&) {});
+  bool blocked_in_time = false;
   {
     std::unique_lock<std::mutex> lock(mutex);
-    ASSERT_TRUE(cv.wait_for(lock, 5s, [&] { return worker_blocked; }));
+    blocked_in_time = cv.wait_for(lock, 5s, [&] { return worker_blocked; });
+    if (!blocked_in_time) {
+      // Lets a late SLAM thread go, so that destroying slam can join it
+      release_worker = true;
+      cv.notify_all();
+    }
   }
+  ASSERT_TRUE(blocked_in_time);
 
   for (const std::string& path : {first_path, second_path}) {
     slam.CopyToDatabase(path, [&, path](bool success) {

@@ -1195,12 +1195,13 @@ NB_MODULE(pycuvslam, m) {
             auto image_set = ImageSetFromNDArrays(images, timestamp_ns, ArrayType::Image);
             self.RecognizePlaceByFrame(image_set, [finish_cb = GilSafeCallable(std::move(finish_cb))](
                                                       const Result<Slam::PlaceRecognition>& result) {
-              nb::gil_scoped_acquire gil;
-              (*finish_cb)(result.data, result.error_message);
+              CallSlamCallback(*finish_cb, "Slam.recognize_place_by_frame finish_cb", result.data,
+                               result.error_message);
             });
           },
           nb::arg("images"), nb::arg("timestamp_ns"), nb::arg("finish_cb"),
-          "Find the pose graph node whose mapped frame looks most like `images`, without geometric verification.\n\n"
+          "Find the pose graph node whose mapped frame looks most like `images`, without geometric verification.\n"
+          "An exception raised by the callback is reported to ``sys.unraisablehook`` instead of propagating.\n\n"
           "Parameters:\n"
           "    images: List of numpy arrays containing the camera images\n"
           "    timestamp_ns: Timestamp of the frame in nanoseconds\n"

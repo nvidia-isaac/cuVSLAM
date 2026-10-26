@@ -385,11 +385,12 @@ TEST_F(TrackerTest, LocalizeInMapWithGuessPoseReportsAMissingMap) {
 TEST(SlamTest, CallbackCanOwnAsyncSlam) {
   Slam::Config config;
   config.sync_mode = false;
-  std::promise<void> destroyed;
-  std::future<void> destroyed_future = destroyed.get_future();
-  auto slam = std::shared_ptr<Slam>(new Slam(MakeStereoRig(), {0}, config), [&destroyed](Slam* owned) {
+  // Shared with the deleter, which may run after a timed-out test has returned
+  auto destroyed = std::make_shared<std::promise<void>>();
+  std::future<void> destroyed_future = destroyed->get_future();
+  auto slam = std::shared_ptr<Slam>(new Slam(MakeStereoRig(), {0}, config), [destroyed](Slam* owned) {
     delete owned;
-    destroyed.set_value();
+    destroyed->set_value();
   });
 
   const std::string base_path =
