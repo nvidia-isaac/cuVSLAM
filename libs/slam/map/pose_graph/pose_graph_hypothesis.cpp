@@ -36,12 +36,12 @@ std::shared_ptr<PoseGraphHypothesis> PoseGraphHypothesis::MakeCopy() const {
   return cpy;
 }
 
-void PoseGraphHypothesis::PutToDatabase(ISlamDatabase* database) const {
+bool PoseGraphHypothesis::PutToDatabase(ISlamDatabase* database) const {
   uint64_t sz0 = pose_graph_verts_.size();
   uint64_t sz = this->format_and_version_.size();
   size_t reserve = sizeof(sz) + sz + sizeof(sz0) + sz0 * (sizeof(KeyFrameId) + sizeof(Isometry3T));
 
-  database->SetSingleton(SlamDatabaseSingleton::PoseGraphHypothesis, reserve, [&](BlobWriter& blob_writer) {
+  return database->SetSingleton(SlamDatabaseSingleton::PoseGraphHypothesis, reserve, [&](BlobWriter& blob_writer) {
     blob_writer.write_str(this->format_and_version_);
     blob_writer.write(sz0);
     for (auto& it : pose_graph_verts_) {

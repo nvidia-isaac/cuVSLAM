@@ -35,6 +35,7 @@
 #include "slam/slam/loop_closure_solver/iloop_closure_solver.h"
 #include "slam/slam/slam.h"
 #include "slam/view/view_landmarks.h"
+#include "slam/vpr/vpr_sof_image.h"
 #include "sof/image_manager.h"
 #include "visualizer/visualizer.hpp"
 
@@ -70,6 +71,7 @@ AsyncSlam::AsyncSlam(const camera::Rig& rig, const std::vector<CameraId>& camera
     : rig_(rig),
       cameras_(cameras),
       options_(options),
+      vpr_enabled_(options.vpr_options.enabled),
       slam_(std::make_unique<LocalizerAndMapper>(rig, FeatureDescriptorType::kShiTomasi6, options.use_gpu)),
       tail_(options.retention_time_ms * 1'000'000ULL),
       loop_closure_solver_(
@@ -90,11 +92,15 @@ AsyncSlam::AsyncSlam(const camera::Rig& rig, const std::vector<CameraId>& camera
     slam_->SetKeepTrackPoses(true);
   }
 
+  if (options.vpr_options.enabled) {
+    slam_->SetVprOptions(options.vpr_options);
+  }
+
   tail_.Clear();
 
-  if (!options.map_cache_path.empty()) {
-    if (!slam_->AttachToNewDatabase(options.map_cache_path)) {
-      throw std::runtime_error("Failed to connect SLAM to map at " + options.map_cache_path);
+  if (!options.map_path.empty()) {
+    if (!slam_->AttachToNewDatabase(options.map_path)) {
+      throw std::runtime_error("Failed to connect SLAM to map at " + options.map_path);
     }
   }
 
@@ -198,6 +204,10 @@ void AsyncSlam::TrackResult(const FrameId frameId, const int64_t timestamp_ns,
       }
     }
     if (tail_.UpdateTimeByOdometry(timestamp_ns, current_pose)) {
+      if (vpr_enabled_) {
+        // Copy now: the worker may run after the image pool recycled these contexts.
+        vo_keyframe->frame_data.vpr_image = vpr::MakeVprImageFromImages(images);
+      }
       input_queue_.Push(vo_keyframe);
       const size_t queue_size = input_queue_.Size();
       TraceWarningIf(queue_size > options_.delay_warning_queue_size,
@@ -219,6 +229,43 @@ void AsyncSlam::TrackResult(const FrameId frameId, const int64_t timestamp_ns,
           TrajectoryType::GT);
   }
 #endif
+}
+
+void AsyncSlam::RecognizePlace(vpr::VprImage image, Slam::RecognizePlaceFinishCB finish_cb) {
+  const auto vo_keyframe = std::make_shared<VOKeyframeInfo>(VOKeyframeInfo());
+  vo_keyframe->command = std::make_shared<RecognizePlaceCmd>(std::move(image), std::move(finish_cb));
+  input_queue_.Push(vo_keyframe);
+  if (reproduce_mode_) {
+    ProcessInputSynchronously();
+  }
+}
+
+void AsyncSlam::RecognizePlaceCmd::Execute(AsyncSlam& async_slam, FrameId, const Isometry3T&) {
+  if (!finish_cb_) {
+    return;
+  }
+  if (!async_slam.vpr_enabled_) {
+    finish_cb_(Result<Slam::PlaceRecognition>::Error("Place recognition is off: Slam::Config::use_vpr is false."));
+    return;
+  }
+
+  vpr::VprPlace place;
+  {
+    const std::lock_guard slam_guard(async_slam.slam_mutex_);
+    place = async_slam.slam_->RecognizePlace(image_);
+  }
+
+  if (!place.found) {
+    finish_cb_(Result<Slam::PlaceRecognition>::Error("No mapped place matched."));
+    return;
+  }
+
+  Slam::PlaceRecognition result{};
+  result.node_id = static_cast<uint64_t>(place.node_id);
+  result.pose = ConvertIsometryToPose(place.pose);
+  result.score = place.score;
+  result.timestamp_ns = place.timestamp_ns;
+  finish_cb_(Result<Slam::PlaceRecognition>::Success(std::move(result)));
 }
 
 Isometry3T AsyncSlam::GetSlamPose() const {
@@ -320,6 +367,26 @@ void AsyncSlam::CopyToDatabaseCmd::Execute(AsyncSlam& async_slam, FrameId, const
   async_slam.CopyToDatabase_worker(path_);
 }
 
+void AsyncSlam::FlushMap(const std::function<void(bool)>& callback) {
+  const auto vo_keyframe = std::make_shared<VOKeyframeInfo>(VOKeyframeInfo());
+  vo_keyframe->command = std::make_shared<FlushMapCmd>(callback);
+  input_queue_.Push(vo_keyframe);
+  if (reproduce_mode_) {
+    ProcessInputSynchronously();
+  }
+}
+
+void AsyncSlam::FlushMapCmd::Execute(AsyncSlam& async_slam, FrameId, const Isometry3T&) {
+  bool flushed = false;
+  {
+    const std::lock_guard slam_guard(async_slam.slam_mutex_);
+    flushed = async_slam.slam_->FlushMapToDatabase();
+  }
+  if (callback_) {
+    callback_(flushed);
+  }
+}
+
 // Set landmarks view
 void AsyncSlam::SetLandmarksView(std::shared_ptr<ViewManager<ViewLandmarks>> view) {
   this->landmarks_view_ = std::move(view);
@@ -342,9 +409,11 @@ void AsyncSlam::Shutdown() {
   if (thread_.joinable()) {
     thread_.join();
   }
-  // Copy to database
+  // The database stays open, so SaveMap after Stop() still sees a loaded map.
   std::lock_guard slam_guard(slam_mutex_);
-  slam_->DetachDatabase();
+  if (slam_->HasWritableDatabase() && !slam_->FlushMapToDatabase()) {
+    SlamStderr("Failed to write the map file at shutdown; it may be incomplete.\n");
+  }
 }
 
 std::string AsyncSlam::FrameInformationString(const sof::Images& images) {

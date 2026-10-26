@@ -68,11 +68,18 @@ option(USE_CUDA "Use CUDA Toolkit" ON)
 option(CUVSLAM_LOG_ENABLE "Enable root cuvslam::Log." OFF)
 option(CUVSLAM_BUILD_SHARED_LIB "Build shared library version of cuVSLAM" TRUE)
 option(USE_RERUN "Use Rerun for visualization" OFF)
+# Needed for VPR AnyLoc
+option(USE_TENSORRT "Build the AnyLoc visual place recognition backend (requires USE_CUDA and TensorRT 8.6+)" OFF)
+# ONNX export in a Python venv, then a TensorRT engine build; see models/anyloc
+include(CMakeDependentOption)
+cmake_dependent_option(CUVSLAM_BUILD_ANYLOC_ENGINE
+    "Build the AnyLoc TensorRT engine (needs Python 3.10+, network access and a GPU)" ON "USE_TENSORRT" OFF)
 
 include(cmake/cuVSLAMUtils.cmake)
 setup_cuvslam_settings()
 
 include(cmake/FindExt.cmake)
+include(cmake/AnyLocModel.cmake)
 
 # Add testing functionalities so that we can take advantage of GTest and CTest
 enable_testing()
@@ -90,6 +97,7 @@ if(CUVSLAM_CUDA_ARCH_ALL)
 endif()
 
 add_subdirectory(libs)
+add_subdirectory(models)
 add_subdirectory(tools)
 add_subdirectory(examples)
 add_subdirectory(doc)
@@ -103,3 +111,6 @@ file(WRITE ${SET_ENV_BAT}   "#!/bin/bash\n"
                             "export CUVSLAM_BUILD_DIR=${CMAKE_BINARY_DIR}/\n"
                             "export CUVSLAM_DATASETS=${CUVSLAM_DATASETS}/\n"
                             "export CUVSLAM_OUTPUT=${CUVSLAM_OUTPUT}/\n")
+if(CUVSLAM_ANYLOC_ENGINE)
+    file(APPEND ${SET_ENV_BAT} "export CUVSLAM_ANYLOC_ENGINE=${CUVSLAM_ANYLOC_ENGINE}\n")
+endif()

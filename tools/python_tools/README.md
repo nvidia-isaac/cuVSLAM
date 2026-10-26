@@ -8,6 +8,7 @@ It provides command-line tools for:
 - Converting ROS 2 bags to EDEX inputs.
 - Running one tracking sequence.
 - Running dataset reports.
+- Evaluating visual place recognition across two passes of a route.
 - Running multi-dataset validation.
 - Undistorting EDEX images.
 
@@ -29,7 +30,7 @@ With PDF report support:
 pip install -e ".[pdf]"
 ```
 
-`cuvslam_tracker`, `cuvslam_reporter`, and `cuvslam_validator` require the `cuvslam` Python binding in the same environment. Dataset preparation, ROS bag conversion, and undistortion should stay usable without importing `cuvslam` when their workflows do not need it.
+`cuvslam_tracker`, `cuvslam_reporter`, `cuvslam_vpr_reporter`, and `cuvslam_validator` require the `cuvslam` Python binding in the same environment. Dataset preparation, ROS bag conversion, and undistortion should stay usable without importing `cuvslam` when their workflows do not need it.
 
 ## Install The cuVSLAM Python Binding
 
@@ -80,6 +81,7 @@ Reinstall the binding after rebuilding `libcuvslam.so`.
 | `prepare_m3ed_spot` | Convert the 19 M3ED SPOT stereo sequences, or an explicit subset, to portable EDEX and reporter configs, reading the source HDF5 straight from the public bucket. |
 | `cuvslam_tracker` | Run one EDEX sequence or supported video input through cuVSLAM. |
 | `cuvslam_reporter` | Run one dataset config and generate report outputs. |
+| `cuvslam_vpr_reporter` | Build a place recognition map from one sequence, recognize places in another, and report the result. |
 | `cuvslam_validator` | Run multiple reporter configs, combine results, and apply validation checks. |
 | `rosbag_extract_edex` | Convert a ROS 2 bag to an EDEX sequence directory. |
 | `rosbag_extract_images` | Extract images from a ROS 2 bag. |
@@ -99,6 +101,7 @@ prepare_coda --help
 prepare_m3ed_spot --help
 cuvslam_tracker --help
 cuvslam_reporter --help
+cuvslam_vpr_reporter --help
 cuvslam_validator --help
 rosbag_extract_edex --help
 rosbag_extract_images --help
@@ -208,10 +211,10 @@ prepare_tum \
 
 The prepared root is `/path/to/datasets/converted/tum`. It contains `tum-rgbd_slam.cfg` and
 `dataset_metadata.json`. Every sequence contains `stereo.edex`, `frame_metadata.jsonl`, camera-aligned `gt.txt`,
-colour PNGs under `00/`, and depth PNGs under `01/`.
+color PNGs under `00/`, and depth PNGs under `01/`.
 
 Colour and depth frames are associated within 1 ms, which pairs the two views of a single Kinect capture and
-rejects pairs stitched across neighbouring captures. Ground truth is interpolated onto the associated frame times
+rejects pairs stitched across neighboring captures. Ground truth is interpolated onto the associated frame times
 (linear translation, slerp rotation) and written relative to the first frame. Frames outside the ground-truth time
 span are dropped so every frame has a pose.
 
@@ -249,10 +252,10 @@ prepare_icl_nuim \
 
 The prepared root is `/path/to/datasets/converted/icl_nuim`. It contains `icl_nuim-rgbd_slam.cfg` and
 `dataset_metadata.json`. Every sequence contains `stereo.edex`, `frame_metadata.jsonl`, camera-aligned `gt.txt`,
-colour PNGs under `00/`, and depth PNGs under `01/`. Depth is copied unchanged as 16-bit PNG with
+color PNGs under `00/`, and depth PNGs under `01/`. Depth is copied unchanged as 16-bit PNG with
 `depth_scale_factor: 5000`, matching TUM.
 
-ICL-NUIM is rendered rather than recorded, so two things differ from TUM. There are no timestamps: colour, depth,
+ICL-NUIM is rendered rather than recorded, so two things differ from TUM. There are no timestamps: color, depth,
 and pose are matched by frame index and timestamps are synthesized at the published 30 Hz, which keeps the output
 reproducible. And the published poses are expressed in the renderer's y-up world while the TUM-compatible PNGs are
 stored top-down, so poses are reflected about the XZ plane to reach the camera frame. That reflection is not
@@ -426,6 +429,113 @@ Every sequence in a reporter config names its reference explicitly, and a sequen
 - Neither — the sequence runs without accuracy metrics and its ATE/ARE columns stay blank.
 
 `cuvslam_tracker` takes the same two choices as `--gt_path` and `--gt_from_shuttle`.
+
+### Loop closure
+
+`--loop_closure_mode` picks how SLAM sequences (`--use_slam true` for `cuvslam_tracker`, `"use_slam": true` in a reporter config) find loop closures:
+
+- `lsi` (the default) — a search of the landmark spatial index around the current pose estimate.
+- `vpr` — geometric verification of visual place recognition candidates. Needs `--use_vpr true`, which needs a build with `USE_TENSORRT` and the AnyLoc TensorRT engine that build makes in `--vpr_model_path`, which defaults to it once the build's `cuvslam_vars.sh` is sourced (see `models/anyloc/README.md`).
+
+Both flags accept any case, and `cuvslam_tracker` rejects a non-default value of either without `--use_slam true`. The stats JSON of both tools records `loop_closure_mode` and `num_loop_closures`, and the report shows the number of loop closures of each SLAM sequence.
+
+`--max_map_size` caps the pose graph (0 for no limit; without the flag SLAM keeps its default of 300 nodes). A node merged away also leaves the place recognition map, so a long sequence keeps fewer places to close a loop to in `vpr` mode than landmarks in `lsi` mode; compare the two with `--max_map_size 0`. Run the comparison with synchronous SLAM (the default `--sync_slam true`): place recognition slows the SLAM thread down enough that an asynchronous replay, which runs faster than real time, finishes before SLAM catches up.
+
+`--use_vpr` runs AnyLoc on the GPU, about half a millisecond per keyframe on an RTX 4090, and every tracker process loads its own copy of the engine.
+
+## Visual Place Recognition
+
+`cuvslam_vpr_reporter` answers "would this map let a robot recognize where it is?". It takes two EDEX sequences of one
+route: a map sequence, and a query sequence driven through the same place later. It tracks the map sequence, which
+maps each keyframe's frame for place recognition, and saves the map, then asks the same session where each frame of the query
+sequence was taken, without tracking those frames, so they never enter the map, and scores every answer against
+KITTI-format ground truth. The place recognition map is part of the SLAM map, so the saved folder holds one LMDB
+database with the landmarks too; those folders are large and are deleted after each pair unless `--keep_vpr_maps` asks
+for them.
+
+Two sequences, straight from flags:
+
+```bash
+cuvslam_vpr_reporter \
+    --map_sequence /path/to/datasets/converted/coda/0 \
+    --query_sequence /path/to/datasets/converted/coda/5 \
+    --pair_title "CODa-00 to CODa-05" \
+    --output_root /tmp/cuvslam-vpr-reports \
+    --pdf
+```
+
+Several pairs at once, from a config:
+
+```bash
+cuvslam_vpr_reporter \
+    --test_config /path/to/configs/coda-vpr.cfg \
+    --datasets_root /path/to/datasets/converted \
+    --output_root /tmp/cuvslam-vpr-reports \
+    --pdf
+```
+
+```json
+{
+  "version": "0.1",
+  "success_radius_m": 10.0,
+  "pairs": [
+    {
+      "title": "CODa-00 to CODa-05",
+      "map_sequence": "coda/0",
+      "query_sequence": "coda/5",
+      "edex_file": "stereo.edex",
+      "map_gt": "gt.txt",
+      "query_gt": "gt.txt"
+    }
+  ]
+}
+```
+
+`pairs` is the only required key; each pair needs `title`, `map_sequence`, and `query_sequence`, and the other three
+keys default to the values above. Sequence paths are resolved against `--datasets_root`, absolute paths are used as
+is, and ground-truth paths are resolved against their own sequence folder. `success_radius_m` sets the default for the
+run; `--success_radius` on the command line overrides it.
+
+Every pair gets one row of the summary table, one section with its plots, and one entry
+in `stats/all_vpr_stats.json`. The plot is a bird's eye view: the map sequence's ground truth as a thin grey line,
+and the query sequence's ground truth drawn on top of it as a ribbon colored by how each frame was classified, dark
+green for recognized, amber for a false positive, red for unrecognized. Under it is a strip of 20 frames of the query
+sequence, evenly spaced over the frames that were queried and bordered green where the frame was recognized correctly
+and red where the robot did not know where it was, false positives included; each frame carries its index.
+
+`--frame_limit` cuts both sequences short for a quick check, `--query_stride`
+queries every Nth frame, `--vpr_score_threshold` raises the similarity a match must reach, and `--keep_vpr_maps` leaves
+the temporary map folders on disk.
+
+### Metrics
+
+Ground truth for both sequences is a KITTI-format `gt.txt` of absolute poses. Both are read in the frame they are
+written in and compared directly, with no alignment, so the two sequences must already share a world frame. This
+holds for the prepared CODa sequences, where every CODa-05 pose is within 6.8 m of the CODa-00 trajectory (median
+2.4 m), and trivially for a sequence evaluated against itself.
+
+A recognition names the mapped frame it matched by timestamp, which is looked up in the map sequence's own
+timestamp-to-frame index; a timestamp that is not in it falls back to the nearest one and is counted. The distance
+between the map frame's ground-truth position and the query frame's ground-truth position is the localization error
+of that query, and it decides the classification:
+
+| Column | Meaning |
+|---|---|
+| Success [%] | query frames whose matched map frame is within `--success_radius` of the query frame |
+| False positive [%] | query frames matched to a mapped place further away than that |
+| Unrecognized [%] | query frames the backend reported no match for |
+| Precision | successes over all map matches |
+| Map build [ms/frame] | wall time of the map pass's `track` calls, over the mapped frames |
+| Search [ms/frame] | wall time of one `recognize_place_by_frame` call, over the queried frames |
+| Saved map [MB/frame] | size of the saved map folder, one LMDB database with the landmarks and the place recognition map, over the mapped frames |
+| Skipped | queried frames with no ground-truth row, which are scored as nothing |
+
+The localization error over the successes and the similarity the backend reported for its matches are still measured,
+as `median_error_m`, `mean_error_m` and `mean_score` in `stats/all_vpr_stats.json`; they are left out of the table
+because the classification rates above already say what they are used to judge. The summary row pools each mean by
+the frames it was averaged over: the map-pass costs by the mapped frames, the search cost by the queried ones.
+
+The query pass does not track its frames, so they never enter the map and every answer comes from the map sequence.
 
 ## Validation
 
