@@ -158,6 +158,8 @@ and are compatible with Python 3.12 and later. Other Python, CUDA, or Jetson com
   Toolkit from JetPack). When installed, they take precedence over a system CUDA Toolkit, unless another module has
   already loaded these libraries.
 
+TensorRT 10 (`libnvinfer10`) must be installed separately (not included in the wheels).
+
 Official wheels include cuNLS support for `Multisensor` mode; no separate cuNLS installation is required.
 
 To install (virtual environment is recommended):
