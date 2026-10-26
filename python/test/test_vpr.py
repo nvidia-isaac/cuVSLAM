@@ -432,7 +432,7 @@ class TestVprAnyLoc(unittest.TestCase):
         map_dir = tempfile.mkdtemp()
         try:
             slam_cfg = self.anyloc_config()
-            slam_cfg.map_path = map_dir  # the config borrows this str
+            slam_cfg.map_path = map_dir
             tracker = self.make_tracker(slam_cfg)
             frames = self.track_prefix(tracker, n_frames=200)
             del tracker
