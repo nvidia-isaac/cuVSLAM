@@ -253,10 +253,10 @@ Build types: `Release` (default), `Debug`, `RelWithDebInfo`, `MinSizeRel`. Do no
 
 **cuNLS** (CUDA nonlinear least squares) is enabled by default (`USE_CUNLS=ON`) and is built from
 source via `FetchContent`, like the other external dependencies — no separate install or path is
-required. The source is pinned in `cmake/ext/cunls.cmake`; cuNLS downloads its own dependencies
-(spdlog is shared with cuVSLAM, cuDSS is fetched as a prebuilt archive) at configure time, so a
-network connection and the CUDA Toolkit are the only prerequisites. The resulting static archive
-is bundled into `libcuvslam`.
+required. The source is pinned in `cmake/ext/cunls.cmake`, and spdlog is shared with cuVSLAM.
+cuVSLAM uses cuNLS's DenseQR solver and builds with the optional cuDSS backend disabled, so no
+cuDSS archive, library, or runtime package is required. A network connection and the CUDA Toolkit
+are the only prerequisites. The resulting static cuNLS archive is bundled into `libcuvslam`.
 
 cuNLS source and license information are published in the
 [nvidia-isaac/cuNLS repository](https://github.com/nvidia-isaac/cuNLS). Release wheels and C++ packages built with the
