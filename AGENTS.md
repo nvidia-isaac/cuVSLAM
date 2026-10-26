@@ -97,7 +97,7 @@ Load-bearing rules:
 **Don't:**
 - Don't edit `libs/cuvslam/cuvslam2.h` without updating `python/cuvslam2.cpp` — they must stay in sync
 - Don't put implementation details in `cuvslam2.h`; it is the public C++ API boundary
-- Don't use non-ABI-stable types (`std::string`, `std::map`, etc.) in `cuvslam2.h`; `std::vector` is the explicit exception. Otherwise, use `std::string_view`, raw pointers with a count, or plain structs of primitive types only
+- Don't store `std::string_view` or other non-owning views in `cuvslam2.h` structs or return them from long-lived objects; use owning types (`std::string`, `std::vector`) for anything the caller keeps. `std::string_view` is fine for function parameters that are only used during the call
 - Don't mix different `CMAKE_BUILD_TYPE` values in the same `CUVSLAM_DST_DIR`
 - Don't add test directories or standalone unit tests for `scripts/` or `examples/`, and don't reach into them from `tools/python_tools/cuvslam_tools/tests/`; validate changes there with focused invocations and the relevant pre-commit hooks
 - Don't commit directly to `main` — the pre-commit hook blocks it

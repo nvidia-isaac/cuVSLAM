@@ -34,6 +34,7 @@ jobs:
   check-changes:
     name: Decide whether to build
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     permissions:
       checks: read
       contents: read
@@ -168,7 +169,7 @@ jobs:
     needs: check-changes
     if: needs.check-changes.outputs.should_build == 'true'
     runs-on: ${{ fromJSON(matrix.runner) }}
-    timeout-minutes: ${{ matrix.job_timeout || 120 }}
+    timeout-minutes: 120
     env:
       EVAL_SUITE: ${{ matrix.eval_suite || 'full' }}
     strategy:
@@ -194,8 +195,8 @@ jobs:
           # Their eval steps are informational (continue-on-error) while runtime and variance are characterized.
           # datasets_root overrides the dataset cache location per config. Orin's home is on a small eMMC; its
           # runner work directory is on NVMe, and the job-completed hook empties only the per-repo workspace in it.
-          - { name: "aarch64 / Orin (JP 6.1)",  runner: '["jetson-orin"]', cuda: "12.6.3", ubuntu: "22.04", archs: "87",  platform: "orin",  wheel: true, benchmark: true, eval: true, eval_suite: smoke, job_timeout: 240, datasets_root: "/data/github-runner-workspace/cuvslam-cache", base_image: "nvcr.io/nvidia/12.6.11-devel:12.6.11-devel-aarch64-ubuntu22.04", ports_mirror: "http://mirrors.ocf.berkeley.edu/ubuntu-ports" }
-          - { name: "aarch64 / Thor (JP 7.1)",  runner: '["jetson-thor"]', cuda: "13.0.1", ubuntu: "24.04", archs: "110", platform: "thor",  wheel: true, benchmark: true, eval: true, eval_suite: smoke, retries: 3, build_timeout: 60, job_timeout: 240, ports_mirror: "http://mirrors.ocf.berkeley.edu/ubuntu-ports" }
+          - { name: "aarch64 / Orin (JP 6.1)",  runner: '["jetson-orin"]', cuda: "12.6.3", ubuntu: "22.04", archs: "87",  platform: "orin",  wheel: true, benchmark: true, eval: true, eval_suite: smoke, datasets_root: "/data/github-runner-workspace/cuvslam-cache", base_image: "nvcr.io/nvidia/12.6.11-devel:12.6.11-devel-aarch64-ubuntu22.04", ports_mirror: "http://mirrors.ocf.berkeley.edu/ubuntu-ports" }
+          - { name: "aarch64 / Thor (JP 7.1)",  runner: '["jetson-thor"]', cuda: "13.0.1", ubuntu: "24.04", archs: "110", platform: "thor",  wheel: true, benchmark: true, eval: true, eval_suite: smoke, retries: 3, ports_mirror: "http://mirrors.ocf.berkeley.edu/ubuntu-ports" }
     steps:
       - name: Verify GPU
         run: nvidia-smi
@@ -230,6 +231,7 @@ jobs:
           lfs: false
 
       - name: Prepare Git checkout for Docker build
+        timeout-minutes: 10
         run: |
           # Some runner filesystems normalize executable bits, and the LFS clean filter needs writable storage.
           git config --local core.fileMode false
@@ -247,6 +249,7 @@ jobs:
       - name: Build CI tools image
         if: matrix.eval
         continue-on-error: ${{ matrix.eval_suite == 'smoke' }}
+        timeout-minutes: 15
         env:
           AWS_CLI_PUBLIC_KEY: ${{ vars.AWS_CLI_PUBLIC_KEY }}
         run: |
@@ -264,8 +267,9 @@ jobs:
       # to keep pip build artifacts out of the runner workspace.
       - name: Run Python tools tests
         if: matrix.tools_tests
+        timeout-minutes: 10
         run: |
-          docker run --rm --network host \
+          docker run --rm --network host --label "cuvslam.runner=$RUNNER_NAME" \
             -v "$(pwd):/cuvslam:ro" \
             cuvslam-ci:local \
             bash -c 'set -euo pipefail
@@ -277,11 +281,12 @@ jobs:
       - name: Verify eval prerequisites
         if: matrix.eval
         continue-on-error: ${{ matrix.eval_suite == 'smoke' }}
+        timeout-minutes: 10
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_RO_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_RO_SECRET_ACCESS_KEY }}
         run: |
-          docker run --rm --network host \
+          docker run --rm --network host --label "cuvslam.runner=$RUNNER_NAME" \
             -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_DEFAULT_REGION -e S3_DATASETS_BUCKET \
             -e RUNNER_STORAGE_ROOT -e RUNNER_LOCAL_DATASETS_ROOT -e EVAL_SUITE \
             -v "$(pwd):/cuvslam:ro" \
@@ -292,12 +297,13 @@ jobs:
       - name: Stage eval datasets
         if: matrix.eval
         continue-on-error: ${{ matrix.eval_suite == 'smoke' }}
+        timeout-minutes: 60
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_RO_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_RO_SECRET_ACCESS_KEY }}
         run: |
           mkdir -p "$RUNNER_LOCAL_DATASETS_ROOT"
-          docker run --rm --network host \
+          docker run --rm --network host --label "cuvslam.runner=$RUNNER_NAME" \
             -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_DEFAULT_REGION -e S3_DATASETS_BUCKET \
             -e RUNNER_LOCAL_DATASETS_ROOT -e EVAL_SUITE \
             -v "$(pwd):/cuvslam:ro" \
@@ -309,7 +315,7 @@ jobs:
         uses: nick-fields/retry@v3
         with:
           max_attempts: ${{ matrix.retries || 1 }}
-          timeout_minutes: ${{ matrix.build_timeout || 120 }}
+          timeout_minutes: 60
           retry_wait_seconds: 30
           command: |
             CUDA_VERSION=${{ matrix.cuda }} \
@@ -323,7 +329,7 @@ jobs:
         uses: nick-fields/retry@v3
         with:
           max_attempts: ${{ matrix.retries || 1 }}
-          timeout_minutes: 30
+          timeout_minutes: 15
           retry_wait_seconds: 30
           command: ./scripts/test_cuvslam_in_docker.sh ./output
 
@@ -335,7 +341,7 @@ jobs:
         uses: nick-fields/retry@v3
         with:
           max_attempts: ${{ matrix.retries || 1 }}
-          timeout_minutes: 30
+          timeout_minutes: 15
           retry_wait_seconds: 30
           command: |
             BENCHMARK_CONFIG="${{ matrix.platform }}-cuda${{ matrix.cuda }}-ubuntu${{ matrix.ubuntu }}" \
@@ -360,6 +366,7 @@ jobs:
 
       - name: Build Python wheel
         if: matrix.wheel
+        timeout-minutes: 15
         run: |
           CUDA_VERSION=${{ matrix.cuda }} \
           UBUNTU_VERSION=${{ matrix.ubuntu }} \
@@ -367,6 +374,7 @@ jobs:
 
       - name: Verify Python wheel installs
         if: matrix.wheel
+        timeout-minutes: 10
         env:
           PACKAGE_VERSION: ${{ needs.check-changes.outputs.package_version }}
         run: |
@@ -377,7 +385,7 @@ jobs:
         uses: nick-fields/retry@v3
         with:
           max_attempts: ${{ matrix.retries || 1 }}
-          timeout_minutes: 30
+          timeout_minutes: 15
           retry_wait_seconds: 30
           command: ./scripts/test_pycuvslam_in_docker.sh ./output
 
@@ -400,6 +408,7 @@ jobs:
 
       - name: Build documentation
         if: matrix.docs
+        timeout-minutes: 15
         run: ./scripts/build_docs_in_docker.sh ./output
 
       - name: Package documentation
@@ -423,6 +432,7 @@ jobs:
       - name: Run cuVSLAM evaluation
         if: matrix.eval
         continue-on-error: ${{ matrix.eval_suite == 'smoke' }}
+        timeout-minutes: 75
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_RO_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_RO_SECRET_ACCESS_KEY }}
@@ -513,6 +523,20 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
+      # On cancel or timeout the runner signals only the step shell, so a hung container keeps running.
+      - name: Remove leftover containers
+        if: always()
+        run: |
+          mapfile -t containers < <(docker ps -aq --filter "label=cuvslam.runner=$RUNNER_NAME")
+          if [ "${#containers[@]}" -eq 0 ]; then
+            exit 0
+          fi
+          image=$(docker inspect --format '{{.Config.Image}}' "${containers[0]}")
+          docker rm -f "${containers[@]}" || echo "::warning::Failed to remove some leftover containers"
+          # Removed containers skip their chown traps, so return the workspace to the runner user.
+          docker run --rm --entrypoint chown -v "$GITHUB_WORKSPACE:/workspace" "$image" \
+            -R "$(id -u):$(id -g)" /workspace
+
   nightly-summary:
     name: >-
       ${{
@@ -521,6 +545,7 @@ jobs:
         'Nightly skipped — revision already passed'
       }}
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     if: always()
     needs: [check-changes, build-and-test]
     outputs:
@@ -898,6 +923,7 @@ jobs:
   publish-release:
     name: Create draft release
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     if: >-
       always() &&
       needs.check-changes.outputs.is_release == 'true' &&

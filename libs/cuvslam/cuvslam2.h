@@ -21,6 +21,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -508,7 +509,7 @@ public:
     /// Default: 1.f
     float max_frame_delta_s = 1.f;
     /// Directory where input data will be dumped in edex format.
-    std::string_view debug_dump_directory;
+    std::string debug_dump_directory;
     /// Enable IMU debug mode. Default: false
     bool debug_imu_mode = false;
     /// RGBD odometry settings.
@@ -750,13 +751,13 @@ private:
 /**
  * @brief Result type that can hold either success data or error information.
  *
- * For use in callbacks. Result::error_message should not outlive the callback scope.
+ * For use in callbacks.
  */
 // TODO(C++23): replace with std::expected
 template <typename T>
 struct Result {
-  std::optional<T> data;           ///< data
-  std::string_view error_message;  ///< error message
+  std::optional<T> data;      ///< data
+  std::string error_message;  ///< error message
 
   /// Create a success result
   /// @param[in] value data
@@ -766,7 +767,7 @@ struct Result {
   /// Create an error result
   /// @param[in] message error message
   /// @return Result
-  static Result Error(std::string_view message) { return Result{std::nullopt, message}; }
+  static Result Error(std::string_view message) { return Result{std::nullopt, std::string(message)}; }
 };
 
 /**
@@ -800,7 +801,7 @@ public:
     /// maps; if the path already exists it will be overwritten. FlushMap() saves the map there, and SaveMap() fails.
     /// To load an existing map, use LocalizeInMap(); once it succeeds, the session writes the loaded folder if
     /// `attach` is set, and no map file otherwise.
-    std::string_view map_path = "";
+    std::string map_path;
     /// Enable GPU use for SLAM
     bool use_gpu = true;
     /// Synchronous mode (does not run a separate work thread if true)
@@ -837,7 +838,7 @@ public:
     bool use_vpr = false;
     /// AnyLoc TensorRT engine, built by the `anyloc_engine` target.
     /// The engine runs only on the GPU and TensorRT version that built it; otherwise the constructor throws.
-    std::string_view vpr_model_path;
+    std::string vpr_model_path;
     /// Minimum similarity in [0, 1] for place recognition to report a match.
     float vpr_score_threshold = 0.68f;
     /// Where loop closure looks for revisited places, see `LoopClosureMode`.
