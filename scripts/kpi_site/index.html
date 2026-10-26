@@ -65,7 +65,7 @@
     <h2 id="combine-heading">Configurations</h2>
     <select id="combine" aria-labelledby="combine-heading">
       <option value="each">Show each configuration</option>
-      <option value="mean">Combine (mean; max for counts)</option>
+      <option value="mean">Combine per platform (mean; max for counts)</option>
     </select>
     <div id="configs"></div>
     <h2>Metrics <button type="button" class="all" data-group="metrics">all / none</button></h2>
@@ -166,12 +166,18 @@ function allRetired(group, value) {
   return kpis.length > 0 && kpis.every((k) => k.retired);
 }
 
+function syncControls() {
+  for (const g of GROUPS) $(g).querySelectorAll("input").forEach((i) => { i.checked = state[g].includes(i.value); });
+  for (const k of SELECTS) $(k).value = state[k];
+  for (const k of TOGGLES) $(k).checked = state[k];
+}
+
 function buildControls(opts) {
   for (const g of GROUPS) {
     const box = $(g);
     for (const v of opts[g]) {
       const label = document.createElement("label"), input = document.createElement("input");
-      input.type = "checkbox"; input.value = v; input.checked = state[g].includes(v);
+      input.type = "checkbox"; input.value = v;
       input.addEventListener("change", () => {
         state[g] = [...box.querySelectorAll("input:checked")].map((i) => i.value); update();
       });
@@ -186,14 +192,9 @@ function buildControls(opts) {
     inputs.forEach((i) => { i.checked = on; });
     state[g] = on ? inputs.map((i) => i.value) : []; update();
   }));
-  for (const k of SELECTS) {
-    $(k).value = state[k];
-    $(k).addEventListener("change", () => { state[k] = $(k).value; update(); });
-  }
-  for (const k of TOGGLES) {
-    $(k).checked = state[k];
-    $(k).addEventListener("change", () => { state[k] = $(k).checked; update(); });
-  }
+  for (const k of SELECTS) $(k).addEventListener("change", () => { state[k] = $(k).value; update(); });
+  for (const k of TOGGLES) $(k).addEventListener("change", () => { state[k] = $(k).checked; update(); });
+  syncControls();
   $("share").addEventListener("click", async () => {
     try {
       // navigator.clipboard is only defined on HTTPS and localhost pages, and writeText can be denied.
@@ -216,9 +217,25 @@ function collectSeries() {
     const perConfig = state.configs.filter((c) => DATA.configs[c].values[key])
       .map((c) => ({config: c, runs: DATA.configs[c].runs, values: DATA.configs[c].values[key]}));
     if (!perConfig.length) continue;
-    if (state.combine === "mean") {
+    if (state.combine !== "mean") {
+      for (const s of perConfig) series.push({key, kpi, ...s});
+      continue;
+    }
+    // Platforms run on different hardware (the nightly aggregate covers x86 only), so each is combined on its own;
+    // a platform with one configuration keeps its own series.
+    const byPlatform = new Map();
+    for (const s of perConfig) {
+      const platform = s.config.split("-")[0];
+      if (!byPlatform.has(platform)) byPlatform.set(platform, []);
+      byPlatform.get(platform).push(s);
+    }
+    for (const [platform, members] of byPlatform) {
+      if (members.length === 1) {
+        series.push({key, kpi, ...members[0]});
+        continue;
+      }
       const byRun = new Map();
-      for (const s of perConfig) s.runs.forEach((r, i) => {
+      for (const s of members) s.runs.forEach((r, i) => {
         if (s.values[i] === null) return;
         if (!byRun.has(r)) byRun.set(r, []);
         byRun.get(r).push(s.values[i]);
@@ -226,10 +243,8 @@ function collectSeries() {
       const runs = [...byRun.keys()].sort();
       const reduce = DATA.metrics[kpi.metric].count ? (xs) => Math.max(...xs)
                                                    : (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
-      series.push({key, kpi, config: `mean of ${perConfig.length}`, configs: perConfig.map((s) => s.config), runs,
-                   values: runs.map((r) => reduce(byRun.get(r)))});
-    } else {
-      for (const s of perConfig) series.push({key, kpi, ...s});
+      series.push({key, kpi, config: `${platform} mean of ${members.length}`, configs: members.map((s) => s.config),
+                   runs, values: runs.map((r) => reduce(byRun.get(r)))});
     }
   }
   return series;
@@ -479,6 +494,8 @@ async function main() {
   state = readHash(opts);
   buildControls(opts);
   update();
+  // Fires for an edited or pasted link; the page's own updates use replaceState, which does not.
+  window.addEventListener("hashchange", () => { state = readHash(opts); syncControls(); update(); });
 }
 main().catch((e) => showError(e.message));
 </script>
