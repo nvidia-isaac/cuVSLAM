@@ -386,7 +386,8 @@ function tracesFor(s, name) {
 // The date span of every visible trace, so all charts share one axis and changes line up across datasets;
 // null when no point is visible.
 function dateSpan(traces) {
-  const times = traces.flatMap((t) => t.x).filter((x) => x !== null).map((x) => (typeof x === "number" ? x : Date.parse(x)));
+  const times = traces.flatMap((t) => t.x.filter((x, i) => x !== null && t.y[i] !== null))
+    .map((x) => (typeof x === "number" ? x : Date.parse(x)));
   if (!times.length) return null;
   const lo = Math.min(...times) - DAY_MS / 2, hi = Math.max(...times) + DAY_MS / 2;
   return [new Date(lo).toISOString(), new Date(hi).toISOString()];
