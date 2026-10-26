@@ -11,6 +11,8 @@ on:
     workflows: ["Nightly Build & Test", "PR Verify"]
     types: [completed]
 
+permissions: {}
+
 concurrency:
   group: retry-lost-runner-${{ github.event.workflow_run.id }}
   cancel-in-progress: false
@@ -72,28 +74,49 @@ jobs:
               return;
             }
 
+            const isPrRun = run.event === 'pull_request';
             const pr = (run.pull_requests || [])[0];
             let prState = null;
-            if (pr) {
+            let prCheckError = null;
+            if (isPrRun && !pr) {
+              prCheckError = 'the run lists no pull request';
+            } else if (pr) {
               try {
                 const { data } = await github.rest.pulls.get({ owner, repo, pull_number: pr.number });
                 prState = data.state;
               } catch (error) {
+                prCheckError = error.message;
                 core.warning(`Could not read PR #${pr.number}: ${error.message}`);
               }
             }
 
             // Both workflows cancel in-progress runs of their concurrency group, so
-            // re-running a superseded run would cancel the newer one.
-            const { data: latest } = await github.rest.actions.listWorkflowRuns({
-              owner, repo, workflow_id: run.workflow_id, branch: run.head_branch, per_page: 1,
-            });
-            const newerRun = latest.workflow_runs.find(r => r.id !== run.id && r.created_at > run.created_at);
+            // re-running a superseded run would cancel the newer one. The branch query
+            // matches by name only, so it can also return fork runs and runs of other
+            // PRs from a same-named branch; PR Verify's group is the PR number.
+            let newerRun = null;
+            let newerRunError = null;
+            try {
+              const { data: recent } = await github.rest.actions.listWorkflowRuns({
+                owner, repo, workflow_id: run.workflow_id, branch: run.head_branch, per_page: 20,
+              });
+              const sameRepo = r => (r.head_repository || {}).full_name === run.head_repository.full_name;
+              const samePr = r => !isPrRun || (r.pull_requests || []).some(p => pr && p.number === pr.number);
+              newerRun = recent.workflow_runs.find(
+                r => r.id !== run.id && r.created_at > run.created_at && sameRepo(r) && samePr(r));
+            } catch (error) {
+              newerRunError = error.message;
+              core.warning(`Could not check for a newer run: ${error.message}`);
+            }
 
             let action;
             let rerunError = null;
             if (attempt >= maxAttempts) {
               action = `Not retried: attempt ${attempt} of ${maxAttempts} was the last one allowed.`;
+            } else if (prCheckError) {
+              action = `Not retried: could not confirm the PR is open (${prCheckError}).`;
+            } else if (newerRunError) {
+              action = `Not retried: could not check for a newer run (${newerRunError}).`;
             } else if (newerRun) {
               action = `Not retried: superseded by [run ${newerRun.id}](${newerRun.html_url}).`;
             } else if (prState && prState !== 'open') {
