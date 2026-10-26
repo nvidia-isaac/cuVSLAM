@@ -48,7 +48,7 @@ TTY_FLAG=""
 # --network host so pip can resolve the wheel's declared runtime deps (pyyaml).
 # --system-site-packages keeps numpy/scipy from the image available so this stays a
 # wheel-install/load smoke test rather than a full dependency-completeness audit.
-docker run --runtime=nvidia --gpus all --rm $TTY_FLAG --network host \
+docker run --runtime=nvidia --gpus all --rm --label "cuvslam.runner=${RUNNER_NAME:-local}" $TTY_FLAG --network host \
   --user "$(id -u):$(id -g)" --group-add video -e HOME=/tmp \
   -v "$OUTPUT_DIR:/output:ro" \
   -e WHEEL_NAME="$WHEEL_NAME" \
