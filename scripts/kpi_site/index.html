@@ -348,6 +348,7 @@ function levelBand(runs, results, y) {
 function tracesFor(s, name) {
   // Nights before an eval existed (or after it was retired) are null; leaving them in stretches the date axis.
   const first = s.values.findIndex((v) => v !== null), last = s.values.length - 1 - [...s.values].reverse().findIndex((v) => v !== null);
+  if (first < 0) return [];
   const idx = s.runs.map((r, i) => i).filter((i) => i >= first && i <= last && inRange(s.runs[i]));
   const color = colorFor(name);
   const ref = state.yaxis === "pct" ? median(idx.map((i) => s.values[i]).filter((v) => v !== null)) : null;
@@ -382,9 +383,11 @@ function tracesFor(s, name) {
   return traces;
 }
 
-// The date span of every visible trace, so all charts share one axis and changes line up across datasets.
+// The date span of every visible trace, so all charts share one axis and changes line up across datasets;
+// null when no point is visible.
 function dateSpan(traces) {
   const times = traces.flatMap((t) => t.x).filter((x) => x !== null).map((x) => (typeof x === "number" ? x : Date.parse(x)));
+  if (!times.length) return null;
   const lo = Math.min(...times) - DAY_MS / 2, hi = Math.max(...times) + DAY_MS / 2;
   return [new Date(lo).toISOString(), new Date(hi).toISOString()];
 }
@@ -410,13 +413,16 @@ function update() {
   const panels = new Map();
   for (const s of collectSeries()) {
     const [panel, name] = panelOf(s);
+    const traces = tracesFor(s, name);
+    if (!traces.length) continue;
     if (!panels.has(panel)) panels.set(panel, []);
-    panels.get(panel).push(...tracesFor(s, name));
+    panels.get(panel).push(...traces);
   }
   const root = $("panels");
   root.querySelectorAll(".panel").forEach((d) => Plotly.purge(d));
   root.replaceChildren();
-  if (!panels.size) {
+  const sharedRange = dateSpan([...panels.values()].flat());
+  if (!sharedRange) {
     const p = document.createElement("div"); p.id = "empty"; p.textContent = "No KPIs match the current filters.";
     root.append(p); return;
   }
@@ -425,7 +431,6 @@ function update() {
   root.style.gridTemplateColumns = columns ? `repeat(${columns}, minmax(0, 1fr))` : "";
   const height = state.height === "auto" ? (single ? "fill" : "360") : state.height;
   const panelHeight = height === "fill" ? `calc(100vh - ${FILL_OFFSET_PX}px)` : `${height}px`;
-  const sharedRange = dateSpan([...panels.values()].flat());
   const divs = [];
   for (const [panel, traces] of [...panels].sort((a, b) => a[0].localeCompare(b[0]))) {
     const div = document.createElement("div"); div.className = "panel"; div.style.height = panelHeight;
