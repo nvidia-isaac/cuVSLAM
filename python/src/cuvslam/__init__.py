@@ -12,7 +12,7 @@
 import warnings
 
 # Import select bindings for the main namespace
-from .pycuvslam import (
+from ._cuvslam import (
     get_version,
     set_verbosity,
     warm_up_gpu,
@@ -30,7 +30,7 @@ from .pycuvslam import (
     Odometry,
     Slam,
     Tracker)
-from . import pycuvslam as _core
+from . import _cuvslam as _core
 
 # Python helper functions for file-based config loading
 from . import utils

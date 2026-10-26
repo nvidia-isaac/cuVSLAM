@@ -37,7 +37,7 @@ wheel.py-api = "cp312"
 
 cmake.source-dir = "."
 
-wheel.install-dir = "cuvslam"
+wheel.packages = ["src/cuvslam"]
 
 # For distribution mode: include prebuilt binaries and headers in source tarball
 # sdist.include = ["../include/**", "../bin/**"]
