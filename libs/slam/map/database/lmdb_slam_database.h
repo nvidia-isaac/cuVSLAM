@@ -36,6 +36,7 @@ protected:
 
   mutable std::map<int, int> errors_;
   bool read_only_ = true;
+  std::string path_;  // absolute folder of the open database
 
   class WriteTxn {
   public:
@@ -51,9 +52,12 @@ protected:
     void Abort();
 
   private:
+    bool Begin(MDB_dbi dbi);
+
     LmdbSlamDatabase* db_ = nullptr;
     MDB_txn* txn_ = nullptr;
     bool ignore_MDB_NOTFOUND_ = false;
+    bool failed_ = false;  // an operation failed, so Commit() aborts
   };
 
   class Cursor {
@@ -95,7 +99,8 @@ public:
     READ_WRITE,             // open exists or make new for write
     READ_WRITE_HARD_RESET,  // make new for write, remove directory recursively
     READ_WRITE_NEW,         // make new for write, drop all records if exists.
-    READ_ONLY_EXISTS        // open exists for read only
+    READ_ONLY_EXISTS,       // open exists for read only
+    READ_WRITE_EXISTS       // open exists for write; never creates the folder or the database
   };
   bool Open(const char* db_path, OpenMode open_mode = OpenMode::READ_WRITE);
   void Close();
@@ -108,6 +113,10 @@ public:
   size_t GetRecordsCount(SlamDatabaseTable table) const override;
 
   bool IsReadOnly() const override;
+
+  bool CopyTo(const std::string& path) const override;
+
+  bool IsAt(const std::string& path) const override;
 
   bool SetRecordV(SlamDatabaseTable table, Key id, size_t bytes, const std::function<bool(BlobWriter&)>& func) override;
   bool GetRecordV(SlamDatabaseTable table, Key id, const std::function<bool(const BlobReader&)>& func,

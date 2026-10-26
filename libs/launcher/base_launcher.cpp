@@ -59,7 +59,8 @@ DEFINE_double(slam_cell_size, 0, "SLAM: cell size of the LSI");
 DEFINE_int32(slam_max_landmarks_in_cell, 100, "SLAM: limit of landmarks in the spatial index cell");
 DEFINE_double(slam_max_landmarks_distance, 100., "SLAM: limit of distance from camera to landmark");
 DEFINE_string(slam_copy_to_database, "",
-              "SLAM: do copy to this database finally or on frame. See 'slam_copy_on_frame'");
+              "SLAM: do copy to this database finally or on frame. See 'slam_copy_on_frame'. Fails with "
+              "'slam_map_path', which is written in place");
 DEFINE_int32(slam_copy_on_frame, -1, "SLAM: do copy to database on this frame");
 DEFINE_bool(use_gpu, true, "Use GPU");
 DEFINE_int32(start_frame, 0, "Start frame index in sequence");
@@ -69,7 +70,7 @@ DEFINE_double(slam_load_and_localize_timestamp, -1, "Load and localize timestamp
 DEFINE_bool(slam_planar_constraints, false, "SLAM: planar constraints");
 DEFINE_bool(enable_ground_integrator, false, "Enable postprocessing ground aligner");
 DEFINE_bool(slam_disable_pgo, false, "SLAM: disable pose graph optimization");
-DEFINE_string(slam_map_cache_path, "",
+DEFINE_string(slam_map_path, "",
               "SLAM: if empty (default), map is kept in memory only,"
               "else, map is synced to disk (LMDB) at this path");
 DEFINE_bool(print_memory_usage, false, "Print memory usage on runtime");
@@ -140,7 +141,7 @@ void BaseLauncher::SetupSlam() {
   }
 
   slam::AsyncSlamOptions options;
-  options.map_cache_path = FLAGS_slam_map_cache_path;
+  options.map_path = FLAGS_slam_map_path;
   options.use_gpu = FLAGS_use_gpu;
   options.reproduce_mode = FLAGS_slam_reproduce_mode;
   options.pose_for_frame_required = true;

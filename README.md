@@ -16,6 +16,7 @@ cuVSLAM is the library by NVIDIA, providing various Visual Tracking Camera modes
 ## Table of Contents
 
 - [Tracking modes](#tracking-modes)
+- [Visual place recognition](#visual-place-recognition)
 - [Using cuVSLAM](#using-cuvslam)
 - [Performance](#performance)
 - [Install PyCuVSLAM](#install-pycuvslam)
@@ -55,6 +56,34 @@ Notes:
 
 Multisensor tracking is experimental: tracking may be inaccurate or fail for some sensor configurations and scenes.
 RGB-D cameras must use the pinhole model; cameras without depth support every distortion model.
+
+# Visual place recognition
+
+Loop closure answers "have I drifted?" and, by default, needs a pose to search around. Visual place recognition
+answers "where am I?" from a single image and no pose at all. That is what a **kidnapped robot** needs: a robot switched on inside
+a map it has never localized in, or picked up mid-run and put down elsewhere, has no prior to search around.
+
+`Slam` keeps a place recognition map alongside the pose graph: one frame per pose graph node, written into the SLAM
+map when it is saved. A match names a node rather than a stored pose, so the pose it reports follows loop closures and
+pose graph optimization instead of being the drifted one that was current when the frame was mapped. Resolving a
+kidnapping is `LocalizeInMap`'s job: called without a guess pose, it takes candidate places from the saved map's place
+recognition map and verifies them against that map's landmarks, instead of searching a grid around a guess the robot
+does not have.
+
+Place recognition runs [AnyLoc](https://anyloc.github.io/), a VLAD aggregation of DINOv2 features, on the GPU. It needs
+a `USE_TENSORRT` build, which also makes its TensorRT engine (see [models/anyloc](models/anyloc/README.md)).
+Both APIs expose it the same way:
+
+| Task | C++ (`cuvslam::Slam`) | Python (`cuvslam.Slam`) |
+|------|-----------------------|-------------------------|
+| Turn it on | `Config::use_vpr = true` and `Config::vpr_model_path` | `Config(use_vpr=True, vpr_model_path=...)` |
+| Ask where a frame was taken | `RecognizePlaceByFrame` | `recognize_place_by_frame` |
+| Save it with the SLAM map | `SaveMap` | `save_map` |
+| Relocalize without a guess pose | `LocalizeInMap` with no `guess_pose` | `localize_in_map(..., guess_pose=None)` |
+| Close loops from it | `Config::loop_closure_mode = LoopClosureMode::VPR` | `Config(loop_closure_mode=LoopClosureMode.VPR)` |
+
+[doc/place_recognition.md](doc/place_recognition.md) walks through a mapping run and a relocalizing run, explains how
+it closes loops, and how to evaluate it with `cuvslam_vpr_reporter`.
 
 # Using cuVSLAM
 
@@ -215,6 +244,8 @@ All flags have defaults; override with `-DFLAG=VALUE`.
 | `USE_LMDB` | ON | LMDB map database |
 | `USE_RERUN` | OFF | Rerun SDK visualization |
 | `USE_NVTX` | OFF | NVIDIA NVTX profiling |
+| `USE_TENSORRT` | OFF | AnyLoc place recognition backend; requires `USE_CUDA` and TensorRT 8.6+ |
+| `CUVSLAM_BUILD_ANYLOC_ENGINE` | ON with `USE_TENSORRT` | builds AnyLoc's TensorRT engine: an ONNX export in a Python venv, then a TensorRT build (needs network access); see [models/anyloc](models/anyloc/README.md) |
 
 Build types: `Release` (default), `Debug`, `RelWithDebInfo`, `MinSizeRel`. Do not mix types in the same build directory.
 

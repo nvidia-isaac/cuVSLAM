@@ -30,6 +30,8 @@ ILoopClosureSolver* CreateLoopClosureSolver(LoopClosureSolverType solver_type, R
       return CreateLoopClosureSolverSimple(rig, ransac_type, randomized, LSIGrid::FetchStrategy::PointOnly);
     case LoopClosureSolverType::kTwoStepsEasy:
       return CreateLoopClosureSolverTwoStepsEasy(rig, ransac_type, randomized);
+    case LoopClosureSolverType::kVpr:
+      return CreateLoopClosureSolverVpr(rig, ransac_type, randomized);
     default:
       SlamStderr("Unsupported LoopClosureSolverType in LocalizerAndMapper::SetLoopClosureSolver.\n");
       return nullptr;

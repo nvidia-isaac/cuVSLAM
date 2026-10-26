@@ -48,7 +48,9 @@ def save_stats_to_json(stats, output_dir):
             'gt_n_error_segments': stat.gt_n_error_segments,
             'gt_simple_error': stat.gt_simple_error,
             'num_tracking_losts': stat.num_tracking_losts,
-            'odometry_mode': stat.odometry_mode
+            'odometry_mode': stat.odometry_mode,
+            'num_loop_closures': stat.num_loop_closures,
+            'loop_closure_mode': stat.loop_closure_mode
         }
         stats_list.append(stat_dict)
 
@@ -282,6 +284,8 @@ def generate_report(test_folder, comments, stats, generate_pdf=False, config_nam
             'gt_av_translation_error': s.gt_av_translation_error,
             'gt_av_rotation_error': s.gt_av_rotation_error,
             'gt_simple_error': s.gt_simple_error,
+            'num_loop_closures': s.num_loop_closures,
+            'loop_closure_mode': s.loop_closure_mode,
             'bird_view_with_errors_path': s.bird_view_with_errors_path,
             'bird_view_image_path': image_relative_path  # Relative path for HTML
         }
@@ -335,6 +339,8 @@ def generate_report(test_folder, comments, stats, generate_pdf=False, config_nam
                     'gt_av_translation_error': s.gt_av_translation_error,
                     'gt_av_rotation_error': s.gt_av_rotation_error,
                     'gt_simple_error': s.gt_simple_error,
+                    'num_loop_closures': s.num_loop_closures,
+                    'loop_closure_mode': s.loop_closure_mode,
                     'bird_view_with_errors_path': s.bird_view_with_errors_path,
                     'bird_view_base64': image_to_base64(s.bird_view_with_errors_path) if s.bird_view_with_errors_path else ""
                 }

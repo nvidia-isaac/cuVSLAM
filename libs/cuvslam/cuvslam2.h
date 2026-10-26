@@ -21,6 +21,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -509,7 +510,7 @@ public:
     /// Default: 1.f
     float max_frame_delta_s = 1.f;
     /// Directory where input data will be dumped in edex format.
-    std::string_view debug_dump_directory;
+    std::string debug_dump_directory;
     /// Enable IMU debug mode. Default: false
     bool debug_imu_mode = false;
     /// RGBD odometry settings.
@@ -751,13 +752,13 @@ private:
 /**
  * @brief Result type that can hold either success data or error information.
  *
- * For use in callbacks. Result::error_message should not outlive the callback scope.
+ * For use in callbacks.
  */
 // TODO(C++23): replace with std::expected
 template <typename T>
 struct Result {
-  std::optional<T> data;           ///< data
-  std::string_view error_message;  ///< error message
+  std::optional<T> data;      ///< data
+  std::string error_message;  ///< error message
 
   /// Create a success result
   /// @param[in] value data
@@ -767,7 +768,7 @@ struct Result {
   /// Create an error result
   /// @param[in] message error message
   /// @return Result
-  static Result Error(std::string_view message) { return Result{std::nullopt, message}; }
+  static Result Error(std::string_view message) { return Result{std::nullopt, std::string(message)}; }
 };
 
 /**
@@ -776,8 +777,9 @@ struct Result {
  * Consumes Odometry::State to maintain a pose graph, detect loop closures, save and load maps, and
  * relocalize in an existing map.
  *
- * Thread safety: all methods must be called from a single thread, except LocalizeInMap()
- * and SaveMap() which may be called concurrently with any other method from another thread.
+ * Thread safety: all methods must be called from a single thread, except SaveMap() and, unless `Config::sync_mode` is
+ * set, LocalizeInMap() and RecognizePlaceByFrame(). These may be called concurrently with any
+ * other method from another thread.
  */
 class CUVSLAM_API Slam {
 public:
@@ -785,13 +787,22 @@ public:
   using ImageSet = std::vector<Image>;
 
   /**
+   * @brief Where loop closure looks for revisited places
+   */
+  enum class LoopClosureMode : uint8_t {
+    LSI = 0,  ///< landmark spatial index search around the current pose estimate
+    VPR = 1,  ///< at places proposed by visual place recognition; needs `use_vpr`
+  };
+
+  /**
    * @brief SLAM configuration parameters
    */
   struct Config {
     /// If empty, map is kept in memory only. Else, map is synced to disk (LMDB) at this path, allowing large-scale
-    /// maps; if the path already exists it will be overwritten. To load an existing map, use LocalizeInMap(). To save
-    /// map, use SaveMap().
-    std::string_view map_cache_path = "";
+    /// maps; if the path already exists it will be overwritten. FlushMap() saves the map there, and SaveMap() fails.
+    /// To load an existing map, use LocalizeInMap(); once it succeeds, the session writes the loaded folder if
+    /// `attach` is set, and no map file otherwise.
+    std::string map_path;
     /// Enable GPU use for SLAM
     bool use_gpu = true;
     /// Synchronous mode (does not run a separate work thread if true)
@@ -823,6 +834,17 @@ public:
     /// the poses and loop closures SLAM reports refer to an increasingly old point of the trajectory. The warning
     /// requires verbosity Warning or higher (see SetVerbosity). Default: 10 queued commands.
     uint32_t delay_warning_queue_size = 10;
+    /// Enable visual place recognition (AnyLoc); needs a USE_TENSORRT build, `use_gpu` and `vpr_model_path`.
+    /// Its map is part of the SLAM map: Track() adds one frame per pose graph node, bounded by `max_map_size`.
+    bool use_vpr = false;
+    /// AnyLoc TensorRT engine, built by the `anyloc_engine` target.
+    /// The engine runs only on the GPU and TensorRT version that built it; otherwise the constructor throws.
+    std::string vpr_model_path;
+    /// Minimum similarity in [0, 1] for place recognition to report a match.
+    float vpr_score_threshold = 0.68f;
+    /// Where loop closure looks for revisited places, see `LoopClosureMode`.
+    /// `VPR` needs `use_vpr` and `gt_align_mode` off, else throws std::invalid_argument.
+    LoopClosureMode loop_closure_mode = LoopClosureMode::LSI;
   };
 
   // TODO(vikuznetsov): remove when https://gcc.gnu.org/bugzilla/show_bug.cgi?id=88165 is fixed
@@ -839,6 +861,7 @@ public:
     float horizontal_step;           ///< horizontal step in meters
     float vertical_step;             ///< vertical step in meters
     float angular_step_rads;         ///< angular step around vertical axis in radians
+    uint32_t vpr_candidates = 5;     ///< max places `LocalizeInMap` tries without a guess pose, best first
   };
 
   /**
@@ -911,6 +934,19 @@ public:
   };
 
   /**
+   * @brief Result of `RecognizePlaceByFrame`
+   */
+  struct PlaceRecognition {
+    uint64_t node_id;      ///< pose graph node of the matched frame
+    Pose pose;             ///< current world pose of that node
+    float score;           ///< similarity in [0, 1]
+    int64_t timestamp_ns;  ///< timestamp of the matched frame in nanoseconds
+  };
+
+  /// Callback invoked when place recognition finishes, may be called in a separate thread
+  using RecognizePlaceFinishCB = std::function<void(const Result<PlaceRecognition>& result)>;
+
+  /**
    * Construct a SLAM instance with rig and primary cameras
    * @param[in] rig Camera rig configuration
    * @param[in] primary_cameras Vector of primary camera indices
@@ -959,10 +995,20 @@ public:
    * Save SLAM database (map) to folder asynchronously.
    * This folder will be created, if it does not exist.
    * Contents of the folder will be overwritten.
+   * Fails while the session writes its map in place (`Config::map_path`, or `LocalizeInMap` with `attach`): FlushMap()
+   * saves it there. Also fails for the folder of a map that `LocalizeInMap` loaded and the folders that contain it.
+   * The saved map includes the place recognition map when `Config::use_vpr` is set.
    * @param[in] folder_name Folder name, where SLAM database (map) will be saved
    * @param[in] callback Callback function to be called when save is complete, may be called in a separate thread
    */
-  void SaveMap(const std::string_view& folder_name, std::function<void(bool success)> callback) const;
+  void SaveMap(std::string_view folder_name, std::function<void(bool success)> callback) const;
+
+  /**
+   * Write all unsaved data of the map to its map file asynchronously: `Config::map_path`, or the folder that
+   * `LocalizeInMap` attached. The file then holds the whole map, and mapping goes on as before. Fails without one.
+   * @param[in] callback Callback function to be called when flush is complete, may be called in a separate thread
+   */
+  void FlushMap(std::function<void(bool success)> callback) const;
 
   /// Callback invoked when localization starts, may be called in a separate thread
   using LocalizeStartCB = std::function<void()>;
@@ -975,18 +1021,25 @@ public:
    * localization finishes (possibly on another thread than the caller). If `Config.sync_mode` is true, localization
    * runs immediately before this call returns.
    * Finds the rig pose in the saved map. If successful, replace current map with saved one.
+   * Without `guess_pose`, it needs `Config::use_vpr` and a map saved with it.
+   * Fails if the map has more nodes than `Config::max_map_size` (0: no limit), and for the folder of the map file
+   * this session writes; FlushMap() saves that one.
    * @param[in] folder_name Folder containing the saved SLAM map (database)
    * @param[in] timestamp_ns Time in nanoseconds for the localized pose. If all images timestamps are equal, it makes
    *                         sense to use images[0].timestamp_ns.
-   * @param[in] guess_pose Initial guess for rig pose at the images' timestamp
+   * @param[in] guess_pose Initial guess for rig pose at the images' timestamp, or nullptr to use place recognition
    * @param[in] images Observed images from multicamera (1 - mono, 2 - stereo, etc.)
    * @param[in] settings Localization settings
    * @param[in] start_cb Called when localization starts, may be called in a separate thread
    * @param[in] finish_cb Called when localization completes, may be called in a separate thread
+   * @param[in] attach On success, the session writes its map into `folder_name` from then on, as with
+   *                   `Config::map_path`: FlushMap() saves it there, SaveMap() fails, and destroying Slam writes it
+   *                   there. The folder holds a whole map only after that. Nothing else may open the folder while
+   *                   it is attached.
    */
-  void LocalizeInMap(const std::string_view& folder_name, int64_t timestamp_ns, const Pose& guess_pose,
-                     const ImageSet& images, const LocalizationSettings& settings, LocalizeStartCB start_cb,
-                     LocalizeFinishCB finish_cb);
+  void LocalizeInMap(std::string_view folder_name, int64_t timestamp_ns, const Pose* guess_pose, const ImageSet& images,
+                     const LocalizationSettings& settings, LocalizeStartCB start_cb, LocalizeFinishCB finish_cb,
+                     bool attach = false);
 
   /**
    * Get SLAM metrics.
@@ -1025,6 +1078,14 @@ public:
    * @return Pose graph
    */
   std::shared_ptr<const PoseGraph> ReadPoseGraph();
+
+  /**
+   * Find the pose graph node whose mapped frame looks most like `images`, without geometric verification.
+   * @param[in] images Observed images; only the first one from a primary camera is used
+   * @param[in] finish_cb Called when the search completes, with an error if no mapped place matched; may be called in
+   * a separate thread
+   */
+  void RecognizePlaceByFrame(const ImageSet& images, RecognizePlaceFinishCB finish_cb);
 
 private:
   class Impl;

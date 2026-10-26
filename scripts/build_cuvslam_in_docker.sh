@@ -61,7 +61,8 @@ else
   exit 1
 fi
 
-docker run --runtime=nvidia --gpus all --rm $TTY_FLAG $DOCKER_USER $DOCKER_VOLUMES \
+docker run --runtime=nvidia --gpus all --rm --label "cuvslam.runner=${RUNNER_NAME:-local}" \
+  $TTY_FLAG $DOCKER_USER $DOCKER_VOLUMES \
   -e CUVSLAM_SRC_DIR=/cuvslam \
   -e CUVSLAM_DST_DIR=$INSTALL_DIR/build \
   -e CUVSLAM_REQUIRE_CLEAN_SOURCE="${CUVSLAM_REQUIRE_CLEAN_SOURCE:-false}" \
