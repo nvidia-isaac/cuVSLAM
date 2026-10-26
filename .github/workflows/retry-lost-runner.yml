@@ -97,12 +97,25 @@ jobs:
             let newerRun = null;
             let newerRunError = null;
             try {
-              const { data: recent } = await github.rest.actions.listWorkflowRuns({
-                owner, repo, workflow_id: run.workflow_id, branch: run.head_branch, per_page: 20,
-              });
+              // Filtered run searches return at most 1,000 results, so a larger total
+              // cannot prove that no newer matching run exists.
+              let total = 0;
+              const recent = await github.paginate(
+                github.rest.actions.listWorkflowRuns,
+                {
+                  owner, repo, workflow_id: run.workflow_id, branch: run.head_branch,
+                  created: `>=${run.created_at}`, per_page: 100,
+                },
+                response => {
+                  total = response.data.total_count;
+                  return response.data.workflow_runs;
+                });
+              if (total > 1000) {
+                throw new Error(`${total} runs on this branch since this run, more than the search returns`);
+              }
               const sameRepo = r => (r.head_repository || {}).full_name === run.head_repository.full_name;
               const samePr = r => !isPrRun || (r.pull_requests || []).some(p => pr && p.number === pr.number);
-              newerRun = recent.workflow_runs.find(
+              newerRun = recent.find(
                 r => r.id !== run.id && r.created_at > run.created_at && sameRepo(r) && samePr(r));
             } catch (error) {
               newerRunError = error.message;
