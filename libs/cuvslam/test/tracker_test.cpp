@@ -410,3 +410,12 @@ TEST_F(TrackerTest, MultisensorModeRequiresCunlsBuild) {
   }
 }
 #endif
+
+TEST(ResultTest, ErrorOwnsMessageFromStringView) {
+  std::string message = "map not found";
+  const auto result = cuvslam::Result<cuvslam::Pose>::Error(std::string_view{message});
+  message.assign(message.size(), 'x');
+
+  EXPECT_FALSE(result.data.has_value());
+  EXPECT_EQ(result.error_message, "map not found");
+}

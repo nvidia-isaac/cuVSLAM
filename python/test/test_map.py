@@ -12,6 +12,7 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
+import multiprocessing
 import os
 import tempfile
 import shutil
@@ -29,6 +30,43 @@ import data_gen as data
 W, H = 640, 480  # Image size of tracked images
 BASELINE = 0.25  # Baseline distance between cameras (m)
 STEPS = 30       # Number of steps
+
+def end_with_pending_callbacks(use_tracker, queue):
+    """Drops an async session while the SLAM thread is inside a callback and has more callbacks queued."""
+    rig = vslam.Rig(data.generate_stereo_camera(W, H, BASELINE), [vslam.ImuCalibration()])
+    slam_cfg = vslam.Slam.Config(sync_mode=False)
+    if use_tracker:
+        odom_cfg = vslam.Odometry.Config(odometry_mode=vslam.Odometry.OdometryMode.Multicamera,
+                                         rectified_stereo_camera=True, async_sba=True)
+        session = [vslam.Tracker(rig, vslam.Tracker.Mode.OdometryWithSlamRealtime, odom_cfg, slam_cfg)]
+        session.append(session[0].slam)
+    else:
+        session = [vslam.Slam(rig, [0], slam_cfg)]
+    images = [np.zeros((H, W), dtype=np.uint8)] * 2
+    settings = vslam.Slam.LocalizationSettings(horizontal_search_radius=0.25, vertical_search_radius=0.25,
+                                               horizontal_step=0.0625, vertical_step=0.0625, angular_step_rads=0.03125)
+    callback_threads = []
+    started = threading.Event()
+    release = threading.Event()
+
+    def first():
+        callback_threads.append(threading.get_ident())
+        started.set()
+        release.wait(60)  # set by a timer, which needs the GIL back once the session is dropped
+
+    def localize(start_cb):
+        # There is no map, so it fails, but its callbacks still run on the SLAM thread
+        session[-1].localize_in_map("/nonexistent/cuvslam/map", 0, vslam.Pose(), images, settings, start_cb,
+                             lambda pose, error: None)
+
+    localize(first)
+    if not started.wait(60):
+        raise RuntimeError("the first callback did not run")
+    for _ in range(10):
+        localize(lambda: None)
+    threading.Timer(0.5, release.set).start()
+    session.clear()  # drops the Python owners while callbacks are pending
+    queue.put(callback_threads[0] != threading.get_ident())
 
 plt = None
 
@@ -408,6 +446,27 @@ class TestMap(unittest.TestCase):
         # The session wrote its own map file before it moved to the loaded one, which it wrote too
         self.assertTrue(any(self.try_localize(img, 'own', i) for i in range(0, 10)))
         self.assertTrue(any(self.try_localize(img, 'map', i) for i in range(0, 10)))
+
+    def end_with_pending_callbacks(self, use_tracker, owners):
+        # In a child process, so that a deadlock fails the test instead of hanging it
+        context = multiprocessing.get_context('spawn')
+        queue = context.Queue()
+        child = context.Process(target=end_with_pending_callbacks, args=(use_tracker, queue))
+        child.start()
+        child.join(timeout=120)
+        if child.is_alive():
+            child.kill()
+            child.join()
+            self.fail(f"destroying {owners} with callbacks pending did not return")
+        self.assertEqual(child.exitcode, 0)
+        on_slam_thread = queue.get(timeout=10)
+        self.assertTrue(on_slam_thread, "the callback did not run on the SLAM thread")
+
+    def test_destroying_slam_with_callbacks_pending_returns(self):
+        self.end_with_pending_callbacks(False, "slam")
+
+    def test_destroying_tracker_with_callbacks_pending_returns(self):
+        self.end_with_pending_callbacks(True, "slam, tracker")
 
 
 if __name__ == "__main__":
