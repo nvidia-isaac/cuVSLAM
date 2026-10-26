@@ -853,7 +853,11 @@ NB_MODULE(pycuvslam, m) {
       m, "Slam",
       "Builds and optimizes a reusable map from odometry results, including loop closure, map persistence, and "
       "relocalization.\n\n"
-      "Use directly for manual orchestration, or access Tracker's instance through its `slam` property.",
+      "Use directly for manual orchestration, or access Tracker's instance through its `slam` property.\n\n"
+      "Destroying a Slam from a SLAM callback, for example when the callback holds its last reference, finishes "
+      "asynchronously: the SLAM thread is stopped and the map file written on another thread after the object is "
+      "gone, and there is no way to wait for that. Do not exit the process right after, or the map file may be left "
+      "incomplete.",
       nb::is_final());
 
   nb::enum_<Slam::DataLayer>(slam_cls, "DataLayer", "Data layer for SLAM")
@@ -1232,7 +1236,9 @@ NB_MODULE(pycuvslam, m) {
   auto tracker_cls = nb::class_<Tracker>(m, "Tracker",
                                          "Coordinates cuVSLAM Odometry and optional SLAM.\n\n"
                                          "Submit frames and IMU measurements through this class. Use the `odometry` "
-                                         "and `slam` properties for module-specific queries and operations.",
+                                         "and `slam` properties for module-specific queries and operations.\n\n"
+                                         "Destroying a Tracker from a SLAM callback finishes asynchronously, as for "
+                                         ":class:`Slam`.",
                                          nb::is_final());
 
   nb::enum_<Tracker::Mode>(tracker_cls, "Mode", "What the tracker runs, and in which thread")
