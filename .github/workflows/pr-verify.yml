@@ -137,7 +137,7 @@ jobs:
       - name: Run Python tools tests
         timeout-minutes: 10
         run: |
-          docker run --rm --network host \
+          docker run --rm --network host --label "cuvslam.runner=$RUNNER_NAME" \
             -v "$(pwd):/cuvslam:ro" \
             cuvslam-ci:local \
             bash -c 'set -euo pipefail
@@ -152,7 +152,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_RO_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_RO_SECRET_ACCESS_KEY }}
         run: |
-          docker run --rm --network host \
+          docker run --rm --network host --label "cuvslam.runner=$RUNNER_NAME" \
             -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_DEFAULT_REGION -e S3_DATASETS_BUCKET \
             -e RUNNER_STORAGE_ROOT -e RUNNER_LOCAL_DATASETS_ROOT -e EVAL_SUITE \
             -v "$(pwd):/cuvslam:ro" \
@@ -167,7 +167,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_RO_SECRET_ACCESS_KEY }}
         run: |
           mkdir -p "$RUNNER_LOCAL_DATASETS_ROOT"
-          docker run --rm --network host \
+          docker run --rm --network host --label "cuvslam.runner=$RUNNER_NAME" \
             -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_DEFAULT_REGION -e S3_DATASETS_BUCKET \
             -e RUNNER_LOCAL_DATASETS_ROOT -e EVAL_SUITE \
             -v "$(pwd):/cuvslam:ro" \
@@ -255,6 +255,20 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
+      # On cancel or timeout the runner signals only the step shell, so a hung container keeps running.
+      - name: Remove leftover containers
+        if: always()
+        run: |
+          mapfile -t containers < <(docker ps -aq --filter "label=cuvslam.runner=$RUNNER_NAME")
+          if [ "${#containers[@]}" -eq 0 ]; then
+            exit 0
+          fi
+          image=$(docker inspect --format '{{.Config.Image}}' "${containers[0]}")
+          docker rm -f "${containers[@]}" || echo "::warning::Failed to remove some leftover containers"
+          # Removed containers skip their chown traps, so return the workspace to the runner user.
+          docker run --rm --entrypoint chown -v "$GITHUB_WORKSPACE:/workspace" "$image" \
+            -R "$(id -u):$(id -g)" /workspace
+
   build-test-orin:
     name: "Build + Test (Orin)"
     if: github.event.pull_request.head.repo.full_name == github.repository
@@ -336,6 +350,20 @@ jobs:
             output/test-summary.txt
           retention-days: 30
           if-no-files-found: warn
+
+      # On cancel or timeout the runner signals only the step shell, so a hung container keeps running.
+      - name: Remove leftover containers
+        if: always()
+        run: |
+          mapfile -t containers < <(docker ps -aq --filter "label=cuvslam.runner=$RUNNER_NAME")
+          if [ "${#containers[@]}" -eq 0 ]; then
+            exit 0
+          fi
+          image=$(docker inspect --format '{{.Config.Image}}' "${containers[0]}")
+          docker rm -f "${containers[@]}" || echo "::warning::Failed to remove some leftover containers"
+          # Removed containers skip their chown traps, so return the workspace to the runner user.
+          docker run --rm --entrypoint chown -v "$GITHUB_WORKSPACE:/workspace" "$image" \
+            -R "$(id -u):$(id -g)" /workspace
 
   build-test-thor:
     name: "Build + Test (Thor)"
@@ -430,6 +458,20 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
+      # On cancel or timeout the runner signals only the step shell, so a hung container keeps running.
+      - name: Remove leftover containers
+        if: always()
+        run: |
+          mapfile -t containers < <(docker ps -aq --filter "label=cuvslam.runner=$RUNNER_NAME")
+          if [ "${#containers[@]}" -eq 0 ]; then
+            exit 0
+          fi
+          image=$(docker inspect --format '{{.Config.Image}}' "${containers[0]}")
+          docker rm -f "${containers[@]}" || echo "::warning::Failed to remove some leftover containers"
+          # Removed containers skip their chown traps, so return the workspace to the runner user.
+          docker run --rm --entrypoint chown -v "$GITHUB_WORKSPACE:/workspace" "$image" \
+            -R "$(id -u):$(id -g)" /workspace
+
   # Smoke check for a non-default CMake configuration. Catches build/link and test
   # breakages the default (USE_RERUN=OFF) build never exercises. Builds and runs the
   # C++ unit tests; no wheels, docs, or evaluation (nightly runs the full USE_RERUN build).
@@ -460,6 +502,20 @@ jobs:
       - name: Run C++ tests
         timeout-minutes: 15
         run: ./scripts/test_cuvslam_in_docker.sh ./output-rerun
+
+      # On cancel or timeout the runner signals only the step shell, so a hung container keeps running.
+      - name: Remove leftover containers
+        if: always()
+        run: |
+          mapfile -t containers < <(docker ps -aq --filter "label=cuvslam.runner=$RUNNER_NAME")
+          if [ "${#containers[@]}" -eq 0 ]; then
+            exit 0
+          fi
+          image=$(docker inspect --format '{{.Config.Image}}' "${containers[0]}")
+          docker rm -f "${containers[@]}" || echo "::warning::Failed to remove some leftover containers"
+          # Removed containers skip their chown traps, so return the workspace to the runner user.
+          docker run --rm --entrypoint chown -v "$GITHUB_WORKSPACE:/workspace" "$image" \
+            -R "$(id -u):$(id -g)" /workspace
 
   test-report:
     name: "Post Test Report"
