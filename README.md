@@ -265,8 +265,6 @@ default configuration include cuNLS support and do not require a separate runtim
 
 cuNLS requires `USE_CUDA=ON`. To build from source with older CUDA versions, configure with
 `-DUSE_CUNLS=OFF`. This disables cuNLS and the `Multisensor` odometry mode that depends on it.
-CUDA 12.2 is a maintainer-reported working configuration with cuNLS disabled, not an established
-minimum CUDA version.
 
 ### Build on Jetson (aarch64)
 
