@@ -31,7 +31,7 @@ namespace {
 
 // Depth lifting, ICP and point-to-plane factors project into depth images with pinhole intrinsics only.
 // Cameras without depth only feed normalized (undistorted) observations to the solver, so any model works.
-void warn_if_non_pinhole_depth_camera(const camera::Rig& rig, const std::vector<int32_t>& depth_camera_ids) {
+void WarnIfNonPinholeDepthCamera(const camera::Rig& rig, const std::vector<int32_t>& depth_camera_ids) {
   for (int32_t cam_id : depth_camera_ids) {
     if (dynamic_cast<const camera::PinholeCameraModel*>(rig.intrinsics[cam_id]) == nullptr) {
       TraceWarning(
@@ -42,7 +42,7 @@ void warn_if_non_pinhole_depth_camera(const camera::Rig& rig, const std::vector<
   }
 }
 
-pipelines::SolverSfMMultisensor make_solver(map::UnifiedMap& map, const camera::Rig& rig, const Settings& settings) {
+pipelines::SolverSfMMultisensor MakeSolver(map::UnifiedMap& map, const camera::Rig& rig, const Settings& settings) {
   if (settings.multisensor_settings.with_imu) {
     return pipelines::SolverSfMMultisensor(map, rig, settings.sba_settings, settings.imu_calibration);
   }
@@ -58,8 +58,8 @@ MultisensorOdometry::MultisensorOdometry(const camera::Rig& rig, const camera::F
       settings_(settings),
       map_(20),
       feature_predictor_(std::make_shared<pipelines::FeaturePredictor>(map_, rig)),
-      solver_(make_solver(map_, rig, settings)) {
-  warn_if_non_pinhole_depth_camera(rig, settings.multisensor_settings.depth_camera_ids);
+      solver_(MakeSolver(map_, rig, settings)) {
+  WarnIfNonPinholeDepthCamera(rig, settings.multisensor_settings.depth_camera_ids);
   observations_.resize(rig.num_cameras);
   depth_cam_ids_.reserve(rig.num_cameras);
   depth_info_storage_.reserve(rig.num_cameras);
