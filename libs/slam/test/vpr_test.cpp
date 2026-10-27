@@ -591,6 +591,22 @@ TEST(VprAnyLocFactory, RefusesToConstructWithoutAnEngine) {
   EXPECT_NE(error.find("anyloc_engine"), std::string::npos) << error;
 }
 
+TEST(VprAnyLocNetwork, LoadsTheTensorRtRuntime) {
+  const std::string library = "libnvinfer.so." + std::to_string(NV_TENSORRT_MAJOR);
+  EXPECT_NE(LoadTensorRtSymbol(library, "createInferRuntime_INTERNAL"), nullptr);
+}
+
+TEST(VprAnyLocNetwork, ReportsAMissingTensorRt) {
+  try {
+    LoadTensorRtSymbol("libnvinfer.so.0", "createInferRuntime_INTERNAL");
+    FAIL() << "loaded a library that does not exist";
+  } catch (const std::runtime_error& error) {
+    const std::string message = error.what();
+    EXPECT_NE(message.find("needs TensorRT"), std::string::npos) << message;
+    EXPECT_NE(message.find("libnvinfer.so.0"), std::string::npos) << message;
+  }
+}
+
 TEST(VprAnyLocNetwork, RunsAnEngineWithTheExpectedInterface) {
   const std::string& engine = StandInEngine("valid");
   if (engine.empty()) {

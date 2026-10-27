@@ -102,7 +102,7 @@ set(LIBS
 if (USE_TENSORRT)
   set(HEADERS ${HEADERS} vpr/anyloc_network.h vpr/vpr_anyloc.h)
   set(SOURCES ${SOURCES} vpr/anyloc_network.cpp vpr/vpr_anyloc.cpp)
-  set(LIBS ${LIBS} TensorRT::nvinfer)
+  set(LIBS ${LIBS} TensorRT::headers ${CMAKE_DL_LIBS})
 endif (USE_TENSORRT)
 
 if (USE_CUDA)
