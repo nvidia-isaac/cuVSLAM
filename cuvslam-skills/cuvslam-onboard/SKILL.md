@@ -50,19 +50,20 @@ Once the user provides a path, use it consistently throughout all subsequent com
 
 Pre-built wheels from https://github.com/nvidia-isaac/cuVSLAM/releases/latest:
 
-| Target | Ubuntu | Python wheel tag | CUDA wheel tag | Arch |
-|--------|--------|------------------|----------------|------|
-| Desktop/server | 22.04 | `cp310` (Python 3.10) | `cu12`, `cu13` | x86_64 |
-| Desktop/server | 24.04 | `cp312-abi3` (Python 3.12+) | `cu12`, `cu13` | x86_64 |
-| Jetson Orin | 22.04 (JetPack 6.x) | `cp310` (Python 3.10) | `cu12` | aarch64 |
-| Jetson Thor | 24.04 (JetPack 7.x) | `cp312-abi3` (Python 3.12+) | `cu13` | aarch64 |
+| Target | Ubuntu | Python wheel tag | Package | Arch |
+|--------|--------|------------------|---------|------|
+| Desktop/server | 22.04 | `cp310` (Python 3.10) | `cuvslam-cu12`, `cuvslam-cu13` | x86_64 |
+| Desktop/server | 24.04 | `cp312-abi3` (Python 3.12+) | `cuvslam-cu12`, `cuvslam-cu13` | x86_64 |
+| Jetson Orin | 22.04 (JetPack 6.x) | `cp310` (Python 3.10) | `cuvslam-cu12` | aarch64 |
+| Jetson Thor | 24.04 (JetPack 7.x) | `cp312-abi3` (Python 3.12+) | `cuvslam-cu13` | aarch64 |
 
-Only these combinations are provided. The installed CUDA major must match the wheel's `cu12` or `cu13` tag; use a
-source build for other combinations.
+Only these combinations are provided; use a source build for others. The CUDA Toolkit major must match the package's
+`cu12` or `cu13` suffix. Without a system CUDA Toolkit, install the wheel with the `cuda` extra
+(`pip install "./<wheel>.whl[cuda]"`; not on Jetson Orin). Install only one cuVSLAM package per environment.
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install cuvslam-<version>.whl
+pip install cuvslam_cu12-<version>-<tags>.whl   # or cuvslam_cu13-...
 pip install -r examples/requirements.txt   # rerun-sdk, numpy, etc.
 ```
 
