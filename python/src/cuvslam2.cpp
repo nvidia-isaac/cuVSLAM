@@ -197,7 +197,7 @@ Odometry::ImageSet ImageSetFromNDArrays(const std::vector<nb::ndarray<nb::ro>>& 
 
 }  // namespace
 
-NB_MODULE(pycuvslam, m) {
+NB_MODULE(_cuvslam, m) {
   // Free functions
 
   m.def(

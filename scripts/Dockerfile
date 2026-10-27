@@ -49,7 +49,7 @@ COPY scripts/requirements.txt /tmp/ci-requirements.txt
 RUN pip install --no-cache-dir -r /tmp/ci-requirements.txt && \
     rm /tmp/ci-requirements.txt
 
-COPY python/test/requirements.txt /tmp/test-requirements.txt
+COPY python/tests/requirements.txt /tmp/test-requirements.txt
 RUN pip install --no-cache-dir -r /tmp/test-requirements.txt && \
     rm /tmp/test-requirements.txt
 

@@ -29,7 +29,7 @@
 """
 Python helper functions for loading cuVSLAM configuration from YAML files.
 
-These are intentionally separate from the core C++ bindings (pycuvslam) to keep
+These are intentionally separate from the core C++ bindings (_cuvslam) to keep
 file I/O out of the libcuvslam binary. Use these helpers in tools and scripts;
 core tracking code should receive fully-constructed Config objects directly.
 """
@@ -38,7 +38,7 @@ import warnings
 from typing import Optional
 import yaml
 
-from .pycuvslam import Odometry, Slam
+from ._cuvslam import Odometry, Slam
 
 
 def _parse_bool(value) -> bool:

@@ -7,7 +7,7 @@ AI agent guidance for working in this repository. **Start by reading `README.md`
 ### Python API tests
 
 ```bash
-python3 -m unittest discover -v -s ./python/test --locals
+python3 -m unittest discover -v -s ./python/tests --locals
 ```
 
 ### All-in-one (build + both test suites)
@@ -42,7 +42,7 @@ Load-bearing rules:
 - When generating C++ code, always include `{}` braces for `if` statements, even for single-line bodies. This prevents accidental behavior changes when new statements are added later and keeps control flow explicit and consistent.
 
 **Don't:**
-- Don't edit `libs/cuvslam/cuvslam2.h` without updating `python/cuvslam2.cpp` — they must stay in sync
+- Don't edit `libs/cuvslam/cuvslam2.h` without updating `python/src/cuvslam2.cpp` — they must stay in sync
 - Don't put implementation details in `cuvslam2.h`; it is the public C++ API boundary
 - Don't store `std::string_view` or other non-owning views in `cuvslam2.h` structs or return them from long-lived objects; use owning types (`std::string`, `std::vector`) for anything the caller keeps. `std::string_view` is fine for function parameters that are only used during the call
 - Don't mix different `CMAKE_BUILD_TYPE` values in the same `CUVSLAM_DST_DIR`
@@ -65,7 +65,7 @@ Load-bearing rules:
 
 **Length:** Keep the git commit message title (the first line) to 70 characters or fewer.
 
-**Unit tests:** `[fix]` and `[feat]` MRs must include unit tests (C++ in `libs/*/test/` and/or Python under `python/test/` as appropriate).
+**Unit tests:** `[fix]` and `[feat]` MRs must include unit tests (C++ in `libs/*/test/` and/or Python under `python/tests/` as appropriate).
 
 Changes confined to `examples/` or `scripts/` are exempt. Neither tree is product source, neither has a test directory, and adding one would mean import shims or harnesses that cost more to maintain than they catch. Validate those changes with focused invocations plus the relevant pre-commit hooks, and record the commands and their output in the MR description. An MR that touches one of these trees *and* product source still needs tests for the product source part.
 
