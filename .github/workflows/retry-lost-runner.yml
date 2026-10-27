@@ -106,9 +106,11 @@ jobs:
                   owner, repo, workflow_id: run.workflow_id, branch: run.head_branch,
                   created: `>=${run.created_at}`, per_page: 100,
                 },
+                // Octokit has already replaced response.data with the runs array and
+                // re-attached total_count to it.
                 response => {
                   total = response.data.total_count;
-                  return response.data.workflow_runs;
+                  return response.data;
                 });
               if (total > 1000) {
                 throw new Error(`${total} runs on this branch since this run, more than the search returns`);
