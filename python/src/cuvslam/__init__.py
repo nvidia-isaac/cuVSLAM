@@ -10,6 +10,39 @@
 """cuVSLAM Python bindings."""
 
 import warnings
+from importlib import metadata as _metadata
+
+
+def _warn_if_multiple_distributions():
+    installed = []
+    for name in ('cuvslam', 'cuvslam_cu12', 'cuvslam_cu13'):
+        try:
+            installed.append(_metadata.distribution(name).metadata['Name'])
+        except _metadata.PackageNotFoundError:
+            pass
+    if len(installed) > 1:
+        warnings.warn(
+            f'Several cuVSLAM distributions are installed ({", ".join(installed)}). They install the same files, '
+            'so uninstalling one breaks the others. Uninstall all of them, then install only one.',
+            RuntimeWarning,
+            stacklevel=2)
+
+
+def _load_cuda_libraries():
+    """Load the CUDA libraries from NVIDIA wheels (the [cuda] extra), which the dynamic loader does not search."""
+    try:
+        from cuda.pathfinder import DynamicLibNotFoundError, load_nvidia_dynamic_lib
+    except ImportError:
+        return
+    for name in ('cublas', 'cusparse', 'cusolver'):
+        try:
+            load_nvidia_dynamic_lib(name)
+        except DynamicLibNotFoundError:
+            pass
+
+
+_warn_if_multiple_distributions()
+_load_cuda_libraries()
 
 # Import select bindings for the main namespace
 from ._cuvslam import (

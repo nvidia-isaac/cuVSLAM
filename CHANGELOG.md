@@ -10,8 +10,14 @@
   The mode has to agree with `Odometry::Config::async_sba` and `Slam::Config::sync_mode`: `Tracker`
   checks them and throws `std::invalid_argument` on a mismatch rather than overwriting them. A
   `slam_config` is now rejected in the odometry-only modes
+- Python wheels are now named `cuvslam-cu12` and `cuvslam-cu13` instead of `cuvslam` with a `+cu12`/`+cu13` local
+  version. Uninstall an existing `cuvslam` before installing them; `import cuvslam` warns when several cuVSLAM
+  distributions are installed
 
 ### Added
+
+- `cuda` extra for the Python wheels (x86_64 and Jetson Thor): `pip install "<wheel>[cuda]"` installs the cuBLAS,
+  cuSOLVER and cuSPARSE wheels from PyPI, so no system CUDA Toolkit is needed
 
 - `Slam::Config::delay_warning_queue_size`: warns in verbose mode when more than the configured number of commands
   are queued to the SLAM thread, meaning SLAM falls behind odometry

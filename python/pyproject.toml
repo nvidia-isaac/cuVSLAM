@@ -3,6 +3,7 @@ requires = ["scikit-build-core>=0.10", "nanobind>=2.10.2"]
 build-backend = "scikit_build_core.build"
 
 [project]
+# Release builds rename this to cuvslam-cu<CUDA major> (scripts/build_pycuvslam_in_docker.sh)
 name = "cuvslam"
 dynamic = ["version"]
 description = "Python bindings for cuVSLAM library"
@@ -23,6 +24,14 @@ classifiers = [
     "Environment :: GPU :: NVIDIA CUDA",
 ]
 dependencies = ["pyyaml>=5.3.1"]
+
+[project.optional-dependencies]
+# CUDA libraries from PyPI instead of a system CUDA Toolkit. Release builds swap in the wheel's CUDA major.
+# On aarch64, CUDA 12 means Jetson Orin, which cannot use these SBSA wheels.
+cuda = [
+    'cuda-toolkit[cublas,cusolver,cusparse]==12.*; platform_machine != "aarch64"',
+    "cuda-pathfinder",
+]
 
 [tool.scikit-build]
 minimum-version = "build-system.requires"
