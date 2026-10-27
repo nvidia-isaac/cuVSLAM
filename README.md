@@ -139,19 +139,24 @@ PyCuVSLAM is the Python wrapper (bindings) for the cuVSLAM library.
 Pre-built wheels are available on the [cuVSLAM releases page](https://github.com/nvidia-isaac/cuVSLAM/releases)
 for the following configurations:
 
-| Target | Ubuntu | Python wheel tag | CUDA wheel tag | Architecture |
-|--------|--------|------------------|----------------|--------------|
-| Desktop/server | 22.04 | `cp310` (Python 3.10) | `cu12`, `cu13` | x86_64 |
-| Desktop/server | 24.04 | `cp312-abi3` (Python 3.12+) | `cu12`, `cu13` | x86_64 |
-| Jetson Orin | 22.04 (JetPack 6.x) | `cp310` (Python 3.10) | `cu12` | aarch64 |
-| Jetson Thor | 24.04 (JetPack 7.x) | `cp312-abi3` (Python 3.12+) | `cu13` | aarch64 |
+| Target | Ubuntu | Python wheel tag | Package | Architecture |
+|--------|--------|------------------|---------|--------------|
+| Desktop/server | 22.04 | `cp310` (Python 3.10) | `cuvslam-cu12`, `cuvslam-cu13` | x86_64 |
+| Desktop/server | 24.04 | `cp312-abi3` (Python 3.12+) | `cuvslam-cu12`, `cuvslam-cu13` | x86_64 |
+| Jetson Orin | 22.04 (JetPack 6.x) | `cp310` (Python 3.10) | `cuvslam-cu12` | aarch64 |
+| Jetson Thor | 24.04 (JetPack 7.x) | `cp312-abi3` (Python 3.12+) | `cuvslam-cu13` | aarch64 |
 
 Only the combinations listed above are provided as pre-built wheels. The `cp312-abi3` wheels use Python's stable ABI
 and are compatible with Python 3.12 and later. Other Python, CUDA, or Jetson combinations require an
 [installation from source](#install-from-source).
 
-**Prerequisite**: [CUDA Toolkit 12 or 13](https://developer.nvidia.com/cuda/toolkit) must be installed separately
-(not included in the wheels). Its major version must match the wheel's `cu12` or `cu13` tag.
+**Prerequisite**: the wheels use cuBLAS, cuSOLVER and cuSPARSE from [CUDA Toolkit](https://developer.nvidia.com/cuda/toolkit)
+12 or 13, matching the package's `cu12` or `cu13` suffix. They come from either:
+
+* a system CUDA Toolkit install, or
+* NVIDIA's CUDA Toolkit wheels, installed with the `cuda` extra (x86_64 and Jetson Thor; Jetson Orin uses the CUDA
+  Toolkit from JetPack). When installed, they take precedence over a system CUDA Toolkit, unless another module has
+  already loaded these libraries.
 
 Official wheels include cuNLS support for `Multisensor` mode; no separate cuNLS installation is required.
 
@@ -163,8 +168,12 @@ To install (virtual environment is recommended):
 3. Install with pip:
 
 ```bash
-pip install cuvslam-*.whl
+pip install cuvslam_cu12-*.whl                         # with a system CUDA Toolkit
+pip install "./cuvslam_cu12-<version>-<tags>.whl[cuda]" # with CUDA Toolkit wheels from PyPI
 ```
+
+Install only one of `cuvslam-cu12` and `cuvslam-cu13` in an environment: both provide the `cuvslam` module, and
+`import cuvslam` warns if more than one cuVSLAM package is installed.
 
 If a pre-built wheel is not available for your system, see [Install from Source](#install-from-source) below.
 
