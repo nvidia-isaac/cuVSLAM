@@ -255,15 +255,18 @@ Build types: `Release` (default), `Debug`, `RelWithDebInfo`, `MinSizeRel`. Do no
 source via `FetchContent`, like the other external dependencies — no separate install or path is
 required. The source is pinned in `cmake/ext/cunls.cmake`, and spdlog is shared with cuVSLAM.
 cuVSLAM uses cuNLS's DenseQR solver and builds with the optional cuDSS backend disabled, so no
-cuDSS archive, library, or runtime package is required. A network connection and the CUDA Toolkit
-are the only prerequisites. The resulting static cuNLS archive is bundled into `libcuvslam`.
+cuDSS archive, library, or runtime package is required. A network connection and CUDA Toolkit 12.6
+or later are required for the default `USE_CUNLS=ON` build. The resulting static cuNLS archive is
+bundled into `libcuvslam`.
 
 cuNLS source and license information are published in the
 [nvidia-isaac/cuNLS repository](https://github.com/nvidia-isaac/cuNLS). Release wheels and C++ packages built with the
 default configuration include cuNLS support and do not require a separate runtime package.
 
-`USE_CUDA` must be `ON`. To build without cuNLS (and disable the multisensor odometry mode that
-depends on it), configure with `-DUSE_CUNLS=OFF`.
+cuNLS requires `USE_CUDA=ON`. To build from source with older CUDA versions, configure with
+`-DUSE_CUNLS=OFF`. This disables cuNLS and the `Multisensor` odometry mode that depends on it.
+CUDA 12.2 is a maintainer-reported working configuration with cuNLS disabled, not an established
+minimum CUDA version.
 
 ### Build on Jetson (aarch64)
 
