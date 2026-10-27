@@ -13,6 +13,7 @@
 - Python wheels are now named `cuvslam-cu12` and `cuvslam-cu13` instead of `cuvslam` with a `+cu12`/`+cu13` local
   version. Uninstall an existing `cuvslam` before installing them; `import cuvslam` warns when several cuVSLAM
   distributions are installed
+- The compiled Python module is now the private `cuvslam._cuvslam` (was `cuvslam.pycuvslam`); import from `cuvslam`
 
 ### Added
 
