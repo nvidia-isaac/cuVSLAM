@@ -155,7 +155,8 @@ and are compatible with Python 3.12 and later. Other Python, CUDA, or Jetson com
 
 * a system CUDA Toolkit install, or
 * NVIDIA's CUDA Toolkit wheels, installed with the `cuda` extra (x86_64 and Jetson Thor; Jetson Orin uses the CUDA
-  Toolkit from JetPack). When installed, they take precedence over a system CUDA Toolkit.
+  Toolkit from JetPack). When installed, they take precedence over a system CUDA Toolkit, unless another module has
+  already loaded these libraries.
 
 Official wheels include cuNLS support for `Multisensor` mode; no separate cuNLS installation is required.
 

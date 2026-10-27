@@ -52,7 +52,7 @@ class TestApi(unittest.TestCase):
 
     def test_loads_cuda_libraries_with_pathfinder(self):
         pathfinder = mock.Mock(DynamicLibNotFoundError=LookupError)
-        pathfinder.load_nvidia_dynamic_lib.side_effect = [None, LookupError('cusparse'), None]
+        pathfinder.load_nvidia_dynamic_lib.side_effect = [None, LookupError('cusparse'), RuntimeError('cusolver')]
         with mock.patch.dict('sys.modules', {'cuda': mock.Mock(pathfinder=pathfinder), 'cuda.pathfinder': pathfinder}):
             vslam._load_cuda_libraries()
         self.assertEqual([c.args[0] for c in pathfinder.load_nvidia_dynamic_lib.call_args_list],

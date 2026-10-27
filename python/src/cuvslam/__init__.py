@@ -9,6 +9,7 @@
 
 """cuVSLAM Python bindings."""
 
+import contextlib
 import warnings
 from importlib import metadata as _metadata
 
@@ -35,10 +36,10 @@ def _load_cuda_libraries():
     except ImportError:
         return
     for name in ('cublas', 'cusparse', 'cusolver'):
-        try:
+        # cuda-pathfinder raises RuntimeError when it finds a library but cannot load it; the normal loader may still
+        # find a usable system copy.
+        with contextlib.suppress(DynamicLibNotFoundError, RuntimeError):
             load_nvidia_dynamic_lib(name)
-        except DynamicLibNotFoundError:
-            pass
 
 
 _warn_if_multiple_distributions()

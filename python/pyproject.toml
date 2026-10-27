@@ -26,7 +26,8 @@ classifiers = [
 dependencies = ["pyyaml>=5.3.1"]
 
 [project.optional-dependencies]
-# CUDA libraries from PyPI instead of a system CUDA Toolkit. Release builds swap in the wheel's CUDA major.
+# CUDA libraries from PyPI instead of a system CUDA Toolkit, for release wheels; release builds swap in the wheel's
+# CUDA major. Source builds use the CUDA Toolkit they were built with and should not install this extra.
 # On aarch64, CUDA 12 means Jetson Orin, which cannot use these SBSA wheels.
 cuda = [
     'cuda-toolkit[cublas,cusolver,cusparse]==12.*; platform_machine != "aarch64"',
