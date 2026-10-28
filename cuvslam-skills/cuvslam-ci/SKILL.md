@@ -18,7 +18,7 @@ Workflows (`.github/workflows/`):
 - `pr-verify.yml` - lint, then build + unit test on x86, Orin, and Thor; eval on the x86 job (fork-gated); posts a KPI table to the PR comment. Jetson benchmarks do not run on PRs.
 - `nightly.yml` - scheduled/manual build + test matrix; eval on the four x86 configs and CUDA micro-benchmarks on Orin and Thor; writes per-config reports and versioned Actions artifacts. Scheduled runs never create a Release. A manual dispatch from a matching `release/vX.Y.Z` branch promotes the same distributable bytes to a protected draft GitHub Release.
 - `provision-datasets.yml` - manual `workflow_dispatch` on the default branch; downloads, converts, and uploads a dataset tarball to S3. The only writer of dataset storage.
-- `retry-lost-runner.yml` - after a failed nightly run on `main` or `release/**`, re-runs the failed jobs only if a self-hosted runner lost communication, and reports each such event on the `ci-runner-lost` issue (and Slack, if configured).
+- `retry-lost-runner.yml` - after a failed or cancelled nightly run on `main` or `release/**`, or a failed or cancelled same-repo PR Verify run, re-runs the failed and cancelled jobs only if a self-hosted runner lost communication or received a shutdown signal (never for user, superseded, or timeout cancellations), and reports each such event on the `ci-runner-lost` issue (and Slack, if configured).
 
 Branch protection is not in this repository. The default-branch ruleset is configured in the GitHub
 UI; read what is actually enforced with `gh api repos/<owner>/<repo>/rules/branches/main`.

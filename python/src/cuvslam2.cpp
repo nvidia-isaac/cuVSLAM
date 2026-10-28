@@ -471,7 +471,8 @@ NB_MODULE(_cuvslam, m) {
              " - The rig must contain at least one RGB-D camera listed in MultisensorSettings.depth_camera_ids, or at "
              "least one camera pair with overlapping frustums. A single RGB-D camera is valid, with or without an "
              "IMU.\n"
-             " - The current solver supports pinhole cameras; other camera models are not supported.\n"
+             " - Cameras listed in MultisensorSettings.depth_camera_ids must use the pinhole model; other models emit "
+             "a warning and their depth is misaligned. Cameras without depth support every distortion model.\n"
              " - Depth images passed to track() must be 2D uint16 ndarrays (cuVSLAM's C++ contract also accepts "
              "FLOAT32, but the current PyCuVSLAM binding only exposes uint16); each depth image's camera_index must "
              "appear in MultisensorSettings.depth_camera_ids.");
