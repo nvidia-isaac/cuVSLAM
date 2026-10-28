@@ -133,7 +133,9 @@ jobs:
 
       # Runs before the build so a broken tool fails in seconds. The package is
       # copied out of the read-only mount before installing, as run_eval.sh does,
-      # to keep pip build artifacts out of the runner workspace.
+      # to keep pip build artifacts out of the runner workspace. Optional extras
+      # are installed too, otherwise every test needing one silently skips here.
+      # An extra the package does not declare is a pip warning, not an error.
       - name: Run Python tools tests
         timeout-minutes: 10
         run: |
@@ -143,7 +145,7 @@ jobs:
             bash -c 'set -euo pipefail
               src="$(mktemp -d)"
               cp -a /cuvslam/tools/python_tools/. "$src/"
-              pip install --quiet "$src"
+              pip install --quiet "$src[map-repair]"
               PYTHONPATH="$src" python3 -m unittest discover -v -s "$src/cuvslam_tools/tests"'
 
       - name: Verify eval prerequisites
