@@ -51,6 +51,9 @@ def run_vpr_report(args: argparse.Namespace) -> str:
         raise ValueError("--frame_limit must be zero (all frames) or positive")
     if args.query_stride < 1:
         raise ValueError("--query_stride must be a positive integer")
+    if args.vpr_vocabulary_path and not os.path.isfile(args.vpr_vocabulary_path):
+        raise ValueError(f"--vpr_vocabulary_path {args.vpr_vocabulary_path} is not a file; "
+                         "cuvslam_vpr_vocabulary writes one")
 
     datasets_root = args.datasets_root or os.environ.get("CUVSLAM_DATASETS", "")
     config_radius = None
@@ -127,6 +130,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--vpr_model_path", type=str, default=os.environ.get("CUVSLAM_ANYLOC_ENGINE", ""),
                         help="AnyLoc TensorRT engine, built by the anyloc_engine CMake target "
                              "(default: $CUVSLAM_ANYLOC_ENGINE).")
+    parser.add_argument("--vpr_vocabulary_path", type=str, default="",
+                        help="Vocabulary file, written by cuvslam_vpr_vocabulary (default: each map fits its own).")
     parser.add_argument("--frame_limit", type=int, default=0,
                         help="Stop each sequence after this many frames; 0 replays all of them.")
     parser.add_argument("--query_stride", type=int, default=1,

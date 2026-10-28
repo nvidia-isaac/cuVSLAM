@@ -137,7 +137,14 @@ void AsyncSlam::LocalizeInMapCmd::Execute(AsyncSlam& async_slam, FrameId, const 
 
   // TODO: keep localizer to safe memory
   const auto localizer = std::make_unique<Localizer>();  // only for the duration of the localization
-  localizer->Init(async_slam.rig_, options);
+  // Init reads the VPR engine and vocabulary files again, which may be gone since Slam was constructed.
+  std::string init_error;
+  try {
+    localizer->Init(async_slam.rig_, options);
+  } catch (const std::exception& error) {
+    init_error = error.what();
+  }
+  CALLBACK_AND_RETURN_IF(!init_error.empty(), finish_cb_, Pose, init_error);
   CALLBACK_AND_RETURN_IF(!localizer->OpenDatabase(std::string{folder_name_}), finish_cb_, Pose,
                          "Failed to open database.");
 
@@ -150,7 +157,8 @@ void AsyncSlam::LocalizeInMapCmd::Execute(AsyncSlam& async_slam, FrameId, const 
     localizer->UseRecognizedPlaceProbes();
     CALLBACK_AND_RETURN_IF(guess_poses.empty(), finish_cb_, Pose,
                            "No guess pose was given and the map's place recognition index did not recognize this "
-                           "place. The map has to have been saved with use_vpr.");
+                           "place. The map has to have been saved with use_vpr, and with vpr_vocabulary_path's "
+                           "vocabulary when that is set.");
   }
 
   LocalizationResult result;

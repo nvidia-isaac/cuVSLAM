@@ -377,6 +377,65 @@ TEST_F(TrackerTest, LocalizeInMapWithGuessPoseReportsAMissingMap) {
   EXPECT_NE(error->find("database"), std::string::npos) << *error;
 }
 
+TEST_F(TrackerTest, SlamRejectsVprVocabularySettingsWithoutUseVpr) {
+  Slam::Config path = MakeOfflineConfig().slam;
+  path.vpr_vocabulary_path = "/nonexistent/test.vocabulary";
+  EXPECT_THROW(Slam(rig, {0}, path), std::invalid_argument);
+
+  Slam::Config min_keyframes = MakeOfflineConfig().slam;
+  min_keyframes.vpr_vocabulary_min_keyframes = 3;
+  EXPECT_THROW(Slam(rig, {0}, min_keyframes), std::invalid_argument);
+
+  Slam::Config max_descriptors = MakeOfflineConfig().slam;
+  max_descriptors.vpr_vocabulary_max_descriptors = 7;
+  EXPECT_THROW(Slam(rig, {0}, max_descriptors), std::invalid_argument);
+}
+
+// The engine does not exist, so each std::invalid_argument comes from a check that runs before it loads.
+TEST_F(TrackerTest, SlamRejectsOnlineFitSettingsBesideAVocabularyFile) {
+  Slam::Config cfg = MakeOfflineConfig().slam;
+  cfg.use_vpr = true;
+  cfg.vpr_model_path = "/nonexistent/anyloc.engine";
+  cfg.vpr_vocabulary_path = "/nonexistent/test.vocabulary";
+  EXPECT_THROW(Slam(rig, {0}, cfg), std::runtime_error);
+
+  Slam::Config min_keyframes = cfg;
+  min_keyframes.vpr_vocabulary_min_keyframes = 3;
+  EXPECT_THROW(Slam(rig, {0}, min_keyframes), std::invalid_argument);
+
+  Slam::Config max_descriptors = cfg;
+  max_descriptors.vpr_vocabulary_max_descriptors = 7;
+  EXPECT_THROW(Slam(rig, {0}, max_descriptors), std::invalid_argument);
+}
+
+TEST_F(TrackerTest, SlamRejectsZeroOnlineFitSettings) {
+  Slam::Config cfg = MakeOfflineConfig().slam;
+  cfg.use_vpr = true;
+  cfg.vpr_model_path = "/nonexistent/anyloc.engine";
+
+  Slam::Config min_keyframes = cfg;
+  min_keyframes.vpr_vocabulary_min_keyframes = 0;
+  EXPECT_THROW(Slam(rig, {0}, min_keyframes), std::invalid_argument);
+
+  Slam::Config max_descriptors = cfg;
+  max_descriptors.vpr_vocabulary_max_descriptors = 0;
+  EXPECT_THROW(Slam(rig, {0}, max_descriptors), std::invalid_argument);
+}
+
+TEST_F(TrackerTest, VprVocabularyFitterRejectsAnEmptyTrainingSetBeforeLoadingAnEngine) {
+  Slam::VprVocabularyFitter::Config cfg;
+  cfg.vpr_model_path = "/nonexistent/anyloc.engine";
+  cfg.max_descriptors = 0;
+  EXPECT_THROW(Slam::VprVocabularyFitter{cfg}, std::invalid_argument);
+}
+
+// Also what a build without TensorRT reports.
+TEST_F(TrackerTest, VprVocabularyFitterNeedsAnEngine) {
+  Slam::VprVocabularyFitter::Config cfg;
+  cfg.vpr_model_path = "/nonexistent/anyloc.engine";
+  EXPECT_THROW(Slam::VprVocabularyFitter{cfg}, std::runtime_error);
+}
+
 }  // namespace
 
 #ifndef USE_CUDA

@@ -262,6 +262,12 @@ def add_loop_closure_arguments(parser: argparse.ArgumentParser) -> None:
              "CMake target builds from here (default: $CUVSLAM_ANYLOC_ENGINE, which cuvslam_vars.sh sets).",
     )
     parser.add_argument(
+        "--vpr_vocabulary_path",
+        type=str,
+        default="",
+        help="Vocabulary file for --use_vpr, written by cuvslam_vpr_vocabulary; by default each session fits its own.",
+    )
+    parser.add_argument(
         "--max_map_size",
         type=int,
         default=None,
@@ -275,11 +281,16 @@ def validate_loop_closure_arguments(parser: argparse.ArgumentParser, args: argpa
     """Reject unusable loop closure flags with parser.error() before tracking starts."""
     if args.loop_closure_mode == "vpr" and not args.use_vpr:
         parser.error("--loop_closure_mode vpr needs place recognition; set --use_vpr true")
+    if args.vpr_vocabulary_path and not args.use_vpr:
+        parser.error("--vpr_vocabulary_path needs place recognition; set --use_vpr true")
     if require_use_slam and not args.use_slam and (args.loop_closure_mode != "lsi" or args.use_vpr):
         parser.error("--loop_closure_mode and --use_vpr only affect SLAM; add --use_slam true")
     if args.use_vpr and not os.path.isfile(args.vpr_model_path):
         parser.error("--use_vpr needs the AnyLoc TensorRT engine; set --vpr_model_path to the one the "
                      "anyloc_engine CMake target builds, or source cuvslam_vars.sh of that build")
+    if args.vpr_vocabulary_path and not os.path.isfile(args.vpr_vocabulary_path):
+        parser.error(f"--vpr_vocabulary_path {args.vpr_vocabulary_path} is not a file; "
+                     "cuvslam_vpr_vocabulary writes one")
     if args.max_map_size is not None and args.max_map_size < 0:
         parser.error("--max_map_size must be 0 (no limit) or a positive number of pose graph nodes")
 

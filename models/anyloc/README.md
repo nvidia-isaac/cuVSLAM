@@ -22,7 +22,8 @@ has the default build target make:
 | `anyloc_engine` | `bin/anyloc_vits14_l9_value_322_fp16_trt<TensorRT version>_sm<GPU>.engine` | about 20 seconds |
 
 The engine is what `Slam::Config::vpr_model_path` takes. `cuvslam_vars.sh` exports its path as
-`CUVSLAM_ANYLOC_ENGINE`, which `cuvslam_tracker` and `cuvslam_vpr_reporter` use as their default `--vpr_model_path`:
+`CUVSLAM_ANYLOC_ENGINE`, which `cuvslam_tracker`, `cuvslam_vpr_reporter` and `cuvslam_vpr_vocabulary` use as their
+default `--vpr_model_path`:
 
 ```bash
 source build/cuvslam_vars.sh

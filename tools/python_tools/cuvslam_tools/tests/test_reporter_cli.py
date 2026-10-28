@@ -95,6 +95,27 @@ class TestReporterCli(unittest.TestCase):
         self.assertIn("--use_vpr", stderr.getvalue())
         run_report.assert_not_called()
 
+    def test_vpr_vocabulary_reaches_the_report(self):
+        with tempfile.NamedTemporaryFile(suffix=".engine") as model, \
+                tempfile.NamedTemporaryFile(suffix=".vocabulary") as vocabulary, \
+                mock.patch.object(cli, "run_report") as run_report:
+            exit_code = cli.main(["--test_config", "kitti.cfg", "--use_vpr", "true", "--vpr_model_path", model.name,
+                                  "--vpr_vocabulary_path", vocabulary.name])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(run_report.call_args.args[0].vpr_vocabulary_path, vocabulary.name)
+
+    def test_vpr_vocabulary_without_place_recognition_fails_before_the_report(self):
+        stderr = io.StringIO()
+        with tempfile.NamedTemporaryFile(suffix=".vocabulary") as vocabulary, \
+                mock.patch.object(cli, "run_report") as run_report, contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as cm:
+                cli.main(["--test_config", "kitti.cfg", "--vpr_vocabulary_path", vocabulary.name])
+
+        self.assertEqual(cm.exception.code, 2)
+        self.assertIn("--use_vpr", stderr.getvalue())
+        run_report.assert_not_called()
+
 
 class TestLoopClosureStats(unittest.TestCase):
     """Loop closure stats in the reporter outputs."""

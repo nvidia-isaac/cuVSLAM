@@ -858,7 +858,7 @@ NB_MODULE(_cuvslam, m) {
 
   nb::class_<Slam::Config>(slam_cls, "Config", "SLAM configuration parameters")
       .def(nb::init<std::string, bool, bool, bool, bool, bool, float, float, uint32_t, uint32_t, uint32_t, uint32_t,
-                    bool, std::string, float, Slam::LoopClosureMode>(),
+                    bool, std::string, float, std::string, uint32_t, uint32_t, Slam::LoopClosureMode>(),
            nb::kw_only(), nb::arg("map_path") = Slam::Config{}.map_path, nb::arg("use_gpu") = Slam::Config{}.use_gpu,
            nb::arg("sync_mode") = Slam::Config{}.sync_mode,
            nb::arg("enable_reading_internals") = true,  // enable by default; in Python convenience is a priority
@@ -872,6 +872,9 @@ NB_MODULE(_cuvslam, m) {
            nb::arg("delay_warning_queue_size") = Slam::Config{}.delay_warning_queue_size,
            nb::arg("use_vpr") = Slam::Config{}.use_vpr, nb::arg("vpr_model_path") = Slam::Config{}.vpr_model_path,
            nb::arg("vpr_score_threshold") = Slam::Config{}.vpr_score_threshold,
+           nb::arg("vpr_vocabulary_path") = Slam::Config{}.vpr_vocabulary_path,
+           nb::arg("vpr_vocabulary_min_keyframes") = Slam::Config{}.vpr_vocabulary_min_keyframes,
+           nb::arg("vpr_vocabulary_max_descriptors") = Slam::Config{}.vpr_vocabulary_max_descriptors,
            nb::arg("loop_closure_mode") = Slam::Config{}.loop_closure_mode)
       .def_rw("map_path", &Slam::Config::map_path,
               "If empty, map is kept in memory only. Else, map is synced to disk (LMDB) at this path, allowing "
@@ -909,6 +912,16 @@ NB_MODULE(_cuvslam, m) {
               "TensorRT version that built it; otherwise constructing Slam raises.")
       .def_rw("vpr_score_threshold", &Slam::Config::vpr_score_threshold,
               "Minimum similarity in [0, 1] for place recognition to report a match.")
+      .def_rw("vpr_vocabulary_path", &Slam::Config::vpr_vocabulary_path,
+              "Vocabulary file `Slam.VprVocabularyFitter` wrote, shared by the sessions of one domain; empty fits one "
+              "per session. Needs `use_vpr`, with `vpr_vocabulary_min_keyframes` and `vpr_vocabulary_max_descriptors` "
+              "at their defaults. A loaded map of another vocabulary keeps its VPR map unused.")
+      .def_rw("vpr_vocabulary_min_keyframes", &Slam::Config::vpr_vocabulary_min_keyframes,
+              "Keyframes a session maps before fitting its own vocabulary; nothing is recognized before. At least 1.")
+      .def_rw("vpr_vocabulary_max_descriptors", &Slam::Config::vpr_vocabulary_max_descriptors,
+              "Most patch descriptors a session fits its own vocabulary to, fitting early once keyframes hold more; "
+              "must hold `vpr_vocabulary_min_keyframes` keyframes of the engine (529 descriptors each with "
+              "anyloc_engine's default).")
       .def_rw("loop_closure_mode", &Slam::Config::loop_closure_mode,
               "Where loop closure looks for revisited places, see `Slam.LoopClosureMode`. `VPR` needs `use_vpr` and "
               "`gt_align_mode` off, else constructing Slam raises ValueError.")
@@ -917,12 +930,14 @@ NB_MODULE(_cuvslam, m) {
                    "cuvslam.Slam.Config(map_path={}, use_gpu={}, sync_mode={}, enable_reading_internals={}, "
                    "planar_constraints={}, gt_align_mode={}, map_cell_size={}, max_landmarks_distance={}, "
                    "max_map_size={}, throttling_time_ms={}, retention_time_ms={}, delay_warning_queue_size={}, "
-                   "use_vpr={}, vpr_model_path={}, vpr_score_threshold={}, "
+                   "use_vpr={}, vpr_model_path={}, vpr_score_threshold={}, vpr_vocabulary_path={}, "
+                   "vpr_vocabulary_min_keyframes={}, vpr_vocabulary_max_descriptors={}, "
                    "loop_closure_mode={})")
             .format(cfg.map_path, cfg.use_gpu, cfg.sync_mode, cfg.enable_reading_internals, cfg.planar_constraints,
                     cfg.gt_align_mode, cfg.map_cell_size, cfg.max_landmarks_distance, cfg.max_map_size,
                     cfg.throttling_time_ms, cfg.retention_time_ms, cfg.delay_warning_queue_size, cfg.use_vpr,
-                    cfg.vpr_model_path, cfg.vpr_score_threshold, cfg.loop_closure_mode);
+                    cfg.vpr_model_path, cfg.vpr_score_threshold, cfg.vpr_vocabulary_path,
+                    cfg.vpr_vocabulary_min_keyframes, cfg.vpr_vocabulary_max_descriptors, cfg.loop_closure_mode);
       });
 
   nb::class_<Slam::LocalizationSettings>(slam_cls, "LocalizationSettings", "Localization settings")
@@ -1044,6 +1059,49 @@ NB_MODULE(_cuvslam, m) {
         return nb::str("cuvslam.Slam.PlaceRecognition(node_id={}, pose={}, score={}, timestamp_ns={})")
             .format(p.node_id, p.pose, p.score, p.timestamp_ns);
       });
+
+  auto vocabulary_fitter_cls = nb::class_<Slam::VprVocabularyFitter>(
+      slam_cls, "VprVocabularyFitter",
+      "Fits the place recognition vocabulary of one operating domain, for `Slam.Config.vpr_vocabulary_path`, to "
+      "images spread over recordings of the domain. Needs what `Slam.Config.use_vpr` needs.");
+
+  nb::class_<Slam::VprVocabularyFitter::Config>(vocabulary_fitter_cls, "Config", "Vocabulary fitter configuration")
+      .def(nb::init<std::string, uint32_t>(), nb::kw_only(),
+           nb::arg("vpr_model_path") = Slam::VprVocabularyFitter::Config{}.vpr_model_path,
+           nb::arg("max_descriptors") = Slam::VprVocabularyFitter::Config{}.max_descriptors)
+      .def_rw("vpr_model_path", &Slam::VprVocabularyFitter::Config::vpr_model_path,
+              "AnyLoc TensorRT engine, as `Slam.Config.vpr_model_path`; sessions need an engine of the same network.")
+      .def_rw("max_descriptors", &Slam::VprVocabularyFitter::Config::max_descriptors,
+              "Most patch descriptors the vocabulary is fitted to; must hold `min_images` images of the engine.")
+      .def("__repr__", [](const Slam::VprVocabularyFitter::Config& cfg) {
+        return nb::str("cuvslam.Slam.VprVocabularyFitter.Config(vpr_model_path={}, max_descriptors={})")
+            .format(cfg.vpr_model_path, cfg.max_descriptors);
+      });
+
+  vocabulary_fitter_cls
+      .def(nb::init<const Slam::VprVocabularyFitter::Config&>(), nb::arg("config"),
+           "Load the engine; raises ValueError if `max_descriptors` cannot hold `min_images` images of it, and "
+           "RuntimeError if the engine cannot be loaded.")
+      .def_ro_static("min_images", &Slam::VprVocabularyFitter::kMinImages, "Fewest images `save` fits to")
+      .def_prop_ro("capacity", &Slam::VprVocabularyFitter::GetCapacity,
+                   "Most images fitted to, every patch descriptor of each; spread them out")
+      .def_prop_ro("image_count", &Slam::VprVocabularyFitter::GetImageCount, "Images added so far")
+      .def(
+          "add_image",
+          [](Slam::VprVocabularyFitter& self, const nb::ndarray<nb::ro>& image) {
+            THROW_INVALID_ARG_IF(!image.data() || image.size() == 0, GetArrayErrorMsg(ArrayType::Image));
+            self.AddImage(ImageFromNDArray(image, 0, 0, ArrayType::Image));
+          },
+          nb::arg("image"),
+          "Describe an image of the camera SLAM maps, its first primary camera.\n\n"
+          "Parameters:\n"
+          "    image: uint8 array of shape (height, width) or (height, width, 3), in CPU or GPU memory\n\n"
+          "Raises ValueError if `image` is unusable, past `capacity` or after `save`, and RuntimeError if the engine "
+          "fails on it.")
+      .def(
+          "save", [](Slam::VprVocabularyFitter& self, std::string_view path) { self.Save(path); }, nb::arg("path"),
+          "Fit the vocabulary to the images added (first call only), then replace `path` with it atomically.\n\n"
+          "Raises ValueError with fewer than `min_images` images, and RuntimeError if `path` cannot be written.");
 
   // Slam class methods
   slam_cls

@@ -30,7 +30,7 @@ With PDF report support:
 pip install -e ".[pdf]"
 ```
 
-`cuvslam_tracker`, `cuvslam_reporter`, `cuvslam_vpr_reporter`, and `cuvslam_validator` require the `cuvslam` Python binding in the same environment. Dataset preparation, ROS bag conversion, and undistortion should stay usable without importing `cuvslam` when their workflows do not need it.
+`cuvslam_tracker`, `cuvslam_reporter`, `cuvslam_vpr_reporter`, `cuvslam_vpr_vocabulary`, and `cuvslam_validator` require the `cuvslam` Python binding in the same environment. Dataset preparation, ROS bag conversion, and undistortion should stay usable without importing `cuvslam` when their workflows do not need it.
 
 ## Install The cuVSLAM Python Binding
 
@@ -82,6 +82,7 @@ Reinstall the binding after rebuilding `libcuvslam.so`.
 | `cuvslam_tracker` | Run one EDEX sequence or supported video input through cuVSLAM. |
 | `cuvslam_reporter` | Run one dataset config and generate report outputs. |
 | `cuvslam_vpr_reporter` | Build a place recognition map from one sequence, recognize places in another, and report the result. |
+| `cuvslam_vpr_vocabulary` | Fit a place recognition vocabulary to EDEX sequences of one operating domain. |
 | `cuvslam_validator` | Run multiple reporter configs, combine results, and apply validation checks. |
 | `rosbag_extract_edex` | Convert a ROS 2 bag to an EDEX sequence directory. |
 | `rosbag_extract_images` | Extract images from a ROS 2 bag. |
@@ -102,6 +103,7 @@ prepare_m3ed_spot --help
 cuvslam_tracker --help
 cuvslam_reporter --help
 cuvslam_vpr_reporter --help
+cuvslam_vpr_vocabulary --help
 cuvslam_validator --help
 rosbag_extract_edex --help
 rosbag_extract_images --help
@@ -441,7 +443,7 @@ Both flags accept any case, and `cuvslam_tracker` rejects a non-default value of
 
 `--max_map_size` caps the pose graph (0 for no limit; without the flag SLAM keeps its default of 300 nodes). A node merged away also leaves the place recognition map, so a long sequence keeps fewer places to close a loop to in `vpr` mode than landmarks in `lsi` mode; compare the two with `--max_map_size 0`. Run the comparison with synchronous SLAM (the default `--sync_slam true`): place recognition slows the SLAM thread down enough that an asynchronous replay, which runs faster than real time, finishes before SLAM catches up.
 
-`--use_vpr` runs AnyLoc on the GPU, about half a millisecond per keyframe on an RTX 4090, and every tracker process loads its own copy of the engine.
+`--use_vpr` runs AnyLoc on the GPU, about half a millisecond per keyframe on an RTX 4090, and every tracker process loads its own copy of the engine. `--vpr_vocabulary_path`, a file from `cuvslam_vpr_vocabulary`, needs `--use_vpr true`.
 
 ## Visual Place Recognition
 
@@ -504,8 +506,9 @@ sequence, evenly spaced over the frames that were queried and bordered green whe
 and red where the robot did not know where it was, false positives included; each frame carries its index.
 
 `--frame_limit` cuts both sequences short for a quick check, `--query_stride`
-queries every Nth frame, `--vpr_score_threshold` raises the similarity a match must reach, and `--keep_vpr_maps` leaves
-the temporary map folders on disk.
+queries every Nth frame, `--vpr_score_threshold` raises the similarity a match must reach, `--vpr_vocabulary_path`
+recognizes places with a vocabulary from `cuvslam_vpr_vocabulary`, and `--keep_vpr_maps` leaves the temporary map
+folders on disk.
 
 ### Metrics
 
@@ -536,6 +539,17 @@ because the classification rates above already say what they are used to judge. 
 the frames it was averaged over: the map-pass costs by the mapped frames, the search cost by the queried ones.
 
 The query pass does not track its frames, so they never enter the map and every answer comes from the map sequence.
+
+### Vocabulary
+
+`cuvslam_vpr_vocabulary` fits the place recognition vocabulary of an operating domain to images spread evenly over
+EDEX sequences of it. For KITTI, fit it to 11-21, which have no ground truth, so 00-10 stay unseen for evaluation:
+
+```bash
+cuvslam_vpr_vocabulary --output kitti.vocabulary /path/to/datasets/converted/kitti/{11..21}
+```
+
+Sessions load it with `--vpr_vocabulary_path` instead of fitting their own.
 
 ## Validation
 

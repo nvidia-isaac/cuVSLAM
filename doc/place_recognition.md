@@ -74,6 +74,20 @@ fired by the time it does.
 In C++ the same calls are `Slam::SaveMap`, `Slam::LocalizeInMap` and
 `Slam::RecognizePlaceByFrame`, with `Slam::Config::use_vpr = true` and the engine in `Slam::Config::vpr_model_path`.
 
+## One vocabulary per operating domain
+
+Each session fits AnyLoc's vocabulary to its own first keyframes, so maps of separate sessions encode places
+differently. To share one vocabulary across the sessions of an operating domain, fit it once to images spread over
+recordings of that domain, with `cuvslam_vpr_vocabulary` or `Slam.VprVocabularyFitter`, and give every session the
+file:
+
+```python
+slam_cfg = vslam.Slam.Config(use_vpr=True, vpr_model_path=engine, vpr_vocabulary_path='kitti.vocabulary')
+```
+
+Such a session recognizes places from its first keyframe. Without the file, `vpr_vocabulary_min_keyframes` and
+`vpr_vocabulary_max_descriptors` set what a session fits its own vocabulary to.
+
 ## Closing loops with it
 
 By default (`LoopClosureMode::LSI`) loop closure searches the landmark spatial index around the current pose estimate,

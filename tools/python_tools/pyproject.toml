@@ -62,6 +62,7 @@ prepare_m3ed_spot = "cuvslam_tools.dataset_preparation.m3ed_spot.prepare:main"
 cuvslam_tracker = "cuvslam_tools.tracker.cli:main"
 cuvslam_reporter = "cuvslam_tools.reporter.cli:main"
 cuvslam_vpr_reporter = "cuvslam_tools.vpr_reporter.cli:main"
+cuvslam_vpr_vocabulary = "cuvslam_tools.vpr_vocabulary.cli:main"
 cuvslam_validator = "cuvslam_tools.datasets_validator.cli:main"
 
 [tool.ruff.lint.per-file-ignores]

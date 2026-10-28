@@ -28,22 +28,17 @@ namespace cuvslam::slam::vpr {
 class AnyLocNetwork;
 
 /// AnyLoc (Keetha et al., 2023): VLAD over DINOv2 patch features.
-/// Fits its vocabulary per session, so two sessions' maps are not comparable.
+/// Loads VprOptions::vocabulary_path or fits a vocabulary per session; maps of two vocabularies are not comparable.
 class VprAnyLoc : public IVpr {
 public:
   /// Ratio test treats nodes this close in creation order as the same place.
   static constexpr uint64_t kNeighbourGuard = 10;
 
-  /// Cap on the patch descriptors the vocabulary is fitted to, and on those held until then.
-  static constexpr size_t kMaxTrainingDescriptors = 100000;
-
   /// Max spherical k-means iterations; stops early once assignments settle.
   static constexpr int kKMeansIterations = 25;
 
-  /// Frames mapped before the one-time vocabulary fit; queries miss until then.
-  static constexpr size_t kMinTrainingFrames = 8;
-
-  /// @throws std::runtime_error if options.model_path is not a usable engine.
+  /// @throws std::runtime_error if options.model_path is not a usable engine or options.vocabulary_path not a
+  /// vocabulary of it; std::invalid_argument if the training options cannot hold min_training_keyframes frames.
   explicit VprAnyLoc(const VprOptions& options);
   ~VprAnyLoc() override;
 
@@ -53,6 +48,7 @@ public:
   bool HasNode(KeyFrameId node_id) const override;
   void RemoveNode(KeyFrameId node_id) override;
   size_t Size() const override { return entries_.size(); }
+  size_t TrainingCapacity() const override;
   void Finalize() override;
   VprMatch Query(const VprImage& image) override;
   std::vector<VprMatch> QueryTopK(const VprImage& image, size_t max_results) override;
@@ -75,11 +71,17 @@ private:
   /// VLAD-pool `patches` against the current centers.
   void Encode(const std::vector<float>& patches, std::vector<float>& vlad) const;
 
+  /// Take the centers of vocabulary_path_.
+  void LoadVocabulary();
+
   std::string model_path_;
+  std::string vocabulary_path_;
   int cluster_count_ = 0;
   float score_threshold_ = 0.f;
   float ratio_threshold_ = 0.f;
   uint32_t max_entries_ = 0;
+  size_t min_training_keyframes_ = 0;
+  size_t max_training_descriptors_ = 0;
 
   std::unique_ptr<AnyLocNetwork> network_;
 

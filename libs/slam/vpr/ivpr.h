@@ -41,6 +41,9 @@ public:
 
   virtual size_t Size() const = 0;
 
+  /// Frames AddFrame() holds for the vocabulary fit before fitting early; 0 if the backend fits none.
+  virtual size_t TrainingCapacity() const { return 0; }
+
   /// Prepare for queries, e.g. train a vocabulary; a no-op unless the map changed.
   virtual void Finalize() = 0;
 

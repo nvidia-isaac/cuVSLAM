@@ -358,6 +358,8 @@ def _slam_config(vslam, args: argparse.Namespace):
         cfg.vpr_score_threshold = args.vpr_score_threshold
     if args.vpr_model_path:
         cfg.vpr_model_path = args.vpr_model_path
+    if args.vpr_vocabulary_path:
+        cfg.vpr_vocabulary_path = args.vpr_vocabulary_path
     return cfg
 
 

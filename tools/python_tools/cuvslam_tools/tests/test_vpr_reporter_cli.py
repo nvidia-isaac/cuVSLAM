@@ -12,11 +12,16 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
+import argparse
 import contextlib
 import io
+import tempfile
+import types
 import unittest
+from unittest import mock
 
 from cuvslam_tools.vpr_reporter import cli
+from cuvslam_tools.vpr_reporter import execution
 from cuvslam_tools.vpr_reporter import generate_report
 from cuvslam_tools.vpr_reporter.execution import VprStat
 
@@ -32,6 +37,7 @@ class TestVprReporterCli(unittest.TestCase):
         self.assertEqual(cm.exception.code, 0)
         help_text = stdout.getvalue()
         self.assertIn("--vpr_model_path", help_text)
+        self.assertIn("--vpr_vocabulary_path", help_text)
         self.assertNotIn("--loop_closure_mode", help_text)
         self.assertNotIn("--use_vpr", help_text)
         self.assertNotIn("--vpr_modes", help_text)
@@ -45,6 +51,29 @@ class TestVprReporterCli(unittest.TestCase):
                     cli.main(["--map_sequence", "map", "--query_sequence", "query"] + argv)
                 self.assertEqual(cm.exception.code, 2)
                 self.assertIn(f"unrecognized arguments: {' '.join(argv)}", stderr.getvalue())
+
+    def test_missing_vpr_vocabulary_fails_before_the_evaluation(self):
+        stderr = io.StringIO()
+        with tempfile.TemporaryDirectory() as output_dir, \
+                mock.patch.object(execution, "evaluate_pairs") as evaluate_pairs, contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as cm:
+                cli.main(["--map_sequence", "map", "--query_sequence", "query", "--output_dir", output_dir,
+                          "--vpr_vocabulary_path", "/nonexistent/kitti.vocabulary"])
+
+        self.assertEqual(cm.exception.code, 2)
+        self.assertIn("/nonexistent/kitti.vocabulary is not a file", stderr.getvalue())
+        self.assertIn("cuvslam_vpr_vocabulary", stderr.getvalue())
+        evaluate_pairs.assert_not_called()
+
+
+class TestVprSlamConfig(unittest.TestCase):
+    def test_vocabulary_is_set_only_when_given(self):
+        vslam = types.SimpleNamespace(Slam=types.SimpleNamespace(Config=types.SimpleNamespace))
+        args = argparse.Namespace(vpr_score_threshold=None, vpr_model_path="", vpr_vocabulary_path="")
+
+        self.assertFalse(hasattr(execution._slam_config(vslam, args), "vpr_vocabulary_path"))
+        args.vpr_vocabulary_path = "kitti.vocabulary"
+        self.assertEqual(execution._slam_config(vslam, args).vpr_vocabulary_path, "kitti.vocabulary")
 
 
 class TestVprSummary(unittest.TestCase):

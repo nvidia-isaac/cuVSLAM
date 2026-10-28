@@ -587,17 +587,24 @@ class TestBindings(unittest.TestCase):
             def __del__(self):
                 freed.append(str(self))
 
-        expected = ["/tmp/a", "/tmp/b", "/tmp/c", "/tmp/d", "/tmp/e", "/tmp/f"]
-        slam_cfg = vslam.Slam.Config(map_path=TrackedStr("/tmp/a"), vpr_model_path=TrackedStr("/tmp/b"))
-        odom_cfg = vslam.Odometry.Config(debug_dump_directory=TrackedStr("/tmp/c"))
+        expected = ["/tmp/a", "/tmp/b", "/tmp/c", "/tmp/d", "/tmp/e", "/tmp/f", "/tmp/g", "/tmp/h", "/tmp/i", "/tmp/j"]
+        slam_cfg = vslam.Slam.Config(map_path=TrackedStr("/tmp/a"), vpr_model_path=TrackedStr("/tmp/b"),
+                                     vpr_vocabulary_path=TrackedStr("/tmp/c"))
+        fitter_cfg = vslam.Slam.VprVocabularyFitter.Config(vpr_model_path=TrackedStr("/tmp/d"))
+        odom_cfg = vslam.Odometry.Config(debug_dump_directory=TrackedStr("/tmp/e"))
         slam_cfg_set, odom_cfg_set = vslam.Slam.Config(), vslam.Odometry.Config()
-        slam_cfg_set.map_path = TrackedStr("/tmp/d")
-        slam_cfg_set.vpr_model_path = TrackedStr("/tmp/e")
-        odom_cfg_set.debug_dump_directory = TrackedStr("/tmp/f")
+        fitter_cfg_set = vslam.Slam.VprVocabularyFitter.Config()
+        slam_cfg_set.map_path = TrackedStr("/tmp/f")
+        slam_cfg_set.vpr_model_path = TrackedStr("/tmp/g")
+        slam_cfg_set.vpr_vocabulary_path = TrackedStr("/tmp/h")
+        fitter_cfg_set.vpr_model_path = TrackedStr("/tmp/i")
+        odom_cfg_set.debug_dump_directory = TrackedStr("/tmp/j")
 
         self.assertEqual(sorted(freed), expected)
-        self.assertEqual([slam_cfg.map_path, slam_cfg.vpr_model_path, odom_cfg.debug_dump_directory,
-                          slam_cfg_set.map_path, slam_cfg_set.vpr_model_path, odom_cfg_set.debug_dump_directory],
+        self.assertEqual([slam_cfg.map_path, slam_cfg.vpr_model_path, slam_cfg.vpr_vocabulary_path,
+                          fitter_cfg.vpr_model_path, odom_cfg.debug_dump_directory,
+                          slam_cfg_set.map_path, slam_cfg_set.vpr_model_path, slam_cfg_set.vpr_vocabulary_path,
+                          fitter_cfg_set.vpr_model_path, odom_cfg_set.debug_dump_directory],
                          expected)
 
     def test_load_path_strings_from_yaml(self):

@@ -127,6 +127,8 @@ class Tracker:
             self.slam_cfg.sync_mode = args.sync_slam
             self.slam_cfg.use_vpr = getattr(args, 'use_vpr', False)
             self.slam_cfg.vpr_model_path = getattr(args, 'vpr_model_path', '')
+            if getattr(args, 'vpr_vocabulary_path', ''):
+                self.slam_cfg.vpr_vocabulary_path = args.vpr_vocabulary_path
             self.slam_cfg.loop_closure_mode = getattr(args, 'loop_closure_mode', vslam.Slam.LoopClosureMode.LSI)
             if getattr(args, 'max_map_size', None) is not None:
                 self.slam_cfg.max_map_size = args.max_map_size

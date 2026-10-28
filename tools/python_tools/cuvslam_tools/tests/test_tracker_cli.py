@@ -69,6 +69,7 @@ class TestTrackerCli(unittest.TestCase):
         self.assertEqual(args.loop_closure_mode, "lsi")
         self.assertFalse(args.use_vpr)
         self.assertEqual(args.vpr_model_path, "")
+        self.assertEqual(args.vpr_vocabulary_path, "", "no flag leaves each session fitting its own")
         self.assertIsNone(args.max_map_size, "no flag leaves the SLAM default in place")
 
     def test_loop_closure_and_vpr_flags_are_settable(self):
@@ -78,12 +79,14 @@ class TestTrackerCli(unittest.TestCase):
             "--loop_closure_mode", "vpr",
             "--use_vpr", "true",
             "--vpr_model_path", "/tmp/anyloc.engine",
+            "--vpr_vocabulary_path", "/tmp/kitti.vocabulary",
             "--max_map_size", "0",
         ])
 
         self.assertEqual(args.loop_closure_mode, "vpr")
         self.assertTrue(args.use_vpr)
         self.assertEqual(args.vpr_model_path, "/tmp/anyloc.engine")
+        self.assertEqual(args.vpr_vocabulary_path, "/tmp/kitti.vocabulary")
         self.assertEqual(args.max_map_size, 0)
 
     def test_loop_closure_and_vpr_modes_are_case_insensitive(self):
@@ -135,6 +138,24 @@ class TestTrackerCli(unittest.TestCase):
 
                 self.assertIn("--vpr_model_path", error)
                 self.assertIn("anyloc_engine", error)
+
+    def test_vpr_vocabulary_without_place_recognition_fails_before_tracking(self):
+        for flags in (["--vpr_vocabulary_path", "kitti.vocabulary"],
+                      ["--use_slam", "true", "--vpr_vocabulary_path", "kitti.vocabulary"]):
+            with self.subTest(flags=flags):
+                error = self._main_usage_error(["--dataset", "seq", *flags])
+
+                self.assertIn("--vpr_vocabulary_path needs place recognition", error)
+                self.assertIn("--use_vpr true", error)
+
+    def test_missing_vpr_vocabulary_fails_before_tracking(self):
+        with tempfile.NamedTemporaryFile(suffix=".engine") as model:
+            error = self._main_usage_error(["--dataset", "seq", "--use_slam", "true", "--use_vpr", "true",
+                                            "--vpr_model_path", model.name,
+                                            "--vpr_vocabulary_path", "/nonexistent/kitti.vocabulary"])
+
+        self.assertIn("/nonexistent/kitti.vocabulary is not a file", error)
+        self.assertIn("cuvslam_vpr_vocabulary", error)
 
     def test_vpr_model_path_defaults_to_the_engine_cuvslam_vars_names(self):
         with mock.patch.dict(os.environ, {"CUVSLAM_ANYLOC_ENGINE": "/build/bin/anyloc.engine"}):

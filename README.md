@@ -81,6 +81,7 @@ Both APIs expose it the same way:
 | Save it with the SLAM map | `SaveMap` | `save_map` |
 | Relocalize without a guess pose | `LocalizeInMap` with no `guess_pose` | `localize_in_map(..., guess_pose=None)` |
 | Close loops from it | `Config::loop_closure_mode = LoopClosureMode::VPR` | `Config(loop_closure_mode=LoopClosureMode.VPR)` |
+| Share one vocabulary across sessions | `VprVocabularyFitter`, `Config::vpr_vocabulary_path` | `VprVocabularyFitter`, `Config(vpr_vocabulary_path=...)` |
 
 [doc/place_recognition.md](doc/place_recognition.md) walks through a mapping run and a relocalizing run, explains how
 it closes loops, and how to evaluate it with `cuvslam_vpr_reporter`.

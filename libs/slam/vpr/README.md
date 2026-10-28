@@ -15,6 +15,7 @@ vpr_anyloc.*    the AnyLoc backend, built when USE_TENSORRT is ON (needs the eng
 anyloc_network.* the TensorRT engine AnyLoc runs, on the GPU
 vpr_map.*       VprMap: owns a backend and the node bookkeeping; the only type the rest of SLAM touches
 vpr_sof_image.* bridge from the tracker's sof::ImageContext to a VprImage
+vpr_vocabulary.* VocabularyFitter, which fits a vocabulary file offline, and its reader
 ```
 
 ## Design decisions
@@ -44,6 +45,13 @@ leaves it at 0, off), AnyLoc's winner has to beat the best match from a differen
 `kNeighbourGuard` nodes away in creation order.
 Between two candidates that look equally much like the query, reporting either is a coin flip, and a wrong pose
 costs a relocalizer more than a missing one.
+
+**One vocabulary per operating domain can replace the one per session.** A session fits AnyLoc's vocabulary to its own
+first keyframes, so two sessions' maps encode places differently. `VprOptions::vocabulary_path` loads a vocabulary
+that `VocabularyFitter` fitted offline to frames spread over recordings of the domain; AnyLoc's own vocabularies are
+per domain, which beat per map ones (Keetha et al., Table V). The file is what `Serialize()` writes once the fitted
+frames are removed again: the header and the centers. A session with a vocabulary file refuses a saved map encoded
+with other centers as it refuses another descriptor width, so that map keeps its record, unused and never overwritten.
 
 **The frame is copied when the keyframe is queued.** `AsyncSlam::TrackResult` copies it into
 `VOFrameData::vpr_image` on the caller's thread, and `LocalizerAndMapper::AddKeyframe` maps it. The worker may run
@@ -87,9 +95,12 @@ words' first default was set that way and produced 75% wrong answers on the cros
 Implement `IVpr` and construct it in `CreateVpr`. The tests of `VprMap` and of
 the pose graph bookkeeping run a stand-in backend instead, through `VprMap(options, backend)` and
 `LocalizerAndMapper::SetVprMap`, so they need neither TensorRT nor a GPU. A backend that needs a
-vocabulary builds it in `Finalize()`, which `VprMap` calls before the first query and before serializing. AnyLoc
-also fits it while mapping, as soon as the raw patches it holds would outgrow its training set, stalling the SLAM
-thread for about 5 s on an i9-10940X; once it has a vocabulary, it pools each frame as it is mapped.
+vocabulary builds it in `Finalize()`, which `VprMap` calls before the first query and before serializing, once it
+holds `VprOptions::min_training_keyframes` frames. AnyLoc also fits it while mapping, as soon as the raw patches it
+holds would outgrow its training set of `VprOptions::max_training_descriptors`, stalling the SLAM thread for about 5 s
+on an i9-10940X; once it has a vocabulary, it pools each frame as it is mapped. `TrainingCapacity()` is the number of
+frames that training set holds whole, which `VocabularyFitter` fills; a backend that fits none, like AnyLoc with a
+vocabulary file, returns 0.
 
 ## Closing loops
 
@@ -150,7 +161,9 @@ against 0.99%), within the overlap of their run-to-run ranges. Two costs come wi
   network pays as well: the in-tree bag of words tracked KITTI-00 at 30 frames per second in this mode. With six runs sharing the machine, this
   mode ran at 22.6 frames per second against 63.3 for the LSI one; on ONNX Runtime's CPU build it ran at 2.7.
 - **Vocabulary.** `AnyLoc` fits its vocabulary once, to the first 8 keyframes; fitting it to the first 100 instead
-  changed nothing on KITTI-00 and 02.
+  changed nothing on KITTI-00 and 02. A vocabulary file fitted to KITTI 11-21 put the revisited place among the five
+  candidates for 74% of KITTI 00-09 revisits against 71% (KITTI-07: 100% against 42%), at the same mean translation
+  error, 0.757% over 15 to 30 runs per sequence, but KITTI-09's rose 0.3%.
 
 ### Still open
 
