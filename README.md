@@ -217,6 +217,7 @@ For Python usage, [pre-built wheels](#install-from-wheels) are the recommended a
 * Ubuntu 22+ (22.04 & 24.04 tested) x86_64/aarch64 (Desktop/Laptop & [Nvidia Jetson Orin/Thor](https://www.nvidia.com/en-us/autonomous-machines/embedded-systems/))
 * [CUDA Toolkit 12.6 or later](https://developer.nvidia.com/cuda/toolkit) for the default `USE_CUNLS=ON` build, [Jetpack 6.1/6.2/7.0/7.1](https://docs.nvidia.com/jetson/)
     * Older CUDA 12 versions require configuring with `-DUSE_CUNLS=OFF` (see [cuNLS](#cunls)).
+* [TensorRT 8.6+](https://developer.nvidia.com/tensorrt), unless configured with `-DUSE_TENSORRT=OFF`
 * `apt update && apt install g++ cmake git git-lfs python3-dev`
     * git + git-lfs to clone this repository
     * CMake 3.19+, gcc

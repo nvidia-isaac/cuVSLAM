@@ -6,7 +6,7 @@ part of the cuVSLAM build, in two steps, from pinned inputs.
 
 ## Building it
 
-With `CUVSLAM_BUILD_ANYLOC_ENGINE` (see Options), the default build target makes:
+With `-DCUVSLAM_BUILD_ANYLOC_ENGINE=ON` (see Options), the default build target makes:
 
 | Target | Makes, in the build tree | Takes |
 |--------|--------------------------|-------|
