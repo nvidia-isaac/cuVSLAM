@@ -63,8 +63,8 @@ jobs:
             });
 
             // Cancellations by a user, by a newer run in the concurrency group, or by a
-            // timeout are annotated; only an unexplained cancellation can be a runner
-            // shutdown, which only the job log records.
+            // timeout are annotated. A runner shutdown is recorded only in the job log,
+            // and ends the job as cancelled or, mid-step, as failed.
             const lost = [];
             let userCancel = null;
             for (const job of jobs.filter(j => j.conclusion === 'failure' || j.conclusion === 'cancelled')) {
@@ -74,9 +74,6 @@ jobs:
               const messages = annotations.map(a => a.message || '');
               if (messages.some(m => m.includes(process.env.LOST_RUNNER_MESSAGE))) {
                 lost.push({ ...job, lostReason: 'lost communication' });
-                continue;
-              }
-              if (job.conclusion !== 'cancelled') {
                 continue;
               }
               userCancel = userCancel || messages.find(m => /The run was canceled by @/.test(m));
