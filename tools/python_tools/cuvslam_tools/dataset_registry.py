@@ -190,9 +190,9 @@ def _rgbd_args() -> tuple[str, ...]:
 def _multisensor_args(*extra: str) -> tuple[str, ...]:
     """Flags for the unified multi-sensor mode.
 
-    Only registered for rigs the cuNLS solver can model. It projects through a
-    pinhole camera and merely warns on any other model, so EuRoC (fisheye) and
-    M3ED-SPOT (polynomial) would report numbers computed from the wrong geometry.
+    Only registered for rigs the cuNLS solver can model. Cameras without depth
+    may use any distortion model, but depth cameras must be pinhole: depth is
+    sampled through pinhole intrinsics, and other models only produce a warning.
     """
     return ("--odometry_mode=multisensor", *extra, "--async_sba=false", "--use_segments")
 
@@ -233,6 +233,17 @@ DATASETS: dict[str, DatasetSpec] = {
                     "--use_segments",
                 ),
                 suites=frozenset(SUITES),
+            ),
+            # Same config as the record above, so the two KPI rows compare the cuNLS
+            # solver against stereo-inertial odometry. The rig's IMU turns on
+            # multi-sensor IMU fusion; the fisheye cameras carry no depth. In smoke
+            # because it is the only pre-merge coverage of multi-sensor IMU fusion
+            # and of distorted cameras in that mode.
+            EvalSpec(
+                config="euroc-vio_slam.cfg",
+                args=_multisensor_args("--rectified_stereo_camera=false", "--multicam_mode=moderate"),
+                suites=frozenset(SUITES),
+                gating="informational",
             ),
         ),
     ),

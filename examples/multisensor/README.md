@@ -13,7 +13,7 @@ RGB-D cameras (`lcam_front`, `lcam_back`) plus a synthetic IMU from the
 - Use an official release wheel, which includes cuNLS, or build from source with `USE_CUNLS=ON`.
 - Configure at least one RGB-D camera in `depth_camera_ids`, or provide at least one camera pair with overlapping
   frustums. A single RGB-D camera is valid, with or without an IMU.
-- Use pinhole cameras. Other camera models are not supported by the current solver.
+- Use the pinhole model for RGB-D cameras. Cameras without depth can use any distortion model.
 - Align each depth image pixel-for-pixel with the RGB image at the same camera index. PyCuVSLAM accepts 2D `uint16`
   depth; the C++ API accepts `UINT16` or `FLOAT32`.
 - Configure no more than one IMU. Serialize image and IMU calls in non-decreasing timestamp order; camera frame
