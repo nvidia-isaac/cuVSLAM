@@ -35,6 +35,7 @@
 #include "slam/common/slam_common.h"
 #include "slam/map/map.h"
 #include "slam/slam/loop_closure_solver/iloop_closure_solver.h"
+#include "slam/vpr/vpr_map.h"
 
 namespace cuvslam::slam {
 
@@ -59,6 +60,7 @@ struct VOFrameData {
   };
   std::vector<Track2DXY> tracks2d_norm;
   std::map<TrackId, Vector3T> tracks3d_rel;
+  vpr::VprImage vpr_image;  // the node's place recognition frame; empty falls back to the images
 };
 
 // Core SLAM system that performs visual localization and mapping.
@@ -173,7 +175,14 @@ public:
   //   true if the flush succeeded, false if no database is attached
   bool FlushActiveDatabase() const;
 
-  void DetachDatabase();  // flush data and close connection
+  // Writes all unsaved data to the attached writable database, which then holds the whole map; nothing else changes.
+  bool FlushMapToDatabase();
+
+  bool HasWritableDatabase() const;
+  bool IsDatabaseAt(const std::string& path) const;  // the attached database is the one in folder `path`
+
+  // Reopens the attached read-only database for writing, keeping the map in memory as it is.
+  bool ReopenDatabaseForWriting(const std::string& path);
 
   // ----- Loop closure search -----
 
@@ -188,6 +197,7 @@ public:
   // - Tracks landmarks to the current images using feature descriptors
   // - Computes pose using landmarks through PnP and RANSAC
   // - Collects statistics about landmark matching quality
+  // - Hands VPR candidates to solvers that WantsVprCandidates(), which is why this is not const
   //
   // Parameters:
   //   loop_closure_solver - Solver implementation for loop closure detection
@@ -198,7 +208,7 @@ public:
   // Returns:
   //   true if loop closure detected, false otherwise
   void DetectLoopClosure(const ILoopClosureSolver& loop_closure_solver, const Images& images,
-                         const Isometry3T& world_from_rig_guess, LoopClosureStatus& status) const;
+                         const Isometry3T& world_from_rig_guess, LoopClosureStatus& status);
 
   // ----- Loop closure result processing -----
 
@@ -285,6 +295,32 @@ public:
 
   [[nodiscard]] bool SelectHeadKeyframe(KeyFrameId const_slam_keyframe_id, int64_t timestamp_ns);
 
+  // ----- Visual place recognition -----
+
+  // Must be called before the first keyframe; VPR stays off unless `options.enabled`.
+  void SetVprOptions(const vpr::VprOptions& options);
+
+  // nullptr turns VPR off; same timing rule as SetVprOptions().
+  void SetVprMap(std::unique_ptr<vpr::VprMap> map);
+
+  bool IsVprEnabled() const;
+
+  size_t GetVprMapSize() const;
+
+  // Best-matching pose graph node for `image`, with its current world pose.
+  vpr::VprPlace RecognizePlace(const vpr::VprImage& image);
+
+  // The `max_results` best places for `image`, best first.
+  std::vector<vpr::VprPlace> RecognizePlaces(const vpr::VprImage& image, size_t max_results);
+
+  // Max places RecognizeLoopClosurePlaces() returns.
+  static constexpr size_t kLoopClosureVprCandidates = 5;
+  // Places mapped this recently look most like the current frame but correct no drift, so they are skipped.
+  static constexpr int64_t kLoopClosureVprMinAgeNs = 20'000'000'000;
+
+  // Best loop closure places for `image`, best first, within the two limits above.
+  std::vector<vpr::VprPlace> RecognizeLoopClosurePlaces(const vpr::VprImage& image);
+
 private:
   // ----- internal types -----
   struct TrackOnKeyframe {
@@ -336,6 +372,15 @@ private:
   mutable std::random_device random_device_;
   mutable std::mt19937 random_generator_;
 
+  // ----- Visual place recognition -----
+  // Keyed by the node ids of map_'s pose graph.
+  std::unique_ptr<vpr::VprMap> vpr_map_;
+  bool vpr_map_unreadable_ = false;  // the database's VPR map is kept as it is, never overwritten
+
+  // The VPR map is a singleton of the attached database, like the spatial index.
+  bool PutVprMapToDatabase();
+  void GetVprMapFromDatabase();
+
   // ----- Cache to reallocation -----
   std::vector<TrackId> to_remove_;
 
@@ -344,6 +389,12 @@ private:
   uint32_t profiler_color_ = 0xFF0000;
 
   // ----- Internal methods -----
+  // Installs the single PoseGraph removal callback, for keyframe_removed_ and the VPR map.
+  void RegisterRemoveNodeCB();
+
+  // Saves a map that LocalizeInMap loaded read-only: a copy of it, updated from memory; the session keeps it.
+  bool SaveLoadedMap(const std::string& path);
+
   // Attempts to add an edge between two keyframes in the pose graph.
   // Returns false if an existing edge has higher weight or if the 'start' keyframe pose is not found.
   bool AddEdgeToPoseGraph(KeyFrameId start, KeyFrameId end, const Isometry3T& start_from_end,

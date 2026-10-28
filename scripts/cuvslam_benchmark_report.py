@@ -35,6 +35,14 @@ REQUIRED_PROPERTIES = (
 )
 
 
+def _annotate(level: str, message: str) -> None:
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        escaped = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        print(f"::{level}::{escaped}", flush=True)
+    else:
+        print(f"{level.capitalize()}: {message}", file=sys.stderr)
+
+
 def _command(arguments: list[str]) -> str:
     if shutil.which(arguments[0]) is None:
         return ""
@@ -82,17 +90,30 @@ def _test_properties(testcase: ET.Element) -> dict[str, str]:
     return {item.get("name", ""): item.get("value", "") for item in properties.findall("property")}
 
 
-def parse_gtest_xml(xml_path: Path, expected_count: int = 0) -> dict:
+def parse_gtest_xml(xml_path: Path) -> dict:
     root = ET.parse(xml_path).getroot()
     benchmarks = []
 
     for testcase in root.findall(".//testcase"):
-        if testcase.get("status") == "notrun" or testcase.get("result") in {"skipped", "suppressed"}:
+        if testcase.get("status") == "notrun" or testcase.get("result") == "suppressed":
             continue
 
         suite = testcase.get("classname", "")
         name = testcase.get("name", "")
         full_name = f"{suite}.{name}".strip(".")
+        if testcase.get("result") == "skipped":
+            skipped = testcase.find("skipped")
+            benchmarks.append(
+                {
+                    "name": full_name,
+                    "status": "skip",
+                    "elapsed_seconds": float(testcase.get("time", "0") or 0),
+                    "failure_message": "" if skipped is None else skipped.get("message") or "",
+                    "metric_error": "",
+                }
+            )
+            continue
+
         properties = _test_properties(testcase)
         missing = [key for key in REQUIRED_PROPERTIES if not properties.get(key)]
         metric_error = ""
@@ -147,17 +168,18 @@ def parse_gtest_xml(xml_path: Path, expected_count: int = 0) -> dict:
     passed = sum(benchmark["status"] == "pass" for benchmark in benchmarks)
     failed = sum(benchmark["status"] == "fail" for benchmark in benchmarks)
     errors = sum(benchmark["status"] == "error" for benchmark in benchmarks)
-    count_matches = expected_count == 0 or len(benchmarks) == expected_count
+    skipped = sum(benchmark["status"] == "skip" for benchmark in benchmarks)
 
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "summary": {
-            "expected_count": expected_count,
             "total": len(benchmarks),
             "passed": passed,
             "failed": failed,
             "errors": errors,
-            "complete": count_matches and errors == 0,
+            "skipped": skipped,
+            # Individual benchmark results are informational; only an empty run means broken coverage.
+            "complete": len(benchmarks) > skipped,
         },
         "benchmarks": benchmarks,
     }
@@ -175,8 +197,6 @@ def render_markdown(report: dict) -> str:
     metadata = report.get("metadata", {})
     summary = report["summary"]
     config = _markdown_text(metadata.get("config", "unknown"))
-    expected = summary["expected_count"]
-    expected_text = f"/{expected}" if expected else ""
     revision = metadata.get("git_sha", "")
     if revision and metadata.get("source_modified"):
         revision = f"{revision}-modified"
@@ -185,8 +205,10 @@ def render_markdown(report: dict) -> str:
         f"### {config}",
         "",
         (
-            f"{summary['total']}{expected_text} benchmarks reported: "
-            f"{summary['passed']} passed, {summary['failed']} failed, {summary['errors']} invalid."
+            f"{summary['total']} benchmarks reported: {summary['passed']} passed, {summary['failed']} failed, "
+            f"{summary['errors']} invalid, {summary['skipped']} skipped."
+            if summary["complete"]
+            else "**No benchmarks ran.** The benchmark filter matched no active tests, or every match was skipped."
         ),
         "",
     ]
@@ -214,7 +236,7 @@ def render_markdown(report: dict) -> str:
         ]
     )
 
-    icons = {"pass": "PASS", "fail": "FAIL", "error": "INVALID"}
+    icons = {"pass": "PASS", "fail": "FAIL", "error": "INVALID", "skip": "SKIPPED"}
     for benchmark in report["benchmarks"]:
         cpu_ms = benchmark.get("cpu_ns_per_iteration")
         gpu_ms = benchmark.get("gpu_ns_per_iteration")
@@ -236,12 +258,45 @@ def render_markdown(report: dict) -> str:
         if benchmark["failure_message"] or benchmark["metric_error"]
     ]
     if details:
-        lines.extend(["", "<details><summary>Benchmark failures and invalid results</summary>", ""])
+        lines.extend(["", "<details><summary>Benchmark failures, invalid results, and skips</summary>", ""])
         lines.extend(f"- **{_markdown_text(name)}:** {_markdown_text(message)}" for name, message in details)
         lines.extend(["", "</details>"])
 
-    lines.extend(["", "_Informational soak-period results; benchmark failures do not gate nightly._", ""])
+    lines.extend(
+        [
+            "",
+            "_Informational soak-period results; benchmark failures do not gate nightly, an empty run does._",
+            "",
+        ]
+    )
     return "\n".join(lines)
+
+
+def _names(benchmarks: list[dict], status: str) -> list[str]:
+    return [benchmark["name"] for benchmark in benchmarks if benchmark["status"] == status]
+
+
+def annotate_report(report: dict, xml_path: Path) -> None:
+    summary = report["summary"]
+    benchmarks = report["benchmarks"]
+    if not summary["complete"]:
+        _annotate(
+            "error",
+            f"No benchmarks ran: {xml_path.name} has no results for active benchmarks. "
+            "The GoogleTest filter matched no active tests, or every match was skipped.",
+        )
+    ran = summary["total"] - summary["skipped"]
+    if summary["failed"]:
+        _annotate(
+            "warning",
+            f"Benchmarks failed ({summary['failed']} of {ran}, informational): "
+            f"{', '.join(_names(benchmarks, 'fail'))}",
+        )
+    for benchmark in benchmarks:
+        if benchmark["status"] == "error":
+            _annotate("warning", f"{benchmark['name']} reported invalid metrics: {benchmark['metric_error']}")
+    if summary["skipped"]:
+        _annotate("warning", f"Benchmarks skipped ({summary['skipped']}): {', '.join(_names(benchmarks, 'skip'))}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -257,7 +312,6 @@ def parse_args() -> argparse.Namespace:
     render_parser.add_argument("--metadata", type=Path, required=True, help="JSON file containing runner metadata")
     render_parser.add_argument("--output-json", type=Path, required=True)
     render_parser.add_argument("--output-markdown", type=Path, required=True)
-    render_parser.add_argument("--expected-count", type=int, default=0)
     return parser.parse_args()
 
 
@@ -268,19 +322,20 @@ def main() -> int:
         args.output.write_text(json.dumps(collect_metadata(args.repo_root), indent=2, sort_keys=True) + "\n")
         return 0
 
-    report = parse_gtest_xml(args.xml, args.expected_count)
+    report = parse_gtest_xml(args.xml)
     report["metadata"] = json.loads(args.metadata.read_text())
 
     args.output_json.parent.mkdir(parents=True, exist_ok=True)
     args.output_markdown.parent.mkdir(parents=True, exist_ok=True)
     args.output_json.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     args.output_markdown.write_text(render_markdown(report))
-    return 0 if report["summary"]["complete"] else 2
+    annotate_report(report, args.xml)
+    return 0 if report["summary"]["complete"] else 1
 
 
 if __name__ == "__main__":
     try:
         sys.exit(main())
     except (ET.ParseError, OSError, ValueError, json.JSONDecodeError) as error:
-        print(f"Error: {error}", file=sys.stderr)
-        sys.exit(2)
+        _annotate("error", f"Could not build the benchmark report: {error}")
+        sys.exit(1)

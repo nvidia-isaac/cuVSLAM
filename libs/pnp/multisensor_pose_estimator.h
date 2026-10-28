@@ -20,7 +20,6 @@
 #include <optional>
 #include <vector>
 
-#include <cunls/common/cublas_helper.h>
 #include <cunls/common/types.h>
 #include <cunls/minimizer/levenberg_marquardt_minimizer.h>
 
@@ -100,7 +99,7 @@ struct InertialPriorInput {
   // World-frame gravity (output of optimize_inertial / map_.set_gravity).
   Vector3T gravity_world = Vector3T::Zero();
   // The IMU-to-rig calibration used to convert between IMU-frame poses (which the preintegration
-  // is expressed in) and rig_from_world (which the cuNLS state holds).
+  // is expressed in) and rig poses (the cuNLS state holds world_from_rig).
   Isometry3T rig_from_imu = Isometry3T::Identity();
 };
 
@@ -137,7 +136,6 @@ private:
   camera::Rig rig_;
   MultisensorSolverSettings settings_;
   mutable cuda::Stream stream_{false};
-  mutable cunls::cuBLASHandle cublas_handle_;
 
   // Pre-allocated GPU buffers (capacity = kMaxObsPerCamera * num_cameras).
   // Avoids cudaMalloc/cudaFree on every solve() call.
