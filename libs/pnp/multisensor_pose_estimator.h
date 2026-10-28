@@ -17,6 +17,7 @@
 #pragma once
 
 #include <functional>
+#include <memory>
 #include <optional>
 #include <vector>
 
@@ -124,6 +125,7 @@ class MultisensorPoseEstimator {
 public:
   MultisensorPoseEstimator(const camera::Rig& rig,
                            const MultisensorSolverSettings& settings = MultisensorSolverSettings());
+  ~MultisensorPoseEstimator();
 
   bool solve(Isometry3T& rig_from_world, Matrix6T& static_info_exp,
              const std::vector<camera::Observation>& observations,
@@ -164,10 +166,11 @@ private:
   mutable std::vector<std::vector<ObservationRef>> obs_per_camera_;
   mutable std::vector<camera::Observation> filtered_obs_;
   mutable std::vector<Vector3T> matched_landmarks_;
-  mutable std::vector<float*> pose_state_ptrs_;
-  mutable std::vector<float*> icp_state_ptrs_;
-  mutable std::vector<std::vector<float*>> p2p_state_ptrs_;
-  mutable std::vector<float*> inertial_state_ptrs_;
+
+  // The cuNLS problem of the last solve, kept while the set of factor batches stays the same so the minimizer
+  // can reuse its structure (MinimizerOptions::reuse_structure).
+  struct CachedProblem;
+  mutable std::unique_ptr<CachedProblem> cached_problem_;
 
   mutable cunls::LevenbergMarquardtMinimizer minimizer_;
 
