@@ -53,37 +53,24 @@ if(NOT EXISTS "${CUVSLAM_LIBRARY}")
         ${CUVSLAM_BUILD_DIR_HELP})
 endif()
 
-nanobind_add_module(pycuvslam STABLE_ABI NB_STATIC cuvslam2.cpp)
-target_link_libraries(pycuvslam PRIVATE ${CUVSLAM_LIBRARY})
-target_include_directories(pycuvslam PRIVATE ${CUVSLAM_INCLUDE_DIR})
+nanobind_add_module(_cuvslam STABLE_ABI NB_STATIC src/cuvslam2.cpp)
+target_link_libraries(_cuvslam PRIVATE ${CUVSLAM_LIBRARY})
+target_include_directories(_cuvslam PRIVATE ${CUVSLAM_INCLUDE_DIR})
 
-# Set RPATH so pycuvslam.so can find libcuvslam.so in the same directory
-set_target_properties(pycuvslam PROPERTIES
+# Set RPATH so _cuvslam.so can find libcuvslam.so in the same directory
+set_target_properties(_cuvslam PROPERTIES
     BUILD_RPATH "$ORIGIN"
     INSTALL_RPATH "$ORIGIN"
 )
 
-install(TARGETS pycuvslam LIBRARY DESTINATION .)
-install(FILES ${CUVSLAM_LIBRARY} DESTINATION .)
+install(TARGETS _cuvslam LIBRARY DESTINATION cuvslam)
+install(FILES ${CUVSLAM_LIBRARY} DESTINATION cuvslam)
 
-install(FILES
-    ${CMAKE_CURRENT_SOURCE_DIR}/__init__.py
-    ${CMAKE_CURRENT_SOURCE_DIR}/utils.py
-    DESTINATION .
+nanobind_add_stub(_cuvslam_stub
+    MODULE _cuvslam
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/_cuvslam.pyi
+    PYTHON_PATH $<TARGET_FILE_DIR:_cuvslam>
+    DEPENDS _cuvslam
 )
 
-nanobind_add_stub(pycuvslam_stub
-    MODULE pycuvslam
-    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/pycuvslam.pyi
-    MARKER_FILE ${CMAKE_CURRENT_BINARY_DIR}/py.typed
-    PYTHON_PATH $<TARGET_FILE_DIR:pycuvslam>
-    DEPENDS pycuvslam
-)
-
-install(FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/pycuvslam.pyi
-    ${CMAKE_CURRENT_BINARY_DIR}/py.typed
-    DESTINATION .
-)
-
-add_subdirectory(test)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/_cuvslam.pyi DESTINATION cuvslam)

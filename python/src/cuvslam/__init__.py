@@ -9,10 +9,44 @@
 
 """cuVSLAM Python bindings."""
 
+import contextlib
 import warnings
+from importlib import metadata as _metadata
+
+
+def _warn_if_multiple_distributions():
+    installed = []
+    for name in ('cuvslam', 'cuvslam_cu12', 'cuvslam_cu13'):
+        try:
+            installed.append(_metadata.distribution(name).metadata['Name'])
+        except _metadata.PackageNotFoundError:
+            pass
+    if len(installed) > 1:
+        warnings.warn(
+            f'Several cuVSLAM distributions are installed ({", ".join(installed)}). They install the same files, '
+            'so uninstalling one breaks the others. Uninstall all of them, then install only one.',
+            RuntimeWarning,
+            stacklevel=2)
+
+
+def _load_cuda_libraries():
+    """Load the CUDA libraries from NVIDIA wheels (the [cuda] extra), which the dynamic loader does not search."""
+    try:
+        from cuda.pathfinder import DynamicLibNotFoundError, load_nvidia_dynamic_lib
+    except ImportError:
+        return
+    for name in ('cublas', 'cusparse', 'cusolver'):
+        # cuda-pathfinder raises RuntimeError when it finds a library but cannot load it; the normal loader may still
+        # find a usable system copy.
+        with contextlib.suppress(DynamicLibNotFoundError, RuntimeError):
+            load_nvidia_dynamic_lib(name)
+
+
+_warn_if_multiple_distributions()
+_load_cuda_libraries()
 
 # Import select bindings for the main namespace
-from .pycuvslam import (
+from ._cuvslam import (
     get_version,
     set_verbosity,
     warm_up_gpu,
@@ -30,7 +64,7 @@ from .pycuvslam import (
     Odometry,
     Slam,
     Tracker)
-from . import pycuvslam as _core
+from . import _cuvslam as _core
 
 # Python helper functions for file-based config loading
 from . import utils

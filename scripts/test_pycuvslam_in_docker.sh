@@ -27,6 +27,6 @@ docker run --runtime=nvidia --gpus all --rm --label "cuvslam.runner=${RUNNER_NAM
     trap "chown -R $HOST_UID:$HOST_GID /output" EXIT
     CUVSLAM_BUILD_DIR=/output/build SKBUILD_BUILD_DIR=/tmp/skbuild \
       pip install /cuvslam/python/
-    python3 -m unittest discover -v -s /cuvslam/python/test 2>&1 | \
+    python3 -m unittest discover -v -s /cuvslam/python/tests 2>&1 | \
       tee /output/python-test-output.txt
   '

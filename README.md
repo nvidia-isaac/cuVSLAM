@@ -55,7 +55,7 @@ Notes:
 ## Multisensor mode
 
 Multisensor tracking is experimental: tracking may be inaccurate or fail for some sensor configurations and scenes.
-The current implementation supports pinhole cameras only.
+RGB-D cameras must use the pinhole model; cameras without depth support every distortion model.
 
 # Visual place recognition
 
@@ -139,19 +139,24 @@ PyCuVSLAM is the Python wrapper (bindings) for the cuVSLAM library.
 Pre-built wheels are available on the [cuVSLAM releases page](https://github.com/nvidia-isaac/cuVSLAM/releases)
 for the following configurations:
 
-| Target | Ubuntu | Python wheel tag | CUDA wheel tag | Architecture |
-|--------|--------|------------------|----------------|--------------|
-| Desktop/server | 22.04 | `cp310` (Python 3.10) | `cu12`, `cu13` | x86_64 |
-| Desktop/server | 24.04 | `cp312-abi3` (Python 3.12+) | `cu12`, `cu13` | x86_64 |
-| Jetson Orin | 22.04 (JetPack 6.x) | `cp310` (Python 3.10) | `cu12` | aarch64 |
-| Jetson Thor | 24.04 (JetPack 7.x) | `cp312-abi3` (Python 3.12+) | `cu13` | aarch64 |
+| Target | Ubuntu | Python wheel tag | Package | Architecture |
+|--------|--------|------------------|---------|--------------|
+| Desktop/server | 22.04 | `cp310` (Python 3.10) | `cuvslam-cu12`, `cuvslam-cu13` | x86_64 |
+| Desktop/server | 24.04 | `cp312-abi3` (Python 3.12+) | `cuvslam-cu12`, `cuvslam-cu13` | x86_64 |
+| Jetson Orin | 22.04 (JetPack 6.x) | `cp310` (Python 3.10) | `cuvslam-cu12` | aarch64 |
+| Jetson Thor | 24.04 (JetPack 7.x) | `cp312-abi3` (Python 3.12+) | `cuvslam-cu13` | aarch64 |
 
 Only the combinations listed above are provided as pre-built wheels. The `cp312-abi3` wheels use Python's stable ABI
 and are compatible with Python 3.12 and later. Other Python, CUDA, or Jetson combinations require an
 [installation from source](#install-from-source).
 
-**Prerequisite**: [CUDA Toolkit 12 or 13](https://developer.nvidia.com/cuda/toolkit) must be installed separately
-(not included in the wheels). Its major version must match the wheel's `cu12` or `cu13` tag.
+**Prerequisite**: the wheels use cuBLAS, cuSOLVER and cuSPARSE from [CUDA Toolkit](https://developer.nvidia.com/cuda/toolkit)
+12 or 13, matching the package's `cu12` or `cu13` suffix. They come from either:
+
+* a system CUDA Toolkit install, or
+* NVIDIA's CUDA Toolkit wheels, installed with the `cuda` extra (x86_64 and Jetson Thor; Jetson Orin uses the CUDA
+  Toolkit from JetPack). When installed, they take precedence over a system CUDA Toolkit, unless another module has
+  already loaded these libraries.
 
 Official wheels include cuNLS support for `Multisensor` mode; no separate cuNLS installation is required.
 
@@ -163,8 +168,12 @@ To install (virtual environment is recommended):
 3. Install with pip:
 
 ```bash
-pip install cuvslam-*.whl
+pip install cuvslam_cu12-*.whl                         # with a system CUDA Toolkit
+pip install "./cuvslam_cu12-<version>-<tags>.whl[cuda]" # with CUDA Toolkit wheels from PyPI
 ```
+
+Install only one of `cuvslam-cu12` and `cuvslam-cu13` in an environment: both provide the `cuvslam` module, and
+`import cuvslam` warns if more than one cuVSLAM package is installed.
 
 If a pre-built wheel is not available for your system, see [Install from Source](#install-from-source) below.
 
@@ -204,7 +213,8 @@ For Python usage, [pre-built wheels](#install-from-wheels) are the recommended a
 ### Requirements
 
 * Ubuntu 22+ (22.04 & 24.04 tested) x86_64/aarch64 (Desktop/Laptop & [Nvidia Jetson Orin/Thor](https://www.nvidia.com/en-us/autonomous-machines/embedded-systems/))
-* [CUDA Toolkit 12 or 13](https://developer.nvidia.com/cuda/toolkit), [Jetpack 6.1/6.2/7.0/7.1](https://docs.nvidia.com/jetson/)
+* [CUDA Toolkit 12.6 or later](https://developer.nvidia.com/cuda/toolkit) for the default `USE_CUNLS=ON` build, [Jetpack 6.1/6.2/7.0/7.1](https://docs.nvidia.com/jetson/)
+    * Older CUDA 12 versions require configuring with `-DUSE_CUNLS=OFF` (see [cuNLS](#cunls)).
 * `apt update && apt install g++ cmake git git-lfs python3-dev`
     * git + git-lfs to clone this repository
     * CMake 3.19+, gcc
@@ -253,17 +263,18 @@ Build types: `Release` (default), `Debug`, `RelWithDebInfo`, `MinSizeRel`. Do no
 
 **cuNLS** (CUDA nonlinear least squares) is enabled by default (`USE_CUNLS=ON`) and is built from
 source via `FetchContent`, like the other external dependencies — no separate install or path is
-required. The source is pinned in `cmake/ext/cunls.cmake`; cuNLS downloads its own dependencies
-(spdlog is shared with cuVSLAM, cuDSS is fetched as a prebuilt archive) at configure time, so a
-network connection and the CUDA Toolkit are the only prerequisites. The resulting static archive
-is bundled into `libcuvslam`.
+required. The source is pinned in `cmake/ext/cunls.cmake`, and spdlog is shared with cuVSLAM.
+cuVSLAM uses cuNLS's DenseQR solver and builds with the optional cuDSS backend disabled, so no
+cuDSS archive, library, or runtime package is required. A network connection and CUDA Toolkit 12.6
+or later are required for the default `USE_CUNLS=ON` build. The resulting static cuNLS archive is
+bundled into `libcuvslam`.
 
 cuNLS source and license information are published in the
 [nvidia-isaac/cuNLS repository](https://github.com/nvidia-isaac/cuNLS). Release wheels and C++ packages built with the
 default configuration include cuNLS support and do not require a separate runtime package.
 
-`USE_CUDA` must be `ON`. To build without cuNLS (and disable the multisensor odometry mode that
-depends on it), configure with `-DUSE_CUNLS=OFF`.
+cuNLS requires `USE_CUDA=ON`. To build from source with older CUDA versions, configure with
+`-DUSE_CUNLS=OFF`. This disables cuNLS and the `Multisensor` odometry mode that depends on it.
 
 ### Build on Jetson (aarch64)
 

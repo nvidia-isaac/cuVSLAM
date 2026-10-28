@@ -226,6 +226,27 @@ class TestTracking(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "duplicate camera id"):
             vslam.Tracker(rig, TrackerMode.OdometryOnlyRealtime, config)
 
+    def test_multisensor_stereo_with_distortion(self):
+        # Without depth, distorted cameras are supported. With this distortion, tracking the same images
+        # with a pinhole model drifts beyond the tolerance (~0.12 m after 20 frames).
+        k1 = 0.5
+        steps = 20
+        img = data.ImageGenerator(self.rig.cameras, steps)
+        distorted_cameras = data.generate_stereo_camera(640, 480, baseline=0.25)
+        for cam in distorted_cameras:
+            cam.distortion = vslam.Distortion(vslam.Distortion.Model.Brown, [k1, 0, 0, 0, 0])
+        config = vslam.Odometry.Config(odometry_mode=vslam.Odometry.OdometryMode.Multisensor)
+        tracker = vslam.Tracker(vslam.Rig(distorted_cameras), TrackerMode.OdometryOnlyRealtime, config)
+
+        for i in range(steps):
+            images, z = img.generate_zoomed_images(i)
+            distorted = [data.distort_image(im, cam, k1) for im, cam in zip(images, self.rig.cameras)]
+            odom_pose, _ = tracker.track(i * 1_000_000, distorted)
+            self.assertTrue(odom_pose.world_from_rig, msg=f"frame {i}")
+            pose = odom_pose.world_from_rig.pose
+            np.testing.assert_allclose(pose.translation, [0, 0, z], atol=0.05, err_msg=f"frame {i}")
+            np.testing.assert_allclose(pose.rotation, [0, 0, 0, 1], atol=0.01, err_msg=f"frame {i}")
+
     def _run_keyframe_overrides(self, mode, overrides):
         """Track a fixed feature-rich frame repeatedly, applying a per-frame keyframe override.
 
