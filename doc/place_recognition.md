@@ -8,19 +8,8 @@ closes loops and how to evaluate it. Relocalizing in a saved map with `LocalizeI
 
 ## The engine
 
-Place recognition runs AnyLoc, which describes a frame with DINOv2 features computed on the GPU. DINOv2 runs as a
-TensorRT engine that a `USE_TENSORRT` build makes for one of two GPUs, an RTX 4090 or a Jetson Orin Nano
-(`CUVSLAM_ANYLOC_TARGET`), on that GPU and with its TensorRT version:
-
-```bash
-cmake -S . -B build -DUSE_TENSORRT=ON
-cmake --build build
-source build/cuvslam_vars.sh   # exports CUVSLAM_ANYLOC_ENGINE, the engine's path
-```
-
-`Slam::Config::vpr_model_path` (Python: `vpr_model_path`) names the engine, and AnyLoc needs `use_gpu`. An engine
-only loads in the TensorRT version and on the GPU architecture that built it; see
-[models/anyloc](https://github.com/nvidia-isaac/cuVSLAM/blob/main/models/anyloc/README.md).
+`Slam::Config::vpr_model_path` (Python: `vpr_model_path`) names the AnyLoc TensorRT engine, built as
+[models/anyloc](https://github.com/nvidia-isaac/cuVSLAM/blob/main/models/anyloc/README.md) describes.
 
 ## Mapping and recognizing places
 
@@ -29,7 +18,6 @@ import os
 
 import cuvslam as vslam
 
-# The AnyLoc TensorRT engine the USE_TENSORRT build made; build/cuvslam_vars.sh exports its path.
 engine = os.environ['CUVSLAM_ANYLOC_ENGINE']
 
 def on_place(place, error):

@@ -70,8 +70,8 @@ kidnapping is `LocalizeInMap`'s job: called without a guess pose, it takes candi
 recognition map and verifies them against that map's landmarks, instead of searching a grid around a guess the robot
 does not have.
 
-Place recognition runs [AnyLoc](https://anyloc.github.io/), a VLAD aggregation of DINOv2 features, on the GPU. It needs
-a `USE_TENSORRT` build, which also makes its TensorRT engine (see [models/anyloc](models/anyloc/README.md)).
+Place recognition runs [AnyLoc](https://anyloc.github.io/), a VLAD aggregation of DINOv2 features, on the GPU, from a
+TensorRT engine that [models/anyloc](models/anyloc/README.md) builds.
 Both APIs expose it the same way:
 
 | Task | C++ (`cuvslam::Slam`) | Python (`cuvslam.Slam`) |
@@ -158,6 +158,8 @@ and are compatible with Python 3.12 and later. Other Python, CUDA, or Jetson com
   Toolkit from JetPack). When installed, they take precedence over a system CUDA Toolkit, unless another module has
   already loaded these libraries.
 
+TensorRT 10 (`libnvinfer10`) must be installed separately (not included in the wheels).
+
 Official wheels include cuNLS support for `Multisensor` mode; no separate cuNLS installation is required.
 
 To install (virtual environment is recommended):
@@ -214,6 +216,7 @@ For Python usage, [pre-built wheels](#install-from-wheels) are the recommended a
 
 * Ubuntu 22+ (22.04 & 24.04 tested) x86_64/aarch64 (Desktop/Laptop & [Nvidia Jetson Orin/Thor](https://www.nvidia.com/en-us/autonomous-machines/embedded-systems/))
 * [CUDA Toolkit 12 or 13](https://developer.nvidia.com/cuda/toolkit), [Jetpack 6.1/6.2/7.0/7.1](https://docs.nvidia.com/jetson/)
+* [TensorRT 8.6+](https://developer.nvidia.com/tensorrt), unless configured with `-DUSE_TENSORRT=OFF`
 * `apt update && apt install g++ cmake git git-lfs python3-dev`
     * git + git-lfs to clone this repository
     * CMake 3.19+, gcc
@@ -253,8 +256,7 @@ All flags have defaults; override with `-DFLAG=VALUE`.
 | `USE_LMDB` | ON | LMDB map database |
 | `USE_RERUN` | OFF | Rerun SDK visualization |
 | `USE_NVTX` | OFF | NVIDIA NVTX profiling |
-| `USE_TENSORRT` | OFF | AnyLoc place recognition backend; requires `USE_CUDA` and TensorRT 8.6+ |
-| `CUVSLAM_BUILD_ANYLOC_ENGINE` | ON with `USE_TENSORRT` | builds AnyLoc's TensorRT engine: an ONNX export in a Python venv, then a TensorRT build (needs network access); see [models/anyloc](models/anyloc/README.md) |
+| `USE_TENSORRT` | ON | AnyLoc place recognition backend; requires TensorRT 8.6+ |
 
 Build types: `Release` (default), `Debug`, `RelWithDebInfo`, `MinSizeRel`. Do not mix types in the same build directory.
 

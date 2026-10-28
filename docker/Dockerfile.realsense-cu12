@@ -53,6 +53,9 @@ ENV PYTHONPATH=/opt/librealsense/build/Release
 # Set working directory
 WORKDIR /cuvslam
 
+COPY scripts/install_tensorrt.sh /tmp/install_tensorrt.sh
+RUN /tmp/install_tensorrt.sh && rm /tmp/install_tensorrt.sh
+
 # Build cuVSLAM, install Python packages, and clean up source
 COPY . /tmp/cuvslam_src
 RUN cmake -DCMAKE_BUILD_TYPE=Release -S /tmp/cuvslam_src -B /tmp/cuvslam_build \
