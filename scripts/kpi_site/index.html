@@ -401,11 +401,18 @@ function tracesFor(s, name) {
 // The date span of every visible trace, so all charts share one axis and changes line up across datasets;
 // null when no point is visible.
 function dateSpan(traces) {
-  const times = traces.flatMap((t) => t.x.filter((x, i) => x !== null && t.y[i] !== null))
-    .map((x) => (typeof x === "number" ? x : Date.parse(x)));
-  if (!times.length) return null;
-  const lo = Math.min(...times) - DAY_MS / 2, hi = Math.max(...times) + DAY_MS / 2;
-  return [new Date(lo).toISOString(), new Date(hi).toISOString()];
+  // A loop, not Math.min(...times): with every metric and band shown the dates outgrow the argument limit.
+  let lo = Infinity, hi = -Infinity;
+  for (const t of traces) {
+    t.x.forEach((x, i) => {
+      if (x === null || t.y[i] === null) return;
+      const time = typeof x === "number" ? x : Date.parse(x);
+      if (time < lo) lo = time;
+      if (time > hi) hi = time;
+    });
+  }
+  if (lo === Infinity) return null;
+  return [new Date(lo - DAY_MS / 2).toISOString(), new Date(hi + DAY_MS / 2).toISOString()];
 }
 
 function syncX(divs, sharedRange) {
@@ -413,12 +420,14 @@ function syncX(divs, sharedRange) {
   for (const div of divs) {
     div.on("plotly_relayout", (ev) => {
       if (syncing) return;
-      // A reset (double-click or the home button) returns every chart to the shared range, not each to its own.
-      const zoomed = ev["xaxis.range[0]"] !== undefined;
-      if (!zoomed && !ev["xaxis.autorange"]) return;
-      const range = zoomed ? [ev["xaxis.range[0]"], ev["xaxis.range[1]"]] : sharedRange;
+      // A zoom sends xaxis.range[0] and [1]; a reset (double-click or the home button) sends the initial range as
+      // xaxis.range, or xaxis.autorange. Either way every chart follows, so they keep sharing one axis.
+      const autorange = ev["xaxis.range[0]"] === undefined && !Array.isArray(ev["xaxis.range"]);
+      if (autorange && !ev["xaxis.autorange"]) return;
+      const range = ev["xaxis.range[0]"] !== undefined ? [ev["xaxis.range[0]"], ev["xaxis.range[1]"]]
+                  : autorange ? sharedRange : ev["xaxis.range"];
       syncing = true;
-      Promise.all(divs.filter((d) => zoomed ? d !== div : true).map((d) => Plotly.relayout(d, {"xaxis.range": range})))
+      Promise.all(divs.filter((d) => autorange || d !== div).map((d) => Plotly.relayout(d, {"xaxis.range": range})))
         .finally(() => { syncing = false; });
     });
   }
