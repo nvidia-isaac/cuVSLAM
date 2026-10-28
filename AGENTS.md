@@ -2,70 +2,19 @@
 
 AI agent guidance for working in this repository. **Start by reading `README.md`** — it is the single source of truth for project overview, tracking modes, performance, install, and build instructions. See `DEVELOPMENT.md` for developer setup.
 
-## Repository Layout
-
-```text
-libs/            # 24 modular C++ libraries (camera, slam, odometry, cuda_modules, …)
-python/          # PyCuVSLAM nanobind bindings for Tracker, Odometry, and Slam
-examples/        # Runnable Python examples per dataset/camera (kitti, euroc, tum, realsense, zed, …)
-models/          # Neural network models the build makes from pinned upstream sources (anyloc)
-tools/           # C++ analysis and visualization tools (tracker, reporter, visualizer)
-test_data/       # Small reference datasets (edex, sof, navsim)
-cmake/ext/       # FetchContent dependency configs (Eigen, GTest, spdlog, yaml-cpp, …)
-docker/          # Dockerfile for containerized builds
-cuvslam-skills/  # Claude Code skills (cuvslam-onboard, cuvslam-troubleshoot, cuvslam-ci)
-```
-
-Key files:
-- `libs/cuvslam/cuvslam2.h` — primary C++ public API (the only public header)
-- `libs/cuvslam/tracker.cpp` — high-level `Tracker` class combining odometry and SLAM
-- `python/cuvslam2.cpp` — nanobind Python bindings (must stay in sync with `cuvslam2.h`)
-- `CMakeLists.txt` — root CMake build definition
-- `build_release.sh` — convenience script for build + tests
-- `pyproject.toml` — Python package metadata (scikit-build-core + nanobind)
-- `.clang-format` — C++ formatting rules (Google style, 120-char limit)
-- `.pre-commit-config.yaml` — hooks for formatting, copyright headers, style
-
 ## Testing
-
-### C++ unit tests (GTest + ctest)
-
-```bash
-cd <build-dir>
-ctest --output-on-failure
-```
-
-Test sources live in `libs/*/test/` directories. Each library has its own test CMakeLists.
 
 ### Python API tests
 
 ```bash
-python3 -m unittest discover -v -s ./python/test --locals
+python3 -m unittest discover -v -s ./python/tests --locals
 ```
-
-Key test files: `python/test/test_api.py`, `test_bindings.py`, `test_tracking.py`, `test_map.py`, `test_image_format.py`.
 
 ### All-in-one (build + both test suites)
 
 ```bash
 ./build_release.sh --modules_test --api_test
 ```
-
-## Code Style
-
-**C++**: Google C++ Style with two project-specific exceptions:
-1. Line limit is **120 characters** (not 80)
-2. No indentation before `public` / `private` / `protected`
-
-```bash
-# Format a single file (fast, safe to run)
-clang-format -i path/to/file.cpp
-
-# Format all C++ files recursively
-find . -iname '*.h' -o -iname '*.cpp' | xargs clang-format -i
-```
-
-**Pre-commit hooks** run on every `git commit` and automatically handle formatting, copyright headers, and basic hygiene. For install instructions and troubleshooting, see `DEVELOPMENT.md`.
 
 ## Design Concepts
 
@@ -88,14 +37,12 @@ Load-bearing rules:
 - Before making changes in any folder, read the `README.md` in that folder if one exists — these are written for humans and contain context that is not derivable from the code alone
 - Keep each library in `libs/` self-contained with its own `CMakeLists.txt` and `test/` subdirectory
 - Use `spdlog` (via `libs/log/`) for all logging — no `printf` or `std::cout` in library code
-- Use `Eigen` for linear algebra; it is already a FetchContent dependency
 - Use the `Pose` type from `cuvslam2.h` for all SE(3) transforms (quaternion + translation)
 - Add new external dependencies as FetchContent entries in `cmake/ext/`
-- Write a corresponding `libs/*/test/` when adding new public API functions
 - When generating C++ code, always include `{}` braces for `if` statements, even for single-line bodies. This prevents accidental behavior changes when new statements are added later and keeps control flow explicit and consistent.
 
 **Don't:**
-- Don't edit `libs/cuvslam/cuvslam2.h` without updating `python/cuvslam2.cpp` — they must stay in sync
+- Don't edit `libs/cuvslam/cuvslam2.h` without updating `python/src/cuvslam2.cpp` — they must stay in sync
 - Don't put implementation details in `cuvslam2.h`; it is the public C++ API boundary
 - Don't store `std::string_view` or other non-owning views in `cuvslam2.h` structs or return them from long-lived objects; use owning types (`std::string`, `std::vector`) for anything the caller keeps. `std::string_view` is fine for function parameters that are only used during the call
 - Don't mix different `CMAKE_BUILD_TYPE` values in the same `CUVSLAM_DST_DIR`
@@ -118,26 +65,11 @@ Load-bearing rules:
 
 **Length:** Keep the git commit message title (the first line) to 70 characters or fewer.
 
-**Unit tests:** `[fix]` and `[feat]` MRs must include unit tests (C++ in `libs/*/test/` and/or Python under `python/test/` as appropriate).
+**Unit tests:** `[fix]` and `[feat]` MRs must include unit tests (C++ in `libs/*/test/` and/or Python under `python/tests/` as appropriate).
 
 Changes confined to `examples/` or `scripts/` are exempt. Neither tree is product source, neither has a test directory, and adding one would mean import shims or harnesses that cost more to maintain than they catch. Validate those changes with focused invocations plus the relevant pre-commit hooks, and record the commands and their output in the MR description. An MR that touches one of these trees *and* product source still needs tests for the product source part.
 
 **Scope:** Do not mix several unrelated changes in one MR. Keep each MR as small as is reasonable; every change in the MR should clearly relate to its stated topic.
-
-## Key Patterns and Examples
-
-Refer to these files when implementing new features or tests:
-
-| What | Where |
-|------|-------|
-| Stereo VO example | `examples/kitti/track_kitti.py` |
-| Stereo-inertial (IMU) example | `examples/euroc/track_euroc.py` |
-| Monocular-depth example | `examples/tum/track_tum.py` |
-| Multi-camera example | `examples/realsense/` |
-| High-level Tracker (odometry + SLAM) | `libs/cuvslam/tracker.cpp` |
-| nanobind binding pattern | `python/cuvslam2.cpp` (see `nb::class_<>` usage) |
-| GTest unit test pattern | `libs/common/test/common_test.cpp` |
-| CMake library definition | any `libs/*/CMakeLists.txt` |
 
 ## Agent Permissions
 
@@ -159,15 +91,7 @@ When creating a git branch, use `<user-name>/<branch-name>`, with `<branch-name>
 
 ## Claude Code Skills
 
-Project-specific skills in `cuvslam-skills/` — see `README.md` for descriptions. Install into Claude Code:
-
-```bash
-cp -r cuvslam-skills/cuvslam-onboard ~/.claude/skills/
-cp -r cuvslam-skills/cuvslam-troubleshoot ~/.claude/skills/
-cp -r cuvslam-skills/cuvslam-ci ~/.claude/skills/
-```
-
-`cuvslam-ci` covers the CI/CD pipelines (see the CI/CD pipelines section above).
+Project-specific skills in `cuvslam-skills/` — see `cuvslam-skills/README.md` for descriptions and install steps.
 
 ## AGENTS.md Convention
 

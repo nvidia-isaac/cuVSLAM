@@ -141,7 +141,7 @@ fi
 if is_true "$APITESTS"; then
   echo "Python API tests executed."
   CUVSLAM_BUILD_DIR=$DST python3 -m pip install --user -e $SRC/python
-  python3 -m unittest discover -v -s $SRC/python/test --locals || exit 1
+  python3 -m unittest discover -v -s $SRC/python/tests --locals || exit 1
 else
   echo "Python API tests skipped."
 fi
