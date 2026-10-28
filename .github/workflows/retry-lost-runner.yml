@@ -1,8 +1,8 @@
 name: Retry lost runner
 
-# Re-runs the failed jobs of a CI run when a self-hosted runner lost contact with
-# GitHub mid-job, and reports every such event. This workflow never checks out
-# or executes code from the run it inspects.
+# Re-runs the failed and cancelled jobs of a CI run when a self-hosted runner lost
+# contact with GitHub or was shut down mid-job, and reports every such event. This
+# workflow never checks out or executes code from the run it inspects.
 
 # A `branches` filter would match PR Verify runs against the PR head branch,
 # which a fork can name `main`, so the job condition does the filtering.
@@ -22,14 +22,17 @@ env:
   # Total attempts per run, including the original one.
   MAX_ATTEMPTS: 3
   LOST_RUNNER_MESSAGE: "lost communication with the server"
+  # Logged, not annotated: the annotation only says "A task was canceled."
+  RUNNER_SHUTDOWN_MESSAGE: "The runner has received a shutdown signal"
   TRACKING_ISSUE_LABEL: ci-runner-lost
-  TRACKING_ISSUE_TITLE: "CI: self-hosted runner lost communication"
+  TRACKING_ISSUE_TITLE: "CI: self-hosted runner lost communication or shut down"
 
 jobs:
   retry:
     name: Retry if a runner was lost
     if: >-
-      github.event.workflow_run.conclusion == 'failure' &&
+      (github.event.workflow_run.conclusion == 'failure' ||
+       github.event.workflow_run.conclusion == 'cancelled') &&
       github.event.workflow_run.head_repository.full_name == github.repository &&
       ((github.event.workflow_run.name == 'Nightly Build & Test' &&
         (github.event.workflow_run.head_branch == 'main' ||
@@ -59,18 +62,42 @@ jobs:
               owner, repo, run_id: run.id, attempt_number: attempt, per_page: 100,
             });
 
+            // Cancellations by a user, by a newer run in the concurrency group, or by a
+            // timeout are annotated; only an unexplained cancellation can be a runner
+            // shutdown, which only the job log records.
             const lost = [];
-            for (const job of jobs.filter(j => j.conclusion === 'failure')) {
+            let userCancel = null;
+            for (const job of jobs.filter(j => j.conclusion === 'failure' || j.conclusion === 'cancelled')) {
               const annotations = await github.paginate(github.rest.checks.listAnnotations, {
                 owner, repo, check_run_id: job.id, per_page: 100,
               });
-              if (annotations.some(a => (a.message || '').includes(process.env.LOST_RUNNER_MESSAGE))) {
-                lost.push(job);
+              const messages = annotations.map(a => a.message || '');
+              if (messages.some(m => m.includes(process.env.LOST_RUNNER_MESSAGE))) {
+                lost.push({ ...job, lostReason: 'lost communication' });
+                continue;
+              }
+              if (job.conclusion !== 'cancelled') {
+                continue;
+              }
+              userCancel = userCancel || messages.find(m => /The run was canceled by @/.test(m));
+              if (!job.runner_name || messages.some(m =>
+                  /The run was canceled by @|higher priority waiting request|exceeded the maximum execution time/.test(m))) {
+                continue;
+              }
+              try {
+                const { data: log } = await github.rest.actions.downloadJobLogsForWorkflowRun({
+                  owner, repo, job_id: job.id,
+                });
+                if (String(log).includes(process.env.RUNNER_SHUTDOWN_MESSAGE)) {
+                  lost.push({ ...job, lostReason: 'shutdown signal' });
+                }
+              } catch (error) {
+                core.warning(`Could not read the log of ${job.name}: ${error.message}`);
               }
             }
 
             if (lost.length === 0) {
-              core.info(`Run ${run.id} attempt ${attempt} failed without a lost runner; nothing to do.`);
+              core.info(`Run ${run.id} attempt ${attempt} ended without a lost runner; nothing to do.`);
               return;
             }
 
@@ -128,6 +155,8 @@ jobs:
             let rerunError = null;
             if (attempt >= maxAttempts) {
               action = `Not retried: attempt ${attempt} of ${maxAttempts} was the last one allowed.`;
+            } else if (userCancel) {
+              action = `Not retried: ${userCancel}`;
             } else if (prCheckError) {
               action = `Not retried: could not confirm the PR is open (${prCheckError}).`;
             } else if (newerRunError) {
@@ -147,10 +176,11 @@ jobs:
             }
 
             const runUrl = `${run.html_url}/attempts/${attempt}`;
-            const jobLines = lost.map(j => `- [${j.name}](${j.html_url}) on runner \`${j.runner_name || 'unknown'}\``);
+            const jobLines = lost.map(
+              j => `- [${j.name}](${j.html_url}) on runner \`${j.runner_name || 'unknown'}\` (${j.lostReason})`);
             const prLink = pr ? `, PR #${pr.number}` : '';
             const header = `**${run.name}** on \`${run.head_branch}\` (${run.event}${prLink}), [attempt ${attempt}](${runUrl})`;
-            const body = [header, '', 'Runner lost communication in:', ...jobLines, '', action].join('\n');
+            const body = [header, '', 'Runner lost in:', ...jobLines, '', action].join('\n');
 
             await core.summary.addRaw(body).write();
 
@@ -167,7 +197,7 @@ jobs:
                   title: process.env.TRACKING_ISSUE_TITLE,
                   labels: [process.env.TRACKING_ISSUE_LABEL],
                   body: [
-                    'Each comment records a CI job whose self-hosted runner lost communication with GitHub.',
+                    'Each comment records a CI job whose self-hosted runner lost communication with GitHub or was shut down.',
                     'Subscribe to this issue to be notified. Close it to start a fresh one on the next event.',
                     '',
                     '---',
@@ -182,9 +212,10 @@ jobs:
             }
 
             if (process.env.SLACK_WEBHOOK_URL) {
-              const slackJobs = lost.map(j => `• <${j.html_url}|${j.name}> on \`${j.runner_name || 'unknown'}\``);
+              const slackJobs = lost.map(
+                j => `• <${j.html_url}|${j.name}> on \`${j.runner_name || 'unknown'}\` (${j.lostReason})`);
               const text = [
-                `:warning: CI runner lost communication: *${run.name}* on \`${run.head_branch}\`${prLink}, <${runUrl}|attempt ${attempt}>`,
+                `:warning: CI runner lost: *${run.name}* on \`${run.head_branch}\`${prLink}, <${runUrl}|attempt ${attempt}>`,
                 ...slackJobs,
                 action,
               ].join('\n');
