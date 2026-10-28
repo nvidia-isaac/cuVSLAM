@@ -98,7 +98,7 @@ bool MultiVisualOdometryBase::track(const Sources& curr_sources, [[maybe_unused]
   IVisualOdometry::VOFrameStat* stat = last_frame_stat_.get();
   std::vector<Track2D>* tracks2d = stat ? &(stat->tracks2d) : nullptr;
   Tracks3DMap* tracks3d = stat ? &(stat->tracks3d) : nullptr;
-  Isometry3T world_from_rig;
+  Isometry3T world_from_rig = predicted_world_from_rig;
 
   const bool have_pose = solver.solveNextFrame(timestamp, frame_type, observations_, world_from_rig, static_info_exp,
                                                {per_frame_setting.sba, per_frame_setting.sm, per_frame_setting.vo_pnp,
