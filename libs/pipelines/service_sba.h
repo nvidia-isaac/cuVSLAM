@@ -358,7 +358,7 @@ class ImuSbaService : public SbaServiceBase {
 public:
   ImuSbaService(const sba::Settings& sba_settings, const camera::Rig& rig, const imu::ImuCalibration& calib,
                 UnifiedMap& map)
-      : SbaServiceBase(map, "cuvslam:sba", sba_settings.async), rig_(rig), calib_(calib), imu_bundler_(calib) {
+      : SbaServiceBase(map, "cuvslam:imu_sba", sba_settings.async), rig_(rig), calib_(calib), imu_bundler_(calib) {
     pending_ = sba_settings;
     current_ = sba_settings;
   }
