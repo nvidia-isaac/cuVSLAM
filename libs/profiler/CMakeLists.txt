@@ -35,5 +35,3 @@ if(USE_NVTX)
 else()
     add_library(${MODULE_NAME} INTERFACE ${HEADERS})
 endif()
-
-add_subdirectory(test)
