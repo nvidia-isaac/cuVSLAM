@@ -5,7 +5,8 @@ name: Retry lost runner
 # workflow never checks out or executes code from the run it inspects.
 
 # A `branches` filter would match PR Verify runs against the PR head branch,
-# which a fork can name `main`, so the job condition does the filtering.
+# which a fork can name `main`, so the job condition does the filtering. It matches
+# the workflow file path: `workflow_run.name` is the run name, which `run-name` sets.
 on:
   workflow_run:
     workflows: ["Nightly Build & Test", "PR Verify"]
@@ -34,10 +35,10 @@ jobs:
       (github.event.workflow_run.conclusion == 'failure' ||
        github.event.workflow_run.conclusion == 'cancelled') &&
       github.event.workflow_run.head_repository.full_name == github.repository &&
-      ((github.event.workflow_run.name == 'Nightly Build & Test' &&
+      ((github.event.workflow_run.path == '.github/workflows/nightly.yml' &&
         (github.event.workflow_run.head_branch == 'main' ||
          startsWith(github.event.workflow_run.head_branch, 'release/'))) ||
-       (github.event.workflow_run.name == 'PR Verify' &&
+       (github.event.workflow_run.path == '.github/workflows/pr-verify.yml' &&
         github.event.workflow_run.event == 'pull_request'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
