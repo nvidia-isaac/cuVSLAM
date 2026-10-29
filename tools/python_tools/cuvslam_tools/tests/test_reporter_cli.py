@@ -63,6 +63,12 @@ def _render_reports(stats: list) -> dict:
 
 
 class TestReporterCli(unittest.TestCase):
+    @staticmethod
+    def _parser():
+        parser = argparse.ArgumentParser()
+        cli.add_reporter_backend_arguments(parser)
+        return parser
+
     def test_resolve_config_path_uses_datasets_root_for_relative_config(self):
         with tempfile.TemporaryDirectory() as datasets_root:
             config_path = Path(datasets_root) / "kitti" / "kitti-vio_slam_gt.cfg"
@@ -72,6 +78,19 @@ class TestReporterCli(unittest.TestCase):
             resolved = cli._resolve_config_path("kitti/kitti-vio_slam_gt.cfg", datasets_root)
 
         self.assertEqual(resolved, config_path)
+
+    def test_cpp_backend_collects_trailing_launcher_flags(self):
+        args, full_argv = cli.parse_reporter_arguments(
+            self._parser(),
+            ["--tracker_backend", "api_launcher", "--", "--expert_sba_num_frames=9"],
+        )
+
+        self.assertEqual(args.api_launcher_args, ["--expert_sba_num_frames=9"])
+        self.assertEqual(full_argv[-1:], args.api_launcher_args)
+
+    def test_python_backend_rejects_trailing_launcher_flags(self):
+        with self.assertRaises(SystemExit):
+            cli.parse_reporter_arguments(self._parser(), ["--", "--expert_sba_num_frames=9"])
 
     def test_vpr_loop_closure_with_a_backend_reaches_the_report(self):
         # No --use_slam: it comes from each config sequence.
