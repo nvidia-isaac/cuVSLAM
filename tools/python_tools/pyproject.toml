@@ -29,9 +29,16 @@ dependencies = [
 pdf = [
     "weasyprint>=70.0",
 ]
+map-repair = [
+    "lmdb==3.0.0",
+    "mcp>=1.29.1,<2",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]
+include = ["cuvslam_tools*"]
+# The separately built NAT server may leave a local build directory in its package.
+exclude = ["*.build", "*.build.*"]
 
 [tool.setuptools.package-data]
 "cuvslam_tools.bag2edex" = ["configs/*.yaml"]
@@ -45,6 +52,8 @@ where = ["."]
 "cuvslam_tools.reporter" = ["report_templates/*.html"]
 "cuvslam_tools.vpr_reporter" = ["report_templates/*.html"]
 "cuvslam_tools.datasets_validator" = ["configs/*.cfg"]
+"cuvslam_tools.offline_map_repair" = ["README.md"]
+"cuvslam_tools.offline_map_repair.mcp_server" = ["configs/*.yaml", "configs/*.json"]
 
 [project.scripts]
 rosbag_extract_edex = "cuvslam_tools.bag2edex.scripts.extract_edex:main"
@@ -63,6 +72,7 @@ cuvslam_tracker = "cuvslam_tools.tracker.cli:main"
 cuvslam_reporter = "cuvslam_tools.reporter.cli:main"
 cuvslam_vpr_reporter = "cuvslam_tools.vpr_reporter.cli:main"
 cuvslam_validator = "cuvslam_tools.datasets_validator.cli:main"
+cuvslam_map_repair = "cuvslam_tools.offline_map_repair.cli:main"
 
 [tool.ruff.lint.per-file-ignores]
 # PT027 rewrites assertRaises into pytest.raises. These tests run under
