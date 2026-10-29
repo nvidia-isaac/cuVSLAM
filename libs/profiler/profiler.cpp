@@ -16,57 +16,21 @@
  */
 
 #include <random>
-#include <string>
-
-#ifdef USE_NVTX
-#ifdef _WIN32
-#include <windows.h>
-#define NameOsThread() \
-  nvtxNameOsThreadA(GetCurrentThreadId(), ("Thread_" + std::to_string(GetCurrentThreadId())).c_str())
-#endif
-
-#ifdef __linux__
-#include <sys/syscall.h>
-#include <unistd.h>
-#endif
 
 #include "profiler/profiler.h"
 
-#ifdef __linux__
-namespace {
-// Each thread names itself once: naming another thread's id from a worker emits out-of-order events
-// that Nsight Systems rejects on import.
-void NameOsThread() {
-  thread_local bool named = false;
-  if (!named) {
-    const auto tid = static_cast<uint32_t>(syscall(SYS_gettid));
-    nvtxNameOsThreadA(tid, ("Thread_" + std::to_string(tid)).c_str());
-    named = true;
-  }
-}
-}  // namespace
-#endif
-
+#ifdef USE_NVTX
 namespace cuvslam::profiler {
 
-Enable::RangeId_t Enable::TraceEventStart(const char* message) {
-  NameOsThread();
-  return nvtxRangeStartA(message);
-}
+Enable::RangeId_t Enable::TraceEventStart(const char* message) { return nvtxRangeStartA(message); }
 
 void Enable::TraceEventEnd(RangeId_t id) { nvtxRangeEnd(id); }
 
-Enable::TraceEvent::TraceEvent(const char* message) {
-  NameOsThread();
-  nvtxRangePushA(message);
-}
+Enable::TraceEvent::TraceEvent(const char* message) { nvtxRangePushA(message); }
 
 Enable::TraceEvent::~TraceEvent() { nvtxRangePop(); }
 
-void Enable::Mark(const char* message) {
-  NameOsThread();
-  nvtxMarkA(message);
-}
+void Enable::Mark(const char* message) { nvtxMarkA(message); }
 
 nvtxEventAttributes_t default_attributes(const char* message, uint32_t color = 0) {
   nvtxMessageValue_t message_;
@@ -93,13 +57,11 @@ uint32_t Enable::Domain::get_color() const { return color; }
 
 void Enable::DomainMark(DomainHandle_t handle, const char* message, uint32_t color) {
   nvtxEventAttributes_t eventAttrib = default_attributes(message, color);
-  NameOsThread();
   nvtxDomainMarkEx(handle, &eventAttrib);
 }
 
 Enable::RangeId_t Enable::DomainTraceEventStart(DomainHandle_t handle, const char* message, uint32_t color) {
   nvtxEventAttributes_t eventAttrib = default_attributes(message, color);
-  NameOsThread();
   return nvtxDomainRangeStartEx(handle, &eventAttrib);
 }
 
@@ -122,7 +84,6 @@ Enable::DomainTraceEvent::~DomainTraceEvent() { Pop(); }
 
 void Enable::DomainTraceEvent::Push(const char* message, uint32_t color) {
   auto eventAttrib = default_attributes(message, color);
-  NameOsThread();
   nvtxDomainRangePushEx(domain_handle_, &eventAttrib);
 }
 
@@ -152,6 +113,6 @@ Enable::RangeId_t Enable::DomainHelper::trace_event_start(const char* message) c
 }
 
 void Enable::DomainHelper::trace_event_end(RangeId_t id) const { return DomainTraceEventEnd(domain_.get_handle(), id); }
-#endif
 
 }  // namespace cuvslam::profiler
+#endif

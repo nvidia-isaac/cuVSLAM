@@ -306,7 +306,7 @@ template <class Bundler>
 class SbaService : public SbaServiceBase {
 public:
   SbaService(const sba::Settings& sba_settings, const camera::Rig& rig, UnifiedMap& map)
-      : SbaServiceBase(map, sba_settings.async), rig_(rig) {
+      : SbaServiceBase(map, "cuvslam:sba", sba_settings.async), rig_(rig) {
     pending_ = sba_settings;
     current_ = sba_settings;
   }
@@ -358,7 +358,7 @@ class ImuSbaService : public SbaServiceBase {
 public:
   ImuSbaService(const sba::Settings& sba_settings, const camera::Rig& rig, const imu::ImuCalibration& calib,
                 UnifiedMap& map)
-      : SbaServiceBase(map, sba_settings.async), rig_(rig), calib_(calib), imu_bundler_(calib) {
+      : SbaServiceBase(map, "cuvslam:sba", sba_settings.async), rig_(rig), calib_(calib), imu_bundler_(calib) {
     pending_ = sba_settings;
     current_ = sba_settings;
   }

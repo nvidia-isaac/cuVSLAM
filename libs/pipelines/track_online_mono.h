@@ -88,7 +88,7 @@ private:
   // After the parallel thread finish map optimization, we need to do quick
   // re-resectioning all frames that have been tracked using non-optimal map.
   std::list<std::vector<camera::Observation>> ahead_sba_observations_;
-  WorkThread<FrameId> kfThread_;
+  WorkThread<FrameId> kfThread_{"cuvslam:sba"};
 
   /***
    * Implementation
