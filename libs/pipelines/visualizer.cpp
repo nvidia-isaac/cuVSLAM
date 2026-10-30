@@ -238,14 +238,16 @@ void logTrajectory(const Isometry3T& rig_from_world, const std::string& viewport
   trajectory_positions.push_back(current_pos);
 
   // Log current camera position as a point
-  recording.log(viewport_name + "/position",
-                rerun::Points3D(current_pos).with_colors(Color(0, 255, 0)).with_radii({0.001f}));
+  // Screen-space radii keep the same on-screen size for room-scale (EuRoC) and street-scale (KITTI) scenes.
+  recording.log(viewport_name + "/position", rerun::Points3D(current_pos)
+                                                 .with_colors(Color(0, 255, 0))
+                                                 .with_radii(rerun::components::Radius::ui_points(3.0f)));
 
   // Log trajectory as a line strip (if we have at least 2 points)
   if (trajectory_positions.size() >= 2) {
-    recording.log(
-        viewport_name + "/path",
-        rerun::LineStrips3D(rerun::components::LineStrip3D(trajectory_positions)).with_colors(color).with_radii(0.5f));
+    recording.log(viewport_name + "/path", rerun::LineStrips3D(rerun::components::LineStrip3D(trajectory_positions))
+                                               .with_colors(color)
+                                               .with_radii(rerun::components::Radius::ui_points(1.5f)));
   }
 
   // Optionally show camera orientation axes

@@ -72,6 +72,23 @@ int32_t RequireNonNegative(int32_t value, std::string_view expression) {
 
 #define REQUIRE_NON_NEGATIVE(x) RequireNonNegative((x), #x)
 
+#ifdef USE_RERUN
+// Only 8-bit CPU images are logged; GPU buffers would need a device-to-host copy.
+void LogCamera0Image(const std::vector<Image>& images) {
+  for (const auto& image : images) {
+    if (image.camera_index != 0 || image.is_gpu_mem || image.data_type != ImageData::DataType::UINT8) {
+      continue;
+    }
+    const auto color_model = image.encoding == ImageData::Encoding::RGB ? rerun::datatypes::ColorModel::RGB
+                                                                        : rerun::datatypes::ColorModel::L;
+    visualizer::RerunVisualizer::getInstance().getRecordingStream().log(
+        "world/camera_0/images",
+        rerun::Image(static_cast<const uint8_t*>(image.pixels),
+                     {static_cast<uint32_t>(image.width), static_cast<uint32_t>(image.height)}, color_model));
+  }
+}
+#endif
+
 // Builds a TrackPerFrameSettings from per-frame options. Internals always carries concrete
 // values; pass Internals{} to use all defaults. Add new per-frame categories to
 // TrackPerFrameSettings rather than adding parameters here or to track().
@@ -824,6 +841,7 @@ PoseEstimate Odometry::Track(const ImageSet& images, const ImageSet& masks, cons
   impl->last_frame_timestamp_ns = current_time_ns;
   // Rerun timelines are thread-local: set them on the caller's thread so VO logs land on frame_id/timestamp.
   RERUN(visualizer::RerunVisualizer::getInstance().setupTimeline, frame_id, current_time_ns);
+  RERUN(LogCamera0Image, images);
 
   for (const auto& image : images) {
     bool is_rgbd = false;

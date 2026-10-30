@@ -325,16 +325,6 @@ ErrorCode BaseLauncher::launch() {
       Matrix6T pose_info;
       const odom::IVisualOdometry::VOFrameStat& stat = last_vo_stat();
 
-      TRACE_EVENT ev_track = profiler_domain_.trace_event("tracker->track()", profiler_color_);
-      StopwatchScope sws_track_proc(sw_track_proc_);
-
-      Isometry3T delta;  // doesn't need to be initialized
-      const bool solutionFound = launch_vo(delta, pose_info, per_frame_settings_);
-      if (!solutionFound) {
-        TraceError("Failed to solveNextFrame in frame %d. Set pose delta to identity.", frameId);
-        delta = Isometry3T::Identity();
-      }
-
       RERUN(setupFrameTimeline, curr_meta);
       // log camera 0 images
       RERUN(logCameraImages, curr_meta, curr_sources, {0}, {"world/camera_0/images"});
@@ -345,6 +335,16 @@ ErrorCode BaseLauncher::launch() {
       if (gt_poses_.size() > static_cast<size_t>(frameId)) {
         RERUN(pipelines::logTrajectory, gt_poses_[frameId].inverse(), "world/trajectories/gt_trajectory",
               Color(0, 0, 255), TrajectoryType::GT);
+      }
+
+      TRACE_EVENT ev_track = profiler_domain_.trace_event("tracker->track()", profiler_color_);
+      StopwatchScope sws_track_proc(sw_track_proc_);
+
+      Isometry3T delta;  // doesn't need to be initialized
+      const bool solutionFound = launch_vo(delta, pose_info, per_frame_settings_);
+      if (!solutionFound) {
+        TraceError("Failed to solveNextFrame in frame %d. Set pose delta to identity.", frameId);
+        delta = Isometry3T::Identity();
       }
 
       prev_abs_world_from_rig = odom::increment_pose(prev_abs_world_from_rig, delta);

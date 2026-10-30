@@ -226,7 +226,7 @@ void AsyncSlam::TrackResult(const FrameId frameId, const int64_t timestamp_ns,
     const Isometry3T current_pose = GetSlamPose();
     LogSlamPose(current_pose);
     RERUN(pipelines::logTrajectory, current_pose.inverse(), "world/trajectories/slam", Color(255, 255, 255),
-          TrajectoryType::GT);
+          TrajectoryType::SLAM);
   }
 #endif
 }
