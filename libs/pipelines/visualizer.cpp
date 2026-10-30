@@ -44,6 +44,11 @@ namespace {
 thread_local std::unordered_map<TrajectoryType, std::vector<rerun::Position3D>> trajectory_positions_map;
 
 std::vector<rerun::Position3D>& getTrajectoryPositions(TrajectoryType type) { return trajectory_positions_map[type]; }
+
+// Points outside the image would stretch the 2D view's bounds past the image.
+bool IsInsideImage(const Vector2T& uv, const Vector2T& resolution) {
+  return uv.x() >= 0.f && uv.y() >= 0.f && uv.x() < resolution.x() && uv.y() < resolution.y();
+}
 }  // namespace
 
 void logObservations(const std::vector<camera::Observation>& observations, const camera::Rig& rig,
@@ -109,8 +114,9 @@ void logLandmarks(const std::unordered_map<TrackId, Vector3T>& landmarks, const 
     // Convert normalized coordinates to pixel UV coordinates using camera intrinsics
     Vector2T uv_coords;
     if (camera_model.denormalizePoint(normalized_coords, uv_coords)) {
-      // Add the 2D UV position
-      points.emplace_back(uv_coords.x(), uv_coords.y());
+      if (IsInsideImage(uv_coords, camera_model.getResolution())) {
+        points.emplace_back(uv_coords.x(), uv_coords.y());
+      }
     } else {
       TraceWarning("RerunVisualizer: Failed to project landmark to UV coordinates");
     }
@@ -155,8 +161,9 @@ void logLandmarks(const std::vector<pipelines::Landmark>& landmarks, const Isome
     // Convert normalized coordinates to pixel UV coordinates using camera intrinsics
     Vector2T uv_coords;
     if (camera_model.denormalizePoint(normalized_coords, uv_coords)) {
-      // Add the 2D UV position
-      points.emplace_back(uv_coords.x(), uv_coords.y());
+      if (IsInsideImage(uv_coords, camera_model.getResolution())) {
+        points.emplace_back(uv_coords.x(), uv_coords.y());
+      }
     } else {
       TraceWarning("RerunVisualizer: Failed to project landmark to UV coordinates");
     }

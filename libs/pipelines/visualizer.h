@@ -37,6 +37,11 @@
 #include "visualizer/visualizer.hpp"
 
 namespace cuvslam::pipelines {
+// Camera 0 entities: the pose lives on kCamera0Entity; image and depth are pinhole children of it.
+inline constexpr const char* kCamera0Entity = "world/camera_0";
+inline constexpr const char* kCamera0ImageEntity = "world/camera_0/images";
+inline constexpr const char* kCamera0DepthEntity = "world/camera_0/depth";
+
 void logObservations(const std::vector<camera::Observation>& observations, const camera::Rig& rig,
                      const std::string& viewport_name, const Color& color);
 

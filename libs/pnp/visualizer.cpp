@@ -71,8 +71,11 @@ void logLandmarks(const std::vector<std::reference_wrapper<const Vector3T>>& lan
     // Convert normalized coordinates to pixel UV coordinates using camera intrinsics
     Vector2T uv_coords;
     if (camera_model->denormalizePoint(normalized_coords, uv_coords)) {
-      // Add the 2D UV position
-      points.emplace_back(uv_coords.x(), uv_coords.y());
+      const Vector2T res = camera_model->getResolution();
+      // Points outside the image would stretch the 2D view's bounds past the image.
+      if (uv_coords.x() >= 0.f && uv_coords.y() >= 0.f && uv_coords.x() < res.x() && uv_coords.y() < res.y()) {
+        points.emplace_back(uv_coords.x(), uv_coords.y());
+      }
     } else {
       TraceWarning("RerunVisualizer: Failed to project landmark to UV coordinates");
     }
