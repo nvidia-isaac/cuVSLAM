@@ -129,7 +129,7 @@ fi
 # DNS and connection-refused errors. Retry configure on other download failures
 # (HTTP errors, timeouts, TLS) so a transient outage does not fail the build.
 CONFIGURE_ATTEMPTS=3
-CONFIGURE_LOG="$DST/cmake-configure.log"
+CONFIGURE_LOG="$PWD/cmake-configure.log"
 attempt=1
 while :; do
   { if cmake $CMAKE_ARGS ${EXTRA_CMAKE_ARGS:-} -S $SRC -B $DST 2>&1; then rc=0; else rc=$?; fi
