@@ -213,7 +213,8 @@ For Python usage, [pre-built wheels](#install-from-wheels) are the recommended a
 ### Requirements
 
 * Ubuntu 22+ (22.04 & 24.04 tested) x86_64/aarch64 (Desktop/Laptop & [Nvidia Jetson Orin/Thor](https://www.nvidia.com/en-us/autonomous-machines/embedded-systems/))
-* [CUDA Toolkit 12 or 13](https://developer.nvidia.com/cuda/toolkit), [Jetpack 6.1/6.2/7.0/7.1](https://docs.nvidia.com/jetson/)
+* [CUDA Toolkit 12.6 or later](https://developer.nvidia.com/cuda/toolkit) for the default `USE_CUNLS=ON` build, [Jetpack 6.1/6.2/7.0/7.1](https://docs.nvidia.com/jetson/)
+    * Older CUDA 12 versions require configuring with `-DUSE_CUNLS=OFF` (see [cuNLS](#cunls)).
 * `apt update && apt install g++ cmake git git-lfs python3-dev`
     * git + git-lfs to clone this repository
     * CMake 3.19+, gcc
@@ -262,17 +263,18 @@ Build types: `Release` (default), `Debug`, `RelWithDebInfo`, `MinSizeRel`. Do no
 
 **cuNLS** (CUDA nonlinear least squares) is enabled by default (`USE_CUNLS=ON`) and is built from
 source via `FetchContent`, like the other external dependencies — no separate install or path is
-required. The source is pinned in `cmake/ext/cunls.cmake`; cuNLS downloads its own dependencies
-(spdlog is shared with cuVSLAM, cuDSS is fetched as a prebuilt archive) at configure time, so a
-network connection and the CUDA Toolkit are the only prerequisites. The resulting static archive
-is bundled into `libcuvslam`.
+required. The source is pinned in `cmake/ext/cunls.cmake`, and spdlog is shared with cuVSLAM.
+cuVSLAM uses cuNLS's DenseQR solver and builds with the optional cuDSS backend disabled, so no
+cuDSS archive, library, or runtime package is required. A network connection and CUDA Toolkit 12.6
+or later are required for the default `USE_CUNLS=ON` build. The resulting static cuNLS archive is
+bundled into `libcuvslam`.
 
 cuNLS source and license information are published in the
 [nvidia-isaac/cuNLS repository](https://github.com/nvidia-isaac/cuNLS). Release wheels and C++ packages built with the
 default configuration include cuNLS support and do not require a separate runtime package.
 
-`USE_CUDA` must be `ON`. To build without cuNLS (and disable the multisensor odometry mode that
-depends on it), configure with `-DUSE_CUNLS=OFF`.
+cuNLS requires `USE_CUDA=ON`. To build from source with older CUDA versions, configure with
+`-DUSE_CUNLS=OFF`. This disables cuNLS and the `Multisensor` odometry mode that depends on it.
 
 ### Build on Jetson (aarch64)
 
