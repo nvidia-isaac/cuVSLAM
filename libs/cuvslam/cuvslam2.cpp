@@ -26,6 +26,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 
 #include "common/error.h"
 #include "common/isometry.h"
@@ -1157,7 +1158,13 @@ Slam::Slam(const Rig& rig, const std::vector<uint8_t>& primary_cameras, const Co
 
 Slam::Slam(Slam&& other) noexcept = default;
 
-Slam::~Slam() = default;
+Slam::~Slam() {
+  // A callback may own this Slam, and the SLAM thread releases callbacks after running them. That thread cannot join
+  // itself, so another thread tears down the state and joins it once it finishes the current command.
+  if (impl && impl->async_slam_->IsWorkerThread()) {
+    std::thread([doomed = std::move(impl)]() mutable { doomed.reset(); }).detach();
+  }
+}
 
 void Slam::Track(const Odometry::State& state, const Pose* gt_pose) {
   // Convert from public API types to internal types
