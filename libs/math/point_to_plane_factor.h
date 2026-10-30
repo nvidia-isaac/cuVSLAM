@@ -51,6 +51,13 @@ public:
     num_factors_ = static_cast<size_t>(grid_w) * grid_h;
   }
 
+  // Rebinds the depth image and the plane count for the next solve; the pixel grid (and so the factor count)
+  // stays fixed.
+  void SetFrame(cudaTextureObject_t depth_tex, int num_planes) {
+    depth_tex_ = depth_tex;
+    num_planes_ = num_planes;
+  }
+
   bool Evaluate(float* residuals, float* jacobians, float const* const* state_pointers, cudaStream_t stream,
                 const int* factor_ids, size_t num_factor_ids) const final {
     // cuNLS passes the resolved item count; only plain evaluation (item t is factor t) is supported.

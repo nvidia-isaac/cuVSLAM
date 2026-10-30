@@ -401,8 +401,9 @@ public:
     ///  - The rig must provide at least one RGB-D camera through
     ///    MultisensorSettings::depth_camera_ids, or at least one camera pair with
     ///    overlapping frustums. A single RGB-D camera is valid, with or without an IMU.
-    ///  - The current cuNLS solver supports pinhole cameras. Other camera models emit a
-    ///    warning and are not supported in Multisensor mode.
+    ///  - Cameras listed in MultisensorSettings::depth_camera_ids must use the pinhole model;
+    ///    other models emit a warning and their depth is misaligned. Cameras without depth
+    ///    support every Distortion::Model.
     ///  - Depth images passed to `Track()` must use `Encoding::MONO` with
     ///    `DataType::UINT16` or `DataType::FLOAT32`; see `Track()` for the per-frame
     ///    matching rules against `MultisensorSettings::depth_camera_ids`.

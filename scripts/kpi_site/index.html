@@ -65,7 +65,7 @@
     <h2 id="combine-heading">Configurations</h2>
     <select id="combine" aria-labelledby="combine-heading">
       <option value="each">Show each configuration</option>
-      <option value="mean">Combine (mean; max for counts)</option>
+      <option value="mean">Combine per platform (mean; max for counts)</option>
     </select>
     <div id="configs"></div>
     <h2>Metrics <button type="button" class="all" data-group="metrics">all / none</button></h2>
@@ -76,6 +76,9 @@
     <div id="types"></div>
     <h2>Modes</h2>
     <div id="modes"></div>
+    <label><input type="checkbox" id="retired"> Include retired evals</label>
+    <div class="hint">Evals that no configuration has run in its last three nightlies, such as KITTI stereo, are
+      hidden unless this is on.</div>
     <h2 id="yaxis-heading">Y axis</h2>
     <select id="yaxis" aria-labelledby="yaxis-heading">
       <option value="abs">Absolute value</option>
@@ -106,9 +109,9 @@
 const PALETTE = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22",
                  "#17becf", "#76b900", "#003f5c", "#bc5090", "#ffa600", "#58508d", "#ff6361"];
 const DEFAULTS = {panel: "row", columns: "auto", height: "auto", combine: "each", yaxis: "abs", style: "lines+markers",
-                  log: false, gaps: false, band: false, metrics: ["ATE"], from: "", to: ""};
+                  log: false, gaps: false, band: true, retired: false, metrics: ["ATE"], from: "", to: ""};
 const SELECTS = ["panel", "columns", "height", "combine", "yaxis", "style", "from", "to"];
-const TOGGLES = ["log", "gaps", "band"];
+const TOGGLES = ["log", "gaps", "band", "retired"];
 const GROUPS = ["configs", "metrics", "datasets", "types", "modes"];
 // Header height plus the panel grid padding, so a "fill" chart fits the window without scrolling.
 const FILL_OFFSET_PX = 72;
@@ -150,9 +153,23 @@ function readHash(opts) {
 function writeHash() {
   const p = new URLSearchParams();
   for (const k of SELECTS) if (state[k] !== DEFAULTS[k]) p.set(k, state[k]);
-  for (const k of TOGGLES) if (state[k]) p.set(k, "1");
+  for (const k of TOGGLES) if (state[k] !== DEFAULTS[k]) p.set(k, state[k] ? "1" : "0");
   for (const g of GROUPS) p.set(g, state[g].join(","));
   history.replaceState(null, "", "#" + p.toString());
+}
+
+// Whether every KPI of a dataset or tracking type is retired, to mark it in the filter lists.
+function allRetired(group, value) {
+  const match = {datasets: (k) => k.dataset === value, types: (k) => splitMode(k.mode)[0] === value}[group];
+  if (!match) return false;
+  const kpis = Object.values(DATA.kpis).filter(match);
+  return kpis.length > 0 && kpis.every((k) => k.retired);
+}
+
+function syncControls() {
+  for (const g of GROUPS) $(g).querySelectorAll("input").forEach((i) => { i.checked = state[g].includes(i.value); });
+  for (const k of SELECTS) $(k).value = state[k];
+  for (const k of TOGGLES) $(k).checked = state[k];
 }
 
 function buildControls(opts) {
@@ -160,11 +177,11 @@ function buildControls(opts) {
     const box = $(g);
     for (const v of opts[g]) {
       const label = document.createElement("label"), input = document.createElement("input");
-      input.type = "checkbox"; input.value = v; input.checked = state[g].includes(v);
+      input.type = "checkbox"; input.value = v;
       input.addEventListener("change", () => {
         state[g] = [...box.querySelectorAll("input:checked")].map((i) => i.value); update();
       });
-      label.append(input, " " + (g === "metrics" ? DATA.metrics[v].label : v));
+      label.append(input, " " + (g === "metrics" ? DATA.metrics[v].label : v) + (allRetired(g, v) ? " (retired)" : ""));
       label.title = v;
       box.append(label);
     }
@@ -175,14 +192,9 @@ function buildControls(opts) {
     inputs.forEach((i) => { i.checked = on; });
     state[g] = on ? inputs.map((i) => i.value) : []; update();
   }));
-  for (const k of SELECTS) {
-    $(k).value = state[k];
-    $(k).addEventListener("change", () => { state[k] = $(k).value; update(); });
-  }
-  for (const k of TOGGLES) {
-    $(k).checked = state[k];
-    $(k).addEventListener("change", () => { state[k] = $(k).checked; update(); });
-  }
+  for (const k of SELECTS) $(k).addEventListener("change", () => { state[k] = $(k).value; update(); });
+  for (const k of TOGGLES) $(k).addEventListener("change", () => { state[k] = $(k).checked; update(); });
+  syncControls();
   $("share").addEventListener("click", async () => {
     try {
       // navigator.clipboard is only defined on HTTPS and localhost pages, and writeText can be denied.
@@ -200,14 +212,30 @@ function collectSeries() {
   const series = [];
   for (const [key, kpi] of Object.entries(DATA.kpis)) {
     const [type, mode] = splitMode(kpi.mode);
-    if (!state.metrics.includes(kpi.metric) || !state.datasets.includes(kpi.dataset) ||
-        !state.types.includes(type) || !state.modes.includes(mode)) continue;
+    if ((kpi.retired && !state.retired) || !state.metrics.includes(kpi.metric) ||
+        !state.datasets.includes(kpi.dataset) || !state.types.includes(type) || !state.modes.includes(mode)) continue;
     const perConfig = state.configs.filter((c) => DATA.configs[c].values[key])
       .map((c) => ({config: c, runs: DATA.configs[c].runs, values: DATA.configs[c].values[key]}));
     if (!perConfig.length) continue;
-    if (state.combine === "mean") {
+    if (state.combine !== "mean") {
+      for (const s of perConfig) series.push({key, kpi, ...s});
+      continue;
+    }
+    // Platforms run on different hardware (the nightly aggregate covers x86 only), so each is combined on its own;
+    // a platform with one configuration keeps its own series.
+    const byPlatform = new Map();
+    for (const s of perConfig) {
+      const platform = s.config.split("-")[0];
+      if (!byPlatform.has(platform)) byPlatform.set(platform, []);
+      byPlatform.get(platform).push(s);
+    }
+    for (const [platform, members] of byPlatform) {
+      if (members.length === 1) {
+        series.push({key, kpi, ...members[0]});
+        continue;
+      }
       const byRun = new Map();
-      for (const s of perConfig) s.runs.forEach((r, i) => {
+      for (const s of members) s.runs.forEach((r, i) => {
         if (s.values[i] === null) return;
         if (!byRun.has(r)) byRun.set(r, []);
         byRun.get(r).push(s.values[i]);
@@ -215,10 +243,8 @@ function collectSeries() {
       const runs = [...byRun.keys()].sort();
       const reduce = DATA.metrics[kpi.metric].count ? (xs) => Math.max(...xs)
                                                    : (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
-      series.push({key, kpi, config: `mean of ${perConfig.length}`, configs: perConfig.map((s) => s.config), runs,
-                   values: runs.map((r) => reduce(byRun.get(r)))});
-    } else {
-      for (const s of perConfig) series.push({key, kpi, ...s});
+      series.push({key, kpi, config: `${platform} mean of ${members.length}`, configs: members.map((s) => s.config),
+                   runs, values: runs.map((r) => reduce(byRun.get(r)))});
     }
   }
   return series;
@@ -335,7 +361,11 @@ function levelBand(runs, results, y) {
 }
 
 function tracesFor(s, name) {
-  const color = colorFor(name), idx = s.runs.map((r, i) => i).filter((i) => inRange(s.runs[i]));
+  // Nights before an eval existed (or after it was retired) are null; leaving them in stretches the date axis.
+  const first = s.values.findIndex((v) => v !== null), last = s.values.length - 1 - [...s.values].reverse().findIndex((v) => v !== null);
+  if (first < 0) return [];
+  const idx = s.runs.map((r, i) => i).filter((i) => i >= first && i <= last && inRange(s.runs[i]));
+  const color = colorFor(name);
   const ref = state.yaxis === "pct" ? median(idx.map((i) => s.values[i]).filter((v) => v !== null)) : null;
   const y = (v) => (v === null ? null : ref !== null ? (ref ? (v / ref - 1) * 100 : null) : v);
   const x = idx.map((i) => s.runs[i]), unit = DATA.metrics[s.kpi.metric].unit;
@@ -368,17 +398,27 @@ function tracesFor(s, name) {
   return traces;
 }
 
-function syncX(divs) {
+// The date span of every visible trace, so all charts share one axis and changes line up across datasets;
+// null when no point is visible.
+function dateSpan(traces) {
+  const times = traces.flatMap((t) => t.x.filter((x, i) => x !== null && t.y[i] !== null))
+    .map((x) => (typeof x === "number" ? x : Date.parse(x)));
+  if (!times.length) return null;
+  const lo = Math.min(...times) - DAY_MS / 2, hi = Math.max(...times) + DAY_MS / 2;
+  return [new Date(lo).toISOString(), new Date(hi).toISOString()];
+}
+
+function syncX(divs, sharedRange) {
   let syncing = false;
   for (const div of divs) {
     div.on("plotly_relayout", (ev) => {
       if (syncing) return;
-      const range = ev["xaxis.range[0]"] !== undefined ? [ev["xaxis.range[0]"], ev["xaxis.range[1]"]]
-                  : ev["xaxis.autorange"] ? null : undefined;
-      if (range === undefined) return;
+      // A reset (double-click or the home button) returns every chart to the shared range, not each to its own.
+      const zoomed = ev["xaxis.range[0]"] !== undefined;
+      if (!zoomed && !ev["xaxis.autorange"]) return;
+      const range = zoomed ? [ev["xaxis.range[0]"], ev["xaxis.range[1]"]] : sharedRange;
       syncing = true;
-      Promise.all(divs.filter((d) => d !== div).map((d) => Plotly.relayout(d, range ? {"xaxis.range": range}
-                                                                                      : {"xaxis.autorange": true})))
+      Promise.all(divs.filter((d) => zoomed ? d !== div : true).map((d) => Plotly.relayout(d, {"xaxis.range": range})))
         .finally(() => { syncing = false; });
     });
   }
@@ -389,13 +429,16 @@ function update() {
   const panels = new Map();
   for (const s of collectSeries()) {
     const [panel, name] = panelOf(s);
+    const traces = tracesFor(s, name);
+    if (!traces.length) continue;
     if (!panels.has(panel)) panels.set(panel, []);
-    panels.get(panel).push(...tracesFor(s, name));
+    panels.get(panel).push(...traces);
   }
   const root = $("panels");
   root.querySelectorAll(".panel").forEach((d) => Plotly.purge(d));
   root.replaceChildren();
-  if (!panels.size) {
+  const sharedRange = dateSpan([...panels.values()].flat());
+  if (!sharedRange) {
     const p = document.createElement("div"); p.id = "empty"; p.textContent = "No KPIs match the current filters.";
     root.append(p); return;
   }
@@ -410,12 +453,12 @@ function update() {
     root.append(div); divs.push(div);
     Plotly.newPlot(div, traces, {
       title: {text: panelTitle(panel), font: {size: 14}, x: 0.01, xanchor: "left"}, margin: {l: 55, r: 10, t: 36, b: 40},
-      xaxis: {type: "date", tickformat: "%b %d"},
+      xaxis: {type: "date", tickformat: "%b %d", range: sharedRange},
       yaxis: {type: state.log && state.yaxis === "abs" ? "log" : "linear", zeroline: state.yaxis === "pct"},
       legend: {font: {size: 10}, orientation: "h", y: -0.18}, hovermode: "closest",
     }, {responsive: true, displaylogo: false, displayModeBar: "hover"});
   }
-  syncX(divs);
+  syncX(divs, sharedRange);
 }
 
 function showError(message) {
@@ -451,6 +494,8 @@ async function main() {
   state = readHash(opts);
   buildControls(opts);
   update();
+  // Fires for an edited or pasted link; the page's own updates use replaceState, which does not.
+  window.addEventListener("hashchange", () => { state = readHash(opts); syncControls(); update(); });
 }
 main().catch((e) => showError(e.message));
 </script>
