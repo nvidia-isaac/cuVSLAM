@@ -91,16 +91,16 @@ bool SolverSfMRGBD::solveNextFrame(int64_t time_ns, const sof::FrameState& frame
   } else {
     map_.get_recent_landmarks(recent_landmarks_);
     RERUN(logLandmarks3D, recent_landmarks_, "world/camera_0/images/sba_landmarks", Color(255, 255, 0), 0.01f);
-    RERUN(logLandmarks, recent_landmarks_, prev_rig_from_world_, *rig_.intrinsics[0], "world/camera_0/images/landmarks",
-          Color(255, 255, 0));
+    RERUN(logLandmarks, recent_landmarks_, rig_.camera_from_rig[0] * prev_rig_from_world_, *rig_.intrinsics[0],
+          "world/camera_0/images/landmarks", Color(255, 255, 0));
 
     Isometry3T rig_from_world = prev_rig_from_world_;  // try to optimize copy, use result if success only
 
     bool res = visual_icp_.solve(rig_from_world, static_info_exp, obs_vector_, recent_landmarks_, solver_settings.icp,
                                  inputs.depth_info);
 
-    RERUN(logLandmarks, recent_landmarks_, rig_from_world, *rig_.intrinsics[0], "world/camera_0/images/landmarks",
-          Color(255, 255, 0));
+    RERUN(logLandmarks, recent_landmarks_, rig_.camera_from_rig[0] * rig_from_world, *rig_.intrinsics[0],
+          "world/camera_0/images/landmarks", Color(255, 255, 0));
 
     RERUN(logTrajectory, rig_from_world, "world/trajectories/vo_trajectory", Color(0, 255, 0), TrajectoryType::VO);
 

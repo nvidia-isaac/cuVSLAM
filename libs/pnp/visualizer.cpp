@@ -98,6 +98,9 @@ void logObservations(const std::vector<std::reference_wrapper<const camera::Obse
   points.reserve(observations.size());
 
   for (const auto& obs : observations) {
+    if (obs.get().cam_id != 0) {
+      continue;
+    }
     // Convert from normalized xy coordinates to pixel uv coordinates
     Vector2T uv;
     if (obs.get().cam_id < rig.num_cameras && rig.intrinsics[obs.get().cam_id]) {

@@ -30,6 +30,7 @@
 #include "common/error.h"
 #include "common/isometry.h"
 #include "common/parse_utils.h"
+#include "common/rerun.h"
 #include "math/twist_to_angle.h"
 #include "odometry/increment_pose.h"
 #include "odometry/mono_visual_odometry.h"
@@ -38,6 +39,7 @@
 #include "odometry/svo_config.h"
 #include "slam/async_slam/async_slam.h"
 #include "slam/vpr/vpr_image.h"
+#include "visualizer/visualizer.hpp"
 #ifdef USE_CUDA
 #include "odometry/rgbd_odometry.h"
 #endif
@@ -820,6 +822,8 @@ PoseEstimate Odometry::Track(const ImageSet& images, const ImageSet& masks, cons
   }
   impl->last_timestamp_ns = current_time_ns;
   impl->last_frame_timestamp_ns = current_time_ns;
+  // Rerun timelines are thread-local: set them on the caller's thread so VO logs land on frame_id/timestamp.
+  RERUN(visualizer::RerunVisualizer::getInstance().setupTimeline, frame_id, current_time_ns);
 
   for (const auto& image : images) {
     bool is_rgbd = false;
