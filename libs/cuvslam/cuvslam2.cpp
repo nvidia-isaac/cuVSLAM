@@ -74,22 +74,38 @@ int32_t RequireNonNegative(int32_t value, std::string_view expression) {
 #define REQUIRE_NON_NEGATIVE(x) RequireNonNegative((x), #x)
 
 #ifdef USE_RERUN
+bool Camera0ProvidesDepth(Odometry::OdometryMode mode, const Odometry::RGBDSettings& rgbd_settings,
+                          const Odometry::MultisensorSettings& multisensor_settings) {
+  if (mode == Odometry::OdometryMode::RGBD) {
+    return rgbd_settings.depth_camera_id == 0;
+  }
+  if (mode == Odometry::OdometryMode::Multisensor) {
+    const auto& ids = multisensor_settings.depth_camera_ids;
+    return std::find(ids.begin(), ids.end(), 0) != ids.end();
+  }
+  return false;
+}
+
 // Only 8-bit CPU images are logged; GPU buffers would need a device-to-host copy.
+// A frame without a loggable camera 0 image clears the previous one (the static pinhole stays).
 void LogCamera0Image(const std::vector<Image>& images) {
+  auto& recording = visualizer::RerunVisualizer::getInstance().getRecordingStream();
   for (const auto& image : images) {
     if (image.camera_index != 0 || image.is_gpu_mem || image.data_type != ImageData::DataType::UINT8) {
       continue;
     }
     const auto color_model = image.encoding == ImageData::Encoding::RGB ? rerun::datatypes::ColorModel::RGB
                                                                         : rerun::datatypes::ColorModel::L;
-    visualizer::RerunVisualizer::getInstance().getRecordingStream().log(
-        pipelines::kCamera0ImageEntity,
-        rerun::Image(static_cast<const uint8_t*>(image.pixels),
-                     {static_cast<uint32_t>(image.width), static_cast<uint32_t>(image.height)}, color_model));
+    recording.log(pipelines::kCamera0ImageEntity,
+                  rerun::Image(static_cast<const uint8_t*>(image.pixels),
+                               {static_cast<uint32_t>(image.width), static_cast<uint32_t>(image.height)}, color_model));
+    return;
   }
+  recording.log(pipelines::kCamera0ImageEntity, rerun::Image::clear_fields());
 }
 
 // Only CPU depth images are logged; GPU buffers would need a device-to-host copy.
+// A frame without a loggable camera 0 depth clears the previous one, which would otherwise be drawn at the new pose.
 void LogCamera0Depth(const std::vector<Image>& depths, float depth_scale_factor) {
   auto& recording = visualizer::RerunVisualizer::getInstance().getRecordingStream();
   for (const auto& depth : depths) {
@@ -101,12 +117,16 @@ void LogCamera0Depth(const std::vector<Image>& depths, float depth_scale_factor)
       recording.log(
           pipelines::kCamera0DepthEntity,
           rerun::DepthImage(static_cast<const uint16_t*>(depth.pixels), resolution).with_meter(depth_scale_factor));
-    } else if (depth.data_type == ImageData::DataType::FLOAT32) {
+      return;
+    }
+    if (depth.data_type == ImageData::DataType::FLOAT32) {
       recording.log(
           pipelines::kCamera0DepthEntity,
           rerun::DepthImage(static_cast<const float*>(depth.pixels), resolution).with_meter(depth_scale_factor));
+      return;
     }
   }
+  recording.log(pipelines::kCamera0DepthEntity, rerun::DepthImage::clear_fields());
 }
 #endif
 
@@ -766,8 +786,7 @@ Odometry::Odometry(const Rig& rig, const Config& cfg) {
   tracker->odometry_mode = cfg.odometry_mode;
   RERUN(pipelines::logCameraPinhole, *tracker->rig.intrinsics[0], pipelines::kCamera0ImageEntity);
 #ifdef USE_RERUN
-  const bool depth_mode = cfg.odometry_mode == OdometryMode::RGBD || cfg.odometry_mode == OdometryMode::Multisensor;
-  if (depth_mode && std::find(depth_ids.begin(), depth_ids.end(), CameraId{0}) != depth_ids.end()) {
+  if (Camera0ProvidesDepth(cfg.odometry_mode, cfg.rgbd_settings, cfg.multisensor_settings)) {
     pipelines::logCameraPinhole(*tracker->rig.intrinsics[0], pipelines::kCamera0DepthEntity);
   }
 #endif
@@ -870,9 +889,12 @@ PoseEstimate Odometry::Track(const ImageSet& images, const ImageSet& masks, cons
   // Rerun timelines are thread-local: set them on the caller's thread so VO logs land on frame_id/timestamp.
   RERUN(visualizer::RerunVisualizer::getInstance().setupTimeline, frame_id, current_time_ns);
   RERUN(LogCamera0Image, images);
-  RERUN(LogCamera0Depth, depths,
-        impl->odometry_mode == OdometryMode::RGBD ? impl->rgbd_settings.depth_scale_factor
-                                                  : impl->multisensor_settings.depth_scale_factor);
+#ifdef USE_RERUN
+  if (Camera0ProvidesDepth(impl->odometry_mode, impl->rgbd_settings, impl->multisensor_settings)) {
+    LogCamera0Depth(depths, impl->odometry_mode == OdometryMode::RGBD ? impl->rgbd_settings.depth_scale_factor
+                                                                      : impl->multisensor_settings.depth_scale_factor);
+  }
+#endif
 
   for (const auto& image : images) {
     bool is_rgbd = false;

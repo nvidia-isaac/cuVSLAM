@@ -78,22 +78,18 @@ void logObservations(const std::vector<camera::Observation>& observations, const
     }
   }
 
-  if (!points.empty()) {
-    auto& visualizer = visualizer::RerunVisualizer::getInstance();
-    visualizer.getRecordingStream().log(viewport_name,
-                                        rerun::Points2D(points).with_colors(color).with_radii(2.0f).with_draw_order(
-                                            100.0f));  // High draw order to render on top
-  } else {
-    TraceWarning("RerunVisualizer: No observations to log for viewport %s", viewport_name.c_str());
+  auto& visualizer = visualizer::RerunVisualizer::getInstance();
+  if (points.empty()) {
+    visualizer.getRecordingStream().log(viewport_name, rerun::Points2D::clear_fields());
+    return;
   }
+  visualizer.getRecordingStream().log(viewport_name,
+                                      rerun::Points2D(points).with_colors(color).with_radii(2.0f).with_draw_order(
+                                          100.0f));  // High draw order to render on top
 }
 
 void logLandmarks(const std::unordered_map<TrackId, Vector3T>& landmarks, const Isometry3T& camera_from_world,
                   const camera::ICameraModel& camera_model, const std::string& viewport_name, const Color& color) {
-  if (landmarks.empty()) {
-    return;
-  }
-
   // Convert landmarks to 2D UV coordinates
   thread_local std::vector<rerun::Position2D> points;
 
@@ -123,22 +119,18 @@ void logLandmarks(const std::unordered_map<TrackId, Vector3T>& landmarks, const 
   }
 
   // Log the 2D landmark projections to Rerun
-  if (!points.empty()) {
-    auto& visualizer = visualizer::RerunVisualizer::getInstance();
-    visualizer.getRecordingStream().log(viewport_name,
-                                        rerun::Points2D(points).with_colors(color).with_radii(3.0f).with_draw_order(
-                                            10.0f));  // Slightly larger radius for 2D points
-  } else {
-    TraceWarning("RerunVisualizer: No landmarks to log for viewport %s", viewport_name.c_str());
+  auto& visualizer = visualizer::RerunVisualizer::getInstance();
+  if (points.empty()) {
+    visualizer.getRecordingStream().log(viewport_name, rerun::Points2D::clear_fields());
+    return;
   }
+  visualizer.getRecordingStream().log(viewport_name,
+                                      rerun::Points2D(points).with_colors(color).with_radii(3.0f).with_draw_order(
+                                          10.0f));  // Slightly larger radius for 2D points
 }
 
 void logLandmarks(const std::vector<pipelines::Landmark>& landmarks, const Isometry3T& camera_from_world,
                   const camera::ICameraModel& camera_model, const std::string& viewport_name, const Color& color) {
-  if (landmarks.empty()) {
-    return;
-  }
-
   // Convert landmarks to 2D UV coordinates
   thread_local std::vector<rerun::Position2D> points;
 
@@ -170,14 +162,14 @@ void logLandmarks(const std::vector<pipelines::Landmark>& landmarks, const Isome
   }
 
   // Log the 2D landmark projections to Rerun
-  if (!points.empty()) {
-    auto& visualizer = visualizer::RerunVisualizer::getInstance();
-    visualizer.getRecordingStream().log(viewport_name,
-                                        rerun::Points2D(points).with_colors(color).with_radii(3.0f).with_draw_order(
-                                            10.0f));  // Slightly larger radius for 2D points
-  } else {
-    TraceWarning("RerunVisualizer: No landmarks to log for viewport %s", viewport_name.c_str());
+  auto& visualizer = visualizer::RerunVisualizer::getInstance();
+  if (points.empty()) {
+    visualizer.getRecordingStream().log(viewport_name, rerun::Points2D::clear_fields());
+    return;
   }
+  visualizer.getRecordingStream().log(viewport_name,
+                                      rerun::Points2D(points).with_colors(color).with_radii(3.0f).with_draw_order(
+                                          10.0f));  // Slightly larger radius for 2D points
 }
 
 void logLandmarks3D(const std::unordered_map<TrackId, Vector3T>& landmarks, const std::string& viewport_name,
