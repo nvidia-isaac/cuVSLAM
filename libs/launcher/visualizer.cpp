@@ -66,15 +66,6 @@ void logCameraImages(const Metas& meta, const Sources& images, const std::vector
   }
 }
 
-void logPose(const Isometry3T& pose, const std::string& viewport_name) {
-  Eigen::Quaternionf quat(pose.linear());
-  auto& visualizer = visualizer::RerunVisualizer::getInstance();
-  visualizer.getRecordingStream().log(
-      viewport_name,
-      rerun::Transform3D(rerun::Vec3D{pose.translation().x(), pose.translation().y(), pose.translation().z()},
-                         rerun::Quaternion{quat.x(), quat.y(), quat.z(), quat.w()}));
-}
-
 void logDepthImage(const ImageSource& depth_source, const ImageMeta& meta, const std::string& viewport_name,
                    float depth_meter, float min_depth, float max_depth) {
   if (depth_source.data == nullptr) {

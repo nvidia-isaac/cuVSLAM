@@ -124,6 +124,7 @@ BaseLauncher::BaseLauncher(ICameraRig& cameraRig, const odom::Settings& svo_sett
     rig.camera_from_rig[i] = cameraRig_.getExtrinsic(i).inverse();
     rig.intrinsics[i] = &(cameraRig_.getIntrinsic(i));
   }
+  RERUN(pipelines::logCameraPinhole, *rig.intrinsics[0], "world/camera_0/images");
 }
 
 void BaseLauncher::SetupSlam() {
@@ -348,6 +349,7 @@ ErrorCode BaseLauncher::launch() {
       }
 
       prev_abs_world_from_rig = odom::increment_pose(prev_abs_world_from_rig, delta);
+      RERUN(pipelines::logCameraPose, prev_abs_world_from_rig * rig.camera_from_rig[0].inverse(), "world/camera_0");
       Isometry3T abs_world_from_rig = prev_abs_world_from_rig;
       if (FLAGS_enable_ground_integrator) {
         ground_integrator.AddNextPose(abs_world_from_rig);

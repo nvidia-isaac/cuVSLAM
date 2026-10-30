@@ -25,7 +25,9 @@
 #include <rerun/archetypes/arrows3d.hpp>
 #include <rerun/archetypes/line_strips3d.hpp>
 #include <rerun/archetypes/mesh3d.hpp>
+#include <rerun/archetypes/pinhole.hpp>
 #include <rerun/archetypes/points3d.hpp>
+#include <rerun/archetypes/transform3d.hpp>
 
 namespace cuvslam::pipelines {
 
@@ -343,6 +345,28 @@ void logCameraFrustums(const camera::Rig& rig, const Isometry3T& world_from_rig,
 
     recording.log(base, rerun::LineStrips3D(edges).with_colors(color).with_radii(0.003f));
   }
+}
+
+void logCameraPinhole(const camera::ICameraModel& camera_model, const std::string& entity_path,
+                      float image_plane_distance) {
+  const Vector2T res = camera_model.getResolution();
+  const Vector2T focal = camera_model.getFocal();
+  const Vector2T principal = camera_model.getPrincipal();
+  const rerun::datatypes::Mat3x3 image_from_camera(
+      std::array<float, 9>{focal.x(), 0.f, 0.f, 0.f, focal.y(), 0.f, principal.x(), principal.y(), 1.f});
+  auto& visualizer = visualizer::RerunVisualizer::getInstance();
+  visualizer.getRecordingStream().log_static(entity_path, rerun::Pinhole(image_from_camera)
+                                                              .with_resolution(res.x(), res.y())
+                                                              .with_image_plane_distance(image_plane_distance));
+}
+
+void logCameraPose(const Isometry3T& world_from_camera, const std::string& entity_path) {
+  const Vector3T t = world_from_camera.translation();
+  const Eigen::Quaternionf q(world_from_camera.linear());
+  auto& visualizer = visualizer::RerunVisualizer::getInstance();
+  visualizer.getRecordingStream().log(
+      entity_path, rerun::Transform3D::from_translation_rotation(
+                       {t.x(), t.y(), t.z()}, rerun::datatypes::Quaternion::from_xyzw(q.x(), q.y(), q.z(), q.w())));
 }
 
 void logVector3D(const Vector3T& vec, const Vector3T& origin, const std::string& viewport_name, const Color& color,

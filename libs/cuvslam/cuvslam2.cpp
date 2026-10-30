@@ -37,6 +37,7 @@
 #include "odometry/multi_visual_odometry.h"
 #include "odometry/stereo_inertial_odometry.h"
 #include "odometry/svo_config.h"
+#include "pipelines/visualizer.h"
 #include "slam/async_slam/async_slam.h"
 #include "slam/vpr/vpr_image.h"
 #include "visualizer/visualizer.hpp"
@@ -743,6 +744,7 @@ Odometry::Odometry(const Rig& rig, const Config& cfg) {
   tracker->debug_dump_directory = cfg.debug_dump_directory;
   tracker->max_frame_delta_ns = static_cast<int64_t>(cfg.max_frame_delta_s * 1e9);
   tracker->odometry_mode = cfg.odometry_mode;
+  RERUN(pipelines::logCameraPinhole, *tracker->rig.intrinsics[0], "world/camera_0/images");
 
   // Each depth-providing camera draws from the depth-capable pool, every other camera from the
   // no-depth pool. Both pools must hold cache_size contexts per camera so the pipeline can keep
@@ -905,6 +907,7 @@ PoseEstimate Odometry::Track(const ImageSet& images, const ImageSet& masks, cons
     return PoseEstimate{};
   }
   const Isometry3T internal_pose = impl->prev_abs_pose;
+  RERUN(pipelines::logCameraPose, internal_pose * impl->rig.camera_from_rig[0].inverse(), "world/camera_0");
 
   // static pose covariance in exponential mapping form in WCS
   const Matrix6T static_pose_covariance_exp = static_info_exp.ldlt().solve(Matrix6T::Identity());
