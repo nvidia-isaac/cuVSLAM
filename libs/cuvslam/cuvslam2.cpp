@@ -31,14 +31,17 @@
 #include "common/error.h"
 #include "common/isometry.h"
 #include "common/parse_utils.h"
+#include "common/rerun.h"
 #include "math/twist_to_angle.h"
 #include "odometry/increment_pose.h"
 #include "odometry/mono_visual_odometry.h"
 #include "odometry/multi_visual_odometry.h"
 #include "odometry/stereo_inertial_odometry.h"
 #include "odometry/svo_config.h"
+#include "pipelines/visualizer.h"
 #include "slam/async_slam/async_slam.h"
 #include "slam/vpr/vpr_image.h"
+#include "visualizer/visualizer.hpp"
 #ifdef USE_CUDA
 #include "odometry/rgbd_odometry.h"
 #endif
@@ -70,6 +73,63 @@ int32_t RequireNonNegative(int32_t value, std::string_view expression) {
 }
 
 #define REQUIRE_NON_NEGATIVE(x) RequireNonNegative((x), #x)
+
+#ifdef USE_RERUN
+bool Camera0ProvidesDepth(Odometry::OdometryMode mode, const Odometry::RGBDSettings& rgbd_settings,
+                          const Odometry::MultisensorSettings& multisensor_settings) {
+  if (mode == Odometry::OdometryMode::RGBD) {
+    return rgbd_settings.depth_camera_id == 0;
+  }
+  if (mode == Odometry::OdometryMode::Multisensor) {
+    const auto& ids = multisensor_settings.depth_camera_ids;
+    return std::find(ids.begin(), ids.end(), 0) != ids.end();
+  }
+  return false;
+}
+
+// Only 8-bit CPU images are logged; GPU buffers would need a device-to-host copy.
+// A frame without a loggable camera 0 image clears the previous one (the static pinhole stays).
+void LogCamera0Image(const std::vector<Image>& images) {
+  auto& recording = visualizer::RerunVisualizer::getInstance().getRecordingStream();
+  for (const auto& image : images) {
+    if (image.camera_index != 0 || image.is_gpu_mem || image.data_type != ImageData::DataType::UINT8) {
+      continue;
+    }
+    const auto color_model = image.encoding == ImageData::Encoding::RGB ? rerun::datatypes::ColorModel::RGB
+                                                                        : rerun::datatypes::ColorModel::L;
+    recording.log(pipelines::kCamera0ImageEntity,
+                  rerun::Image(static_cast<const uint8_t*>(image.pixels),
+                               {static_cast<uint32_t>(image.width), static_cast<uint32_t>(image.height)}, color_model));
+    return;
+  }
+  recording.log(pipelines::kCamera0ImageEntity, rerun::Image::clear_fields());
+}
+
+// Only CPU depth images are logged; GPU buffers would need a device-to-host copy.
+// A frame without a loggable camera 0 depth clears the previous one, which would otherwise be drawn at the new pose.
+void LogCamera0Depth(const std::vector<Image>& depths, float depth_scale_factor) {
+  auto& recording = visualizer::RerunVisualizer::getInstance().getRecordingStream();
+  for (const auto& depth : depths) {
+    if (depth.camera_index != 0 || depth.is_gpu_mem) {
+      continue;
+    }
+    const rerun::WidthHeight resolution{static_cast<uint32_t>(depth.width), static_cast<uint32_t>(depth.height)};
+    if (depth.data_type == ImageData::DataType::UINT16) {
+      recording.log(
+          pipelines::kCamera0DepthEntity,
+          rerun::DepthImage(static_cast<const uint16_t*>(depth.pixels), resolution).with_meter(depth_scale_factor));
+      return;
+    }
+    if (depth.data_type == ImageData::DataType::FLOAT32) {
+      recording.log(
+          pipelines::kCamera0DepthEntity,
+          rerun::DepthImage(static_cast<const float*>(depth.pixels), resolution).with_meter(depth_scale_factor));
+      return;
+    }
+  }
+  recording.log(pipelines::kCamera0DepthEntity, rerun::DepthImage::clear_fields());
+}
+#endif
 
 // Builds a TrackPerFrameSettings from per-frame options. Internals always carries concrete
 // values; pass Internals{} to use all defaults. Add new per-frame categories to
@@ -725,6 +785,12 @@ Odometry::Odometry(const Rig& rig, const Config& cfg) {
   tracker->debug_dump_directory = cfg.debug_dump_directory;
   tracker->max_frame_delta_ns = static_cast<int64_t>(cfg.max_frame_delta_s * 1e9);
   tracker->odometry_mode = cfg.odometry_mode;
+  RERUN(pipelines::logCameraPinhole, *tracker->rig.intrinsics[0], pipelines::kCamera0ImageEntity);
+#ifdef USE_RERUN
+  if (Camera0ProvidesDepth(cfg.odometry_mode, cfg.rgbd_settings, cfg.multisensor_settings)) {
+    pipelines::logCameraPinhole(*tracker->rig.intrinsics[0], pipelines::kCamera0DepthEntity);
+  }
+#endif
 
   // Each depth-providing camera draws from the depth-capable pool, every other camera from the
   // no-depth pool. Both pools must hold cache_size contexts per camera so the pipeline can keep
@@ -821,6 +887,15 @@ PoseEstimate Odometry::Track(const ImageSet& images, const ImageSet& masks, cons
   }
   impl->last_timestamp_ns = current_time_ns;
   impl->last_frame_timestamp_ns = current_time_ns;
+  // Rerun timelines are thread-local: set them on the caller's thread so VO logs land on frame_id/timestamp.
+  RERUN(visualizer::RerunVisualizer::getInstance().setupTimeline, frame_id, current_time_ns);
+  RERUN(LogCamera0Image, images);
+#ifdef USE_RERUN
+  if (Camera0ProvidesDepth(impl->odometry_mode, impl->rgbd_settings, impl->multisensor_settings)) {
+    LogCamera0Depth(depths, impl->odometry_mode == OdometryMode::RGBD ? impl->rgbd_settings.depth_scale_factor
+                                                                      : impl->multisensor_settings.depth_scale_factor);
+  }
+#endif
 
   for (const auto& image : images) {
     bool is_rgbd = false;
@@ -884,6 +959,7 @@ PoseEstimate Odometry::Track(const ImageSet& images, const ImageSet& masks, cons
     return PoseEstimate{};
   }
   const Isometry3T internal_pose = impl->prev_abs_pose;
+  RERUN(pipelines::logCameraPose, internal_pose * impl->rig.camera_from_rig[0].inverse(), pipelines::kCamera0Entity);
 
   // static pose covariance in exponential mapping form in WCS
   const Matrix6T static_pose_covariance_exp = static_info_exp.ldlt().solve(Matrix6T::Identity());

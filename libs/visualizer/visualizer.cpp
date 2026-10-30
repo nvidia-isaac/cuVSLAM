@@ -35,7 +35,8 @@ RerunVisualizer::RerunVisualizer() {
   if (recording_.is_enabled()) {
     recording_.spawn().exit_on_failure();
   }
-  recording_.log(
+  // Static, so it applies on every timeline (frame_id/timestamp too), not just log_time.
+  recording_.log_static(
       "world",
       rerun::archetypes::ViewCoordinates::RIGHT_HAND_Y_DOWN);  // OpenCV-style world (x right, y down, z forward)
 }

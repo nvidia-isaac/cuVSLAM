@@ -124,6 +124,7 @@ BaseLauncher::BaseLauncher(ICameraRig& cameraRig, const odom::Settings& svo_sett
     rig.camera_from_rig[i] = cameraRig_.getExtrinsic(i).inverse();
     rig.intrinsics[i] = &(cameraRig_.getIntrinsic(i));
   }
+  RERUN(pipelines::logCameraPinhole, *rig.intrinsics[0], pipelines::kCamera0ImageEntity);
 }
 
 void BaseLauncher::SetupSlam() {
@@ -325,6 +326,18 @@ ErrorCode BaseLauncher::launch() {
       Matrix6T pose_info;
       const odom::IVisualOdometry::VOFrameStat& stat = last_vo_stat();
 
+      RERUN(setupFrameTimeline, curr_meta);
+      // log camera 0 images
+      RERUN(logCameraImages, curr_meta, curr_sources, {0}, {pipelines::kCamera0ImageEntity});
+      // log depth image as separate 2D view
+      if (!depth_sources.empty() && depth_sources[0].data != nullptr) {
+        RERUN(logDepthImage, depth_sources[0], curr_meta[0], pipelines::kCamera0DepthEntity, 1.0f, 0.0f, 5.0f);
+      }
+      if (gt_poses_.size() > static_cast<size_t>(frameId)) {
+        RERUN(pipelines::logTrajectory, gt_poses_[frameId].inverse(), "world/trajectories/gt_trajectory",
+              Color(0, 0, 255), TrajectoryType::GT);
+      }
+
       TRACE_EVENT ev_track = profiler_domain_.trace_event("tracker->track()", profiler_color_);
       StopwatchScope sws_track_proc(sw_track_proc_);
 
@@ -335,19 +348,9 @@ ErrorCode BaseLauncher::launch() {
         delta = Isometry3T::Identity();
       }
 
-      RERUN(setupFrameTimeline, curr_meta);
-      // log camera 0 images
-      RERUN(logCameraImages, curr_meta, curr_sources, {0}, {"world/camera_0/images"});
-      // log depth image as separate 2D view
-      if (!depth_sources.empty() && depth_sources[0].data != nullptr) {
-        RERUN(logDepthImage, depth_sources[0], curr_meta[0], "world/camera_0/depth", 1.0f, 0.0f, 5.0f);
-      }
-      if (gt_poses_.size() > static_cast<size_t>(frameId)) {
-        RERUN(pipelines::logTrajectory, gt_poses_[frameId].inverse(), "world/trajectories/gt_trajectory",
-              Color(0, 0, 255), TrajectoryType::GT);
-      }
-
       prev_abs_world_from_rig = odom::increment_pose(prev_abs_world_from_rig, delta);
+      RERUN(pipelines::logCameraPose, prev_abs_world_from_rig * rig.camera_from_rig[0].inverse(),
+            pipelines::kCamera0Entity);
       Isometry3T abs_world_from_rig = prev_abs_world_from_rig;
       if (FLAGS_enable_ground_integrator) {
         ground_integrator.AddNextPose(abs_world_from_rig);

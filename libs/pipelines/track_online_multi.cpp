@@ -96,7 +96,7 @@ bool SolverSfMMulti::solveNextFrame(int64_t time_ns, const sof::FrameState& fram
   } else {
     map_.get_recent_landmarks(recent_landmarks_);
 
-    RERUN(logLandmarks3D, recent_landmarks_, "world/camera_0/images/sba_landmarks", Color(255, 255, 0), 0.01f);
+    RERUN(logLandmarks3D, recent_landmarks_, "world/sba_landmarks", Color(255, 255, 0), 0.01f);
 
     Isometry3T pose = rig_from_w;  // try to optimize copy, use result if success only
     if (pnp_.solve(pose, static_info_exp, obs_vector_, recent_landmarks_, solver_settings.vo_pnp)) {
@@ -116,8 +116,8 @@ bool SolverSfMMulti::solveNextFrame(int64_t time_ns, const sof::FrameState& fram
     auto tr_landmarks = triangulator.triangulate(world_from_rig, obs_vector_);
 
     // log landmarks in yellow color
-    RERUN(logLandmarks, tr_landmarks, rig_from_w, *rig_.intrinsics[0], "world/camera_0/images/landmarks",
-          Color(255, 255, 0));
+    RERUN(logLandmarks, tr_landmarks, rig_.camera_from_rig[0] * rig_from_w, *rig_.intrinsics[0],
+          "world/camera_0/images/landmarks", Color(255, 255, 0));
 
     map_.add_keyframe(time_ns, {rig_from_w}, {},  // preintegration
                       obs_vector_, tr_landmarks);
@@ -125,8 +125,8 @@ bool SolverSfMMulti::solveNextFrame(int64_t time_ns, const sof::FrameState& fram
       static_cast<SbaServiceBase*>(sba_service_.get())->trigger(solver_settings.sba);
     }
   } else {
-    RERUN(logLandmarks, recent_landmarks_, rig_from_w, *rig_.intrinsics[0], "world/camera_0/images/landmarks",
-          Color(255, 255, 0));
+    RERUN(logLandmarks, recent_landmarks_, rig_.camera_from_rig[0] * rig_from_w, *rig_.intrinsics[0],
+          "world/camera_0/images/landmarks", Color(255, 255, 0));
   }
 
   if (tracks2d && tracks3d) {

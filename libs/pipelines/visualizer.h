@@ -37,6 +37,11 @@
 #include "visualizer/visualizer.hpp"
 
 namespace cuvslam::pipelines {
+// Camera 0 entities: the pose lives on kCamera0Entity; image and depth are pinhole children of it.
+inline constexpr const char* kCamera0Entity = "world/camera_0";
+inline constexpr const char* kCamera0ImageEntity = "world/camera_0/images";
+inline constexpr const char* kCamera0DepthEntity = "world/camera_0/depth";
+
 void logObservations(const std::vector<camera::Observation>& observations, const camera::Rig& rig,
                      const std::string& viewport_name, const Color& color);
 
@@ -108,6 +113,23 @@ void clearTrajectory(const std::string& viewport_name, TrajectoryType trajectory
  */
 void logCameraFrustums(const camera::Rig& rig, const Isometry3T& world_from_rig, const std::string& viewport_name,
                        float frustum_depth = 0.3f);
+
+/**
+ * Log a static pinhole model so 2D content under entity_path (image, observations) is also shown in the 3D view.
+ * Lens distortion is not modeled, so for distorted cameras the 3D placement of the image is approximate.
+ * @param camera_model Camera intrinsics (focal, principal point, resolution)
+ * @param entity_path Rerun entity of the camera image (e.g. "world/camera_0/images")
+ * @param image_plane_distance Distance in meters at which the image plane is drawn in 3D
+ */
+void logCameraPinhole(const camera::ICameraModel& camera_model, const std::string& entity_path,
+                      float image_plane_distance = 0.3f);
+
+/**
+ * Log the camera pose as the transform of entity_path relative to its parent ("world").
+ * @param world_from_camera Camera pose in world frame
+ * @param entity_path Rerun entity of the camera (e.g. "world/camera_0")
+ */
+void logCameraPose(const Isometry3T& world_from_camera, const std::string& entity_path);
 
 /**
  * Log a 3D vector as an arrow anchored at a given world-frame origin.
