@@ -96,7 +96,7 @@ bool SolverSfMMulti::solveNextFrame(int64_t time_ns, const sof::FrameState& fram
   } else {
     map_.get_recent_landmarks(recent_landmarks_);
 
-    RERUN(logLandmarks3D, recent_landmarks_, "world/camera_0/images/sba_landmarks", Color(255, 255, 0), 0.01f);
+    RERUN(logLandmarks3D, recent_landmarks_, "world/sba_landmarks", Color(255, 255, 0), 0.01f);
 
     Isometry3T pose = rig_from_w;  // try to optimize copy, use result if success only
     if (pnp_.solve(pose, static_info_exp, obs_vector_, recent_landmarks_, solver_settings.vo_pnp)) {

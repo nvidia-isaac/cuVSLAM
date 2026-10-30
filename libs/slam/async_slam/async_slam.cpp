@@ -59,7 +59,8 @@ void LogSlamPose(const Isometry3T& slam_pose) {
   poses.clear();
   poses.emplace_back(p.x(), p.y(), p.z());
   visualizer::RerunVisualizer::getInstance().getRecordingStream().log(
-      "world/slam_pose", rerun::Points3D(poses).with_colors(Color(0, 255, 0)).with_radii(5.f));
+      "world/slam_pose",
+      rerun::Points3D(poses).with_colors(Color(0, 255, 0)).with_radii(rerun::components::Radius::ui_points(5.f)));
 }
 #endif
 
