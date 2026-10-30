@@ -49,4 +49,24 @@ struct Settings {
   bool use_sba_winsorizer = false;
 };
 
+// GPU bundlers exist only in CUDA builds; there a GPU mode is replaced by the CPU bundler of the same kind.
+inline Mode SupportedMode(Mode mode) {
+#ifndef USE_CUDA
+  if (mode == OriginalGPU) {
+    return OriginalCPU;
+  }
+  if (mode == InertialGPU) {
+    return InertialCPU;
+  }
+#endif
+  return mode;
+}
+
+inline Mode SelectMode(bool inertial, bool use_gpu) {
+  if (inertial) {
+    return SupportedMode(use_gpu ? InertialGPU : InertialCPU);
+  }
+  return SupportedMode(use_gpu ? OriginalGPU : OriginalCPU);
+}
+
 }  // namespace cuvslam::sba

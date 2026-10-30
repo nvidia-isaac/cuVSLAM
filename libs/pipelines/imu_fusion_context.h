@@ -27,6 +27,7 @@
 #include "common/isometry.h"
 #include "common/types.h"
 #include "common/vector_3t.h"
+#include "imu/imu_bundler.h"
 #include "imu/imu_preintegration.h"
 #include "imu/imu_sba.h"
 #include "imu/imu_sba_problem.h"
@@ -56,7 +57,7 @@ namespace cuvslam::pipelines {
 class ImuFusionContext {
 public:
   ImuFusionContext(map::UnifiedMap& map, const camera::Rig& rig, const imu::ImuCalibration& calib,
-                   const pnp::MultisensorPoseEstimator& pose_estimator);
+                   const pnp::MultisensorPoseEstimator& pose_estimator, bool use_gpu_bundler);
 
   // Wires the gravity-estimation callback into the internal StateMachine. Must be called once after
   // construction (kept separate so the lambda does not capture `this` inside the constructor).
@@ -140,7 +141,7 @@ private:
   imu::ImuMeasurementStorage imu_storage_;
 
   sba_imu::InertialOptimizer optimizer_;
-  sba_imu::IMUBundlerCpuFixedVel init_bundler_;
+  sba_imu::IMUBundler init_bundler_;
   StateMachine sm_;
 
   bool enable_imu_sba_init_ = true;
