@@ -45,6 +45,7 @@ bool ParseSettings(Settings& settings) {
   } else {
     return false;
   }
+  settings.mode = SupportedMode(settings.mode);
   settings.num_sba_frames = FLAGS_num_sba_frames;
   settings.num_fixed_sba_frames = FLAGS_num_fixed_sba_frames;
   settings.num_sba_iterations = FLAGS_num_sba_iterations;

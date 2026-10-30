@@ -14,8 +14,12 @@
  * of the software or derivative works thereof, you agree to be bound by this License.
  */
 
+#include <chrono>
 #include <cstdint>
+#include <filesystem>
+#include <future>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -375,6 +379,34 @@ TEST_F(TrackerTest, LocalizeInMapWithGuessPoseReportsAMissingMap) {
 
   ASSERT_TRUE(error.has_value());  // sync_mode localizes before returning
   EXPECT_NE(error->find("database"), std::string::npos) << *error;
+}
+
+// The SLAM thread releases a callback after running it, so a callback that owns the Slam destroys it on that thread.
+TEST(SlamTest, CallbackCanOwnAsyncSlam) {
+  Slam::Config config;
+  config.sync_mode = false;
+  // Shared with the deleter, which may run after a timed-out test has returned
+  auto destroyed = std::make_shared<std::promise<void>>();
+  std::future<void> destroyed_future = destroyed->get_future();
+  auto slam = std::shared_ptr<Slam>(new Slam(MakeStereoRig(), {0}, config), [destroyed](Slam* owned) {
+    delete owned;
+    destroyed->set_value();
+  });
+
+  const std::string base_path =
+      std::filesystem::temp_directory_path() /
+      ("cuvslam_owned_by_callback_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+  std::promise<void> release;
+  std::shared_future<void> released = release.get_future().share();
+  Slam& session = *slam;
+  // Holds the SLAM thread until the next callback is the only owner
+  session.SaveMap(base_path + "_first", [released](bool) { released.wait(); });
+  session.SaveMap(base_path + "_second", [owner = std::move(slam)](bool) {});
+  release.set_value();
+
+  EXPECT_EQ(destroyed_future.wait_for(std::chrono::seconds(30)), std::future_status::ready);
+  std::filesystem::remove_all(base_path + "_first");
+  std::filesystem::remove_all(base_path + "_second");
 }
 
 }  // namespace

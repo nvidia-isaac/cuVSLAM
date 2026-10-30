@@ -30,6 +30,7 @@
 
 #include "benchmark_utils.h"
 
+#include "imu/imu_bundler.h"
 #include "imu/imu_sba.h"
 #include "imu/imu_sba_gpu.h"
 #include "imu/imu_sba_problem.h"
@@ -61,6 +62,8 @@ struct Shape {
 
 // Every point is seen by every keyframe.
 constexpr Shape kParityShape{7, 2, 200, 7};
+// Gravity-init refinement: the whole 20-keyframe map with short tracks, as in RunImuSbaInit() on EuRoC.
+constexpr Shape kInitShape{20, 1, 5900, 2};
 
 struct Scenario {
   imu::ImuCalibration calib;
@@ -209,6 +212,9 @@ Scenario MakeScenario(uint32_t seed, const Shape& shape = kParityShape, bool exa
   return s;
 }
 
+// Same settings as RunImuSbaInit() in libs/pipelines/track_online_inertial.cpp.
+void UseInitSettings(ImuBAProblem& problem) { problem.prior_acc = 1e1; }
+
 void ExpectSameSolution(const ImuBAProblem& cpu_problem, const ImuBAProblem& gpu_problem) {
   EXPECT_NEAR(cpu_problem.initial_cost, gpu_problem.initial_cost, 1e-4f * cpu_problem.initial_cost);
   for (size_t k = cpu_problem.num_fixed_key_frames; k < cpu_problem.rig_poses.size(); ++k) {
@@ -236,6 +242,42 @@ TEST(ImuSbaGpu, MatchesCpuBundler) {
     ASSERT_TRUE(cpu.solve(cpu_problem));
     ASSERT_TRUE(gpu.solve(gpu_problem));
     ExpectSameSolution(cpu_problem, gpu_problem);
+  }
+}
+
+// IMUBundlerCpuFixedVel::solve() records the cost of its input before iterating; with no iterations allowed that is
+// all it does, so the CPU bundler scores any state, including a GPU result.
+float CpuCost(const imu::ImuCalibration& calib, ImuBAProblem problem) {
+  problem.max_iterations = 0;
+  IMUBundlerCpuFixedVel(calib).solve(problem);
+  return problem.initial_cost;
+}
+
+// 20 keyframes with short tracks leave a nearly flat cost valley: after the full 10 iterations both bundlers reach the
+// same cost, yet their states may drift centimetres apart along it. Compare states early and costs at the end.
+TEST(ImuSbaGpu, MatchesCpuBundlerWithInitSettings) {
+  for (uint32_t seed : {1u, 2u}) {
+    SCOPED_TRACE(seed);
+    Scenario s = MakeScenario(seed, kInitShape);
+    UseInitSettings(s.problem);
+
+    IMUBundlerCpuFixedVel cpu(s.calib);
+    IMUBundlerGpuFixedVel gpu(s.calib);
+
+    ImuBAProblem cpu_early = s.problem;
+    ImuBAProblem gpu_early = s.problem;
+    cpu_early.max_iterations = gpu_early.max_iterations = 3;
+    ASSERT_TRUE(cpu.solve(cpu_early));
+    ASSERT_TRUE(gpu.solve(gpu_early));
+    ExpectSameSolution(cpu_early, gpu_early);
+
+    ImuBAProblem cpu_problem = s.problem;
+    ImuBAProblem gpu_problem = s.problem;
+    ASSERT_TRUE(cpu.solve(cpu_problem));
+    ASSERT_TRUE(gpu.solve(gpu_problem));
+    const float cpu_cost = CpuCost(s.calib, cpu_problem);
+    EXPECT_LT(cpu_cost, 1e-2f * cpu_problem.initial_cost);
+    EXPECT_NEAR(CpuCost(s.calib, gpu_problem), cpu_cost, 1e-3f * cpu_cost);
   }
 }
 
@@ -318,17 +360,40 @@ TEST(ImuSbaGpu, EmptyProblemFailsLikeCpu) {
   EXPECT_FALSE(gpu.solve(gpu_problem));
 }
 
-// Whole IMUBundlerGpuFixedVel::solve() vs IMUBundlerCpuFixedVel::solve(), including host<->device copies and
-// preintegration packing. Shapes follow run_imu_sba() on EuRoC VIO: 10 keyframes, 1 fixed, and roughly the 10th
-// percentile, median and maximum observation counts seen there (~3.6k, ~6.4k, ~8k).
-TEST(Cuda, ImuSbaSolveSpeedup) {
-  constexpr int kRepeats = 20;
-  const Shape shapes[] = {{10, 1, 450, 4}, {10, 1, 800, 4}, {10, 1, 1000, 4}};
+TEST(ImuSbaGpu, BundlerFollowsUseGpu) {
+  const Scenario s = MakeScenario(1);
 
+  IMUBundler cpu(s.calib, false);
+  IMUBundler gpu(s.calib, true);
+  EXPECT_FALSE(cpu.uses_gpu());
+  EXPECT_TRUE(gpu.uses_gpu());
+
+  ImuBAProblem cpu_problem = s.problem;
+  ImuBAProblem gpu_problem = s.problem;
+  ASSERT_TRUE(cpu.solve(cpu_problem));
+  ASSERT_TRUE(gpu.solve(gpu_problem));
+  ExpectSameSolution(cpu_problem, gpu_problem);
+}
+
+template <class Bundler>
+std::chrono::nanoseconds TimeSolves(Bundler& bundler, std::vector<ImuBAProblem>& problems) {
+  const auto start = std::chrono::steady_clock::now();
+  for (auto& q : problems) {
+    EXPECT_TRUE(bundler.solve(q));
+  }
+  return std::chrono::steady_clock::now() - start;
+}
+
+// Times whole CPU and GPU solve() calls, including host<->device copies and preintegration packing, and reports the
+// combined speedup over all shapes.
+void RunSolveSpeedup(const std::vector<Shape>& shapes, int repeats, void (*settings)(ImuBAProblem&)) {
   std::chrono::nanoseconds cpu_total{0}, gpu_total{0};
   int total_solves = 0;
   for (const Shape& shape : shapes) {
-    const Scenario s = MakeScenario(7, shape);
+    Scenario s = MakeScenario(7, shape);
+    if (settings) {
+      settings(s.problem);
+    }
     IMUBundlerCpuFixedVel cpu(s.calib);
     IMUBundlerGpuFixedVel gpu(s.calib);
 
@@ -336,34 +401,32 @@ TEST(Cuda, ImuSbaSolveSpeedup) {
     ImuBAProblem warmup = s.problem;
     ASSERT_TRUE(gpu.solve(warmup));
 
-    std::vector<ImuBAProblem> cpu_problems(kRepeats, s.problem);
-    std::vector<ImuBAProblem> gpu_problems(kRepeats, s.problem);
+    std::vector<ImuBAProblem> cpu_problems(repeats, s.problem);
+    std::vector<ImuBAProblem> gpu_problems(repeats, s.problem);
+    const auto cpu_time = TimeSolves(cpu, cpu_problems);
+    const auto gpu_time = TimeSolves(gpu, gpu_problems);
 
-    const auto cpu_start = std::chrono::steady_clock::now();
-    for (auto& q : cpu_problems) {
-      ASSERT_TRUE(cpu.solve(q));
-    }
-    const auto cpu_time = std::chrono::steady_clock::now() - cpu_start;
-
-    const auto gpu_start = std::chrono::steady_clock::now();
-    for (auto& q : gpu_problems) {
-      ASSERT_TRUE(gpu.solve(q));
-    }
-    const auto gpu_time = std::chrono::steady_clock::now() - gpu_start;
-
-    const double cpu_ms = std::chrono::duration<double, std::milli>(cpu_time).count() / kRepeats;
-    const double gpu_ms = std::chrono::duration<double, std::milli>(gpu_time).count() / kRepeats;
-    std::cout << "points " << shape.num_points << ", observations " << s.problem.observation_xys.size()
-              << ", LM iterations cpu/gpu " << cpu_problems[0].iterations << "/" << gpu_problems[0].iterations
-              << ": cpu " << cpu_ms << " ms, gpu " << gpu_ms << " ms, speedup " << cpu_ms / gpu_ms << std::endl;
+    const double cpu_ms = std::chrono::duration<double, std::milli>(cpu_time).count() / repeats;
+    const double gpu_ms = std::chrono::duration<double, std::milli>(gpu_time).count() / repeats;
+    std::cout << "keyframes " << shape.num_poses << ", points " << shape.num_points << ", observations "
+              << s.problem.observation_xys.size() << ", LM iterations cpu/gpu " << cpu_problems[0].iterations << "/"
+              << gpu_problems[0].iterations << ": cpu " << cpu_ms << " ms, gpu " << gpu_ms << " ms, speedup "
+              << cpu_ms / gpu_ms << std::endl;
 
     cpu_total += cpu_time;
     gpu_total += gpu_time;
-    total_solves += kRepeats;
+    total_solves += repeats;
   }
   ::test::ReportSpeedBenchmark(cpu_total, gpu_total, total_solves);
   ASSERT_TRUE(cpu_total >= gpu_total);
 }
+
+// Shapes follow run_imu_sba() on EuRoC VIO: 10 keyframes, 1 fixed, and roughly the 10th
+// percentile, median and maximum observation counts seen there (~3.6k, ~6.4k, ~8k).
+TEST(Cuda, ImuSbaSolveSpeedup) { RunSolveSpeedup({{10, 1, 450, 4}, {10, 1, 800, 4}, {10, 1, 1000, 4}}, 20, nullptr); }
+
+// The gravity-init refinement solve, which runs on the tracking thread.
+TEST(Cuda, ImuSbaInitSolveSpeedup) { RunSolveSpeedup({kInitShape}, 5, UseInitSettings); }
 
 }  // namespace
 }  // namespace cuvslam::sba_imu
