@@ -12,12 +12,8 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
-set(MODULE_NAME "profiler_test")
-
-set(LIBS profiler)
-
-set(SRCS profiler_test.cpp)
-
-setup_app(MODULE_NAME ${MODULE_NAME}
-          LIBRARIES ${LIBS}
-          SOURCES ${SRCS})
+setup_test_project(
+    MODULE_NAME profiler
+    SOURCES profiler_test.cpp
+    LIBRARIES profiler
+    )

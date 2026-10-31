@@ -19,21 +19,22 @@ set(HEADERS
     profiler_enable.h
 )
 
+set(SOURCES
+    thread_name.cpp
+)
+
+set(LIBS)
+
 if(USE_NVTX)
-    set(SOURCES
-        profiler.cpp
-    )
-
-    set(LIBS NVTX::nvtx3 ${CMAKE_DL_LIBS})
-
-    setup_staticlib_project(
-            MODULE_NAME ${MODULE_NAME}
-            HEADERS ${HEADERS}
-            SOURCES ${SOURCES}
-            LIBRARIES ${LIBS}
-    )
-else()
-    add_library(${MODULE_NAME} INTERFACE ${HEADERS})
+    list(APPEND SOURCES profiler.cpp)
+    list(APPEND LIBS NVTX::nvtx3 ${CMAKE_DL_LIBS})
 endif()
+
+setup_staticlib_project(
+        MODULE_NAME ${MODULE_NAME}
+        HEADERS ${HEADERS}
+        SOURCES ${SOURCES}
+        LIBRARIES ${LIBS}
+)
 
 add_subdirectory(test)

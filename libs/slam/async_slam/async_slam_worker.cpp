@@ -35,6 +35,7 @@ namespace cuvslam::slam {
 // in async mode, or synchronously on the caller's thread via ProcessInputSynchronously() in reproduce_mode.
 
 void AsyncSlam::Run_worker() {
+  profiler::NameCurrentThread("cuvslam:slam");
 #ifdef USE_CUDA
   if (options_.use_gpu) {
     cudaSetDevice(0);

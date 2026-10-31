@@ -20,6 +20,7 @@
 #include <list>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
 
 #include "map/map.h"
@@ -28,7 +29,8 @@ namespace cuvslam::map {
 
 class ServiceBase {
 public:
-  ServiceBase(UnifiedMap& map, bool async = true);
+  // thread_name names the async worker thread, see profiler::NameCurrentThread().
+  ServiceBase(UnifiedMap& map, std::string thread_name, bool async = true);
   virtual ~ServiceBase();
 
   // some operation that must be done with the map;
@@ -60,6 +62,7 @@ protected:
 
 private:
   void run();
+  const std::string thread_name_;
   std::thread job_;
 };
 

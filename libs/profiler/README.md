@@ -83,6 +83,20 @@ helper.trace_event_end(ev_id);
 
 ```
 
+Naming threads
+--------------
+
+Threads cuVSLAM creates name themselves at the top of their entry function:
+
+```
+profiler::NameCurrentThread("cuvslam:sba");
+```
+
+This sets the OS thread name (shown by gdb, top, perf) in every build, and the NVTX thread name when
+built with `USE_NVTX`. Linux truncates names to 15 characters. A thread must name itself: Nsight Systems
+rejects traces where one thread names another. Don't name threads cuVSLAM doesn't own, such as the
+caller's thread.
+
 Usage in Nsight Systems.
 -----------------------
 
