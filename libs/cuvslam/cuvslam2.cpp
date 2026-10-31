@@ -26,6 +26,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 
 #include "common/error.h"
 #include "common/isometry.h"
@@ -572,18 +573,16 @@ Odometry::Odometry(const Rig& rig, const Config& cfg) {
                        "IMU fusion is enabled, but IMU calibration is not provided");
   THROW_INVALID_ARG_IF(rig.imus.size() > 1, "Only one IMU sensor is supported");
 
-  // For Multisensor mode, IMU presence is auto-detected from the rig (same convention as Inertial).
-  const bool multisensor_with_imu = cfg.odometry_mode == OdometryMode::Multisensor && !rig.imus.empty();
+  // Inertial mode requires an IMU; Multisensor mode fuses one whenever the rig has it.
+  const bool imu_fusion_enabled = !rig.imus.empty() && (cfg.odometry_mode == OdometryMode::Inertial ||
+                                                        cfg.odometry_mode == OdometryMode::Multisensor);
 
   odom::Settings svo_settings;
   svo_settings.verbose = Trace::GetVerbosity() > Trace::Verbosity::None;
 
   svo_settings.sba_settings.async = cfg.async_sba;
-  // Auto-pick SBA mode: inertial-CPU when IMU fusion is on (Inertial mode, or Multisensor with IMU),
-  // otherwise the standard GPU bundler.
-  svo_settings.sba_settings.mode = (cfg.odometry_mode == OdometryMode::Inertial || multisensor_with_imu)
-                                       ? sba::Mode::InertialCPU
-                                       : sba::Mode::OriginalGPU;
+  // Inertial bundler with IMU fusion, visual otherwise; on the GPU only with use_gpu in CUDA builds.
+  svo_settings.sba_settings.mode = sba::SelectMode(imu_fusion_enabled, cfg.use_gpu);
 
   // Use only first camera border settings. Other camera border settings are ignored now.
   svo_settings.sof_settings.multicam_mode = ToMulticamMode(cfg.multicam_mode);
@@ -644,6 +643,16 @@ Odometry::Odometry(const Rig& rig, const Config& cfg) {
         "Bad calibration. cuVSLAM needs at least one stereo pair for Multicamera or Inertial mode."};
   }
 
+  if (imu_fusion_enabled) {
+    const auto& imu_calibration = rig.imus[0];
+    CheckImuCalibration(imu_calibration);
+    const Isometry3T rig_from_imu = ConvertPoseToIsometry(imu_calibration.rig_from_imu);
+    svo_settings.imu_calibration =
+        imu::ImuCalibration(rig_from_imu, imu_calibration.gyroscope_noise_density,
+                            imu_calibration.gyroscope_random_walk, imu_calibration.accelerometer_noise_density,
+                            imu_calibration.accelerometer_random_walk, imu_calibration.frequency);
+  }
+
   switch (cfg.odometry_mode) {
     case OdometryMode::Multicamera: {
       svo_settings.use_prediction = cfg.use_motion_model;
@@ -652,13 +661,6 @@ Odometry::Odometry(const Rig& rig, const Config& cfg) {
       break;
     }
     case OdometryMode::Inertial: {
-      const auto& imu_calibration = rig.imus[0];
-      CheckImuCalibration(imu_calibration);
-      const Isometry3T rig_from_imu = ConvertPoseToIsometry(imu_calibration.rig_from_imu);
-      svo_settings.imu_calibration =
-          imu::ImuCalibration(rig_from_imu, imu_calibration.gyroscope_noise_density,
-                              imu_calibration.gyroscope_random_walk, imu_calibration.accelerometer_noise_density,
-                              imu_calibration.accelerometer_random_walk, imu_calibration.frequency);
       svo_settings.use_prediction = cfg.use_motion_model;
       tracker->visual_odometry = std::make_unique<odom::StereoInertialOdometry>(
           tracker->rig, tracker->fig, svo_settings, cfg.use_gpu, cfg.debug_imu_mode,
@@ -688,20 +690,11 @@ Odometry::Odometry(const Rig& rig, const Config& cfg) {
     case OdometryMode::Multisensor: {
 #ifdef USE_CUNLS
       tracker->multisensor_settings = cfg.multisensor_settings;
-      svo_settings.multisensor_settings.with_imu = multisensor_with_imu;
+      svo_settings.multisensor_settings.with_imu = imu_fusion_enabled;
       svo_settings.multisensor_settings.depth_camera_ids = cfg.multisensor_settings.depth_camera_ids;
       svo_settings.multisensor_settings.depth_scale_factor = cfg.multisensor_settings.depth_scale_factor;
       svo_settings.multisensor_settings.enable_depth_stereo_tracking =
           cfg.multisensor_settings.enable_depth_stereo_tracking;
-      if (multisensor_with_imu) {
-        const auto& imu_calibration = rig.imus[0];
-        CheckImuCalibration(imu_calibration);
-        const Isometry3T rig_from_imu = ConvertPoseToIsometry(imu_calibration.rig_from_imu);
-        svo_settings.imu_calibration =
-            imu::ImuCalibration(rig_from_imu, imu_calibration.gyroscope_noise_density,
-                                imu_calibration.gyroscope_random_walk, imu_calibration.accelerometer_noise_density,
-                                imu_calibration.accelerometer_random_walk, imu_calibration.frequency);
-      }
       svo_settings.use_prediction = cfg.use_motion_model;
       tracker->visual_odometry =
           std::make_unique<odom::MultisensorOdometry>(tracker->rig, tracker->fig, svo_settings, cfg.use_gpu);
@@ -720,7 +713,7 @@ Odometry::Odometry(const Rig& rig, const Config& cfg) {
 
   tracker->svo_settings = svo_settings;
   tracker->use_gpu = cfg.use_gpu;
-  tracker->imu_fusion_enabled = cfg.odometry_mode == OdometryMode::Inertial || multisensor_with_imu;
+  tracker->imu_fusion_enabled = imu_fusion_enabled;
   tracker->debug_dump_directory = cfg.debug_dump_directory;
   tracker->max_frame_delta_ns = static_cast<int64_t>(cfg.max_frame_delta_s * 1e9);
   tracker->odometry_mode = cfg.odometry_mode;
@@ -1165,7 +1158,13 @@ Slam::Slam(const Rig& rig, const std::vector<uint8_t>& primary_cameras, const Co
 
 Slam::Slam(Slam&& other) noexcept = default;
 
-Slam::~Slam() = default;
+Slam::~Slam() {
+  // A callback may own this Slam, and the SLAM thread releases callbacks after running them. That thread cannot join
+  // itself, so another thread tears down the state and joins it once it finishes the current command.
+  if (impl && impl->async_slam_->IsWorkerThread()) {
+    std::thread([doomed = std::move(impl)]() mutable { doomed.reset(); }).detach();
+  }
+}
 
 void Slam::Track(const Odometry::State& state, const Pose* gt_pose) {
   // Convert from public API types to internal types

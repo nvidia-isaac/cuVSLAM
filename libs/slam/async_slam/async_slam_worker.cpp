@@ -275,10 +275,6 @@ bool AsyncSlam::CopyToDatabase_worker(const std::string& path) {
     std::lock_guard slam_guard(slam_mutex_);
     status = slam_->AttachToNewDatabaseSaveMapAndDetach(path);
   }
-  if (copy_to_database_callback_) {
-    copy_to_database_callback_(status);
-  }
-  copy_to_database_callback_ = nullptr;
   return status;
 }
 

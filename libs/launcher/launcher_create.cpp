@@ -41,8 +41,9 @@ std::unique_ptr<BaseLauncher> CreateLauncher(ICameraRig& rig, const odom::Settin
   } else if (FLAGS_mode == "multicamera") {
     return std::make_unique<MultiCameraLauncher>(rig, svo_settings);
   } else if (FLAGS_mode == "inertial") {
-    TraceWarningIf(svo_settings.sba_settings.mode != sba::Mode::InertialCPU,
-                   "For inertial mode only -sba_mode=imu is supported.");
+    TraceWarningIf(svo_settings.sba_settings.mode != sba::Mode::InertialCPU &&
+                       svo_settings.sba_settings.mode != sba::Mode::InertialGPU,
+                   "For inertial mode only -sba_mode=imu or -sba_mode=imugpu is supported.");
     return std::make_unique<VisualInertialLauncher>(rig, svo_settings);
   } else if (FLAGS_mode == "rgbd") {
 #ifdef USE_CUDA

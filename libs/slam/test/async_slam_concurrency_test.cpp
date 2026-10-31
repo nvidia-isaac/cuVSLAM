@@ -16,9 +16,13 @@
 
 #include <chrono>
 #include <condition_variable>
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
+#include <utility>
+#include <vector>
 
 #include "camera/camera.h"
 #include "common/include_gtest.h"
@@ -232,6 +236,79 @@ TEST(AsyncSlam, TrackResultCanRunWhileLocalizeInMapIsInFlight) {
     ASSERT_TRUE(cv.wait_for(lock, 30s, [&] { return localization_finished; }));
     EXPECT_FALSE(localization_succeeded);
   }
+}
+
+TEST(AsyncSlam, CopyToDatabase_AsyncMode_EachQueuedCopyCallsItsOwnCallback) {
+  std::unique_ptr<cuvslam::camera::ICameraModel> camera;
+  const cuvslam::camera::Rig rig = MakeSingleCameraRig(camera);
+  cuvslam::slam::AsyncSlamOptions options;
+  options.use_gpu = false;
+  options.reproduce_mode = false;
+  options.loop_closure_solver_type = cuvslam::slam::LoopClosureSolverType::kDummy;
+
+  // Declared before slam, so that they outlive the SLAM thread that calls the callbacks
+  std::mutex mutex;
+  std::condition_variable cv;
+  bool worker_blocked = false;
+  bool release_worker = false;
+  std::vector<std::pair<std::string, bool>> calls;
+
+  const std::string base_path =
+      "/tmp/cuvslam_copy_to_database_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+  const std::string first_path = base_path + "_first";
+  const std::string second_path = base_path + "_second";
+
+  cuvslam::slam::AsyncSlam slam(rig, {0}, options);
+
+  // Holds the SLAM thread, so that both copies are queued before it runs either
+  slam.LocalizeInMap(
+      base_path + "_missing", 1'000, cuvslam::Isometry3T::Identity(), {}, MakeLocalizationSettings(),
+      /*attach=*/false,
+      [&] {
+        std::unique_lock<std::mutex> lock(mutex);
+        worker_blocked = true;
+        cv.notify_all();
+        cv.wait(lock, [&] { return release_worker; });
+      },
+      [](const cuvslam::Result<cuvslam::Pose>&) {});
+  bool blocked_in_time = false;
+  {
+    std::unique_lock<std::mutex> lock(mutex);
+    blocked_in_time = cv.wait_for(lock, 5s, [&] { return worker_blocked; });
+    if (!blocked_in_time) {
+      // Lets a late SLAM thread go, so that destroying slam can join it
+      release_worker = true;
+      cv.notify_all();
+    }
+  }
+  ASSERT_TRUE(blocked_in_time);
+
+  for (const std::string& path : {first_path, second_path}) {
+    slam.CopyToDatabase(path, [&, path](bool success) {
+      std::lock_guard<std::mutex> lock(mutex);
+      calls.emplace_back(path, success);
+      cv.notify_all();
+    });
+  }
+  {
+    std::lock_guard<std::mutex> lock(mutex);
+    release_worker = true;
+    cv.notify_all();
+  }
+  {
+    std::unique_lock<std::mutex> lock(mutex);
+    ASSERT_TRUE(cv.wait_for(lock, 30s, [&] { return calls.size() == 2; }));
+  }
+  std::this_thread::sleep_for(100ms);  // a callback called twice would show up here
+
+  std::lock_guard<std::mutex> lock(mutex);
+  ASSERT_EQ(calls.size(), 2u);
+  EXPECT_EQ(calls[0].first, first_path);
+  EXPECT_EQ(calls[1].first, second_path);
+  EXPECT_TRUE(calls[0].second);
+  EXPECT_TRUE(calls[1].second);
+  std::filesystem::remove_all(first_path);
+  std::filesystem::remove_all(second_path);
 }
 
 }  // namespace test::slam
