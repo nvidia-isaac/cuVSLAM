@@ -196,7 +196,7 @@ jobs:
           # datasets_root overrides the dataset cache location per config. Orin's home is on a small eMMC; its
           # runner work directory is on NVMe, and the job-completed hook empties only the per-repo workspace in it.
           - { name: "aarch64 / Orin (JP 6.1)",  runner: '["jetson-orin"]', cuda: "12.6.3", ubuntu: "22.04", archs: "87",  platform: "orin",  wheel: true, benchmark: true, eval: true, eval_suite: smoke, datasets_root: "/data/github-runner-workspace/cuvslam-cache", base_image: "nvcr.io/nvidia/12.6.11-devel:12.6.11-devel-aarch64-ubuntu22.04", ports_mirror: "http://mirrors.ocf.berkeley.edu/ubuntu-ports" }
-          - { name: "aarch64 / Thor (JP 7.1)",  runner: '["jetson-thor"]', cuda: "13.0.1", ubuntu: "24.04", archs: "110", platform: "thor",  wheel: true, benchmark: true, eval: true, eval_suite: smoke, retries: 3, ports_mirror: "http://mirrors.ocf.berkeley.edu/ubuntu-ports" }
+          - { name: "aarch64 / Thor (JP 7.1)",  runner: '["jetson-thor"]', cuda: "13.0.1", ubuntu: "24.04", archs: "110", platform: "thor",  wheel: true, benchmark: true, eval: true, eval_suite: smoke, ports_mirror: "http://mirrors.ocf.berkeley.edu/ubuntu-ports" }
     steps:
       - name: Verify GPU
         run: nvidia-smi
@@ -312,42 +312,30 @@ jobs:
             cuvslam-ci:local ./scripts/stage_eval_datasets.sh
 
       - name: Build C++ libraries
-        uses: nick-fields/retry@v3
-        with:
-          max_attempts: ${{ matrix.retries || 1 }}
-          timeout_minutes: 60
-          retry_wait_seconds: 30
-          command: |
-            CUDA_VERSION=${{ matrix.cuda }} \
-            UBUNTU_VERSION=${{ matrix.ubuntu }} \
-            BASE_IMAGE="${{ matrix.base_image }}" \
-            UBUNTU_PORTS_MIRROR="${{ matrix.ports_mirror }}" \
-            EXTRA_CMAKE_ARGS="-DCMAKE_CUDA_ARCHITECTURES=${{ matrix.archs }} ${{ matrix.cmake_options }}" \
-            ./scripts/build_cuvslam_in_docker.sh Release ./output
+        timeout-minutes: 60
+        run: |
+          CUDA_VERSION=${{ matrix.cuda }} \
+          UBUNTU_VERSION=${{ matrix.ubuntu }} \
+          BASE_IMAGE="${{ matrix.base_image }}" \
+          UBUNTU_PORTS_MIRROR="${{ matrix.ports_mirror }}" \
+          EXTRA_CMAKE_ARGS="-DCMAKE_CUDA_ARCHITECTURES=${{ matrix.archs }} ${{ matrix.cmake_options }}" \
+          ./scripts/build_cuvslam_in_docker.sh Release ./output
 
       - name: Run C++ tests
-        uses: nick-fields/retry@v3
-        with:
-          max_attempts: ${{ matrix.retries || 1 }}
-          timeout_minutes: 15
-          retry_wait_seconds: 30
-          command: ./scripts/test_cuvslam_in_docker.sh ./output
+        timeout-minutes: 15
+        run: ./scripts/test_cuvslam_in_docker.sh ./output
 
       # Collect benchmark data without gating nightly while Jetson variance is characterized.
       - name: Run Jetson CUDA benchmarks
         id: cuda-benchmarks
         if: matrix.benchmark
         continue-on-error: true
-        uses: nick-fields/retry@v3
-        with:
-          max_attempts: ${{ matrix.retries || 1 }}
-          timeout_minutes: 15
-          retry_wait_seconds: 30
-          command: |
-            BENCHMARK_CONFIG="${{ matrix.platform }}-cuda${{ matrix.cuda }}-ubuntu${{ matrix.ubuntu }}" \
-            CUDA_VERSION="${{ matrix.cuda }}" \
-            UBUNTU_VERSION="${{ matrix.ubuntu }}" \
-            ./scripts/benchmark_cuvslam_in_docker.sh ./output
+        timeout-minutes: 15
+        run: |
+          BENCHMARK_CONFIG="${{ matrix.platform }}-cuda${{ matrix.cuda }}-ubuntu${{ matrix.ubuntu }}" \
+          CUDA_VERSION="${{ matrix.cuda }}" \
+          UBUNTU_VERSION="${{ matrix.ubuntu }}" \
+          ./scripts/benchmark_cuvslam_in_docker.sh ./output
 
       - name: Publish Jetson benchmark job summary
         if: always() && matrix.benchmark
@@ -382,12 +370,8 @@ jobs:
             ./output "$PACKAGE_VERSION" "$(git rev-parse HEAD)"
 
       - name: Run Python tests
-        uses: nick-fields/retry@v3
-        with:
-          max_attempts: ${{ matrix.retries || 1 }}
-          timeout_minutes: 15
-          retry_wait_seconds: 30
-          command: ./scripts/test_pycuvslam_in_docker.sh ./output
+        timeout-minutes: 15
+        run: ./scripts/test_pycuvslam_in_docker.sh ./output
 
       - name: Package C++ distribution
         if: ${{ !matrix.skip_artifacts }}
