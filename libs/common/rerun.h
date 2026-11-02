@@ -25,7 +25,7 @@
 #define RERUN(func, ...) func(__VA_ARGS__)
 namespace cuvslam {
 using Color = rerun::Color;
-enum class TrajectoryType { VO, SBA, GT };
+enum class TrajectoryType { VO, SBA, GT, SLAM };
 }  // namespace cuvslam
 #else
 #define RERUN(func, ...) \
