@@ -85,8 +85,8 @@ Repository secrets, split read from write so fork-reachable jobs never hold a ke
   `kpi_<run_id>.report.json` contains the current values, previous per-config values, and soft drift results. KPIs are
   ATE, ARE, Kabsch, KabschRot, tracking losts, failed sequences (`Failed`), and FPS, in ODOM and SLAM modes. ATE (%)
   and ARE (º/m) are KITTI-style segment drift. Kabsch and KabschRot, shown in tables as ATE RMSE (m) and ARE RMSE (º),
-  are absolute errors after one Umeyama alignment of the whole trajectory (Sim(3) for mono), matching
-  `evo_ape --align`. During migration, `run_eval.sh` also emits the old
+  are absolute errors after one Umeyama alignment of the whole trajectory, matching `evo_ape --align` (SE(3)), or
+  `evo_ape --align --correct_scale` (Sim(3)) for mono. During migration, `run_eval.sh` also emits the old
   `.table` and `.drift` files; a follow-up script-only change removes those after CI switches to report JSON.
 - KPI config: `kpi_baseline_ranges.json` has `defaults` and per-prefix `datasets` overrides, each holding the
   sequence checks (`max_ate_pct`, `max_lost_frame_pct`, `exclude_failed`), the rolling-baseline settings, and per-metric drift `tolerances`; a
