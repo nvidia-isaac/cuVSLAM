@@ -29,6 +29,7 @@
 #include "slam/slam/slam.h"
 #include "slam/view/view_landmarks.h"
 #include "slam/view/view_manager.h"
+#include "slam/vpr/vpr_types.h"
 #include "sof/gradient_pyramid.h"
 
 namespace cuvslam::slam {
@@ -43,6 +44,10 @@ struct LocalizerOptions {
   float horizontal_step = 0.5f;
   float vertical_step = 0.25f;
   float angle_step_rads = 2 * cuvslam::PI / 36;
+  // Yaw sweep around the guess; narrowed for place recognition guesses, which already face the right way.
+  float angle_search_range_rads = 2 * cuvslam::PI;
+  // Must match the VPR backend the map was saved with.
+  vpr::VprOptions vpr_options;
 };
 
 struct LocalizationResult {
@@ -62,7 +67,16 @@ public:
 
   bool OpenDatabase(const std::string& path);
 
+  // World poses of mapped places that look like `images`, best first; empty without a VPR map.
+  std::vector<Isometry3T> RecognizePlaces(const sof::Images& images, size_t max_results) const;
+
+  // Shrink the probe grid for RecognizePlaces() guesses, which are already close and facing the right way.
+  void UseRecognizedPlaceProbes();
+
   bool Localize(const Isometry3T& guess_pose, const sof::Images& images, LocalizationResult& result);
+
+  // Try each guess in turn; true on the first that verifies.
+  bool Localize(const std::vector<Isometry3T>& guess_poses, const sof::Images& images, LocalizationResult& result);
 
 private:
   struct LoopClosureStatus {

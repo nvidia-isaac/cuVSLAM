@@ -35,6 +35,7 @@ namespace cuvslam::slam {
 // in async mode, or synchronously on the caller's thread via ProcessInputSynchronously() in reproduce_mode.
 
 void AsyncSlam::Run_worker() {
+  profiler::NameCurrentThread("cuvslam:slam");
 #ifdef USE_CUDA
   if (options_.use_gpu) {
     cudaSetDevice(0);
@@ -274,10 +275,6 @@ bool AsyncSlam::CopyToDatabase_worker(const std::string& path) {
     std::lock_guard slam_guard(slam_mutex_);
     status = slam_->AttachToNewDatabaseSaveMapAndDetach(path);
   }
-  if (copy_to_database_callback_) {
-    copy_to_database_callback_(status);
-  }
-  copy_to_database_callback_ = nullptr;
   return status;
 }
 

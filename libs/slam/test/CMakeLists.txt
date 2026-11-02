@@ -19,6 +19,10 @@ set(HEADERS
 # Source files
 set(SOURCES
     async_slam_concurrency_test.cpp
+    attached_map_test.cpp
+    lcs_vpr_test.cpp
+    localize_in_map_test.cpp
+    lsi_grid_test.cpp
     pgo_test.cpp
     p3p_test.cpp
     pnp_ransac_test.cpp
@@ -26,6 +30,7 @@ set(SOURCES
     slam_test.cpp
     tail_test.cpp
     thread_safe_queue_test.cpp
+    vpr_test.cpp
     )
 
 set(LIBS
@@ -45,9 +50,23 @@ if(USE_RERUN)
     set(LIBS ${LIBS} visualizer)
 endif()
 
+if(USE_TENSORRT)
+    set(LIBS ${LIBS} TensorRT::nvinfer cnpy::cnpy)
+endif()
+
 setup_test_project(
     MODULE_NAME ${MODULE_NAME}
     HEADERS ${HEADERS}
     SOURCES ${SOURCES}
     LIBRARIES ${LIBS}
     )
+
+if(CUVSLAM_ANYLOC_ENGINE)
+    # AnyLoc tests check the built engine against its reference arrays
+    target_compile_definitions(${MODULE_NAME}_test PRIVATE
+        CUVSLAM_ANYLOC_ENGINE_PATH="${CUVSLAM_ANYLOC_ENGINE}"
+        CUVSLAM_ANYLOC_REFERENCE_INPUT="${CUVSLAM_ANYLOC_REFERENCE_INPUT}"
+        CUVSLAM_ANYLOC_REFERENCE_OUTPUT="${CUVSLAM_ANYLOC_REFERENCE_OUTPUT}"
+        )
+    add_dependencies(${MODULE_NAME}_test anyloc_engine)
+endif()

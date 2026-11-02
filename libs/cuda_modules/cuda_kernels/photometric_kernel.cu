@@ -118,26 +118,14 @@ __global__ void lift_opencv_kernel(const float2* obs_cv, cudaTextureObject_t dep
   points_cv[tid] = {refined.x * inv_n, refined.y * inv_n, refined.z * inv_n};
 }
 
-// Compose C = A * B for two row-major SE(3) matrices (upper 3x4 block only).
-// Bottom row is implicitly (0, 0, 0, 1).
-__device__ __forceinline__ void ComposeSE3_3x4(const float* A, const float* B, float* C) {
-  for (int r = 0; r < 3; r++) {
-    for (int c = 0; c < 4; c++) {
-      C[r * 4 + c] = A[r * 4 + 0] * B[0 * 4 + c] + A[r * 4 + 1] * B[1 * 4 + c] + A[r * 4 + 2] * B[2 * 4 + c] +
-                     A[r * 4 + 3] * (c == 3 ? 1.f : 0.f);
-    }
-  }
-}
-
 // ── Point-to-plane evaluate kernel (image-space) ─────────────────────────────
 //
 // One thread per pixel in a regular grid defined by stride + image_size.
 // Each thread derives its (u,v) from tid, samples depth, lifts to world,
 // finds the closest plane, and computes the point-to-plane residual + Jacobian.
 //
-// State is rig_from_world (row-major 4x4). The kernel composes
-// cam_from_world = cam_from_rig * rig_from_world so the sampled depth point
-// can be transformed into the world frame where the planes live.
+// State is world_from_rig (row-major 4x4). The sampled depth point is moved to the
+// rig frame with cam_from_rig^-1 and then to the world frame where the planes live.
 __global__ void point_to_plane_evaluate_kernel(const GPUPlane* planes, int num_planes, int stride,
                                                cudaTextureObject_t depth_tex, float2 focal, float2 principal,
                                                int2 image_size, float const* const* state_ptrs,
@@ -180,18 +168,17 @@ __global__ void point_to_plane_evaluate_kernel(const GPUPlane* planes, int num_p
   const float inv_fy = __fdividef(1.f, focal.y);
   const float3 q_cam = {(u - principal.x) * inv_fx * d, (v - principal.y) * inv_fy * d, d};
 
-  // Compose cam_from_world = cam_from_rig * rig_from_world (row-major 3x4 upper block).
-  float M_buf[12];
-  ComposeSE3_3x4(cam_from_rig, state_ptrs[tid], M_buf);
-  const float* M = M_buf;
+  // q_rig = cam_from_rig^-1 * q_cam = E^T * (q_cam - t_E), with E row-major (columns of E^T are rows of E).
+  const float* E = cam_from_rig;
+  const float3 q_c = {q_cam.x - E[3], q_cam.y - E[7], q_cam.z - E[11]};
+  const float3 q_rig = {E[0] * q_c.x + E[4] * q_c.y + E[8] * q_c.z, E[1] * q_c.x + E[5] * q_c.y + E[9] * q_c.z,
+                        E[2] * q_c.x + E[6] * q_c.y + E[10] * q_c.z};
 
-  // q_world = world_from_cam * q_cam, where world_from_cam = M^{-1}
-  // For SE(3) with rotation R and translation t: R^{-1} = R^T, t_inv = -R^T * t.
-  // Using M in row-major: cols of R^T are rows of R, i.e. M[0],M[4],M[8] etc.
-  float3 q_world;
-  q_world.x = M[0] * q_cam.x + M[4] * q_cam.y + M[8] * q_cam.z + (-(M[0] * M[3] + M[4] * M[7] + M[8] * M[11]));
-  q_world.y = M[1] * q_cam.x + M[5] * q_cam.y + M[9] * q_cam.z + (-(M[1] * M[3] + M[5] * M[7] + M[9] * M[11]));
-  q_world.z = M[2] * q_cam.x + M[6] * q_cam.y + M[10] * q_cam.z + (-(M[2] * M[3] + M[6] * M[7] + M[10] * M[11]));
+  // q_world = world_from_rig * q_rig.
+  const float* W = state_ptrs[tid];
+  const float3 q_world = {W[0] * q_rig.x + W[1] * q_rig.y + W[2] * q_rig.z + W[3],
+                          W[4] * q_rig.x + W[5] * q_rig.y + W[6] * q_rig.z + W[7],
+                          W[8] * q_rig.x + W[9] * q_rig.y + W[10] * q_rig.z + W[11]};
 
   // Find the plane with minimum absolute signed distance |n . q + d| to the world point.
   int best_pi = -1;
@@ -218,16 +205,18 @@ __global__ void point_to_plane_evaluate_kernel(const GPUPlane* planes, int num_p
   }
 
   if (jacobians) {
-    // Point-to-plane Jacobian: d(n . q_world + d)/d(xi) for SE(3) tangent xi = [omega, t].
-    // Rotation part: n x q_world   (cross product of plane normal and world point)
-    // Translation part: -n          (negative plane normal)
+    // Point-to-plane Jacobian: d(n . q_world + d)/d(xi) for the right perturbation W' = W * Exp(xi),
+    // xi = [omega, t]. q_world moves as W * (q_rig + omega x q_rig + t), so with m = R_W^T n
+    // (the plane normal in the rig frame): rotation part q_rig x m, translation part m.
     const float3 n = planes[best_pi].normal;
-    jacobians[tid * 6 + 0] = n.y * q_world.z - n.z * q_world.y;
-    jacobians[tid * 6 + 1] = n.z * q_world.x - n.x * q_world.z;
-    jacobians[tid * 6 + 2] = n.x * q_world.y - n.y * q_world.x;
-    jacobians[tid * 6 + 3] = -n.x;
-    jacobians[tid * 6 + 4] = -n.y;
-    jacobians[tid * 6 + 5] = -n.z;
+    const float3 m = {W[0] * n.x + W[4] * n.y + W[8] * n.z, W[1] * n.x + W[5] * n.y + W[9] * n.z,
+                      W[2] * n.x + W[6] * n.y + W[10] * n.z};
+    jacobians[tid * 6 + 0] = q_rig.y * m.z - q_rig.z * m.y;
+    jacobians[tid * 6 + 1] = q_rig.z * m.x - q_rig.x * m.z;
+    jacobians[tid * 6 + 2] = q_rig.x * m.y - q_rig.y * m.x;
+    jacobians[tid * 6 + 3] = m.x;
+    jacobians[tid * 6 + 4] = m.y;
+    jacobians[tid * 6 + 5] = m.z;
   }
 }
 

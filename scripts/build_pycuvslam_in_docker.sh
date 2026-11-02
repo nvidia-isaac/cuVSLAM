@@ -22,7 +22,7 @@ fi
 TTY_FLAG=""
 [ -t 0 ] && TTY_FLAG="-it"
 
-docker run --runtime=nvidia --gpus all --rm $TTY_FLAG \
+docker run --runtime=nvidia --gpus all --rm --label "cuvslam.runner=${RUNNER_NAME:-local}" $TTY_FLAG \
   --user "$(id -u):$(id -g)" --group-add video -e HOME=/tmp \
   -v "$(pwd):/cuvslam:ro" \
   -v "$OUTPUT_DIR:/output" \
@@ -30,12 +30,6 @@ docker run --runtime=nvidia --gpus all --rm $TTY_FLAG \
   cuvslam:local bash -c '
     set -euo pipefail
     CUDA_MAJOR=$(echo "$CUDA_VERSION" | cut -d. -f1)
-
-    cp -r /cuvslam /tmp/cuvslam_src
-    sed -i "s/$/+cu${CUDA_MAJOR}/" /tmp/cuvslam_src/VERSION
-
-    CUVSLAM_BUILD_DIR=/output/build pip wheel --no-deps \
-      -w /tmp/wheels /tmp/cuvslam_src/python/
 
     if [ "$CUDA_MAJOR" = "12" ]; then
       EXCLUDES="--exclude libcusolver.so.11 --exclude libcublas.so.12 --exclude libcublasLt.so.12 --exclude libcusparse.so.12 --exclude libnvJitLink.so.12"
@@ -45,6 +39,26 @@ docker run --runtime=nvidia --gpus all --rm $TTY_FLAG \
       echo "Error: unknown CUDA major version $CUDA_MAJOR, cannot determine auditwheel exclusions"
       exit 1
     fi
+
+    cp -r /cuvslam /tmp/cuvslam_src
+    python3 - /tmp/cuvslam_src/python/pyproject.toml "$CUDA_MAJOR" <<"PY"
+import sys
+from pathlib import Path
+
+path, major = Path(sys.argv[1]), sys.argv[2]
+text = path.read_text()
+replacements = [("name = \"cuvslam\"", f"name = \"cuvslam-cu{major}\"")]
+if major != "12":
+    replacements.append(("==12.*; platform_machine != \"aarch64\"", f"=={major}.*"))
+for old, new in replacements:
+    if text.count(old) != 1:
+        raise SystemExit(f"Expected exactly one {old!r} in {path}")
+    text = text.replace(old, new)
+path.write_text(text)
+PY
+
+    CUVSLAM_BUILD_DIR=/output/build pip wheel --no-deps \
+      -w /tmp/wheels /tmp/cuvslam_src/python/
 
     mkdir -p /output/wheel
     for whl in /tmp/wheels/*.whl; do

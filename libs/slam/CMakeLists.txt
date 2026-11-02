@@ -42,7 +42,13 @@ set(HEADERS
     slam/loop_closure_solver/lcs_simple.h
     slam/loop_closure_solver/lcs_simple_single_kf.h
     slam/loop_closure_solver/lcs_two_steps_easy.h
+    slam/loop_closure_solver/lcs_vpr.h
     slam/loop_closure_solver/pnp_ransac_hypothesis.h
+    vpr/ivpr.h
+    vpr/vpr_image.h
+    vpr/vpr_map.h
+    vpr/vpr_sof_image.h
+    vpr/vpr_types.h
     view/map_to_view.h
     view/view_landmarks.h
     view/view_manager.h
@@ -72,7 +78,12 @@ set(SOURCES
     slam/loop_closure_solver/lcs_simple.cpp
     slam/loop_closure_solver/lcs_simple_single_kf.cpp
     slam/loop_closure_solver/lcs_two_steps_easy.cpp
+    slam/loop_closure_solver/lcs_vpr.cpp
     slam/slam_check_hypothesis.cpp
+    vpr/ivpr.cpp
+    vpr/vpr_image.cpp
+    vpr/vpr_map.cpp
+    vpr/vpr_sof_image.cpp
     view/map_to_view.cpp
 )
 
@@ -85,7 +96,14 @@ set(LIBS
     log
     pnp
     profiler
+    sof
 )
+
+if (USE_TENSORRT)
+  set(HEADERS ${HEADERS} vpr/anyloc_network.h vpr/vpr_anyloc.h)
+  set(SOURCES ${SOURCES} vpr/anyloc_network.cpp vpr/vpr_anyloc.cpp)
+  set(LIBS ${LIBS} TensorRT::nvinfer)
+endif (USE_TENSORRT)
 
 if (USE_CUDA)
   set(LIBS ${LIBS} cuda_modules)

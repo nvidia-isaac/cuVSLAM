@@ -12,6 +12,8 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
-from setuptools import setup
+# One folder per model, built from pinned upstream sources.
 
-setup()
+if(CUVSLAM_BUILD_ANYLOC_ENGINE)
+    add_subdirectory(anyloc)
+endif()

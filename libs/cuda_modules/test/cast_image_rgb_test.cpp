@@ -15,6 +15,7 @@
  * of the software or derivative works thereof, you agree to be bound by this License.
  */
 
+#include <algorithm>
 #include <chrono>
 #include <iostream>
 #include <random>
@@ -84,13 +85,42 @@ TEST(Cuda, CastImageRGB) {
 
       float actual_value = output_grayscale_image(y, x);
 
-      if (std::abs(expected_value - actual_value) > epsilon()) {
+      // The kernel computes in float, so allow a few ulps relative to the value.
+      if (std::abs(expected_value - actual_value) > 4 * epsilon() * std::max(1.f, expected_value)) {
         verify_gs = false;
         break;
       }
     }
   }
   ASSERT_TRUE(verify_gs);
+}
+
+TEST(Cuda, CastDepthU16) {
+  const ImageShape image_shape = {640, 480, 0, ImageEncoding::MONO8};
+  std::vector<uint16_t> depth_data(image_shape.width * image_shape.height);
+  for (size_t i = 0; i < depth_data.size(); ++i) {
+    depth_data[i] = static_cast<uint16_t>(i % 65536);
+  }
+
+  cuda::ImageCast image_cast;
+  cuda::GPUImageT gpu_image;
+  cuda::Stream stream;
+  ImageMatrixT output_depth(image_shape.height, image_shape.width);
+  gpu_image.init(image_shape.width, image_shape.height);
+
+  for (const float scale : {1.f, 1000.f, 5000.f}) {
+    ASSERT_TRUE(image_cast.cast_depth(depth_data.data(), scale, image_shape, gpu_image, stream.get_stream()));
+    gpu_image.copy(cuda::GPUCopyDirection::ToCPU, output_depth.data(), stream.get_stream());
+    CUDA_CHECK(cudaStreamSynchronize(stream.get_stream()));
+
+    for (int y = 0; y < image_shape.height; ++y) {
+      for (int x = 0; x < image_shape.width; ++x) {
+        const float expected = static_cast<float>(depth_data[y * image_shape.width + x]) / scale;
+        ASSERT_NEAR(output_depth(y, x), expected, 4 * epsilon() * std::max(1.f, expected))
+            << "scale=" << scale << " x=" << x << " y=" << y;
+      }
+    }
+  }
 }
 
 }  // namespace

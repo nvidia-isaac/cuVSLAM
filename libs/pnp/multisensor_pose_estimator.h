@@ -17,10 +17,10 @@
 #pragma once
 
 #include <functional>
+#include <memory>
 #include <optional>
 #include <vector>
 
-#include <cunls/common/cublas_helper.h>
 #include <cunls/common/types.h>
 #include <cunls/minimizer/levenberg_marquardt_minimizer.h>
 
@@ -100,7 +100,7 @@ struct InertialPriorInput {
   // World-frame gravity (output of optimize_inertial / map_.set_gravity).
   Vector3T gravity_world = Vector3T::Zero();
   // The IMU-to-rig calibration used to convert between IMU-frame poses (which the preintegration
-  // is expressed in) and rig_from_world (which the cuNLS state holds).
+  // is expressed in) and rig poses (the cuNLS state holds world_from_rig).
   Isometry3T rig_from_imu = Isometry3T::Identity();
 };
 
@@ -125,6 +125,7 @@ class MultisensorPoseEstimator {
 public:
   MultisensorPoseEstimator(const camera::Rig& rig,
                            const MultisensorSolverSettings& settings = MultisensorSolverSettings());
+  ~MultisensorPoseEstimator();
 
   bool solve(Isometry3T& rig_from_world, Matrix6T& static_info_exp,
              const std::vector<camera::Observation>& observations,
@@ -137,7 +138,6 @@ private:
   camera::Rig rig_;
   MultisensorSolverSettings settings_;
   mutable cuda::Stream stream_{false};
-  mutable cunls::cuBLASHandle cublas_handle_;
 
   // Pre-allocated GPU buffers (capacity = kMaxObsPerCamera * num_cameras).
   // Avoids cudaMalloc/cudaFree on every solve() call.
@@ -166,10 +166,11 @@ private:
   mutable std::vector<std::vector<ObservationRef>> obs_per_camera_;
   mutable std::vector<camera::Observation> filtered_obs_;
   mutable std::vector<Vector3T> matched_landmarks_;
-  mutable std::vector<float*> pose_state_ptrs_;
-  mutable std::vector<float*> icp_state_ptrs_;
-  mutable std::vector<std::vector<float*>> p2p_state_ptrs_;
-  mutable std::vector<float*> inertial_state_ptrs_;
+
+  // The cuNLS problem of the last solve, kept while the set of factor batches stays the same so the minimizer
+  // can reuse its structure (MinimizerOptions::reuse_structure).
+  struct CachedProblem;
+  mutable std::unique_ptr<CachedProblem> cached_problem_;
 
   mutable cunls::LevenbergMarquardtMinimizer minimizer_;
 

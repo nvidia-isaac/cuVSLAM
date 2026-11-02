@@ -17,9 +17,14 @@
 
 #include "map/service.h"
 
+#include <utility>
+
+#include "profiler/profiler.h"
+
 namespace cuvslam::map {
 
-ServiceBase::ServiceBase(UnifiedMap& map, bool async) : map_(map), async_(async) {
+ServiceBase::ServiceBase(UnifiedMap& map, std::string thread_name, bool async)
+    : map_(map), async_(async), thread_name_(std::move(thread_name)) {
   if (!async_) {
     return;
   }
@@ -68,6 +73,7 @@ void ServiceBase::notify() {
 }
 
 void ServiceBase::run() {
+  profiler::NameCurrentThread(thread_name_);
   while (true) {
     {
       std::unique_lock<std::mutex> lock(mutex_);

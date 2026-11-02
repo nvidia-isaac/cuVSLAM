@@ -190,6 +190,7 @@ cudaError_t lift(cudaTextureObject_t curr_depth, const Inctinsics& intrinsics, c
 // Produces a 1-D residual (p_cam.z - d) and 1x6 Jacobian per factor. The kernel
 // also applies a fixed relative-depth gate to discard occlusion-edge matches;
 // the threshold (kMaxRelDepth) is defined in point_to_point_icp_kernel.cu.
+// state_ptrs: per-factor pointers to world_from_rig (the cuNLS pose convention).
 // cam_from_rig: required device pointer to a single 4×4 SE3 (identity when rig == camera).
 cudaError_t point_to_point_icp_evaluate(const float3* landmarks_world, float const* const* state_ptrs,
                                         const float* cam_from_rig, cudaTextureObject_t depth_tex, float2 focal,
@@ -272,9 +273,9 @@ struct GPUPlane {
 // Point-to-plane factor evaluation (image-space): one thread per pixel in a
 // regular grid defined by stride + image_size. Samples depth, lifts to world,
 // finds the closest plane, and computes point-to-plane residual + 1x6 Jacobian.
-// State is rig_from_world. cam_from_rig is required (device pointer to a single
-// 4x4 SE3, identity when the depth camera coincides with the rig origin); the
-// kernel composes cam_from_world = cam_from_rig * rig_from_world internally.
+// State is world_from_rig (the cuNLS pose convention). cam_from_rig is required (device
+// pointer to a single 4x4 SE3, identity when the depth camera coincides with the rig
+// origin); the kernel lifts depth with world_from_cam = world_from_rig * cam_from_rig^-1.
 cudaError_t point_to_plane_evaluate(const GPUPlane* planes, int num_planes, int stride, cudaTextureObject_t depth_tex,
                                     float2 focal, float2 principal, int2 image_size, float const* const* state_ptrs,
                                     const float* cam_from_rig, float* residuals, float* jacobians, size_t num_factors,

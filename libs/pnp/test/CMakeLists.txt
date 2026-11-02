@@ -31,7 +31,7 @@ endif()
 if(USE_CUNLS)
     enable_language(CUDA)
     # Host-only tests; built by the host compiler (not LANGUAGE CUDA) — see libs/map/CMakeLists.txt.
-    list(APPEND SOURCES multisensor_pose_estimator_test.cpp point_to_point_icp_test.cpp)
+    list(APPEND SOURCES multisensor_pose_estimator_test.cpp point_to_plane_test.cpp point_to_point_icp_test.cpp)
     list(APPEND LIBS cunls::cunls)
 endif()
 

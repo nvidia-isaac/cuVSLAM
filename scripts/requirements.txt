@@ -2,7 +2,7 @@
 # Used by scripts/Dockerfile
 #
 # Pin versions to prevent supply chain attacks on self-hosted runners.
-# Test dependencies are in python/test/requirements.txt (installed separately)
+# Test dependencies are in python/tests/requirements.txt (installed separately)
 
 # Wheel packaging (used by scripts/build_pycuvslam_in_docker.sh)
 auditwheel==6.6.0

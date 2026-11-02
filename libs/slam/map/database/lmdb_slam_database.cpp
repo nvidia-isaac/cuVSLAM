@@ -17,6 +17,11 @@
 
 #include "slam/map/database/lmdb_slam_database.h"
 
+#include <fcntl.h>
+#include <unistd.h>
+
+#include <cerrno>
+#include <cstring>
 #include <filesystem>
 
 #include "slam/common/blob_eigen.h"
@@ -61,22 +66,30 @@ bool LmdbSlamDatabase::WriteTxn::Put(MDB_dbi dbi, const std::string& key_name, c
   return Put(dbi, &key, &data);
 }
 
-bool LmdbSlamDatabase::WriteTxn::Put(MDB_dbi dbi, MDB_val* key, MDB_val* data) {
-  int rc;
+bool LmdbSlamDatabase::WriteTxn::Begin(MDB_dbi dbi) {
+  if (failed_) {
+    return false;
+  }
   if (!txn_) {
-    // begin new transaction
-    rc = mdb_txn_begin(db_->env, NULL, 0, &txn_);
+    const int rc = mdb_txn_begin(db_->env, NULL, 0, &txn_);
     if (db_->Error(rc, dbi)) {
+      txn_ = nullptr;
+      failed_ = true;
       return false;
     }
   }
+  return true;
+}
 
-  // put key/value
-  rc = mdb_put(txn_, dbi, key, data, 0);
-  if (db_->Error(rc, dbi)) {
+bool LmdbSlamDatabase::WriteTxn::Put(MDB_dbi dbi, MDB_val* key, MDB_val* data) {
+  if (!Begin(dbi)) {
     return false;
   }
-
+  const int rc = mdb_put(txn_, dbi, key, data, 0);
+  if (db_->Error(rc, dbi)) {
+    failed_ = true;
+    return false;
+  }
   return true;
 }
 
@@ -88,56 +101,43 @@ bool LmdbSlamDatabase::WriteTxn::Del(MDB_dbi dbi, const size_t& id) {
   return Del(dbi, &key);
 }
 bool LmdbSlamDatabase::WriteTxn::Del(MDB_dbi dbi, MDB_val* key) {
-  int rc;
-  if (!txn_) {
-    // begin new transaction
-    rc = mdb_txn_begin(db_->env, NULL, 0, &txn_);
-
-    if (db_->Error(rc, dbi)) {
-      return false;
-    }
-  }
-
-  rc = mdb_del(txn_, dbi, key, nullptr);
-  if (ignore_MDB_NOTFOUND_ && rc == MDB_NOTFOUND) {
-    return false;  // don't show MDB_NOTFOUND error
-  }
-  if (db_->Error(rc, dbi)) {
+  if (!Begin(dbi)) {
     return false;
   }
-
+  const int rc = mdb_del(txn_, dbi, key, nullptr);
+  if (ignore_MDB_NOTFOUND_ && rc == MDB_NOTFOUND) {
+    return false;  // don't show MDB_NOTFOUND error; the txn stays usable
+  }
+  if (db_->Error(rc, dbi)) {
+    failed_ = true;
+    return false;
+  }
   return true;
 }
 
 bool LmdbSlamDatabase::WriteTxn::Drop(MDB_dbi dbi, int del) {
-  int rc;
-  if (!txn_) {
-    // begin new transaction
-    rc = mdb_txn_begin(db_->env, NULL, 0, &txn_);
-    if (db_->Error(rc, dbi)) {
-      return false;
-    }
-  }
-
-  rc = mdb_drop(txn_, dbi, del);
-  if (db_->Error(rc, dbi)) {
+  if (!Begin(dbi)) {
     return false;
   }
-
+  const int rc = mdb_drop(txn_, dbi, del);
+  if (db_->Error(rc, dbi)) {
+    failed_ = true;
+    return false;
+  }
   return true;
 }
 
 bool LmdbSlamDatabase::WriteTxn::Commit() {
-  if (txn_) {
-    int rc = mdb_txn_commit(txn_);
-    if (db_->Error(rc)) {
-      mdb_txn_abort(txn_);
-      txn_ = nullptr;
-      return false;
-    }
-    txn_ = nullptr;
+  if (failed_) {
+    Abort();
+    return false;
   }
-  return true;
+  if (!txn_) {
+    return true;
+  }
+  const int rc = mdb_txn_commit(txn_);
+  txn_ = nullptr;  // LMDB frees the txn whether the commit succeeds or not
+  return !db_->Error(rc);
 }
 void LmdbSlamDatabase::WriteTxn::Abort() {
   if (txn_) {
@@ -305,7 +305,15 @@ bool LmdbSlamDatabase::Open(const char* db_path, OpenMode open_mode) {
     }
   }
 
-  if (!read_only_) {
+  if (open_mode == OpenMode::READ_WRITE_EXISTS) {
+    std::error_code ec;
+    if (!std::filesystem::exists(std::filesystem::path(db_path) / "data.mdb", ec)) {
+      SlamStderr("LMDB database %s does not exist.\n", db_path);
+      return false;
+    }
+  }
+
+  if (!read_only_ && open_mode != OpenMode::READ_WRITE_EXISTS) {
     // Create directory
     std::error_code ec;
     const auto dir = std::filesystem::path(db_path);
@@ -350,6 +358,11 @@ bool LmdbSlamDatabase::Open(const char* db_path, OpenMode open_mode) {
   rc = mdb_env_open(env, db_path, flags, 0664);
   if (Error(rc)) {
     return false;
+  }
+  std::error_code ec;
+  path_ = std::filesystem::absolute(db_path, ec).string();  // stays right if the working folder changes
+  if (ec) {
+    path_ = db_path;
   }
 
   MDB_txn* txn;
@@ -406,6 +419,9 @@ bool LmdbSlamDatabase::Open(const char* db_path, OpenMode open_mode) {
 }
 
 void LmdbSlamDatabase::Close() {
+  if (env == nullptr) {
+    return;
+  }
   mdb_close(env, dbi_main);
   mdb_close(env, dbi_landmarks);
   mdb_close(env, dbi_descriptors);
@@ -413,6 +429,7 @@ void LmdbSlamDatabase::Close() {
   // mdb_close(env, dbi_posegraph_edges);
   mdb_close(env, dbi_spatial_cells);
   mdb_env_close(env);
+  env = nullptr;
 
   SlamStdout("Closing LMDB database.\n");
 }
@@ -502,6 +519,77 @@ size_t LmdbSlamDatabase::GetRecordsCount(SlamDatabaseTable table) const {
 }
 
 bool LmdbSlamDatabase::IsReadOnly() const { return this->read_only_; }
+
+bool LmdbSlamDatabase::CopyTo(const std::string& path) const {
+  if (env == nullptr) {
+    return false;
+  }
+  std::error_code ec;
+  // Without a trailing separator, so that "map/" and "map" are the same folder.
+  const auto resolve = [&ec](const std::filesystem::path& folder) {
+    const std::filesystem::path resolved = std::filesystem::weakly_canonical(folder, ec);
+    return resolved.has_filename() ? resolved : resolved.parent_path();
+  };
+  const std::filesystem::path target = resolve(path);
+  const std::filesystem::path own = ec ? std::filesystem::path() : resolve(path_);
+  if (ec) {
+    SlamStderr("Can't resolve LMDB database paths %s and %s. %s\n", path_.c_str(), path.c_str(), ec.message().c_str());
+    return false;
+  }
+  // Replacing the target folder must not delete this database.
+  for (std::filesystem::path entry = own / "data.mdb"; !entry.empty(); entry = entry.parent_path()) {
+    if (entry == target || std::filesystem::equivalent(entry, target, ec)) {
+      SlamStderr("Can't copy LMDB database %s into %s, which holds it.\n", path_.c_str(), path.c_str());
+      return false;
+    }
+    if (entry == entry.parent_path()) {
+      break;
+    }
+  }
+  ec.clear();
+  std::filesystem::remove_all(target, ec);
+  if (ec || !std::filesystem::create_directory(target, ec)) {
+    SlamStderr("Failed to make the empty folder %s. %s\n", path.c_str(), ec.message().c_str());
+    return false;
+  }
+  // Renamed to data.mdb only when complete, so a failed copy leaves no truncated database.
+  const std::filesystem::path partial = target / "data.mdb.partial";
+  const int fd = open(partial.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0664);
+  if (fd < 0) {
+    SlamStderr("Failed to create %s. %s\n", partial.c_str(), std::strerror(errno));
+    return false;
+  }
+  // Page by page, so the map never has to fit in memory.
+  bool copied = !Error(mdb_env_copyfd2(env, fd, 0));
+  if (copied && fsync(fd) != 0) {
+    SlamStderr("Failed to write %s. %s\n", partial.c_str(), std::strerror(errno));
+    copied = false;
+  }
+  if (close(fd) != 0 && copied) {
+    SlamStderr("Failed to write %s. %s\n", partial.c_str(), std::strerror(errno));
+    copied = false;
+  }
+  if (copied) {
+    std::filesystem::rename(partial, target / "data.mdb", ec);
+    if (ec) {
+      SlamStderr("Failed to rename %s. %s\n", partial.c_str(), ec.message().c_str());
+      copied = false;
+    }
+  }
+  if (!copied) {
+    std::filesystem::remove(partial, ec);
+  }
+  return copied;
+}
+
+bool LmdbSlamDatabase::IsAt(const std::string& path) const {
+  if (env == nullptr) {
+    return false;
+  }
+  std::error_code ec;
+  return std::filesystem::equivalent(std::filesystem::path(path_) / "data.mdb",
+                                     std::filesystem::path(path) / "data.mdb", ec);
+}
 
 bool LmdbSlamDatabase::SetRecordV(SlamDatabaseTable table, Key id, size_t bytes,
                                   const std::function<bool(BlobWriter&)>& func) {

@@ -20,7 +20,11 @@
 #include <condition_variable>
 #include <future>
 #include <mutex>
+#include <string>
 #include <thread>
+#include <utility>
+
+#include "profiler/profiler.h"
 
 namespace cuvslam {
 
@@ -29,7 +33,9 @@ class WorkThread {
 public:
   using result_type = RESULT;
 
-  WorkThread() : mustTerminate_(false), isRunning_(true) {}
+  // thread_name names the worker thread, see profiler::NameCurrentThread().
+  explicit WorkThread(std::string thread_name)
+      : threadName_(std::move(thread_name)), mustTerminate_(false), isRunning_(true) {}
 
   ~WorkThread() { reset(); }
 
@@ -74,6 +80,7 @@ private:
   }
 
   void run() {
+    profiler::NameCurrentThread(threadName_);
     std::unique_lock<std::mutex> lk(mtxHasInput_);
     while (!mustTerminate_) {
       condHasInput_.wait(lk, [this] { return (isRunning_ && !input_.empty()) || mustTerminate_; });
@@ -90,6 +97,7 @@ private:
 
   std::vector<std::packaged_task<result_type()>> input_;
 
+  const std::string threadName_;
   bool mustTerminate_;
   bool isRunning_;
   std::thread thread_;

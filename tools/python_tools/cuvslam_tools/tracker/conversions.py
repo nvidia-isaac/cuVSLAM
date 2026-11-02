@@ -83,6 +83,15 @@ def str2odometry_mode(value: str) -> vslam.Odometry.OdometryMode:
     return str2odometry_mode_map[value]
 
 
+def str2loop_closure_mode(value: str) -> vslam.Slam.LoopClosureMode:
+    """Convert string to loop closure mode enum."""
+    str2loop_closure_mode_map = {
+        'lsi': vslam.Slam.LoopClosureMode.LSI,
+        'vpr': vslam.Slam.LoopClosureMode.VPR,
+    }
+    return str2loop_closure_mode_map[value]
+
+
 def to_distortion_model(distortion: str) -> vslam.Distortion.Model:
     """Convert string to distortion model enum."""
     distortion = distortion.lower()
