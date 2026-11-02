@@ -68,8 +68,10 @@ bool PoseGraphHypothesis::GetFromDatabase(ISlamDatabase* database) {
     for (uint64_t i = 0; i < sz; i++) {
       KeyFrameId key;
       Isometry3T value;
-      blob_reader.read(key);
-      blob_reader.read_eigen(value);
+      if (!blob_reader.read(key) || !blob_reader.read_eigen(value)) {
+        pose_graph_verts_.clear();
+        return false;
+      }
       pose_graph_verts_[key] = value;
     }
     return true;

@@ -219,8 +219,9 @@ protected:
 
   bool AddLandmarkToCell(LandmarkId landmark_id, HashCellId hash_cell_id);
 
-  // return begin/end of landmarks vector for cell_id
-  std::pair<const LandmarkId*, const LandmarkId*> GetCellLandmarks(const HashCellId& hash_cell_id) const;
+  // Appends a copy of the cell's landmarks: a cell that is only in the database lives in a read transaction
+  // that ends before this returns.
+  void AppendCellLandmarks(const HashCellId& hash_cell_id, std::vector<LandmarkId>& landmarks) const;
   // Return exists or add new cell
   Cell& GetCellForWrite(const HashCellId& hash_cell_id);
   // Return exists cell

@@ -23,6 +23,7 @@ set(SOURCES
     lcs_vpr_test.cpp
     localize_in_map_test.cpp
     lsi_grid_test.cpp
+    map_blob_test.cpp
     pgo_test.cpp
     p3p_test.cpp
     pnp_ransac_test.cpp

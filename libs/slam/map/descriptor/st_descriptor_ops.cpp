@@ -103,19 +103,33 @@ bool STDescriptorOps::ToBlob(const FeatureDescriptorRef fd, BlobWriter& blob_wri
   return true;
 }
 
+// The blob usually points into a database read transaction that ends when the caller returns, so the
+// descriptor has to own a copy rather than point into the blob.
 FeatureDescriptor STDescriptorOps::CreateFromBlob(const BlobReader& blob_reader) const {
-  const uint8_t* mem = blob_reader.feed_forward(sizeof(STDescriptor));
-  if (!mem) {
+  STDescriptor header;
+  if (!blob_reader.read(header)) {
     return FeatureDescriptorEmpty;
   }
-  const STDescriptor* ptr = reinterpret_cast<const STDescriptor*>(mem);
-  const uint8_t* mem2 = blob_reader.feed_forward(ptr->image_patches_size * sizeof(sof::STFeaturePatch));
-  if (!mem2) {
+  if (header.image_patches_size > blob_reader.remaining() / sizeof(sof::STFeaturePatch)) {
+    return FeatureDescriptorEmpty;
+  }
+  const size_t patches_bytes = sizeof(sof::STFeaturePatch) * header.image_patches_size;
+
+  auto shared_ptr = std::shared_ptr<STDescriptor>(
+      reinterpret_cast<STDescriptor*>(new char[sizeof(STDescriptor) + patches_bytes]), [](void* ptr) {
+        if (ptr) {
+          delete[] static_cast<char*>(ptr);
+        }
+      });
+  STDescriptor* dst = shared_ptr.get();
+  dst->levels_mask = header.levels_mask;
+  dst->image_patches_size = header.image_patches_size;
+  if (!blob_reader.read(static_cast<void*>(dst->image_patches), patches_bytes)) {
     return FeatureDescriptorEmpty;
   }
 
   FeatureDescriptor fd;
-  fd.const_memory_ptr = ptr;
+  fd.pull_memory = shared_ptr;
   return fd;
 }
 FeatureDescriptor STDescriptorOps::Copy(const FeatureDescriptor& source) const {

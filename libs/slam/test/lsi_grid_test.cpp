@@ -14,7 +14,9 @@
  * of the software or derivative works thereof, you agree to be bound by this License.
  */
 
+#include <cstring>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -40,8 +42,10 @@ namespace {
 class OpenGrid : public LSIGrid {
 public:
   using StoredLandmark = decltype(landmarks_)::mapped_type;
+  using LSIGrid::AppendCellLandmarks;
   using LSIGrid::cells_;
   using LSIGrid::dead_landmarks_;
+  using LSIGrid::GetLandmark;
   using LSIGrid::landmark_quality_func_;
   using LSIGrid::landmarks_;
   using LSIGrid::LandmarkToBlob;
@@ -113,6 +117,97 @@ TEST_F(CellLimit, LandmarksOnlyInTheDatabaseCompeteForTheCell) {
   grid_->SetDatabase(nullptr);
   database->Close();
   std::filesystem::remove_all(folder);
+}
+
+// The grid backed by a scratch database, to feed it records the way a map file on disk would.
+class GridOverDatabase : public CellLimit {
+protected:
+  void SetUp() override {
+    CellLimit::SetUp();
+    folder_ = std::filesystem::temp_directory_path() / ("cuvslam_lsi_grid_db_test_" + std::to_string(getpid()));
+    database_ = std::make_shared<LmdbSlamDatabase>();
+    ASSERT_TRUE(database_->Open(folder_.c_str(), LmdbSlamDatabase::OpenMode::READ_WRITE_HARD_RESET));
+  }
+  void TearDown() override {
+    grid_->SetDatabase(nullptr);
+    database_->Close();
+    std::filesystem::remove_all(folder_);
+  }
+
+  void Put(SlamDatabaseTable table, ISlamDatabase::Key key, const Blob& record) {
+    ASSERT_TRUE(database_->SetRecord(table, key, record.size(), [&](BlobWriter& writer) {
+      writer.write(record.data(), record.size());
+      return true;
+    }));
+  }
+
+  Blob LandmarkRecord(const OpenGrid::StoredLandmark& landmark) const {
+    Blob record;
+    BlobWriter writer(record);
+    grid_->LandmarkToBlob(landmark, writer);
+    return record;
+  }
+
+  std::filesystem::path folder_;
+  std::shared_ptr<LmdbSlamDatabase> database_;
+};
+
+TEST_F(GridOverDatabase, CellOnlyInTheDatabaseIsCopiedOut) {
+  Blob cell;
+  BlobWriter(cell).write_std(std::vector<LandmarkId>{7, 8});
+  Put(SlamDatabaseTable::SpatialCells, 30, cell);
+
+  Blob short_cell;
+  BlobWriter short_writer(short_cell);
+  short_writer.write(size_t{5});
+  short_writer.write(LandmarkId{9});
+  Put(SlamDatabaseTable::SpatialCells, 31, short_cell);
+
+  grid_->cells_[40].landmarks_in_cell = {};
+  grid_->SetDatabase(database_);
+
+  std::vector<LandmarkId> landmarks = {1};
+  grid_->AppendCellLandmarks(30, landmarks);
+  EXPECT_EQ(landmarks, (std::vector<LandmarkId>{1, 7, 8}));
+  grid_->AppendCellLandmarks(31, landmarks);
+  grid_->AppendCellLandmarks(32, landmarks);
+  grid_->AppendCellLandmarks(40, landmarks);
+  EXPECT_EQ(landmarks, (std::vector<LandmarkId>{1, 7, 8}));
+}
+
+TEST_F(GridOverDatabase, CorruptLandmarkRecordIsNotLoaded) {
+  Blob huge_count = LandmarkRecord(MakeLandmark({10}, 1));
+  const uint32_t keyframes_size = std::numeric_limits<uint32_t>::max();
+  std::memcpy(huge_count.data() + sizeof(uint32_t), &keyframes_size, sizeof(keyframes_size));
+  Put(SlamDatabaseTable::Landmarks, 1, huge_count);
+
+  Blob truncated = LandmarkRecord(MakeLandmark({10}, 1));
+  truncated.resize(truncated.size() - 1);
+  Put(SlamDatabaseTable::Landmarks, 2, truncated);
+
+  Put(SlamDatabaseTable::Landmarks, 3, LandmarkRecord(MakeLandmark({10}, 1)));
+  grid_->SetDatabase(database_);
+
+  EXPECT_EQ(grid_->GetLandmark(1), nullptr);
+  EXPECT_EQ(grid_->GetLandmark(2), nullptr);
+  EXPECT_NE(grid_->GetLandmark(3), nullptr);
+}
+
+// The descriptor is read inside a database transaction that ends before the grid hands it out.
+TEST_F(GridOverDatabase, DescriptorFromTheDatabaseOwnsItsMemory) {
+  Put(SlamDatabaseTable::Landmarks, 1, LandmarkRecord(MakeLandmark({10}, 1)));
+  Blob descriptor;
+  BlobWriter writer(descriptor);
+  writer.write(uint32_t{1});  // levels_mask
+  writer.write(uint32_t{1});  // image_patches_size
+  writer.write(sof::STFeaturePatch(sof::STFeaturePatch::Constant(3.f)));
+  Put(SlamDatabaseTable::Descriptors, 1, descriptor);
+  grid_->SetDatabase(database_);
+
+  const FeatureDescriptor fd = grid_->GetLandmarkFeatureDescriptor(1);
+  ASSERT_TRUE(fd);
+  EXPECT_EQ(fd.const_memory_ptr, nullptr);
+  EXPECT_EQ(static_cast<const STDescriptor*>(fd.get())->image_patches[0](0, 0), 3.f);
 }
 #endif  // USE_LMDB
 

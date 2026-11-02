@@ -225,12 +225,11 @@ void LSIGrid::SyncDatabaseReverse() {
   this->database_->ForEach(SlamDatabaseTable::Descriptors,
                            [&](LandmarkId landmark_id, const BlobReader& /* blob_reader */) -> bool {
                              LSIGrid::GridLandmark* landmark = this->GetLandmark(landmark_id);
-                             if (landmark) {
+                             if (landmark && landmark->have_to_get_descriptor_from_db) {
                                const FeatureDescriptor fd = GetLandmarkFeatureDescriptor(landmark_id);
-                               if (fd && fd.is_const_memory()) {
-                                 const FeatureDescriptor fd_mem = feature_descriptor_ops_.Copy(fd);
+                               if (fd) {
                                  landmark->have_to_get_descriptor_from_db = false;
-                                 landmark->fd = fd_mem;
+                                 landmark->fd = fd;
                                }
                              }
                              return true;
@@ -442,12 +441,11 @@ void LSIGrid::OnUpdateKeyframePoseFinished() {
   for (auto& it : update_keyframe_pose_items_) {
     // copy landmarks that is in this cell and is related to this keyframe to new cell
     // auto& cell_old = this->cells_[it.hash_cell_id_old];
-    auto start_end_landmarks = GetCellLandmarks(it.hash_cell_id_old);
+    std::vector<LandmarkId> landmarks_old;
+    AppendCellLandmarks(it.hash_cell_id_old, landmarks_old);
     auto& cell_new = this->GetCellForWrite(it.hash_cell_id_new);
 
-    for (auto it_landmark_old_id = start_end_landmarks.first; it_landmark_old_id != start_end_landmarks.second;
-         it_landmark_old_id++) {
-      auto landmark_id = *it_landmark_old_id;
+    for (const LandmarkId landmark_id : landmarks_old) {
       auto landmark_it = this->landmarks_.find(landmark_id);
       if (landmark_it == this->landmarks_.end()) {
         continue;
@@ -664,10 +662,8 @@ bool LSIGrid::FromBlob(const BlobReader& blob_reader) {
     return false;
   }
 
-  blob_reader.read(this->cell_size_);
-  blob_reader.read(this->cell_landmarks_limit_);
-  blob_reader.read(this->next_landmark_auto_id_);
-  return true;
+  return blob_reader.read(this->cell_size_) && blob_reader.read(this->cell_landmarks_limit_) &&
+         blob_reader.read(this->next_landmark_auto_id_);
 }
 
 // return Landmark count
@@ -896,13 +892,11 @@ void LSIGrid::QueryLandmarksByCameraPoseV(const Isometry3T& pose, const std::vec
           cell_id.y_ += y;
           cell_id.z_ += z;
 
-          auto landmarks_in_cell = GetCellLandmarks(HashCellIdFromCellId(cell_id));
-          if (!landmarks_in_cell.first) {
-            continue;
+          const size_t candidates_before = candidates.size();
+          AppendCellLandmarks(HashCellIdFromCellId(cell_id), candidates);
+          if (candidates.size() != candidates_before) {
+            log::Value<LogSlamHypothesis>("cell", HashCellIdFromCellId(cell_id));
           }
-
-          log::Value<LogSlamHypothesis>("cell", HashCellIdFromCellId(cell_id));
-          candidates.insert(candidates.end(), landmarks_in_cell.first, landmarks_in_cell.second);
         }
       }
     }
@@ -989,35 +983,23 @@ bool LSIGrid::AddLandmarkToCell(LandmarkId landmark_id, HashCellId hash_cell_id)
   return is_cell_changed;
 }
 
-std::pair<const LandmarkId*, const LandmarkId*> LSIGrid::GetCellLandmarks(const HashCellId& hash_cell_id) const {
+void LSIGrid::AppendCellLandmarks(const HashCellId& hash_cell_id, std::vector<LandmarkId>& landmarks) const {
   auto it = cells_.find(hash_cell_id);
-  if (it == cells_.end()) {
-    if (database_) {
-      // read from DB
-      std::pair<const LandmarkId*, const LandmarkId*> res(nullptr, nullptr);
-      database_->TryGetRecord(SlamDatabaseTable::SpatialCells, hash_cell_id, [&](const BlobReader& blob_reader) {
-        size_t sz;
-        if (!blob_reader.read(sz)) {
-          return false;
-        };
-        if (sz == 0) {
-          return false;
-        }
-        auto ptr = blob_reader.feed_forward(0);
-        auto begin = reinterpret_cast<const LandmarkId*>(ptr);
-        res.first = begin;
-        res.second = begin + sz;
-        return true;
-      });
-      return res;
-    }
-    return std::pair<const LandmarkId*, const LandmarkId*>(nullptr, nullptr);
+  if (it != cells_.end()) {
+    const auto& in_cell = it->second.landmarks_in_cell;
+    landmarks.insert(landmarks.end(), in_cell.begin(), in_cell.end());
+    return;
   }
-
-  const Cell& cell = it->second;
-  const LandmarkId* begin = &(*cell.landmarks_in_cell.begin());
-  const LandmarkId* end = &(*cell.landmarks_in_cell.end());
-  return std::pair<const LandmarkId*, const LandmarkId*>(begin, end);
+  if (database_) {
+    database_->TryGetRecord(SlamDatabaseTable::SpatialCells, hash_cell_id, [&](const BlobReader& blob_reader) {
+      std::vector<LandmarkId> in_cell;
+      if (!blob_reader.read_std(in_cell)) {
+        return false;
+      }
+      landmarks.insert(landmarks.end(), in_cell.begin(), in_cell.end());
+      return true;
+    });
+  }
 }
 
 LSIGrid::Cell& LSIGrid::GetCellForWrite(const HashCellId& hash_cell_id) {
@@ -1094,7 +1076,7 @@ bool LSIGrid::LandmarkFromBlob(const BlobReader& blob_reader, GridLandmark& land
   }
 
   uint32_t keyframes_size;
-  if (!blob_reader.read(keyframes_size)) {
+  if (!blob_reader.read(keyframes_size) || keyframes_size > blob_reader.remaining() / sizeof(KeyFrameId)) {
     return false;
   }
 
@@ -1121,16 +1103,17 @@ bool LSIGrid::LandmarkFromBlob(const BlobReader& blob_reader, GridLandmark& land
   }
 
   uint32_t cells_size;
-  if (!blob_reader.read(cells_size)) {
+  if (!blob_reader.read(cells_size) || cells_size > blob_reader.remaining() / sizeof(HashCellId)) {
     return false;
   }
   landmark.cells.resize(cells_size);
   for (auto& cell_id : landmark.cells) {
-    blob_reader.read(cell_id);
+    if (!blob_reader.read(cell_id)) {
+      return false;
+    }
   }
-  blob_reader.read(landmark.probes_types.data(), sizeof(*landmark.probes_types.data()) * landmark.probes_types.size());
-
-  return true;
+  return blob_reader.read(landmark.probes_types.data(),
+                          sizeof(*landmark.probes_types.data()) * landmark.probes_types.size());
 }
 
 LSIGrid::LandmarkQualityFunc LSIGrid::MakeLandmarkQualityFunc() {

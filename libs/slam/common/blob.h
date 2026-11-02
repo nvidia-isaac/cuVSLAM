@@ -18,6 +18,9 @@
 #pragma once
 
 #include <stdint.h>
+
+#include <cstring>
+#include <string>
 #include <vector>
 
 #include "common/isometry.h"
@@ -65,13 +68,15 @@ public:
   }
 };
 
+// Blobs come from map files on disk, so every count read from one is untrusted: check it against remaining()
+// before allocating for it. Records are packed without padding, so values are copied out, never dereferenced.
 class BlobReader {
   const uint8_t* data_;
   size_t size_;
   mutable size_t feed_offset_ = 0;
 
 public:
-  BlobReader(const Blob& buffer) : data_(&buffer[0]), size_(buffer.size()) {}
+  BlobReader(const Blob& buffer) : data_(buffer.data()), size_(buffer.size()) {}
   BlobReader(const void* data, size_t size) : data_((uint8_t*)data), size_(size) {}
 
   template <class T>
@@ -80,7 +85,7 @@ public:
     if (!ptr) {
       return false;
     }
-    dst = *(const T*)ptr;
+    memcpy(static_cast<void*>(&dst), ptr, sizeof(T));
     return true;
   }
   bool read(std::string& dst) const { return read_str(dst); }
@@ -89,25 +94,27 @@ public:
     if (!ptr) {
       return false;
     }
-    memcpy(dst, ptr, size);
+    if (size != 0) {
+      memcpy(dst, ptr, size);
+    }
     return true;
   }
   bool read_str(std::string& dst) const {
     size_t sz;
-    if (!this->read(sz)) {
+    if (!this->read(sz) || sz > remaining()) {
       return false;
     }
     dst.resize(sz);
-    return this->read(&dst[0], sz);
+    return this->read(dst.data(), sz);
   }
   template <class T>
   bool read_std(std::vector<T>& dst) const {
     size_t sz;
-    if (!this->read(sz)) {
+    if (!this->read(sz) || sz > remaining() / sizeof(T)) {
       return false;
     }
     dst.resize(sz);
-    return this->read(&dst[0], sizeof(T) * sz);
+    return this->read(static_cast<void*>(dst.data()), sizeof(T) * sz);
   }
   bool read_eigen(Isometry3T& m) const {
     storage::Pose<float> storage_m;

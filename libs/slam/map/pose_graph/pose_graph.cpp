@@ -360,12 +360,16 @@ bool PoseGraph::FromBlob(const BlobReader& blob) {
     return false;
   }
 
-  blob.read(next_keyframe_auto_id_);
-  blob.read(next_edge_auto_id_);
-  blob.read(head_keyframe_id_);
+  if (!blob.read(next_keyframe_auto_id_) || !blob.read(next_edge_auto_id_) || !blob.read(head_keyframe_id_)) {
+    SlamStderr("Can't read PoseGraph header.\n");
+    return false;
+  }
 
   size_t sz = 0;
-  blob.read(sz);
+  if (!blob.read(sz)) {
+    SlamStderr("Can't read PoseGraph keyframes count.\n");
+    return false;
+  }
   for (size_t i = 0; i < sz; i++) {
     KeyFrameId keyframe_id;
     PoseGraphKeyFrame keyframe;
@@ -375,7 +379,10 @@ bool PoseGraph::FromBlob(const BlobReader& blob) {
     keyframes_[keyframe_id] = keyframe;
   }
 
-  blob.read(sz);
+  if (!blob.read(sz)) {
+    SlamStderr("Can't read PoseGraph edges count.\n");
+    return false;
+  }
   for (size_t i = 0; i < sz; i++) {
     EdgeId edge_id;
     Edge edge;
