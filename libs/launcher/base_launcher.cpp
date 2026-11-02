@@ -125,6 +125,12 @@ BaseLauncher::BaseLauncher(ICameraRig& cameraRig, const odom::Settings& svo_sett
     rig.intrinsics[i] = &(cameraRig_.getIntrinsic(i));
   }
   RERUN(pipelines::logCameraPinhole, *rig.intrinsics[0], pipelines::kCamera0ImageEntity);
+#ifdef USE_RERUN
+  const std::vector<CameraId> depth_cameras = cameraRig_.getCamerasWithDepth();
+  if (std::find(depth_cameras.begin(), depth_cameras.end(), CameraId{0}) != depth_cameras.end()) {
+    pipelines::logCameraPinhole(*rig.intrinsics[0], pipelines::kCamera0DepthEntity);
+  }
+#endif
 }
 
 void BaseLauncher::SetupSlam() {

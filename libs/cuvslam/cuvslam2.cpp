@@ -948,6 +948,13 @@ PoseEstimate Odometry::Track(const ImageSet& images, const ImageSet& masks, cons
   if (result) {
     impl->prev_abs_pose = odom::increment_pose(impl->prev_abs_pose, impl->last_delta);
   } else {
+#ifdef USE_RERUN
+    // No new camera pose is logged, so this frame's depth would be drawn at the previous pose.
+    if (Camera0ProvidesDepth(impl->odometry_mode, impl->rgbd_settings, impl->multisensor_settings)) {
+      visualizer::RerunVisualizer::getInstance().getRecordingStream().log(pipelines::kCamera0DepthEntity,
+                                                                          rerun::DepthImage::clear_fields());
+    }
+#endif
     return PoseEstimate{};
   }
   const Isometry3T internal_pose = impl->prev_abs_pose;
