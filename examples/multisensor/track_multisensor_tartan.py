@@ -116,7 +116,7 @@ odom_cfg = vslam.Odometry.Config(
 )
 
 tracker = vslam.Tracker(rig, vslam.Tracker.Mode.OdometryOnlyOffline, odom_cfg)
-print(f"cuVSLAM Tracker initialized with odometry mode: {cfg.odometry_mode}"
+print(f"cuVSLAM Tracker initialized with odometry mode: {odom_cfg.odometry_mode}"
       f"{' (IMU disabled)' if not use_imu else ''}")
 
 frames_metadata = prepare_tartan_frames(data_path, CAMERA_LIST, include_imu=use_imu)
