@@ -47,7 +47,9 @@ void LogPoseGraphNodes(rerun::RecordingStream& recording, const PoseGraph& pg, c
       poses.emplace_back(p.x(), p.y(), p.z());
     }
   });
-  recording.log("world/slam_pose_graph_nodes", rerun::Points3D(poses).with_colors(Color(0, 0, 255)).with_radii(2.f));
+  recording.log(
+      "world/slam_pose_graph_nodes",
+      rerun::Points3D(poses).with_colors(Color(0, 0, 255)).with_radii(rerun::components::Radius::ui_points(2.f)));
 }
 
 void LogPoseGraphHead(rerun::RecordingStream& recording, const PoseGraph& pg, const PoseGraphHypothesis& pgh) {
@@ -63,7 +65,9 @@ void LogPoseGraphHead(rerun::RecordingStream& recording, const PoseGraph& pg, co
   thread_local std::vector<rerun::Position3D> poses(1);
   poses.clear();
   poses.emplace_back(p.x(), p.y(), p.z());
-  recording.log("world/slam_pose_graph_head", rerun::Points3D(poses).with_colors(Color(255, 0, 0)).with_radii(5.f));
+  recording.log(
+      "world/slam_pose_graph_head",
+      rerun::Points3D(poses).with_colors(Color(255, 0, 0)).with_radii(rerun::components::Radius::ui_points(5.f)));
 }
 #endif
 
