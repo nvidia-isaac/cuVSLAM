@@ -270,6 +270,32 @@ TEST_F(TrackerTest, StandaloneSlamChecksTheWholeRig) {
   EXPECT_THROW(Slam(mismatched_resolutions, {0}), std::invalid_argument);
 }
 
+// Primary camera ids index fixed-size arrays inside SLAM, and only Tracker derives them from Odometry.
+TEST_F(TrackerTest, StandaloneSlamChecksPrimaryCameras) {
+  Slam::Config cpu;
+  cpu.use_gpu = false;
+  EXPECT_THROW(Slam(rig, {}, cpu), std::invalid_argument);
+  EXPECT_THROW(Slam(rig, {2}, cpu), std::invalid_argument);
+  EXPECT_THROW(Slam(rig, {255}, cpu), std::invalid_argument);
+  EXPECT_THROW(Slam(rig, {1, 1}, cpu), std::invalid_argument);
+  EXPECT_NO_THROW(Slam(rig, {1}, cpu));
+  EXPECT_NO_THROW(Slam(rig, {0, 1}, cpu));
+}
+
+TEST_F(TrackerTest, StandaloneSlamChecksCameraCount) {
+  Slam::Config cpu;
+  cpu.use_gpu = false;
+  Rig full;
+  for (int32_t k = 0; k < 33; ++k) {
+    full.cameras.push_back(rig.cameras[0]);
+    full.cameras.back().rig_from_camera.translation = {kBaseline * static_cast<float>(k), 0.f, 0.f};
+  }
+  EXPECT_THROW(Slam(full, {0}, cpu), std::invalid_argument);
+
+  full.cameras.pop_back();
+  EXPECT_NO_THROW(Slam(full, {0, 31}, cpu));
+}
+
 TEST_F(TrackerTest, TrackReturnsSlamPoseWhenEnabled) {
   OfflineConfig cfg = MakeOfflineConfig();
   Tracker tracker{rig, Mode::OdometryWithSlamOffline, cfg.odometry, &cfg.slam};

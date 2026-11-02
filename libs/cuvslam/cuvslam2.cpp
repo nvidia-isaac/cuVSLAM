@@ -212,6 +212,18 @@ void CheckCameras(const cuvslam::Rig& rig) {
   }
 }
 
+// Primary camera ids index the fixed-size internal rig, so they must name distinct cameras of the rig.
+void CheckPrimaryCameras(const std::vector<uint8_t>& primary_cameras, size_t num_cameras) {
+  THROW_INVALID_ARG_IF(primary_cameras.empty(), "No primary cameras");
+  std::vector<bool> seen(num_cameras, false);
+  for (const uint8_t cam_id : primary_cameras) {
+    THROW_INVALID_ARG_IF(cam_id >= num_cameras,
+                         "Primary camera " + std::to_string(cam_id) + " is not a camera of the rig");
+    THROW_INVALID_ARG_IF(seen[cam_id], "Primary camera " + std::to_string(cam_id) + " is listed twice");
+    seen[cam_id] = true;
+  }
+}
+
 void CheckRectifiedStereoCamera(const cuvslam::Rig& rig) {
   THROW_INVALID_ARG_IF(rig.cameras.size() % 2 != 0,
                        "Rectified stereo camera mode only works with 1+ stereo cameras. "
@@ -814,7 +826,7 @@ PoseEstimate Odometry::Track(const ImageSet& images, const ImageSet& masks, cons
                          "Frame timestamps must be strictly increasing");
     auto current_frame_delta_ns = current_time_ns - impl->last_frame_timestamp_ns;
     TraceWarningIf(current_frame_delta_ns > impl->max_frame_delta_ns,
-                   "Delta between frames at frame %d is %.0f ms that is longer than desired %.0f ms. Check camera fps "
+                   "Delta between frames at frame %zu is %.0f ms that is longer than desired %.0f ms. Check camera fps "
                    "and sync settings.",
                    frame_id, current_frame_delta_ns / 1e6, impl->max_frame_delta_ns / 1e6);
   }
@@ -1088,6 +1100,7 @@ public:
 
     // Slam can be constructed on its own, so it cannot rely on Odometry having vetted the rig
     CheckCameras(rig);
+    CheckPrimaryCameras(primary_cameras, rig.cameras.size());
 
     SetTrackerRigAndIntrinsics(cameras_models_, rig_, rig.cameras);
 

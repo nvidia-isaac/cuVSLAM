@@ -275,7 +275,7 @@ SolverSfMInertial::SolverSfMInertial(map::UnifiedMap& map, const camera::Rig& ri
     auto recent_map = map_.get_recent_submap(map_.capacity());
 
     if (recent_map.consecutive_keyframes.size() < num_kfs) {
-      TraceDebug("Not enough keyframes in map, (%d, %d)", map_.size(), num_kfs);
+      TraceDebug("Not enough keyframes in map, (%zu, %zu)", map_.size(), num_kfs);
       return false;
     }
     const Isometry3T& rig_from_imu = calib_.rig_from_imu();
@@ -489,7 +489,7 @@ bool check_imu_drops(sba_imu::IMUPreintegration& preint, const imu::ImuCalibrati
   const float missing = std::max(0.f, expected - actual - effective_jitter);
   const float drop_ratio = missing / expected;
   if (drop_ratio > 0.1f) {
-    TraceWarning("Lost IMU msgs: %d, Frame time delta = %f [s], drop ratio = %f [%]", static_cast<int>(missing + 0.5f),
+    TraceWarning("Lost IMU msgs: %d, Frame time delta = %f [s], drop ratio = %f [%%]", static_cast<int>(missing + 0.5f),
                  dT_s, drop_ratio * 100);
     return false;
   }
