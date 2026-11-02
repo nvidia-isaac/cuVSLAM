@@ -961,7 +961,14 @@ public:
    */
   Slam(Slam&& other) noexcept;
 
-  /// Destructor
+  /**
+   * Destructor. Stops the SLAM thread and, with a map file (`Config::map_path`, or LocalizeInMap() with `attach`),
+   * writes the map there.
+   *
+   * On the SLAM thread, for example when a callback holds the last owner, this work finishes asynchronously on
+   * another thread after the destructor returns, and there is no way to wait for it. Do not exit the process right
+   * after, or the map file may be left incomplete.
+   */
   ~Slam();
 
   /**
@@ -1183,7 +1190,7 @@ public:
    */
   Tracker(Tracker&& other) noexcept = default;
 
-  /// @brief Destructor
+  /// @brief Destructor. On the SLAM thread, the Slam it owns finishes tearing down asynchronously, see ~Slam().
   ~Tracker() = default;
 
   /**
