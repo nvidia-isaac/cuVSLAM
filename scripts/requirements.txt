@@ -7,6 +7,10 @@
 # Wheel packaging (used by scripts/build_pycuvslam_in_docker.sh)
 auditwheel==6.6.0
 
+# PyPI/Kitmaker package checks (used by scripts/verify_pycuvslam_wheel_in_docker.sh)
+abi3audit==0.0.26
+twine==7.0.0
+
 # Documentation build (used by python/docs/conf.py)
 # Sphinx 8.2+ requires Python 3.11; Thor/Orin use Ubuntu 22.04 with Python 3.10
 sphinx==8.1.3

@@ -13,6 +13,8 @@
 # of the software or derivative works thereof, you agree to be bound by this License.
 
 import importlib.metadata
+import os
+import sys
 import unittest
 import warnings
 from unittest import mock
@@ -39,6 +41,10 @@ class TestApi(unittest.TestCase):
             core = vslam.core
         self.assertIs(core.Odometry, vslam.Odometry)
         self.assertIs(core.Slam, vslam.Slam)
+
+    @unittest.skipIf(sys.version_info < (3, 12), 'stable ABI builds need Python 3.12 or newer')
+    def test_extension_uses_stable_abi(self):
+        self.assertIn('.abi3.', os.path.basename(vslam._core.__file__))
 
     def test_warns_about_several_distributions(self):
         with _fake_distributions('cuvslam', 'cuvslam_cu12'):

@@ -6,7 +6,8 @@ if [ "$#" -ne 1 ] && [ "$#" -ne 3 ]; then
   echo "  Run after build_pycuvslam_in_docker.sh. Installs the repaired wheel into a"
   echo "  fresh environment and imports cuvslam, verifying the wheel filename is valid"
   echo "  (pip-installable) and the auditwheel-repaired extension loads with the"
-  echo "  excluded CUDA libraries resolved from the system."
+  echo "  excluded CUDA libraries resolved from the system. Before installing, runs the"
+  echo "  PyPI metadata check (twine check --strict) and, for abi3 wheels, abi3audit."
   echo "  When expected_version and expected_git_sha are provided, also verifies that"
   echo "  get_version() identifies that clean source revision without '-modified'."
   exit 1
@@ -58,6 +59,10 @@ docker run --runtime=nvidia --gpus all --rm --label "cuvslam.runner=${RUNNER_NAM
     set -euo pipefail
     python3 -m venv --system-site-packages /tmp/wheel_venv
     . /tmp/wheel_venv/bin/activate
+    twine check --strict "/output/wheel/$WHEEL_NAME"
+    case "$WHEEL_NAME" in
+      *-abi3-*) abi3audit "/output/wheel/$WHEEL_NAME" ;;
+    esac
     pip install --no-cache-dir "/output/wheel/$WHEEL_NAME"
     cd /tmp
     python3 - <<PY

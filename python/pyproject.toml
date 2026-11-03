@@ -1,5 +1,5 @@
 [build-system]
-requires = ["scikit-build-core>=0.10", "nanobind>=2.10.2"]
+requires = ["scikit-build-core>=0.11", "nanobind>=2.10.2"]
 build-backend = "scikit_build_core.build"
 
 [project]
@@ -7,20 +7,21 @@ build-backend = "scikit_build_core.build"
 name = "cuvslam"
 dynamic = ["version"]
 description = "Python bindings for cuVSLAM library"
+readme = "README.md"
 authors = [
     {name = "NVIDIA Corporation"}
 ]
-license = {text = "Other/Proprietary License"}
-requires-python = ">=3.9"
-urls = {Homepage = "https://github.com/nvidia-isaac/cuVSLAM"}
+license = "LicenseRef-NVIDIA-Community-License"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+urls = {Homepage = "https://github.com/nvidia-isaac/cuVSLAM", Documentation = "https://nvidia-isaac.github.io/cuVSLAM/python/"}
 classifiers = [
     "Operating System :: POSIX :: Linux",
     "Programming Language :: C++",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Environment :: GPU :: NVIDIA CUDA",
 ]
 dependencies = ["pyyaml>=5.3.1"]
