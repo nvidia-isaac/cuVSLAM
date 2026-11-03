@@ -12,4 +12,15 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
-add_test(NAME TestPycuvslam COMMAND python3 -m unittest discover -v -s ${CMAKE_CURRENT_SOURCE_DIR} --locals)
+set(SOURCES
+        sba_config_test.cpp
+        )
+set(LIBS
+        sba
+        )
+
+setup_test_project(
+        MODULE_NAME ${MODULE_NAME}
+        LIBRARIES ${LIBS}
+        SOURCES ${SOURCES}
+)

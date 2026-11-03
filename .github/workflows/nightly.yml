@@ -196,7 +196,7 @@ jobs:
           # datasets_root overrides the dataset cache location per config. Orin's home is on a small eMMC; its
           # runner work directory is on NVMe, and the job-completed hook empties only the per-repo workspace in it.
           - { name: "aarch64 / Orin (JP 6.1)",  runner: '["jetson-orin"]', cuda: "12.6.3", ubuntu: "22.04", archs: "87",  platform: "orin",  wheel: true, benchmark: true, eval: true, eval_suite: smoke, datasets_root: "/data/github-runner-workspace/cuvslam-cache", base_image: "nvcr.io/nvidia/12.6.11-devel:12.6.11-devel-aarch64-ubuntu22.04", ports_mirror: "http://mirrors.ocf.berkeley.edu/ubuntu-ports" }
-          - { name: "aarch64 / Thor (JP 7.1)",  runner: '["jetson-thor"]', cuda: "13.0.1", ubuntu: "24.04", archs: "110", platform: "thor",  wheel: true, benchmark: true, eval: true, eval_suite: smoke, retries: 3, ports_mirror: "http://mirrors.ocf.berkeley.edu/ubuntu-ports" }
+          - { name: "aarch64 / Thor (JP 7.1)",  runner: '["jetson-thor"]', cuda: "13.0.1", ubuntu: "24.04", archs: "110", platform: "thor",  wheel: true, benchmark: true, eval: true, eval_suite: smoke, ports_mirror: "http://mirrors.ocf.berkeley.edu/ubuntu-ports" }
     steps:
       - name: Verify GPU
         run: nvidia-smi
@@ -269,7 +269,7 @@ jobs:
         if: matrix.tools_tests
         timeout-minutes: 10
         run: |
-          docker run --rm --network host \
+          docker run --rm --network host --label "cuvslam.runner=$RUNNER_NAME" \
             -v "$(pwd):/cuvslam:ro" \
             cuvslam-ci:local \
             bash -c 'set -euo pipefail
@@ -286,7 +286,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_RO_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_RO_SECRET_ACCESS_KEY }}
         run: |
-          docker run --rm --network host \
+          docker run --rm --network host --label "cuvslam.runner=$RUNNER_NAME" \
             -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_DEFAULT_REGION -e S3_DATASETS_BUCKET \
             -e RUNNER_STORAGE_ROOT -e RUNNER_LOCAL_DATASETS_ROOT -e EVAL_SUITE \
             -v "$(pwd):/cuvslam:ro" \
@@ -303,7 +303,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_RO_SECRET_ACCESS_KEY }}
         run: |
           mkdir -p "$RUNNER_LOCAL_DATASETS_ROOT"
-          docker run --rm --network host \
+          docker run --rm --network host --label "cuvslam.runner=$RUNNER_NAME" \
             -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_DEFAULT_REGION -e S3_DATASETS_BUCKET \
             -e RUNNER_LOCAL_DATASETS_ROOT -e EVAL_SUITE \
             -v "$(pwd):/cuvslam:ro" \
@@ -312,42 +312,30 @@ jobs:
             cuvslam-ci:local ./scripts/stage_eval_datasets.sh
 
       - name: Build C++ libraries
-        uses: nick-fields/retry@v3
-        with:
-          max_attempts: ${{ matrix.retries || 1 }}
-          timeout_minutes: 60
-          retry_wait_seconds: 30
-          command: |
-            CUDA_VERSION=${{ matrix.cuda }} \
-            UBUNTU_VERSION=${{ matrix.ubuntu }} \
-            BASE_IMAGE="${{ matrix.base_image }}" \
-            UBUNTU_PORTS_MIRROR="${{ matrix.ports_mirror }}" \
-            EXTRA_CMAKE_ARGS="-DCMAKE_CUDA_ARCHITECTURES=${{ matrix.archs }} ${{ matrix.cmake_options }}" \
-            ./scripts/build_cuvslam_in_docker.sh Release ./output
+        timeout-minutes: 60
+        run: |
+          CUDA_VERSION=${{ matrix.cuda }} \
+          UBUNTU_VERSION=${{ matrix.ubuntu }} \
+          BASE_IMAGE="${{ matrix.base_image }}" \
+          UBUNTU_PORTS_MIRROR="${{ matrix.ports_mirror }}" \
+          EXTRA_CMAKE_ARGS="-DCMAKE_CUDA_ARCHITECTURES=${{ matrix.archs }} ${{ matrix.cmake_options }}" \
+          ./scripts/build_cuvslam_in_docker.sh Release ./output
 
       - name: Run C++ tests
-        uses: nick-fields/retry@v3
-        with:
-          max_attempts: ${{ matrix.retries || 1 }}
-          timeout_minutes: 15
-          retry_wait_seconds: 30
-          command: ./scripts/test_cuvslam_in_docker.sh ./output
+        timeout-minutes: 15
+        run: ./scripts/test_cuvslam_in_docker.sh ./output
 
       # Collect benchmark data without gating nightly while Jetson variance is characterized.
       - name: Run Jetson CUDA benchmarks
         id: cuda-benchmarks
         if: matrix.benchmark
         continue-on-error: true
-        uses: nick-fields/retry@v3
-        with:
-          max_attempts: ${{ matrix.retries || 1 }}
-          timeout_minutes: 15
-          retry_wait_seconds: 30
-          command: |
-            BENCHMARK_CONFIG="${{ matrix.platform }}-cuda${{ matrix.cuda }}-ubuntu${{ matrix.ubuntu }}" \
-            CUDA_VERSION="${{ matrix.cuda }}" \
-            UBUNTU_VERSION="${{ matrix.ubuntu }}" \
-            ./scripts/benchmark_cuvslam_in_docker.sh ./output
+        timeout-minutes: 15
+        run: |
+          BENCHMARK_CONFIG="${{ matrix.platform }}-cuda${{ matrix.cuda }}-ubuntu${{ matrix.ubuntu }}" \
+          CUDA_VERSION="${{ matrix.cuda }}" \
+          UBUNTU_VERSION="${{ matrix.ubuntu }}" \
+          ./scripts/benchmark_cuvslam_in_docker.sh ./output
 
       - name: Publish Jetson benchmark job summary
         if: always() && matrix.benchmark
@@ -382,12 +370,8 @@ jobs:
             ./output "$PACKAGE_VERSION" "$(git rev-parse HEAD)"
 
       - name: Run Python tests
-        uses: nick-fields/retry@v3
-        with:
-          max_attempts: ${{ matrix.retries || 1 }}
-          timeout_minutes: 15
-          retry_wait_seconds: 30
-          command: ./scripts/test_pycuvslam_in_docker.sh ./output
+        timeout-minutes: 15
+        run: ./scripts/test_pycuvslam_in_docker.sh ./output
 
       - name: Package C++ distribution
         if: ${{ !matrix.skip_artifacts }}
@@ -522,6 +506,20 @@ jobs:
           overwrite: true
           retention-days: 30
           if-no-files-found: error
+
+      # On cancel or timeout the runner signals only the step shell, so a hung container keeps running.
+      - name: Remove leftover containers
+        if: always()
+        run: |
+          mapfile -t containers < <(docker ps -aq --filter "label=cuvslam.runner=$RUNNER_NAME")
+          if [ "${#containers[@]}" -eq 0 ]; then
+            exit 0
+          fi
+          image=$(docker inspect --format '{{.Config.Image}}' "${containers[0]}")
+          docker rm -f "${containers[@]}" || echo "::warning::Failed to remove some leftover containers"
+          # Removed containers skip their chown traps, so return the workspace to the runner user.
+          docker run --rm --entrypoint chown -v "$GITHUB_WORKSPACE:/workspace" "$image" \
+            -R "$(id -u):$(id -g)" /workspace
 
   nightly-summary:
     name: >-
@@ -855,7 +853,7 @@ jobs:
                 && artifact.name.endsWith('.tar.gz'),
             ).length;
             const wheelCount = artifacts.filter(
-              artifact => artifact.name.startsWith('cuvslam-') && artifact.name.endsWith('.whl'),
+              artifact => artifact.name.startsWith('cuvslam_cu') && artifact.name.endsWith('.whl'),
             ).length;
             core.setOutput('cpp_count', cppCount.toString());
             core.setOutput('wheel_count', wheelCount.toString());
@@ -948,7 +946,7 @@ jobs:
       - name: Download release artifacts
         uses: actions/download-artifact@v8
         with:
-          pattern: cuvslam-*
+          pattern: cuvslam*
           path: release-assets
           merge-multiple: true
 
@@ -971,7 +969,7 @@ jobs:
           ' "$PACKAGE_VERSION"
           )
           cpp_assets=(release-assets/cuvslam-cpp-"${PACKAGE_VERSION}"-*.tar.gz)
-          wheel_assets=(release-assets/cuvslam-"${WHEEL_VERSION}"+cu*.whl)
+          wheel_assets=(release-assets/cuvslam_cu*-"${WHEEL_VERSION}"-*.whl)
           docs_asset="release-assets/cuvslam-docs-${PACKAGE_VERSION}.tar.gz"
           evaluation_asset="release-assets/cuvslam-evaluation-${PACKAGE_VERSION}.tar.gz"
 

@@ -1,5 +1,21 @@
 # Development
 
+## Repository layout
+
+| Folder | Contents |
+|---|---|
+| `libs/` | C++ libraries (camera, odometry, slam, cuda_modules, …); public API in `libs/cuvslam/cuvslam2.h` |
+| `python/` | PyCuVSLAM nanobind bindings, Python API docs and tests |
+| `examples/` | Examples per dataset/camera (KITTI, EuRoC, TUM, RealSense, ZED, …) |
+| `models/` | Neural network models built from pinned upstream sources (AnyLoc) |
+| `tools/` | C++ and Python tools: tracker, visualizers, dataset preparation, reporters, ROS bag converters |
+| `test_data/` | Small reference datasets (edex, sof, navsim) |
+| `scripts/` | CI, Docker build, benchmark and KPI scripts |
+| `cmake/ext/` | FetchContent dependency configs |
+| `docker/` | RealSense Dockerfiles (CUDA 12/13) |
+| `doc/` | Doxygen config and C++ API doc pages |
+| `cuvslam-skills/` | Claude Code skills |
+
 ## Code Style
 
 cuVSLAM uses [Google C++ Code Style](https://google.github.io/styleguide/cppguide.html)

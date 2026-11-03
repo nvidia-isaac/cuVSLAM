@@ -21,6 +21,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -400,8 +401,9 @@ public:
     ///  - The rig must provide at least one RGB-D camera through
     ///    MultisensorSettings::depth_camera_ids, or at least one camera pair with
     ///    overlapping frustums. A single RGB-D camera is valid, with or without an IMU.
-    ///  - The current cuNLS solver supports pinhole cameras. Other camera models emit a
-    ///    warning and are not supported in Multisensor mode.
+    ///  - Cameras listed in MultisensorSettings::depth_camera_ids must use the pinhole model;
+    ///    other models emit a warning and their depth is misaligned. Cameras without depth
+    ///    support every Distortion::Model.
     ///  - Depth images passed to `Track()` must use `Encoding::MONO` with
     ///    `DataType::UINT16` or `DataType::FLOAT32`; see `Track()` for the per-frame
     ///    matching rules against `MultisensorSettings::depth_camera_ids`.
@@ -508,7 +510,7 @@ public:
     /// Default: 1.f
     float max_frame_delta_s = 1.f;
     /// Directory where input data will be dumped in edex format.
-    std::string_view debug_dump_directory;
+    std::string debug_dump_directory;
     /// Enable IMU debug mode. Default: false
     bool debug_imu_mode = false;
     /// RGBD odometry settings.
@@ -592,13 +594,13 @@ public:
    *
    * The track will output poses in the same coordinate system until a loss of tracking.
    *
-   * Image timestamps have to match. cuVSLAM will use timestamp from the camera 0 image.
+   * Image timestamps have to match. cuVSLAM will use the timestamp of images[0].
    * If a camera rig provides "almost synchronized" frames, the timestamps should be within 1 millisecond.
    * The number of images for tracker should not exceed rig->num_cameras.
    *
    * @param[in]  images  an array of synchronized images no more than rig->num_cameras.
-   * Must use ImageData::DataType::UINT8. Partial ImageSet is supported, for example due to frame drops. Corresponding
-   * cameras are identified by Image::camera_index.
+   * Must use ImageData::DataType::UINT8. Partial ImageSet is supported, for example due to frame drops, but cycling
+   * through cameras or camera groups across calls is not. Corresponding cameras are identified by Image::camera_index.
    * @param[in]  masks  (Optional) an array of corresponding masks no more than rig->num_cameras.
    * Must use ImageData::DataType::UINT8 and ImageData::Encoding::MONO. Non-zero pixels are excluded: no features are
    * selected or kept there, and in OdometryMode::RGBD and OdometryMode::Multisensor the depth at those pixels is
@@ -750,13 +752,13 @@ private:
 /**
  * @brief Result type that can hold either success data or error information.
  *
- * For use in callbacks. Result::error_message should not outlive the callback scope.
+ * For use in callbacks.
  */
 // TODO(C++23): replace with std::expected
 template <typename T>
 struct Result {
-  std::optional<T> data;           ///< data
-  std::string_view error_message;  ///< error message
+  std::optional<T> data;      ///< data
+  std::string error_message;  ///< error message
 
   /// Create a success result
   /// @param[in] value data
@@ -766,7 +768,7 @@ struct Result {
   /// Create an error result
   /// @param[in] message error message
   /// @return Result
-  static Result Error(std::string_view message) { return Result{std::nullopt, message}; }
+  static Result Error(std::string_view message) { return Result{std::nullopt, std::string(message)}; }
 };
 
 /**
@@ -800,7 +802,7 @@ public:
     /// maps; if the path already exists it will be overwritten. FlushMap() saves the map there, and SaveMap() fails.
     /// To load an existing map, use LocalizeInMap(); once it succeeds, the session writes the loaded folder if
     /// `attach` is set, and no map file otherwise.
-    std::string_view map_path = "";
+    std::string map_path;
     /// Enable GPU use for SLAM
     bool use_gpu = true;
     /// Synchronous mode (does not run a separate work thread if true)
@@ -837,7 +839,7 @@ public:
     bool use_vpr = false;
     /// AnyLoc TensorRT engine, built by the `anyloc_engine` target.
     /// The engine runs only on the GPU and TensorRT version that built it; otherwise the constructor throws.
-    std::string_view vpr_model_path;
+    std::string vpr_model_path;
     /// Minimum similarity in [0, 1] for place recognition to report a match.
     float vpr_score_threshold = 0.68f;
     /// Where loop closure looks for revisited places, see `LoopClosureMode`.
@@ -959,7 +961,14 @@ public:
    */
   Slam(Slam&& other) noexcept;
 
-  /// Destructor
+  /**
+   * Destructor. Stops the SLAM thread and, with a map file (`Config::map_path`, or LocalizeInMap() with `attach`),
+   * writes the map there.
+   *
+   * On the SLAM thread, for example when a callback holds the last owner, this work finishes asynchronously on
+   * another thread after the destructor returns, and there is no way to wait for it. Do not exit the process right
+   * after, or the map file may be left incomplete.
+   */
   ~Slam();
 
   /**
@@ -1181,7 +1190,7 @@ public:
    */
   Tracker(Tracker&& other) noexcept = default;
 
-  /// @brief Destructor
+  /// @brief Destructor. On the SLAM thread, the Slam it owns finishes tearing down asynchronously, see ~Slam().
   ~Tracker() = default;
 
   /**

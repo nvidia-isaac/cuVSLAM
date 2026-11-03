@@ -37,7 +37,7 @@ pip install -e ".[pdf]"
 If you have a released wheel that matches your platform, Python version, and CUDA version, install it into the same environment:
 
 ```bash
-pip install /path/to/cuvslam-*.whl
+pip install /path/to/cuvslam_cu*.whl
 ```
 
 When installing from this source tree, build cuVSLAM first, then install the binding from `python`. From `tools/python_tools`:

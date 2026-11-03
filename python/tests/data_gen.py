@@ -13,7 +13,7 @@
 # of the software or derivative works thereof, you agree to be bound by this License.
 
 import numpy as np
-from scipy.ndimage import zoom, gaussian_filter
+from scipy.ndimage import map_coordinates, zoom, gaussian_filter
 import cuvslam as vslam
 
 def generate_stereo_camera(width: int, height: int, baseline: float = 0.25) -> list[vslam.Camera]:
@@ -29,6 +29,25 @@ def generate_stereo_camera(width: int, height: int, baseline: float = 0.25) -> l
             cam.rig_from_camera.translation[0] = baseline
         cameras.append(cam)
     return cameras
+
+def distort_image(image: np.ndarray, camera: vslam.Camera, k1: float) -> np.ndarray:
+    """
+    Resample an image rendered by the pinhole `camera` as seen by the same camera with Brown radial
+    distortion `k1` (other coefficients zero). Requires k1 >= 0 so every distorted pixel maps inside the
+    pinhole image.
+    """
+    h, w = image.shape
+    fx, fy = float(camera.focal[0]), float(camera.focal[1])
+    cx, cy = float(camera.principal[0]), float(camera.principal[1])
+    v, u = np.mgrid[0:h, 0:w].astype(np.float64)
+    xd, yd = (u - cx) / fx, (v - cy) / fy
+    # Invert x_d = x_u * (1 + k1 * r_u^2) by fixed-point iteration (a contraction for small k1 >= 0).
+    xu, yu = xd.copy(), yd.copy()
+    for _ in range(20):
+        radial = 1.0 + k1 * (xu * xu + yu * yu)
+        xu, yu = xd / radial, yd / radial
+    coords = [yu * fy + cy, xu * fx + cx]
+    return map_coordinates(image, coords, order=1).astype(np.uint8)
 
 class ImageGenerator:
     """

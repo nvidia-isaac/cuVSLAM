@@ -25,7 +25,7 @@ TTY_FLAG=""
 # the pip install links the prebuilt libs rather than compiling CUDA. Runs as
 # root so the docs build can install the cuvslam package for Sphinx autodoc;
 # output artifacts are chowned back to the host user on exit.
-docker run --rm $TTY_FLAG \
+docker run --rm --label "cuvslam.runner=${RUNNER_NAME:-local}" $TTY_FLAG \
   -v "$(pwd):/cuvslam:ro" \
   -v "$OUTPUT_DIR:/output" \
   -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \

@@ -18,7 +18,7 @@ fi
 TTY_FLAG=""
 [ -t 0 ] && TTY_FLAG="-it"
 
-docker run --runtime=nvidia --gpus all --rm $TTY_FLAG \
+docker run --runtime=nvidia --gpus all --rm --label "cuvslam.runner=${RUNNER_NAME:-local}" $TTY_FLAG \
   -v "$(pwd):/cuvslam:ro" \
   -v "$OUTPUT_DIR:/output" \
   -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \

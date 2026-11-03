@@ -37,8 +37,11 @@ from cuvslam_kpi_report import (COUNT_METRICS, COUNT_MIN_BAND, DEFAULT_BASELINE,
                                 safe_float, stored_baseline_settings, write_json)
 
 SITE_SUBDIR = "kpi"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 PAGE_SOURCE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kpi_site", "index.html")
+# An eval is retired when no config produced a value for it in its last few nights with results; a margin of
+# several nights keeps one broken nightly from retiring everything.
+RETIRED_AFTER_RUNS = 3
 
 
 def load_history_dir(path):
@@ -80,6 +83,17 @@ def load_config_runs(path):
     if os.path.isdir(path):
         return load_history_dir(path), None
     return load_report_file(path)
+
+
+def retired_keys(data_configs):
+    """KPI keys that no config has a value for in its last RETIRED_AFTER_RUNS nights with any value."""
+    active = set()
+    for config in data_configs.values():
+        nights = [index for index in range(len(config["runs"]))
+                  if any(series[index] is not None for series in config["values"].values())]
+        for index in nights[-RETIRED_AFTER_RUNS:]:
+            active.update(key for key, series in config["values"].items() if series[index] is not None)
+    return {key for config in data_configs.values() for key in config["values"]} - active
 
 
 def finite_float(value):
@@ -137,11 +151,12 @@ def build_data(configs, stored_settings, kpi_config_path):
             "runs": dates,
             "values": {key: [finite_float(runs[run].get(key)) for run in dates] for key in config_keys},
         }
+    retired = retired_keys(data_configs)
     kpis = {}
     for key in sorted(keys):
         row, metric = parse_kpi_key(key)
         dataset, mode = row.split("-", 1)
-        kpis[key] = {"dataset": dataset, "mode": mode, "metric": metric}
+        kpis[key] = {"dataset": dataset, "mode": mode, "metric": metric, "retired": key in retired}
     datasets = sorted({entry["dataset"] for entry in kpis.values()})
     return {
         "schema_version": SCHEMA_VERSION,
