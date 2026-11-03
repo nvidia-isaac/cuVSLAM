@@ -318,6 +318,7 @@ jobs:
           UBUNTU_VERSION=${{ matrix.ubuntu }} \
           BASE_IMAGE="${{ matrix.base_image }}" \
           UBUNTU_PORTS_MIRROR="${{ matrix.ports_mirror }}" \
+          CUVSLAM_REQUIRE_CLEAN_SOURCE=1 \
           EXTRA_CMAKE_ARGS="-DCMAKE_CUDA_ARCHITECTURES=${{ matrix.archs }} ${{ matrix.cmake_options }}" \
           ./scripts/build_cuvslam_in_docker.sh Release ./output
 
