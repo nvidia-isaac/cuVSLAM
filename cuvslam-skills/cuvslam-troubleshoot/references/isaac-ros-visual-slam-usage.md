@@ -56,6 +56,9 @@ ros2 launch isaac_ros_visual_slam isaac_ros_visual_slam_realsense_bag.launch.py 
 
 ## Key Parameters
 
+Defaults are the `declare_parameter` values in release-4.3 `visual_slam_node.cpp`; check them there for the user's
+release before relying on one.
+
 | Parameter | Default | Notes |
 |---|---|---|
 | `num_cameras` | `2` | Number of input cameras (max 32) |
@@ -65,11 +68,11 @@ ros2 launch isaac_ros_visual_slam isaac_ros_visual_slam_realsense_bag.launch.py 
 | `enable_localization_n_mapping` | `true` | `false` = odometry only, no loop closure |
 | `enable_image_denoising` | `false` | Enable for low-light/noisy cameras |
 | `enable_ground_constraint_in_slam` | `false` | Constrain to horizontal plane for wheeled robots |
-| `image_jitter_threshold_ms` | — | Tolerated timestamp jitter between left/right images |
-| `sync_matching_threshold_ms` | — | Tolerated timestamp offset across cameras for sync |
+| `image_jitter_threshold_ms` | `34.0` | Tolerated gap between consecutive frames; exceeding it only logs a warning |
+| `sync_matching_threshold_ms` | `5.0` | Grouping window only; `Odometry::Track` rejects images differing by 1 ms or more, so keep grouped timestamps under 1 ms |
 | `base_frame` | `base_link` | Robot base frame for TF |
 | `camera_optical_frames` | — | List of camera optical frame names (must match TF tree) |
-| `imu_frame` | `imu` | IMU frame (VIO mode only) |
+| `imu_frame` | `""` | IMU frame (VIO mode only) |
 | `save_map_folder_path` | `""` | Path to save SLAM map |
 | `load_map_folder_path` | `""` | Path to load a saved SLAM map |
 
