@@ -152,6 +152,7 @@ Repository secrets, split read from write so fork-reachable jobs never hold a ke
   requires a clean tracked source tree and verifies that every wheel identifies the checked-out SHA without the
   `-modified` suffix.
 - Final distributables are packaged once by their producing job and uploaded directly, without an Actions ZIP wrapper: `cuvslam-cpp-<version>-<slug>.tar.gz`, the versioned Python wheels, `cuvslam-docs-<version>.tar.gz`, and `cuvslam-evaluation-<version>.tar.gz`.
+- Wheels come from the x86_64 Ubuntu 22.04 configs (their `manylinux_2_35` tag also covers 24.04), Orin, and Thor. Each of these jobs builds `cp310`, `cp311` and `cp312-abi3` wheels and uploads them in one step per Python tag.
 - Each C++ archive contains only `bin/{libcuvslam.so,cuvslam_api_launcher}`, `include/cuvslam/{cuvslam2.h,cuvslam_gpu.h,ground_constraint2.h}`, and `LICENSE`. `scripts/package_cpp_dist.sh` creates and validates this manifest.
 - A release job downloads the `cuvslam-*` distributables and promotes the same bytes to the draft Release. Test-result artifacts remain Actions-only.
 - The Actions summary contains CI test and KPI status. Release notes are generated separately from the evaluation summary, so permanent releases do not contain run metadata or expiring Actions links.
