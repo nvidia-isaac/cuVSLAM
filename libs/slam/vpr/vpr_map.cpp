@@ -25,8 +25,6 @@ constexpr uint32_t kBlobMagic = 0x504D5056;  // "VPMP"
 constexpr uint32_t kBlobVersion = 2;
 }  // namespace
 
-VprMap::VprMap(const VprOptions& options) : VprMap(options, CreateVpr(options)) {}
-
 VprMap::VprMap(const VprOptions& options, std::unique_ptr<IVpr> backend)
     : options_(options), backend_(std::move(backend)) {}
 

@@ -63,7 +63,8 @@ struct LocalizationResult {
 
 class Localizer {
 public:
-  void Init(const camera::Rig& rig, const LocalizerOptions& options);
+  // False with `error` set if the VPR backend cannot be created.
+  bool Init(const camera::Rig& rig, const LocalizerOptions& options, std::string& error);
 
   bool OpenDatabase(const std::string& path);
 

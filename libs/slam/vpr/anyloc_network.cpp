@@ -17,8 +17,9 @@
 #include "slam/vpr/anyloc_network.h"
 
 #include <cmath>
+#include <cstdint>
+#include <filesystem>
 #include <fstream>
-#include <iterator>
 #include <optional>
 #include <stdexcept>
 #include <utility>
@@ -130,16 +131,19 @@ bool IsTensor(const nvinfer1::ICudaEngine& engine, const char* name, nvinfer1::T
   return true;
 }
 
-std::vector<char> ReadFile(const std::string& path) {
+/// False unless `path` is a readable, non-empty regular file.
+bool ReadFile(const std::string& path, std::vector<char>& bytes) {
+  std::error_code error;
+  if (!std::filesystem::is_regular_file(path, error)) {
+    return false;
+  }
+  const uintmax_t size = std::filesystem::file_size(path, error);
+  if (error || size == 0) {
+    return false;
+  }
+  bytes.resize(static_cast<size_t>(size));
   std::ifstream file(path, std::ios::binary);
-  std::vector<char> bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-  if (!file.good() && !file.eof()) {
-    bytes.clear();
-  }
-  if (bytes.empty()) {
-    throw std::runtime_error("VPR AnyLoc: could not read the TensorRT engine \"" + path + "\".");
-  }
-  return bytes;
+  return static_cast<bool>(file.read(bytes.data(), static_cast<std::streamsize>(size)));
 }
 
 void* TensorRtSymbol(void* handle, const char* symbol) {
@@ -165,43 +169,32 @@ CreateInferRuntime LoadTensorRt() {
   return reinterpret_cast<CreateInferRuntime>(TensorRtSymbol(handle, "createInferRuntime_INTERNAL"));
 }
 
-struct AnyLocNetwork::Impl {
-  // Order matters: members are destroyed in reverse, as TensorRT requires.
-  cuda::Stream stream{false, ICudaStreamProvider::StreamType::Slam};
-  std::unique_ptr<nvinfer1::IRuntime> runtime;
-  std::unique_ptr<nvinfer1::ICudaEngine> engine;
-  std::unique_ptr<nvinfer1::IExecutionContext> context;
-  std::optional<cuda::GPUOnlyArray<float>> device_input;
-  std::optional<cuda::GPUOnlyArray<float>> device_output;
-  // Pinned, for async copies.
-  std::vector<float, cuda::HostAllocator<float>> host_input;
-  std::vector<float, cuda::HostAllocator<float>> host_output;
-  int width = 0;
-  int height = 0;
-  int patches = 0;
-  int dim = 0;
-};
+std::unique_ptr<AnyLocNetwork> AnyLocNetwork::Load(const std::string& engine_path, std::string& error) {
+  std::vector<char> plan;
+  if (!ReadFile(engine_path, plan)) {
+    error = "VPR AnyLoc: could not read the TensorRT engine \"" + engine_path + "\".";
+    return nullptr;
+  }
 
-AnyLocNetwork::AnyLocNetwork(const std::string& engine_path) : impl_(std::make_unique<Impl>()) {
-  Impl& impl = *impl_;
-  const std::vector<char> plan = ReadFile(engine_path);
-
+  std::unique_ptr<AnyLocNetwork> network(new AnyLocNetwork());
   TensorRtLogger& logger = Logger();
   logger.TakeLastError();
   static const CreateInferRuntime create_runtime = LoadTensorRt();
-  impl.runtime.reset(static_cast<nvinfer1::IRuntime*>(create_runtime(&logger, NV_TENSORRT_VERSION)));
-  if (!impl.runtime) {
-    throw std::runtime_error("VPR AnyLoc: could not create the TensorRT " + kTensorRtVersion + " runtime.");
+  network->runtime_.reset(static_cast<nvinfer1::IRuntime*>(create_runtime(&logger, NV_TENSORRT_VERSION)));
+  if (!network->runtime_) {
+    error = "VPR AnyLoc: could not create the TensorRT " + kTensorRtVersion + " runtime.";
+    return nullptr;
   }
-  impl.engine.reset(impl.runtime->deserializeCudaEngine(plan.data(), plan.size()));
-  if (!impl.engine) {
-    throw std::runtime_error("VPR AnyLoc: \"" + engine_path + "\" is not a TensorRT engine that TensorRT " +
-                             kTensorRtVersion + " can run on this GPU (" + logger.TakeLastError() +
-                             "). An engine only loads into the TensorRT version and onto the GPU architecture that "
-                             "built it: rebuild it with the anyloc_engine CMake target or anyloc_engine_builder.");
+  network->engine_.reset(network->runtime_->deserializeCudaEngine(plan.data(), plan.size()));
+  if (!network->engine_) {
+    error = "VPR AnyLoc: \"" + engine_path + "\" is not a TensorRT engine that TensorRT " + kTensorRtVersion +
+            " can run on this GPU (" + logger.TakeLastError() +
+            "). An engine only loads into the TensorRT version and onto the GPU architecture that built it: rebuild "
+            "it with the anyloc_engine CMake target or anyloc_engine_builder.";
+    return nullptr;
   }
 
-  const nvinfer1::ICudaEngine& engine = *impl.engine;
+  const nvinfer1::ICudaEngine& engine = *network->engine_;
   if (engine.getNbIOTensors() != 2 || !IsTensor(engine, kInputName, nvinfer1::TensorIOMode::kINPUT, 4) ||
       engine.getTensorShape(kInputName).d[1] != 3 ||
       !IsTensor(engine, kOutputName, nvinfer1::TensorIOMode::kOUTPUT, 3)) {
@@ -212,76 +205,78 @@ AnyLocNetwork::AnyLocNetwork(const std::string& engine_path) : impl_(std::make_u
                (engine.getTensorIOMode(name) == nvinfer1::TensorIOMode::kINPUT ? "input " : "output ") + name + " " +
                ToString(engine.getTensorDataType(name)) + " " + ToString(engine.getTensorShape(name));
     }
-    throw std::runtime_error("VPR AnyLoc: \"" + engine_path +
-                             "\" is not the DINOv2 patch descriptor engine AnyLoc runs, which takes input image fp32 "
-                             "[1, 3, H, W] and gives output patch_descriptors fp32 [1, N, D]; it has " +
-                             found + ".");
+    error = "VPR AnyLoc: \"" + engine_path +
+            "\" is not the DINOv2 patch descriptor engine AnyLoc runs, which takes input image fp32 [1, 3, H, W] and "
+            "gives output patch_descriptors fp32 [1, N, D]; it has " +
+            found + ".";
+    return nullptr;
   }
   const nvinfer1::Dims input_dims = engine.getTensorShape(kInputName);
   const nvinfer1::Dims output_dims = engine.getTensorShape(kOutputName);
-  impl.height = static_cast<int>(input_dims.d[2]);
-  impl.width = static_cast<int>(input_dims.d[3]);
-  impl.patches = static_cast<int>(output_dims.d[1]);
-  impl.dim = static_cast<int>(output_dims.d[2]);
+  network->height_ = static_cast<int>(input_dims.d[2]);
+  network->width_ = static_cast<int>(input_dims.d[3]);
+  network->patches_ = static_cast<int>(output_dims.d[1]);
+  network->dim_ = static_cast<int>(output_dims.d[2]);
 
-  impl.context.reset(impl.engine->createExecutionContext());
-  if (!impl.context) {
-    throw std::runtime_error("VPR AnyLoc: could not create an execution context for \"" + engine_path + "\" (" +
-                             logger.TakeLastError() + ").");
+  network->context_.reset(network->engine_->createExecutionContext());
+  if (!network->context_) {
+    error = "VPR AnyLoc: could not create an execution context for \"" + engine_path + "\" (" + logger.TakeLastError() +
+            ").";
+    return nullptr;
   }
-  impl.host_input.resize(static_cast<size_t>(3) * impl.height * impl.width);
-  impl.host_output.resize(static_cast<size_t>(impl.patches) * impl.dim);
-  impl.device_input.emplace(impl.host_input.size());
-  impl.device_output.emplace(impl.host_output.size());
-  if (!impl.context->setTensorAddress(kInputName, impl.device_input->ptr()) ||
-      !impl.context->setTensorAddress(kOutputName, impl.device_output->ptr())) {
-    throw std::runtime_error("VPR AnyLoc: could not bind the inputs and outputs of \"" + engine_path + "\".");
+  network->host_input_.resize(static_cast<size_t>(3) * network->height_ * network->width_);
+  network->host_output_.resize(static_cast<size_t>(network->patches_) * network->dim_);
+  network->device_input_.emplace(network->host_input_.size());
+  network->device_output_.emplace(network->host_output_.size());
+  if (!network->context_->setTensorAddress(kInputName, network->device_input_->ptr()) ||
+      !network->context_->setTensorAddress(kOutputName, network->device_output_->ptr())) {
+    error = "VPR AnyLoc: could not bind the inputs and outputs of \"" + engine_path + "\".";
+    return nullptr;
   }
 
   // Warm up, so the first keyframe does not pay for TensorRT's lazy init.
   std::vector<float> warm_up;
-  if (!Run(warm_up)) {
-    throw std::runtime_error("VPR AnyLoc: the first inference of \"" + engine_path + "\" failed, see the log.");
+  if (!network->Run(warm_up)) {
+    error = "VPR AnyLoc: the first inference of \"" + engine_path + "\" failed, see the log.";
+    return nullptr;
   }
+  return network;
 }
 
-AnyLocNetwork::~AnyLocNetwork() = default;
+int AnyLocNetwork::input_width() const { return width_; }
 
-int AnyLocNetwork::input_width() const { return impl_->width; }
+int AnyLocNetwork::input_height() const { return height_; }
 
-int AnyLocNetwork::input_height() const { return impl_->height; }
+int AnyLocNetwork::patch_count() const { return patches_; }
 
-int AnyLocNetwork::patch_count() const { return impl_->patches; }
+int AnyLocNetwork::descriptor_dim() const { return dim_; }
 
-int AnyLocNetwork::descriptor_dim() const { return impl_->dim; }
-
-float* AnyLocNetwork::input() { return impl_->host_input.data(); }
+float* AnyLocNetwork::input() { return host_input_.data(); }
 
 bool AnyLocNetwork::Run(std::vector<float>& patches) {
-  Impl& impl = *impl_;
-  cudaStream_t stream = impl.stream.get_stream();
-  bool ok = Succeeded(cudaMemcpyAsync(impl.device_input->ptr(), impl.host_input.data(),
-                                      impl.host_input.size() * sizeof(float), cudaMemcpyHostToDevice, stream),
+  cudaStream_t stream = stream_.get_stream();
+  bool ok = Succeeded(cudaMemcpyAsync(device_input_->ptr(), host_input_.data(), host_input_.size() * sizeof(float),
+                                      cudaMemcpyHostToDevice, stream),
                       "copying the image to the GPU");
-  if (ok && !impl.context->enqueueV3(stream)) {
+  if (ok && !context_->enqueueV3(stream)) {
     TraceError("VPR AnyLoc: TensorRT could not run the network\n");
     ok = false;
   }
-  ok = ok && Succeeded(cudaMemcpyAsync(impl.host_output.data(), impl.device_output->ptr(),
-                                       impl.host_output.size() * sizeof(float), cudaMemcpyDeviceToHost, stream),
+  ok = ok && Succeeded(cudaMemcpyAsync(host_output_.data(), device_output_->ptr(), host_output_.size() * sizeof(float),
+                                       cudaMemcpyDeviceToHost, stream),
                        "copying the descriptors from the GPU");
   // Always sync, even on failure: queued work may still read the input buffer.
   ok = Succeeded(cudaStreamSynchronize(stream), "running the network") && ok;
   if (!ok) {
     return false;
   }
-  for (const float value : impl.host_output) {
+  for (const float value : host_output_) {
     if (!std::isfinite(value)) {
       TraceError("VPR AnyLoc: the network produced a descriptor that is not finite\n");
       return false;
     }
   }
-  patches.assign(impl.host_output.begin(), impl.host_output.end());
+  patches.assign(host_output_.begin(), host_output_.end());
   return true;
 }
 

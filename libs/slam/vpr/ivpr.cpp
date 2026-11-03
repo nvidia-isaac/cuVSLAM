@@ -16,22 +16,21 @@
 
 #include "slam/vpr/ivpr.h"
 
-#include <stdexcept>
-
 #ifdef USE_TENSORRT
 #include "slam/vpr/vpr_anyloc.h"
 #endif
 
 namespace cuvslam::slam::vpr {
 
-std::unique_ptr<IVpr> CreateVpr(const VprOptions& options) {
+std::unique_ptr<IVpr> CreateVpr(const VprOptions& options, std::string& error) {
   if (!options.enabled) {
     return nullptr;
   }
 #ifdef USE_TENSORRT
-  return std::make_unique<VprAnyLoc>(options);
+  return VprAnyLoc::Create(options, error);
 #else
-  throw std::runtime_error("VPR backend AnyLoc is not available: cuVSLAM was built with USE_TENSORRT=OFF.");
+  error = "VPR backend AnyLoc is not available: cuVSLAM was built with USE_TENSORRT=OFF.";
+  return nullptr;
 #endif
 }
 

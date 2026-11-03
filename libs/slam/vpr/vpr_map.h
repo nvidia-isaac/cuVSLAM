@@ -38,9 +38,7 @@ struct VprPlace {
 /// Not thread safe; callers hold the SLAM lock.
 class VprMap {
 public:
-  explicit VprMap(const VprOptions& options);
-
-  /// Uses `backend`, e.g. a test stand-in.
+  /// Uses `backend`: CreateVpr()'s, or a test stand-in.
   VprMap(const VprOptions& options, std::unique_ptr<IVpr> backend);
   ~VprMap();
 

@@ -8,7 +8,7 @@ closes loops and how to evaluate it. Relocalizing in a saved map with `LocalizeI
 
 ## The engine
 
-`Slam::Config::vpr_model_path` (Python: `vpr_model_path`) names the AnyLoc TensorRT engine, built as
+`Slam::VprSettings::model_path` (Python: `Slam.VprSettings.model_path`) names the AnyLoc TensorRT engine, built as
 [models/anyloc](https://github.com/nvidia-isaac/cuVSLAM/blob/main/models/anyloc/README.md) describes.
 
 ## Mapping and recognizing places
@@ -27,7 +27,7 @@ def on_place(place, error):
         print(place.node_id, place.pose, place.score)
 
 # Mapping run: tracking maps each keyframe's frame, one per pose graph node.
-slam_cfg = vslam.Slam.Config(use_vpr=True, vpr_model_path=engine, sync_mode=True)
+slam_cfg = vslam.Slam.Config(use_vpr=True, vpr_settings=vslam.Slam.VprSettings(model_path=engine), sync_mode=True)
 tracker = vslam.Tracker(rig, vslam.Tracker.Mode.OdometryWithSlamOffline, odom_cfg, slam_cfg)
 for timestamp, images in sequence:
     tracker.track(timestamp, images)
@@ -60,7 +60,22 @@ thread and their callbacks run when it finishes, possibly on that thread. `sync_
 fired by the time it does.
 
 In C++ the same calls are `Slam::SaveMap`, `Slam::LocalizeInMap` and
-`Slam::RecognizePlaceByFrame`, with `Slam::Config::use_vpr = true` and the engine in `Slam::Config::vpr_model_path`.
+`Slam::RecognizePlaceByFrame`, with `Slam::Config::use_vpr = true` and the engine in `Slam::VprSettings::model_path`.
+
+## One vocabulary per operating domain
+
+Each session fits AnyLoc's vocabulary to its own first keyframes, so maps of separate sessions encode places
+differently. To share one vocabulary across the sessions of an operating domain, fit it once to images spread over
+recordings of that domain, with `cuvslam_vpr_vocabulary` or `Slam.VprVocabularyFitter`, and give every session the
+file:
+
+```python
+vpr_settings = vslam.Slam.VprSettings(model_path=engine, vocabulary_path='kitti.vocabulary')
+slam_cfg = vslam.Slam.Config(use_vpr=True, vpr_settings=vpr_settings)
+```
+
+Such a session recognizes places from its first keyframe. Without the file, `vocabulary_min_keyframes` and
+`vocabulary_max_keyframes` set what a session fits its own vocabulary to.
 
 ## Closing loops with it
 

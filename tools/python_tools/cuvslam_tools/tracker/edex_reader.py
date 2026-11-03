@@ -698,6 +698,48 @@ class EdexReader(DatasetReader):
         new_digits = f"{new_value:0{padding_length}d}"
         return re.sub(r"(\d+)(?=\D*$)", new_digits, input_str)
 
+    def _load_camera_image(self, cam_data: dict) -> np.ndarray:
+        """Load the image a frame's camera entry names and check its size against the rig."""
+        assert self.rig is not None
+        cam_id = cam_data['id']
+        assert cam_id < len(self.rig.cameras)
+        # Check image size, for ndarrays it's (height, width)
+        expected_size = (
+            self.rig.cameras[cam_id].size[1], self.rig.cameras[cam_id].size[0])
+
+        image_path = os.path.join(self.edex_dir, cam_data['filename'])
+        cache_path = self._get_tga_cache_path(image_path)
+
+        # Check if image should be loaded from tar archive
+        folder_name = os.path.dirname(cam_data['filename'])
+        if folder_name and folder_name in self.tar_archives:
+            if cache_path is not None and os.path.exists(cache_path):
+                image = self.load_image(cache_path)
+            else:
+                # Load from tar archive
+                # print(f"Loading from tar: {cam_data['filename']}")
+                image = self.load_image_from_tar(
+                    self.tar_archives[folder_name],
+                    cam_data['filename'],
+                    cache_path if self.cache_uncompressed else None)
+        else:
+            # Load from regular file system
+            # print(f"Loading from filesystem: {image_path}")
+            image = self.load_image(image_path, cache_uncompressed=self.cache_uncompressed)
+
+        image_size = image.shape[:2]
+        if image_size != expected_size:
+            raise ValueError(
+                f"Image size mismatch for {image_path}. Expected {expected_size}, got {image_size}.")
+        return image
+
+    def load_camera_image(self, frame_id: int, camera_id: int) -> np.ndarray:
+        """Load the image camera `camera_id` took in frame `frame_id`."""
+        for cam_data in self.frames[frame_id]["cams"]:
+            if cam_data['id'] == camera_id:
+                return self._load_camera_image(cam_data)
+        raise ValueError(f"Frame {frame_id} has no image from camera {camera_id}")
+
     def replay(self, processor: Processing):
         """Replay EDEX frames, depths, and IMU samples to a Processing implementation."""
         assert self.rig is not None
@@ -719,37 +761,9 @@ class EdexReader(DatasetReader):
             frame_data = self.frames[self.current_frame]
             for cam_data in frame_data["cams"]:
                 cam_id = cam_data['id']
-                assert cam_id < len(self.rig.cameras)
-                # Check image size, for ndarrays it's (height, width)
-                expected_size = (
-                    self.rig.cameras[cam_id].size[1], self.rig.cameras[cam_id].size[0])
+                images[cam_id] = self._load_camera_image(cam_data)
 
-                image_path = os.path.join(self.edex_dir, cam_data['filename'])
-                cache_path = self._get_tga_cache_path(image_path)
-
-                # Check if image should be loaded from tar archive
                 folder_name = os.path.dirname(cam_data['filename'])
-                if folder_name and folder_name in self.tar_archives:
-                    if cache_path is not None and os.path.exists(cache_path):
-                        image = self.load_image(cache_path)
-                    else:
-                        # Load from tar archive
-                        # print(f"Loading from tar: {cam_data['filename']}")
-                        image = self.load_image_from_tar(
-                            self.tar_archives[folder_name],
-                            cam_data['filename'],
-                            cache_path if self.cache_uncompressed else None)
-                else:
-                    # Load from regular file system
-                    # print(f"Loading from filesystem: {image_path}")
-                    image = self.load_image(image_path, cache_uncompressed=self.cache_uncompressed)
-
-                image_size = image.shape[:2]
-                if image_size != expected_size:
-                    raise ValueError(
-                        f"Image size mismatch for {image_path}. Expected {expected_size}, got {image_size}.")
-                images[cam_id] = image
-
                 basename, ext = os.path.splitext(cam_data['filename'])
                 mask_file_name = f"{basename}_mask{ext}"
 

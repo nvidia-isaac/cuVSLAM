@@ -41,6 +41,7 @@
 #include "pipelines/visualizer.h"
 #include "slam/async_slam/async_slam.h"
 #include "slam/vpr/vpr_image.h"
+#include "slam/vpr/vpr_vocabulary.h"
 #include "visualizer/visualizer.hpp"
 #ifdef USE_CUDA
 #include "odometry/rgbd_odometry.h"
@@ -419,12 +420,19 @@ void FillImageSourceAndShape(const Image& image, ImageSource& source, ImageShape
   shape.height = image.height;
 }
 
+// The vocabulary fit's limits, the same for a session and VprVocabularyFitter.
+void CheckVocabularyFit(const Slam::VprSettings& settings) {
+  THROW_INVALID_ARG_IF(settings.vocabulary_min_keyframes == 0, "vocabulary_min_keyframes must be at least 1.");
+  THROW_INVALID_ARG_IF(settings.vocabulary_max_keyframes < settings.vocabulary_min_keyframes,
+                       "vocabulary_max_keyframes must be at least vocabulary_min_keyframes.");
+}
+
 // Copy a user image into a grayscale host VprImage, which VPR may keep after the call returns.
-slam::vpr::VprImage MakeVprImage(const Image& image, const bool use_gpu) {
+slam::vpr::VprImage MakeVprImage(const ImageData& image, const bool use_gpu) {
   if (image.pixels == nullptr || image.width <= 0 || image.height <= 0) {
     return slam::vpr::VprImage{};
   }
-  THROW_INVALID_ARG_IF(image.data_type != Image::DataType::UINT8,
+  THROW_INVALID_ARG_IF(image.data_type != ImageData::DataType::UINT8,
                        "Place recognition images must use ImageData::DataType::UINT8");
 
 #ifdef USE_CUDA
@@ -435,9 +443,9 @@ slam::vpr::VprImage MakeVprImage(const Image& image, const bool use_gpu) {
                        "GPU memory requires a build with CUDA support (USE_CUDA=ON) for the place recognition image");
 #endif
 
-  const int channels = image.encoding == Image::Encoding::RGB ? 3 : 1;
+  const int channels = image.encoding == ImageData::Encoding::RGB ? 3 : 1;
   const auto format =
-      image.encoding == Image::Encoding::RGB ? slam::vpr::VprPixelFormat::kRgb8 : slam::vpr::VprPixelFormat::kMono8;
+      image.encoding == ImageData::Encoding::RGB ? slam::vpr::VprPixelFormat::kRgb8 : slam::vpr::VprPixelFormat::kMono8;
 
   if (!image.is_gpu_mem) {
     // Host images are tightly packed; pitch applies to GPU memory only.
@@ -446,6 +454,8 @@ slam::vpr::VprImage MakeVprImage(const Image& image, const bool use_gpu) {
 
 #ifdef USE_CUDA
   CheckImageMemory(image, use_gpu, "place recognition image");
+  // A vertically flipped array has a negative pitch; copying forward from its first row would leave the buffer.
+  THROW_INVALID_ARG_IF(image.pitch < 0, "Place recognition images in GPU memory need a non-negative pitch.");
   const size_t row_bytes = static_cast<size_t>(image.width) * channels;
   const size_t pitch = image.pitch > 0 ? static_cast<size_t>(image.pitch) : row_bytes;
   std::vector<uint8_t> host(row_bytes * static_cast<size_t>(image.height));
@@ -1193,11 +1203,25 @@ public:
     options.delay_warning_queue_size = config.delay_warning_queue_size;
     THROW_INVALID_ARG_IF(config.use_vpr && !config.use_gpu,
                          "use_vpr runs AnyLoc as a TensorRT engine on the GPU, so it needs use_gpu.");
+    const VprSettings& vpr_settings = config.vpr_settings;
     options.vpr_options.enabled = config.use_vpr;
-    options.vpr_options.model_path = config.vpr_model_path;
-    THROW_INVALID_ARG_IF(!(config.vpr_score_threshold >= 0.f && config.vpr_score_threshold <= 1.f),
-                         "vpr_score_threshold must be in [0, 1].");
-    options.vpr_options.score_threshold = config.vpr_score_threshold;
+    options.vpr_options.model_path = vpr_settings.model_path;
+    THROW_INVALID_ARG_IF(!(vpr_settings.score_threshold >= 0.f && vpr_settings.score_threshold <= 1.f),
+                         "vpr_settings.score_threshold must be in [0, 1].");
+    options.vpr_options.score_threshold = vpr_settings.score_threshold;
+    const VprSettings defaults;
+    const bool fit_changed = vpr_settings.vocabulary_min_keyframes != defaults.vocabulary_min_keyframes ||
+                             vpr_settings.vocabulary_max_keyframes != defaults.vocabulary_max_keyframes;
+    THROW_INVALID_ARG_IF(!config.use_vpr && (!vpr_settings.vocabulary_path.empty() || fit_changed),
+                         "vpr_settings.vocabulary_path, vocabulary_min_keyframes and vocabulary_max_keyframes "
+                         "configure place recognition, so they need use_vpr.");
+    THROW_INVALID_ARG_IF(!vpr_settings.vocabulary_path.empty() && fit_changed,
+                         "vpr_settings.vocabulary_path replaces the per-session vocabulary fit of "
+                         "vocabulary_min_keyframes and vocabulary_max_keyframes; leave them at their defaults.");
+    CheckVocabularyFit(vpr_settings);
+    options.vpr_options.vocabulary_path = vpr_settings.vocabulary_path;
+    options.vpr_options.min_training_keyframes = vpr_settings.vocabulary_min_keyframes;
+    options.vpr_options.max_training_keyframes = vpr_settings.vocabulary_max_keyframes;
     if (config.loop_closure_mode == LoopClosureMode::VPR) {
       THROW_INVALID_ARG_IF(!config.use_vpr, "loop_closure_mode is VPR but use_vpr is false.");
       options.loop_closure_solver_type = slam::LoopClosureSolverType::kVpr;
@@ -1591,6 +1615,54 @@ std::shared_ptr<const Slam::PoseGraph> Slam::ReadPoseGraph() {
     }
   }
   return impl->pose_graph_;
+}
+
+class Slam::VprVocabularyFitter::Impl {
+public:
+  std::unique_ptr<slam::vpr::VocabularyFitter> fitter;
+};
+
+Slam::VprVocabularyFitter::VprVocabularyFitter(const VprSettings& settings) : impl(std::make_unique<Impl>()) {
+  CheckVocabularyFit(settings);
+  slam::vpr::VprOptions options;
+  options.enabled = true;
+  options.model_path = settings.model_path;
+  options.min_training_keyframes = settings.vocabulary_min_keyframes;
+  options.max_training_keyframes = settings.vocabulary_max_keyframes;
+  std::string error;
+  impl->fitter = slam::vpr::VocabularyFitter::Create(options, error);
+  if (!impl->fitter) {
+    throw std::runtime_error(error);
+  }
+}
+
+Slam::VprVocabularyFitter::VprVocabularyFitter(VprVocabularyFitter&& other) noexcept = default;
+
+Slam::VprVocabularyFitter::~VprVocabularyFitter() = default;
+
+uint32_t Slam::VprVocabularyFitter::GetCapacity() const { return static_cast<uint32_t>(impl->fitter->Capacity()); }
+
+uint32_t Slam::VprVocabularyFitter::GetImageCount() const { return static_cast<uint32_t>(impl->fitter->Size()); }
+
+void Slam::VprVocabularyFitter::AddImage(const ImageData& image) {
+  const slam::vpr::VprImage vpr_image = MakeVprImage(image, true);
+  THROW_INVALID_ARG_IF(vpr_image.Empty(), "VprVocabularyFitter::AddImage needs an image with pixels.");
+  slam::vpr::VocabularyFitter& fitter = *impl->fitter;
+  std::string error;
+  if (!fitter.AddFrame(vpr_image, error)) {
+    // Past capacity or after Save() is the caller's error, the rest the engine's.
+    THROW_INVALID_ARG_IF(fitter.Fitted() || fitter.Size() >= fitter.Capacity(), error);
+    throw std::runtime_error(error);
+  }
+}
+
+void Slam::VprVocabularyFitter::Save(std::string_view path) {
+  std::string error;
+  if (!impl->fitter->Save(std::string(path), error)) {
+    // Too few images leave it unfitted; a write failure comes after the fit.
+    THROW_INVALID_ARG_IF(!impl->fitter->Fitted(), error);
+    throw std::runtime_error(error);
+  }
 }
 
 }  // namespace cuvslam

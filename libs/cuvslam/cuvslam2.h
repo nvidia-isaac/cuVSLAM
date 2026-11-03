@@ -795,6 +795,24 @@ public:
   };
 
   /**
+   * @brief Visual place recognition settings, for `Config::use_vpr` and `VprVocabularyFitter`
+   */
+  struct VprSettings {
+    /// AnyLoc TensorRT engine, built by the `anyloc_engine` target.
+    /// The engine runs only on the GPU and TensorRT version that built it; otherwise the constructor throws.
+    std::string model_path;
+    /// Minimum similarity in [0, 1] for place recognition to report a match.
+    float score_threshold = 0.68f;
+    /// Vocabulary file `VprVocabularyFitter` wrote, shared by the sessions of one domain; empty fits one per session.
+    /// Needs the two below at their defaults. A loaded map of another vocabulary keeps its VPR map unused.
+    std::string vocabulary_path;
+    /// Keyframes a session maps before fitting its own vocabulary; nothing is recognized before. At least 1.
+    uint32_t vocabulary_min_keyframes = 8;
+    /// Most keyframes a session fits its own vocabulary to, fitting early once it maps more. At least the minimum.
+    uint32_t vocabulary_max_keyframes = 189;
+  };
+
+  /**
    * @brief SLAM configuration parameters
    */
   struct Config {
@@ -834,14 +852,11 @@ public:
     /// the poses and loop closures SLAM reports refer to an increasingly old point of the trajectory. The warning
     /// requires verbosity Warning or higher (see SetVerbosity). Default: 10 queued commands.
     uint32_t delay_warning_queue_size = 10;
-    /// Enable visual place recognition (AnyLoc); needs a USE_TENSORRT build, `use_gpu` and `vpr_model_path`.
+    /// Enable visual place recognition (AnyLoc); needs a USE_TENSORRT build, `use_gpu` and `vpr_settings.model_path`.
     /// Its map is part of the SLAM map: Track() adds one frame per pose graph node, bounded by `max_map_size`.
     bool use_vpr = false;
-    /// AnyLoc TensorRT engine, built by the `anyloc_engine` target.
-    /// The engine runs only on the GPU and TensorRT version that built it; otherwise the constructor throws.
-    std::string vpr_model_path;
-    /// Minimum similarity in [0, 1] for place recognition to report a match.
-    float vpr_score_threshold = 0.68f;
+    /// Place recognition settings; non-default vocabulary ones need `use_vpr`.
+    VprSettings vpr_settings;
     /// Where loop closure looks for revisited places, see `LoopClosureMode`.
     /// `VPR` needs `use_vpr` and `gt_align_mode` off, else throws std::invalid_argument.
     LoopClosureMode loop_closure_mode = LoopClosureMode::LSI;
@@ -945,6 +960,61 @@ public:
 
   /// Callback invoked when place recognition finishes, may be called in a separate thread
   using RecognizePlaceFinishCB = std::function<void(const Result<PlaceRecognition>& result)>;
+
+  /**
+   * @brief Fits the place recognition vocabulary of one operating domain, for `VprSettings::vocabulary_path`
+   *
+   * Fits it as a session fits its own, to images spread over recordings of the domain. Needs what `Config::use_vpr`
+   * needs. Not thread safe.
+   */
+  class CUVSLAM_API VprVocabularyFitter {
+  public:
+    /**
+     * Load the engine; sessions need an engine of the same network.
+     * @param[in] settings `model_path`, and `vocabulary_min_keyframes` and `vocabulary_max_keyframes` counted in
+     * images; the rest is ignored
+     * @throws std::invalid_argument if `vocabulary_min_keyframes` is 0 or above `vocabulary_max_keyframes`
+     * @throws std::runtime_error if the engine cannot be loaded, or cuVSLAM was built without TensorRT
+     */
+    explicit VprVocabularyFitter(const VprSettings& settings);
+
+    /**
+     * Move constructor
+     * @param[in] other other fitter
+     */
+    VprVocabularyFitter(VprVocabularyFitter&& other) noexcept;
+
+    /**
+     * Destructor
+     */
+    ~VprVocabularyFitter();
+
+    /// @return most images fitted to, `VprSettings::vocabulary_max_keyframes`; spread them out
+    uint32_t GetCapacity() const;
+
+    /// @return images added so far
+    uint32_t GetImageCount() const;
+
+    /**
+     * Describe an image of the camera SLAM maps, its first primary camera.
+     * @param[in] image 8 bit mono or RGB image in CPU or GPU memory
+     * @throws std::invalid_argument if `image` is unusable, `GetCapacity()` images were added, or after Save()
+     * @throws std::runtime_error if the engine fails on it
+     */
+    void AddImage(const ImageData& image);
+
+    /**
+     * Fit the vocabulary to the images added (first call only), then write it to `path`.
+     * @param[in] path vocabulary file to write
+     * @throws std::invalid_argument with fewer than `VprSettings::vocabulary_min_keyframes` images
+     * @throws std::runtime_error if `path` cannot be written
+     */
+    void Save(std::string_view path);
+
+  private:
+    class Impl;
+    std::unique_ptr<Impl> impl;
+  };
 
   /**
    * Construct a SLAM instance with rig and primary cameras

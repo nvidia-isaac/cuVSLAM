@@ -94,7 +94,10 @@ AsyncSlam::AsyncSlam(const camera::Rig& rig, const std::vector<CameraId>& camera
   }
 
   if (options.vpr_options.enabled) {
-    slam_->SetVprOptions(options.vpr_options);
+    std::string error;
+    if (!slam_->SetVprOptions(options.vpr_options, error)) {
+      throw std::runtime_error(error);
+    }
   }
 
   tail_.Clear();

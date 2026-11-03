@@ -18,8 +18,13 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
+
+#include <NvInfer.h>
+
+#include "cuda_modules/cuda_helper.h"
 
 namespace cuvslam::slam::vpr {
 
@@ -34,10 +39,8 @@ CreateInferRuntime LoadTensorRt();
 /// AnyLoc's TensorRT engine (see models/anyloc). Not thread safe.
 class AnyLocNetwork {
 public:
-  /// Load, check and warm up the engine at `engine_path`.
-  /// @throws std::runtime_error if the engine is missing or incompatible.
-  explicit AnyLocNetwork(const std::string& engine_path);
-  ~AnyLocNetwork();
+  /// Load, check and warm up the engine at `engine_path`; nullptr with `error` set if it is missing or incompatible.
+  static std::unique_ptr<AnyLocNetwork> Load(const std::string& engine_path, std::string& error);
 
   AnyLocNetwork(const AnyLocNetwork&) = delete;
   AnyLocNetwork& operator=(const AnyLocNetwork&) = delete;
@@ -55,8 +58,22 @@ public:
   bool Run(std::vector<float>& patches);
 
 private:
-  struct Impl;
-  std::unique_ptr<Impl> impl_;
+  AnyLocNetwork() = default;
+
+  // Order matters: members are destroyed in reverse, as TensorRT requires.
+  cuda::Stream stream_{false, ICudaStreamProvider::StreamType::Slam};
+  std::unique_ptr<nvinfer1::IRuntime> runtime_;
+  std::unique_ptr<nvinfer1::ICudaEngine> engine_;
+  std::unique_ptr<nvinfer1::IExecutionContext> context_;
+  std::optional<cuda::GPUOnlyArray<float>> device_input_;
+  std::optional<cuda::GPUOnlyArray<float>> device_output_;
+  // Pinned, for async copies.
+  std::vector<float, cuda::HostAllocator<float>> host_input_;
+  std::vector<float, cuda::HostAllocator<float>> host_output_;
+  int width_ = 0;
+  int height_ = 0;
+  int patches_ = 0;
+  int dim_ = 0;
 };
 
 }  // namespace cuvslam::slam::vpr

@@ -17,6 +17,7 @@
 #pragma once
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "slam/common/blob.h"
@@ -40,6 +41,9 @@ public:
   virtual void RemoveNode(KeyFrameId node_id) = 0;
 
   virtual size_t Size() const = 0;
+
+  /// Frames AddFrame() holds for the vocabulary fit before fitting early; 0 if the backend fits none.
+  virtual size_t TrainingCapacity() const { return 0; }
 
   /// Prepare for queries, e.g. train a vocabulary; a no-op unless the map changed.
   virtual void Finalize() = 0;
@@ -67,8 +71,7 @@ public:
   virtual bool Deserialize(const BlobReader& reader) = 0;
 };
 
-/// AnyLoc backend, nullptr unless `options.enabled`.
-/// @throws std::runtime_error if the backend is not in this build.
-std::unique_ptr<IVpr> CreateVpr(const VprOptions& options);
+/// AnyLoc backend, nullptr unless `options.enabled`; nullptr with `error` set if it is not built in or fails to load.
+std::unique_ptr<IVpr> CreateVpr(const VprOptions& options, std::string& error);
 
 }  // namespace cuvslam::slam::vpr

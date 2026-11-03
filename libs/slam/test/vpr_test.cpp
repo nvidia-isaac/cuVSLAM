@@ -41,6 +41,7 @@
 #include "slam/vpr/vpr_image.h"
 #include "slam/vpr/vpr_map.h"
 #include "slam/vpr/vpr_sof_image.h"
+#include "slam/vpr/vpr_vocabulary.h"
 #include "sof/image_context.h"
 
 #ifdef USE_CUDA
@@ -93,7 +94,7 @@ VprImage MakeConstantImage(int width, int height, uint8_t value) {
   return image;
 }
 
-/// Stand-in for AnyLoc, which needs TensorRT, a GPU and kMinTrainingFrames frames.
+/// Stand-in for AnyLoc, which needs TensorRT, a GPU and VprOptions::min_training_keyframes frames.
 class StandInVpr : public IVpr {
 public:
   static constexpr int kGrid = 8;
@@ -356,14 +357,48 @@ TEST(VprImageResize, UpscaleInterpolatesBetweenTheSourcePixels) {
   EXPECT_EQ(out.row, std::vector<uint8_t>({0, 50, 150, 200}));
 }
 
-TEST(VprFactory, DisabledHasNoBackend) { EXPECT_EQ(CreateVpr(VprOptions{}), nullptr); }
+TEST(VprFactory, DisabledHasNoBackend) {
+  std::string error;
+  EXPECT_EQ(CreateVpr(VprOptions{}, error), nullptr);
+  EXPECT_EQ(error, "");
+}
 
 TEST(VprFactory, RefusesAnUnavailableBackend) {
-  // Throws either way: compiled out AnyLoc is unavailable, compiled in it has no model file.
+  // Fails either way: compiled out AnyLoc is unavailable, compiled in it has no model file.
   VprOptions options;
   options.enabled = true;
   options.model_path = "/nonexistent/anyloc.engine";
-  EXPECT_THROW(CreateVpr(options), std::runtime_error);
+  std::string error;
+  EXPECT_EQ(CreateVpr(options, error), nullptr);
+  EXPECT_NE(error, "");
+}
+
+TEST(VprVocabularyFitter, NeedsAnEnabledBackendWithoutAVocabularyFile) {
+  VprOptions options;
+  std::string error;
+  EXPECT_EQ(VocabularyFitter::Create(options, error), nullptr);
+  options.enabled = true;
+  options.vocabulary_path = "/nonexistent/anyloc.vocabulary";
+  EXPECT_EQ(VocabularyFitter::Create(options, error), nullptr);
+  // As CreateVpr(): compiled out AnyLoc is unavailable, compiled in it has no model file.
+  options.vocabulary_path.clear();
+  options.model_path = "/nonexistent/anyloc.engine";
+  error.clear();
+  EXPECT_EQ(VocabularyFitter::Create(options, error), nullptr);
+  EXPECT_NE(error, "");
+}
+
+TEST(VprVocabularyFitter, ReadsNoMissingEmptyOrHugeFile) {
+  Blob bytes;
+  EXPECT_FALSE(ReadVocabularyFile("/nonexistent/anyloc.vocabulary", bytes));
+  const std::filesystem::path file = std::filesystem::temp_directory_path() /
+                                     ("cuvslam_vpr_file_" + std::to_string(std::random_device{}()) + ".vocabulary");
+  std::ofstream(file, std::ios::binary | std::ios::trunc).close();
+  EXPECT_FALSE(ReadVocabularyFile(file.string(), bytes));
+  // A wrong path, like a map file, is refused unread: sparse, far larger than any vocabulary.
+  std::filesystem::resize_file(file, uintmax_t{1} << 30);
+  EXPECT_FALSE(ReadVocabularyFile(file.string(), bytes));
+  std::filesystem::remove(file);
 }
 
 namespace {
@@ -560,14 +595,84 @@ std::vector<std::string> AnyLocEngines() {
 
 constexpr char kNoStandIns[] = "TensorRT could not build the stand-in engines, which needs a CUDA device";
 
-/// What CreateVpr() throws for `path`, or empty.
-std::string ConstructionError(const std::string& path) {
-  try {
-    CreateVpr(AnyLocOptions(path));
-  } catch (const std::runtime_error& error) {
-    return error.what();
+/// The error CreateVpr() reports for `options`, or empty.
+std::string ConstructionError(const VprOptions& options) {
+  std::string error;
+  CreateVpr(options, error);
+  return error;
+}
+
+/// The error CreateVpr() reports for the engine at `path`, or empty.
+std::string ConstructionError(const std::string& path) { return ConstructionError(AnyLocOptions(path)); }
+
+/// The backend of `options`; the test fails if CreateVpr() reports an error.
+std::unique_ptr<IVpr> MakeVpr(const VprOptions& options) {
+  std::string error;
+  std::unique_ptr<IVpr> vpr = CreateVpr(options, error);
+  EXPECT_EQ(error, "");
+  return vpr;
+}
+
+/// The engine at `path`; the test fails if it does not load.
+std::unique_ptr<AnyLocNetwork> LoadNetwork(const std::string& path) {
+  std::string error;
+  std::unique_ptr<AnyLocNetwork> network = AnyLocNetwork::Load(path, error);
+  EXPECT_NE(network, nullptr) << error;
+  return network;
+}
+
+/// A fitter of `options`; the test fails if VocabularyFitter::Create() reports an error.
+std::unique_ptr<VocabularyFitter> MakeFitter(const VprOptions& options) {
+  std::string error;
+  std::unique_ptr<VocabularyFitter> fitter = VocabularyFitter::Create(options, error);
+  EXPECT_NE(fitter, nullptr) << error;
+  return fitter;
+}
+
+/// Adds `frames` blocky pictures from `seed` on; the test fails on an error.
+void AddFrames(VocabularyFitter& fitter, size_t frames, uint32_t seed) {
+  for (size_t i = 0; i < frames; ++i) {
+    std::string error;
+    EXPECT_TRUE(fitter.AddFrame(MakeBlockyImage(256, 256, 8, seed + static_cast<uint32_t>(i)), error)) << error;
   }
-  return {};
+}
+
+VprOptions VocabularyOptions(const std::string& engine_path, const std::string& vocabulary_path) {
+  VprOptions options = AnyLocOptions(engine_path);
+  options.vocabulary_path = vocabulary_path;
+  return options;
+}
+
+/// Fits `frames` blocky pictures from `seed` on with `engine_path` and writes the vocabulary to `name`.
+std::string FitVocabulary(const std::string& engine_path, size_t frames, uint32_t seed, const std::string& name) {
+  const std::filesystem::path path = ScratchFolder() / name;
+  std::unique_ptr<VocabularyFitter> fitter = MakeFitter(AnyLocOptions(engine_path));
+  if (fitter) {
+    AddFrames(*fitter, frames, seed);
+    std::string error;
+    EXPECT_TRUE(fitter->Save(path.string(), error)) << error;
+  }
+  return path.string();
+}
+
+Blob ReadFileBytes(const std::filesystem::path& path) {
+  std::ifstream file(path, std::ios::binary);
+  return Blob((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+}
+
+std::string WriteFileBytes(const Blob& bytes, const std::string& name) {
+  const std::filesystem::path path = ScratchFolder() / name;
+  std::ofstream file(path, std::ios::binary | std::ios::trunc);
+  file.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+  return path.string();
+}
+
+/// The bytes `vpr` serializes.
+Blob Serialized(IVpr& vpr) {
+  Blob blob;
+  BlobWriter writer(blob);
+  vpr.Serialize(writer);
+  return blob;
 }
 
 }  // namespace
@@ -596,18 +701,19 @@ TEST(VprAnyLocNetwork, RunsAnEngineWithTheExpectedInterface) {
   if (engine.empty()) {
     GTEST_SKIP() << kNoStandIns;
   }
-  AnyLocNetwork network(engine);
-  EXPECT_EQ(network.input_width(), 28);
-  EXPECT_EQ(network.input_height(), 28);
-  EXPECT_EQ(network.patch_count(), 16);
-  EXPECT_EQ(network.descriptor_dim(), 147);
+  const std::unique_ptr<AnyLocNetwork> network = LoadNetwork(engine);
+  ASSERT_NE(network, nullptr);
+  EXPECT_EQ(network->input_width(), 28);
+  EXPECT_EQ(network->input_height(), 28);
+  EXPECT_EQ(network->patch_count(), 16);
+  EXPECT_EQ(network->descriptor_dim(), 147);
 
-  float* input = network.input();
+  float* input = network->input();
   for (int i = 0; i < 3 * 28 * 28; ++i) {
     input[i] = static_cast<float>(i);
   }
   std::vector<float> patches;
-  ASSERT_TRUE(network.Run(patches));
+  ASSERT_TRUE(network->Run(patches));
   ASSERT_EQ(patches.size(), 16u * 147u);
   // Patch 1 starts at red row 0, column 7; value 49 of patch 0 is the first green pixel.
   EXPECT_EQ(patches[147], 7.f);
@@ -618,14 +724,15 @@ TEST(VprAnyLocNetwork, ReportsAnOutputThatIsNotFiniteAsAFailure) {
   if (StandInEngine("valid").empty()) {
     GTEST_SKIP() << kNoStandIns;
   }
-  AnyLocNetwork network(StandInEngine("valid"));
-  std::fill_n(network.input(), 3 * 28 * 28, 0.f);
-  network.input()[5] = std::numeric_limits<float>::quiet_NaN();
+  const std::unique_ptr<AnyLocNetwork> network = LoadNetwork(StandInEngine("valid"));
+  ASSERT_NE(network, nullptr);
+  std::fill_n(network->input(), 3 * 28 * 28, 0.f);
+  network->input()[5] = std::numeric_limits<float>::quiet_NaN();
   std::vector<float> patches;
-  EXPECT_FALSE(network.Run(patches));
+  EXPECT_FALSE(network->Run(patches));
 
-  network.input()[5] = 0.f;
-  EXPECT_TRUE(network.Run(patches));
+  network->input()[5] = 0.f;
+  EXPECT_TRUE(network->Run(patches));
 }
 
 TEST(VprAnyLocNetwork, RefusesAnEngineWithAnotherInterface) {
@@ -651,19 +758,20 @@ TEST(VprAnyLocNetwork, ReproducesTheFp32ReferenceDescriptors) {
   // Network input and fp32 descriptors the export saved for test_data/sof/left.png.
   const cnpy::NpyArray input = cnpy::npy_load(CUVSLAM_ANYLOC_REFERENCE_INPUT);
   const cnpy::NpyArray expected = cnpy::npy_load(CUVSLAM_ANYLOC_REFERENCE_OUTPUT);
-  AnyLocNetwork network(engine);
-  const size_t dim = static_cast<size_t>(network.descriptor_dim());
-  if (input.num_vals != 3u * network.input_width() * network.input_height() ||
-      expected.num_vals != network.patch_count() * dim) {
+  const std::unique_ptr<AnyLocNetwork> network = LoadNetwork(engine);
+  ASSERT_NE(network, nullptr);
+  const size_t dim = static_cast<size_t>(network->descriptor_dim());
+  if (input.num_vals != 3u * network->input_width() * network->input_height() ||
+      expected.num_vals != network->patch_count() * dim) {
     GTEST_SKIP() << engine << " is not the engine this build's reference arrays belong to";
   }
-  std::copy_n(input.data<float>(), input.num_vals, network.input());
+  std::copy_n(input.data<float>(), input.num_vals, network->input());
   std::vector<float> patches;
-  ASSERT_TRUE(network.Run(patches));
+  ASSERT_TRUE(network->Run(patches));
 
   double cosine_sum = 0.;
   double cosine_min = 1.;
-  for (int p = 0; p < network.patch_count(); ++p) {
+  for (int p = 0; p < network->patch_count(); ++p) {
     const float* a = patches.data() + p * dim;
     const float* b = expected.data<float>() + p * dim;
     double dot = 0.;
@@ -679,7 +787,7 @@ TEST(VprAnyLocNetwork, ReproducesTheFp32ReferenceDescriptors) {
     cosine_min = std::min(cosine_min, cosine);
   }
   // FP16 vs fp32: the thresholds anyloc_engine_builder uses.
-  EXPECT_GE(cosine_sum / network.patch_count(), 0.999);
+  EXPECT_GE(cosine_sum / network->patch_count(), 0.999);
   EXPECT_GE(cosine_min, 0.99);
 #else
   GTEST_SKIP() << "this build has no AnyLoc reference arrays (CUVSLAM_BUILD_ANYLOC_ENGINE is off)";
@@ -692,16 +800,17 @@ TEST(VprAnyLocBackend, VocabularyIsNotFittedBelowTheTrainingMinimum) {
   }
   for (const std::string& engine : AnyLocEngines()) {
     SCOPED_TRACE(engine);
-    std::unique_ptr<IVpr> vpr = CreateVpr(AnyLocOptions(engine));
+    std::unique_ptr<IVpr> vpr = MakeVpr(AnyLocOptions(engine));
     ASSERT_NE(vpr, nullptr);
     EXPECT_STREQ(vpr->Name(), "AnyLoc");
 
+    const size_t min_frames = VprOptions{}.min_training_keyframes;
     std::vector<VprImage> images;
-    for (size_t i = 0; i + 1 < VprAnyLoc::kMinTrainingFrames; ++i) {
+    for (size_t i = 0; i + 1 < min_frames; ++i) {
       images.push_back(MakeBlockyImage(256, 256, 8, static_cast<uint32_t>(1200 + i)));
       vpr->AddFrame(i, images.back());
     }
-    ASSERT_EQ(vpr->Size(), VprAnyLoc::kMinTrainingFrames - 1);
+    ASSERT_EQ(vpr->Size(), min_frames - 1);
 
     // The vocabulary is frozen once fitted, so it is not fitted on too few frames.
     vpr->Finalize();
@@ -709,7 +818,7 @@ TEST(VprAnyLocBackend, VocabularyIsNotFittedBelowTheTrainingMinimum) {
 
     // At the minimum, a mapped frame recognizes itself.
     images.push_back(MakeBlockyImage(256, 256, 8, 1300));
-    vpr->AddFrame(VprAnyLoc::kMinTrainingFrames - 1, images.back());
+    vpr->AddFrame(min_frames - 1, images.back());
     vpr->Finalize();
     const VprMatch match = vpr->Query(images.front());
     EXPECT_TRUE(match.found) << "score " << match.score;
@@ -722,17 +831,25 @@ TEST(VprAnyLocBackend, RawPatchesNeverOutgrowTheTrainingSet) {
   if (engine.empty()) {
     GTEST_SKIP() << kNoStandIns;
   }
-  // `exact` maps the most frames the training set holds whole, `longer` one more.
-  const size_t full = VprAnyLoc::kMaxTrainingDescriptors / static_cast<size_t>(AnyLocNetwork(engine).patch_count());
-  std::unique_ptr<IVpr> exact = CreateVpr(AnyLocOptions(engine));
-  std::unique_ptr<IVpr> longer = CreateVpr(AnyLocOptions(engine));
+  // `exact` maps the most frames the training set holds, `longer` one more, `roomy` holds one more.
+  VprOptions options = AnyLocOptions(engine);
+  options.max_training_keyframes = 20;
+  VprOptions roomy_options = options;
+  ++roomy_options.max_training_keyframes;
+  std::unique_ptr<IVpr> exact = MakeVpr(options);
+  std::unique_ptr<IVpr> longer = MakeVpr(options);
+  std::unique_ptr<IVpr> roomy = MakeVpr(roomy_options);
   ASSERT_NE(exact, nullptr);
   ASSERT_NE(longer, nullptr);
+  ASSERT_NE(roomy, nullptr);
+  const size_t full = exact->TrainingCapacity();
+  ASSERT_EQ(full, 20u);
   VprImage image;
   for (size_t i = 0; i <= full; ++i) {
     image = MakeBlockyImage(256, 256, 8, static_cast<uint32_t>(3000 + i));
     if (i < full) {
       exact->AddFrame(i, image);
+      roomy->AddFrame(i, image);
     }
     longer->AddFrame(i, image);
   }
@@ -756,6 +873,10 @@ TEST(VprAnyLocBackend, RawPatchesNeverOutgrowTheTrainingSet) {
   const size_t prefix = exact_blob.size() - reader.remaining() + center_count * sizeof(float);
   ASSERT_GE(longer_blob.size(), prefix);
   EXPECT_TRUE(std::equal(exact_blob.begin(), exact_blob.begin() + prefix, longer_blob.begin()));
+  // `exact` fit on all of its frames, as `roomy` did: a full training set does not fit early.
+  const Blob roomy_blob = Serialized(*roomy);
+  ASSERT_GE(roomy_blob.size(), prefix);
+  EXPECT_TRUE(std::equal(exact_blob.begin(), exact_blob.begin() + prefix, roomy_blob.begin()));
 
   // The frame mapped after the fit is recognized.
   const VprMatch match = longer->Query(image);
@@ -769,11 +890,11 @@ TEST(VprAnyLocBackend, SerializeDeserializeKeepsAnswers) {
   }
   for (const std::string& engine : AnyLocEngines()) {
     SCOPED_TRACE(engine);
-    constexpr size_t kFrames = VprAnyLoc::kMinTrainingFrames;
+    const size_t frames = VprOptions{}.min_training_keyframes;
     std::vector<VprImage> images;
-    std::unique_ptr<IVpr> vpr = CreateVpr(AnyLocOptions(engine));
+    std::unique_ptr<IVpr> vpr = MakeVpr(AnyLocOptions(engine));
     ASSERT_NE(vpr, nullptr);
-    for (size_t i = 0; i < kFrames; ++i) {
+    for (size_t i = 0; i < frames; ++i) {
       images.push_back(MakeBlockyImage(256, 256, 8, static_cast<uint32_t>(1400 + i)));
       vpr->AddFrame(i, images.back());
     }
@@ -784,12 +905,12 @@ TEST(VprAnyLocBackend, SerializeDeserializeKeepsAnswers) {
     ASSERT_FALSE(blob.empty());
 
     // The blob holds the cluster centers too, so no re-fit is needed.
-    std::unique_ptr<IVpr> restored = CreateVpr(AnyLocOptions(engine));
+    std::unique_ptr<IVpr> restored = MakeVpr(AnyLocOptions(engine));
     ASSERT_NE(restored, nullptr);
     ASSERT_TRUE(restored->Deserialize(BlobReader(blob)));
-    EXPECT_EQ(restored->Size(), kFrames);
+    EXPECT_EQ(restored->Size(), frames);
 
-    for (size_t i = 0; i < kFrames; ++i) {
+    for (size_t i = 0; i < frames; ++i) {
       EXPECT_TRUE(restored->HasNode(i));
       const VprMatch match = restored->Query(images[i]);
       EXPECT_TRUE(match.found) << "frame " << i;
@@ -798,7 +919,7 @@ TEST(VprAnyLocBackend, SerializeDeserializeKeepsAnswers) {
     }
 
     const Blob garbage(64, 0x5A);
-    std::unique_ptr<IVpr> rejecting = CreateVpr(AnyLocOptions(engine));
+    std::unique_ptr<IVpr> rejecting = MakeVpr(AnyLocOptions(engine));
     ASSERT_NE(rejecting, nullptr);
     EXPECT_FALSE(rejecting->Deserialize(BlobReader(garbage)));
     EXPECT_EQ(rejecting->Size(), 0u);
@@ -810,9 +931,9 @@ TEST(VprAnyLocBackend, MapsSavedBeforeTheVocabularyWasFittedLoad) {
     GTEST_SKIP() << kNoStandIns;
   }
   // Neither has cluster centers to save; both must load.
-  for (const size_t frames : {size_t{0}, VprAnyLoc::kMinTrainingFrames - 1}) {
+  for (const size_t frames : {size_t{0}, VprOptions{}.min_training_keyframes - 1}) {
     SCOPED_TRACE(frames);
-    std::unique_ptr<IVpr> vpr = CreateVpr(AnyLocOptions(StandInEngine("valid")));
+    std::unique_ptr<IVpr> vpr = MakeVpr(AnyLocOptions(StandInEngine("valid")));
     ASSERT_NE(vpr, nullptr);
     for (size_t i = 0; i < frames; ++i) {
       vpr->AddFrame(i, MakeBlockyImage(256, 256, 8, static_cast<uint32_t>(1600 + i)));
@@ -821,7 +942,7 @@ TEST(VprAnyLocBackend, MapsSavedBeforeTheVocabularyWasFittedLoad) {
     BlobWriter writer(blob);
     vpr->Serialize(writer);
 
-    std::unique_ptr<IVpr> restored = CreateVpr(AnyLocOptions(StandInEngine("valid")));
+    std::unique_ptr<IVpr> restored = MakeVpr(AnyLocOptions(StandInEngine("valid")));
     ASSERT_NE(restored, nullptr);
     EXPECT_TRUE(restored->Deserialize(BlobReader(blob)));
     EXPECT_EQ(restored->Size(), frames);
@@ -834,19 +955,278 @@ TEST(VprAnyLocBackend, DeserializeRefusesAMapOfAnotherDescriptorWidth) {
     GTEST_SKIP() << kNoStandIns;
   }
   // Another width means another network, whose vocabulary is meaningless here.
-  std::unique_ptr<IVpr> narrow = CreateVpr(AnyLocOptions(StandInEngine("valid")));
+  std::unique_ptr<IVpr> narrow = MakeVpr(AnyLocOptions(StandInEngine("valid")));
   ASSERT_NE(narrow, nullptr);
-  for (size_t i = 0; i < VprAnyLoc::kMinTrainingFrames; ++i) {
+  for (size_t i = 0; i < VprOptions{}.min_training_keyframes; ++i) {
     narrow->AddFrame(i, MakeBlockyImage(256, 256, 8, static_cast<uint32_t>(1500 + i)));
   }
   Blob blob;
   BlobWriter writer(blob);
   narrow->Serialize(writer);
 
-  std::unique_ptr<IVpr> wide = CreateVpr(AnyLocOptions(StandInEngine("wide")));
+  std::unique_ptr<IVpr> wide = MakeVpr(AnyLocOptions(StandInEngine("wide")));
   ASSERT_NE(wide, nullptr);
   EXPECT_FALSE(wide->Deserialize(BlobReader(blob)));
   EXPECT_EQ(wide->Size(), 0u);
+}
+
+TEST(VprAnyLocBackend, TheTrainingMinimumComesFromTheOptions) {
+  if (StandInEngine("valid").empty()) {
+    GTEST_SKIP() << kNoStandIns;
+  }
+  VprOptions options = AnyLocOptions(StandInEngine("valid"));
+  options.min_training_keyframes = 3;
+  std::unique_ptr<IVpr> vpr = MakeVpr(options);
+  ASSERT_NE(vpr, nullptr);
+  const VprImage first = MakeBlockyImage(256, 256, 8, 1700);
+  for (uint32_t i = 0; i < 3; ++i) {
+    vpr->AddFrame(i, i == 0 ? first : MakeBlockyImage(256, 256, 8, 1700 + i));
+    EXPECT_EQ(vpr->Query(first).found, i == 2) << "after " << i + 1 << " frames";
+  }
+}
+
+TEST(VprAnyLocFactory, RefusesTrainingOptionsOutOfOrder) {
+  if (StandInEngine("valid").empty()) {
+    GTEST_SKIP() << kNoStandIns;
+  }
+  VprOptions options = AnyLocOptions(StandInEngine("valid"));
+  options.max_training_keyframes = options.min_training_keyframes - 1;
+  EXPECT_NE(ConstructionError(options), "");
+  ++options.max_training_keyframes;
+  const std::unique_ptr<IVpr> vpr = MakeVpr(options);
+  ASSERT_NE(vpr, nullptr);
+  EXPECT_EQ(vpr->TrainingCapacity(), options.min_training_keyframes);
+  options.min_training_keyframes = 0;
+  EXPECT_NE(ConstructionError(options), "");
+}
+
+TEST(VprVocabularyFitter, TakesNoMoreFramesThanItsCapacity) {
+  if (StandInEngine("valid").empty()) {
+    GTEST_SKIP() << kNoStandIns;
+  }
+  VprOptions options = AnyLocOptions(StandInEngine("valid"));
+  options.max_training_keyframes = 10;
+  std::unique_ptr<VocabularyFitter> fitter = MakeFitter(options);
+  ASSERT_NE(fitter, nullptr);
+  ASSERT_EQ(fitter->Capacity(), 10u);
+  AddFrames(*fitter, 10, 1800);
+  std::string error;
+  EXPECT_FALSE(fitter->AddFrame(MakeBlockyImage(256, 256, 8, 1810), error));
+  EXPECT_NE(error, "");
+  EXPECT_EQ(fitter->Size(), 10u);
+}
+
+TEST(VprVocabularyFitter, NeedsTheTrainingMinimumToSave) {
+  if (StandInEngine("valid").empty()) {
+    GTEST_SKIP() << kNoStandIns;
+  }
+  const VprOptions options = AnyLocOptions(StandInEngine("valid"));
+  std::unique_ptr<VocabularyFitter> fitter = MakeFitter(options);
+  ASSERT_NE(fitter, nullptr);
+  AddFrames(*fitter, options.min_training_keyframes - 1, 1820);
+  const std::filesystem::path path = ScratchFolder() / "too_few.vocabulary";
+  std::string error;
+  EXPECT_FALSE(fitter->Save(path.string(), error));
+  EXPECT_FALSE(fitter->Fitted());
+  EXPECT_FALSE(std::filesystem::exists(path));
+}
+
+TEST(VprVocabularyFitter, WritesAVocabularyThatASessionLoads) {
+  const std::string& engine = StandInEngine("valid");
+  if (engine.empty()) {
+    GTEST_SKIP() << kNoStandIns;
+  }
+  std::unique_ptr<VocabularyFitter> fitter = MakeFitter(AnyLocOptions(engine));
+  ASSERT_NE(fitter, nullptr);
+  AddFrames(*fitter, 8, 1830);
+  const std::filesystem::path path = ScratchFolder() / "written.vocabulary";
+  const std::filesystem::path again = ScratchFolder() / "written_again.vocabulary";
+  std::string error;
+  ASSERT_TRUE(fitter->Save(path.string(), error)) << error;
+  ASSERT_TRUE(fitter->Save(again.string(), error)) << error;
+  const Blob bytes = ReadFileBytes(path);
+  EXPECT_EQ(ReadFileBytes(again), bytes);
+  EXPECT_TRUE(fitter->Fitted());
+  EXPECT_FALSE(fitter->AddFrame(MakeBlockyImage(256, 256, 8, 1840), error));
+
+  // A session on it holds that vocabulary and no places.
+  const std::unique_ptr<IVpr> vpr = MakeVpr(VocabularyOptions(engine, path.string()));
+  ASSERT_NE(vpr, nullptr);
+  EXPECT_EQ(vpr->TrainingCapacity(), 0u);
+  EXPECT_EQ(Serialized(*vpr), bytes);
+}
+
+TEST(VprVocabularyFitter, ReportsAFileItCannotWrite) {
+  const std::string& engine = StandInEngine("valid");
+  if (engine.empty()) {
+    GTEST_SKIP() << kNoStandIns;
+  }
+  std::unique_ptr<VocabularyFitter> fitter = MakeFitter(AnyLocOptions(engine));
+  ASSERT_NE(fitter, nullptr);
+  AddFrames(*fitter, 8, 1850);
+  const std::string path = (ScratchFolder() / "missing" / "anyloc.vocabulary").string();
+  std::string error;
+  EXPECT_FALSE(fitter->Save(path, error));
+  EXPECT_TRUE(fitter->Fitted());
+  EXPECT_NE(error.find(path), std::string::npos) << error;
+}
+
+TEST(VprVocabularyFitter, RefusesAFrameTheBackendCannotDescribe) {
+  const std::string& engine = StandInEngine("valid");
+  if (engine.empty()) {
+    GTEST_SKIP() << kNoStandIns;
+  }
+  std::unique_ptr<VocabularyFitter> fitter = MakeFitter(AnyLocOptions(engine));
+  ASSERT_NE(fitter, nullptr);
+  std::string error;
+  EXPECT_FALSE(fitter->AddFrame(VprImage{}, error));
+  EXPECT_NE(error, "");
+  EXPECT_EQ(fitter->Size(), 0u);
+}
+
+TEST(VprAnyLocFactory, RefusesAFileThatIsNotAVocabularyOfTheEngine) {
+  const std::string& engine = StandInEngine("valid");
+  if (engine.empty() || StandInEngine("wide").empty()) {
+    GTEST_SKIP() << kNoStandIns;
+  }
+  const std::string good_path = FitVocabulary(engine, 8, 1860, "good.vocabulary");
+  ASSERT_EQ(ConstructionError(VocabularyOptions(engine, good_path)), "");
+  const Blob good = ReadFileBytes(good_path);
+
+  // The first center starts after the magic, the version, the cluster count, the width and the center count.
+  constexpr size_t kCentersOffset = 24;
+  constexpr size_t kWidth = 147;
+  auto with_first_center = [&good](float scale, float first) {
+    Blob bytes = good;
+    for (size_t i = 0; i < kWidth; ++i) {
+      float value = 0.f;
+      std::memcpy(&value, &bytes[kCentersOffset + i * sizeof(float)], sizeof(float));
+      value = i == 0 && std::isnan(first) ? first : value * scale;
+      std::memcpy(&bytes[kCentersOffset + i * sizeof(float)], &value, sizeof(float));
+    }
+    return bytes;
+  };
+  Blob trailing = good;
+  trailing.push_back(0);
+  std::unique_ptr<IVpr> mapper = MakeVpr(AnyLocOptions(engine));
+  ASSERT_NE(mapper, nullptr);
+  for (uint32_t i = 0; i < 8; ++i) {
+    mapper->AddFrame(i, MakeBlockyImage(256, 256, 8, 1870 + i));
+  }
+  std::unique_ptr<IVpr> unfitted = MakeVpr(AnyLocOptions(engine));
+  ASSERT_NE(unfitted, nullptr);
+  const std::string other_width = FitVocabulary(StandInEngine("wide"), 8, 1880, "wide.vocabulary");
+
+  const std::vector<std::pair<std::string, std::string>> cases = {
+      {"missing", (ScratchFolder() / "missing.vocabulary").string()},
+      {"empty", WriteFileBytes(Blob{}, "empty.vocabulary")},
+      {"directory", ScratchFolder().string()},
+      {"garbage", WriteFileBytes(Blob(64, 0x5A), "garbage.vocabulary")},
+      {"truncated", WriteFileBytes(Blob(good.begin(), good.end() - 1), "truncated.vocabulary")},
+      {"trailing byte", WriteFileBytes(trailing, "trailing.vocabulary")},
+      {"mapped places", WriteFileBytes(Serialized(*mapper), "places.vocabulary")},
+      {"no centers", WriteFileBytes(Serialized(*unfitted), "no_centers.vocabulary")},
+      {"other width", other_width},
+      {"center not of unit length", WriteFileBytes(with_first_center(2.f, 0.f), "scaled.vocabulary")},
+      {"center not finite",
+       WriteFileBytes(with_first_center(1.f, std::numeric_limits<float>::quiet_NaN()), "nan.vocabulary")},
+  };
+  for (const auto& [name, path] : cases) {
+    SCOPED_TRACE(name);
+    const std::string error = ConstructionError(VocabularyOptions(engine, path));
+    EXPECT_NE(error.find(path), std::string::npos) << error;
+  }
+  // The width mismatch names both widths.
+  const std::string error = ConstructionError(VocabularyOptions(engine, other_width));
+  EXPECT_NE(error.find("588"), std::string::npos) << error;
+  EXPECT_NE(error.find("147"), std::string::npos) << error;
+}
+
+TEST(VprAnyLocVocabulary, RecognizesPlacesFromTheFirstFrame) {
+  const std::string& engine = StandInEngine("valid");
+  if (engine.empty()) {
+    GTEST_SKIP() << kNoStandIns;
+  }
+  std::unique_ptr<IVpr> vpr =
+      MakeVpr(VocabularyOptions(engine, FitVocabulary(engine, 8, 1900, "first_frame.vocabulary")));
+  ASSERT_NE(vpr, nullptr);
+  const VprImage image = MakeBlockyImage(256, 256, 8, 1910);
+  vpr->AddFrame(0, image);
+  const VprMatch match = vpr->Query(image);
+  EXPECT_TRUE(match.found) << "score " << match.score;
+  EXPECT_EQ(match.node_id, 0u);
+}
+
+TEST(VprAnyLocVocabulary, SessionsSharingAVocabularyEncodeAlike) {
+  const std::string& engine = StandInEngine("valid");
+  if (engine.empty()) {
+    GTEST_SKIP() << kNoStandIns;
+  }
+  const VprOptions options = VocabularyOptions(engine, FitVocabulary(engine, 8, 1915, "shared.vocabulary"));
+  std::unique_ptr<IVpr> first = MakeVpr(options);
+  std::unique_ptr<IVpr> second = MakeVpr(options);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+  for (uint32_t i = 0; i < 3; ++i) {
+    const VprImage image = MakeBlockyImage(256, 256, 8, 1916 + i);
+    first->AddFrame(i, image);
+    second->AddFrame(i, image);
+  }
+  EXPECT_EQ(Serialized(*first), Serialized(*second));
+}
+
+TEST(VprAnyLocVocabulary, DeserializeTakesOnlyPlacesOfItsVocabulary) {
+  const std::string& engine = StandInEngine("valid");
+  if (engine.empty()) {
+    GTEST_SKIP() << kNoStandIns;
+  }
+  const std::string vocabulary = FitVocabulary(engine, 8, 1920, "own.vocabulary");
+  const VprOptions options = VocabularyOptions(engine, vocabulary);
+
+  // Places this vocabulary encoded load.
+  std::unique_ptr<IVpr> mapper = MakeVpr(options);
+  ASSERT_NE(mapper, nullptr);
+  std::vector<VprImage> images;
+  for (uint32_t i = 0; i < 3; ++i) {
+    images.push_back(MakeBlockyImage(256, 256, 8, 1930 + i));
+    mapper->AddFrame(i, images.back());
+  }
+  const Blob own = Serialized(*mapper);
+  std::unique_ptr<IVpr> session = MakeVpr(options);
+  ASSERT_NE(session, nullptr);
+  ASSERT_TRUE(session->Deserialize(BlobReader(own)));
+  ASSERT_EQ(session->Size(), 3u);
+  for (size_t i = 0; i < images.size(); ++i) {
+    EXPECT_EQ(session->Query(images[i]).node_id, i) << "frame " << i;
+  }
+
+  // A session that fitted its own encoded them with another vocabulary: refused, nothing changes.
+  std::unique_ptr<IVpr> online = MakeVpr(AnyLocOptions(engine));
+  ASSERT_NE(online, nullptr);
+  for (uint32_t i = 0; i < 8; ++i) {
+    online->AddFrame(i, MakeBlockyImage(256, 256, 8, 1940 + i));
+  }
+  EXPECT_FALSE(session->Deserialize(BlobReader(Serialized(*online))));
+  EXPECT_EQ(Serialized(*session), own);
+
+  // A map saved before any fit has no centers: its places load and the vocabulary stays.
+  std::unique_ptr<IVpr> unfitted = MakeVpr(AnyLocOptions(engine));
+  ASSERT_NE(unfitted, nullptr);
+  for (uint32_t i = 0; i < 3; ++i) {
+    unfitted->AddFrame(i, MakeBlockyImage(256, 256, 8, 1950 + i));
+  }
+  std::unique_ptr<IVpr> fresh = MakeVpr(options);
+  ASSERT_NE(fresh, nullptr);
+  ASSERT_TRUE(fresh->Deserialize(BlobReader(Serialized(*unfitted))));
+  EXPECT_EQ(fresh->Size(), 3u);
+  const VprImage later = MakeBlockyImage(256, 256, 8, 1960);
+  fresh->AddFrame(3, later);
+  EXPECT_EQ(fresh->Query(later).node_id, 3u);
+  const Blob file = ReadFileBytes(vocabulary);
+  const Blob saved = Serialized(*fresh);
+  const size_t centers_end = file.size() - sizeof(uint64_t);  // the file ends with a zero place count
+  ASSERT_GE(saved.size(), centers_end);
+  EXPECT_TRUE(std::equal(file.begin(), file.begin() + centers_end, saved.begin()));
 }
 
 #endif  // USE_TENSORRT
@@ -993,7 +1373,7 @@ TEST(VprMapStorage, FromBlobRejectsAnAbsurdEntryCount) {
 }
 
 TEST(VprMapStorage, DisabledMapIsANoOp) {
-  VprMap map(VprOptions{});
+  VprMap map(VprOptions{}, nullptr);
   const VprImage image = MakeBlockyImage(64, 64, 8, 1);
 
   EXPECT_FALSE(map.Enabled());
@@ -1154,7 +1534,8 @@ protected:
   std::unique_ptr<LocalizerAndMapper> MakeMapper(const VprOptions& options) {
     auto mapper = std::make_unique<LocalizerAndMapper>(rig_, FeatureDescriptorType::kNone, true);
     mapper->SetActiveCameras({0});
-    mapper->SetVprOptions(options);
+    std::string error;
+    EXPECT_TRUE(mapper->SetVprOptions(options, error)) << error;
     EXPECT_TRUE(mapper->SetPoseGraphOptimizerOptions({PoseGraphOptimizerType::Simple}));
     return mapper;
   }
@@ -1484,10 +1865,10 @@ TEST_F(VprPoseGraph, AsyncSlamMapsEveryKeyframeQueuedWhileItWasBehind) {
   AsyncSlam slam(rig_, {0}, options);
 
   // All keyframes queue before the worker runs, by which time it has only the newest one's pixels.
-  constexpr int kKeyframes = static_cast<int>(VprAnyLoc::kMinTrainingFrames);
+  const int keyframes = static_cast<int>(VprOptions{}.min_training_keyframes);
   Isometry3T step = Isometry3T::Identity();
   step.translation().x() = 1.f;
-  for (int i = 0; i < kKeyframes; ++i) {
+  for (int i = 0; i < keyframes; ++i) {
     images_.push_back(MakeBlockyImage(256, 256, 8, static_cast<uint32_t>(1400 + i)));
     odom::IVisualOdometry::VOFrameStat stat;
     stat.keyframe = true;
@@ -1495,7 +1876,7 @@ TEST_F(VprPoseGraph, AsyncSlamMapsEveryKeyframeQueuedWhileItWasBehind) {
   }
   slam.ProcessInputSynchronously();
 
-  for (int i = 0; i < kKeyframes; ++i) {
+  for (int i = 0; i < keyframes; ++i) {
     std::optional<int64_t> timestamp_ns;
     slam.RecognizePlace(images_[i], [&](const Result<cuvslam::Slam::PlaceRecognition>& result) {
       if (result.data) {
@@ -1679,6 +2060,67 @@ TEST_F(VprPoseGraph, AnUnreadablePlaceRecognitionMapIsKeptAsItIs) {
     EXPECT_EQ(kept, other) << folder;
   }
 }
+
+#ifdef USE_TENSORRT
+TEST_F(VprPoseGraph, AMapOfAnotherVocabularyIsKeptAsItIs) {
+  const std::string& engine = StandInEngine("valid");
+  if (engine.empty()) {
+    GTEST_SKIP() << kNoStandIns;
+  }
+  std::filesystem::create_directories(folder_);
+  const std::string saved = (folder_ / "saved").string();
+  const std::string copy = (folder_ / "copy").string();
+  auto vpr_record = [](const std::string& folder) {
+    LmdbSlamDatabase database;
+    EXPECT_TRUE(database.Open(folder.c_str(), LmdbSlamDatabase::OpenMode::READ_ONLY_EXISTS)) << folder;
+    std::string record;
+    EXPECT_TRUE(database.GetSingleton(SlamDatabaseSingleton::VprMap, [&](const BlobReader& reader) {
+      record.resize(reader.remaining());
+      return reader.read(record.data(), record.size());
+    })) << folder;
+    return record;
+  };
+  // Fits its own vocabulary when saving.
+  mapper_ = MakeMapper(AnyLocOptions(engine));
+  BuildChain(static_cast<int>(VprOptions{}.min_training_keyframes), 1.f);
+  ASSERT_TRUE(mapper_->AttachToNewDatabaseSaveMapAndDetach(saved));
+  const std::string recorded = vpr_record(saved);
+
+  std::unique_ptr<LocalizerAndMapper> session =
+      MakeMapper(VocabularyOptions(engine, FitVocabulary(engine, 8, 2000, "session.vocabulary")));
+  ASSERT_TRUE(session->AttachToExistingReadOnlyDatabase(saved));
+  EXPECT_EQ(session->GetVprMapSize(), 0u);
+  EXPECT_FALSE(session->RecognizePlace(images_.front()).found);
+  ASSERT_TRUE(session->AttachToNewDatabaseSaveMapAndDetach(copy));  // SaveMap
+  ASSERT_TRUE(session->ReopenDatabaseForWriting(saved));            // LocalizeInMap with attach
+  ASSERT_TRUE(session->FlushMapToDatabase());
+  session.reset();
+
+  for (const std::string& folder : {saved, copy}) {
+    EXPECT_EQ(vpr_record(folder), recorded) << folder;
+  }
+}
+
+TEST_F(VprPoseGraph, AMapOfTheSameVocabularyIsRecognized) {
+  const std::string& engine = StandInEngine("valid");
+  if (engine.empty()) {
+    GTEST_SKIP() << kNoStandIns;
+  }
+  const VprOptions options = VocabularyOptions(engine, FitVocabulary(engine, 8, 2010, "same.vocabulary"));
+  mapper_ = MakeMapper(options);
+  BuildChain(3, 1.f);
+  ASSERT_TRUE(mapper_->AttachToNewDatabaseSaveMapAndDetach(Folder()));
+
+  std::unique_ptr<LocalizerAndMapper> reader = MakeMapper(options);
+  ASSERT_TRUE(reader->AttachToExistingReadOnlyDatabase(Folder()));
+  EXPECT_EQ(reader->GetVprMapSize(), 3u);
+  for (size_t i = 0; i < images_.size(); ++i) {
+    const VprPlace place = reader->RecognizePlace(images_[i]);
+    EXPECT_TRUE(place.found) << "frame " << i;
+    EXPECT_EQ(place.node_id, i) << "frame " << i;
+  }
+}
+#endif  // USE_TENSORRT
 #endif  // USE_LMDB
 
 TEST_F(VprPoseGraph, TurningVprOffLeavesEveryEntryPointInert) {
@@ -1686,7 +2128,8 @@ TEST_F(VprPoseGraph, TurningVprOffLeavesEveryEntryPointInert) {
   ASSERT_TRUE(mapper_->IsVprEnabled());
   ASSERT_EQ(mapper_->GetVprMapSize(), 2u);
 
-  mapper_->SetVprOptions(VprOptions{});
+  std::string error;
+  ASSERT_TRUE(mapper_->SetVprOptions(VprOptions{}, error)) << error;
 
   EXPECT_FALSE(mapper_->IsVprEnabled());
   EXPECT_EQ(mapper_->GetVprMapSize(), 0u);

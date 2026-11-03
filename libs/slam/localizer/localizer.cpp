@@ -55,7 +55,7 @@ float Localizer::LoopClosureStatus::Weight() const {
   return w;
 }
 
-void Localizer::Init(const camera::Rig& rig, const LocalizerOptions& options) {
+bool Localizer::Init(const camera::Rig& rig, const LocalizerOptions& options, std::string& error) {
   options_ = options;
   PrepareProbes();
 
@@ -74,10 +74,13 @@ void Localizer::Init(const camera::Rig& rig, const LocalizerOptions& options) {
   rig_ = rig;
   slam_ = std::make_unique<LocalizerAndMapper>(rig_, FeatureDescriptorType::kShiTomasi2, options.use_gpu);
   slam_->SetReproduceMode(options.reproduce_mode);
-  slam_->SetVprOptions(options.vpr_options);
+  if (!slam_->SetVprOptions(options.vpr_options, error)) {
+    return false;
+  }
 
   first_lcs_.reset(CreateLoopClosureSolver(LoopClosureSolverType::kSimplePoint, RansacType::kNone, true, rig));
   second_lcs_.reset(CreateLoopClosureSolver(LoopClosureSolverType::kTwoStepsEasy, RansacType::kPnP, true, rig));
+  return true;
 }
 
 bool Localizer::OpenDatabase(const std::string& path) {

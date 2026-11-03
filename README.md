@@ -76,11 +76,12 @@ Both APIs expose it the same way:
 
 | Task | C++ (`cuvslam::Slam`) | Python (`cuvslam.Slam`) |
 |------|-----------------------|-------------------------|
-| Turn it on | `Config::use_vpr = true` and `Config::vpr_model_path` | `Config(use_vpr=True, vpr_model_path=...)` |
+| Turn it on | `Config::use_vpr = true` and `VprSettings::model_path` | `Config(use_vpr=True, vpr_settings=VprSettings(model_path=...))` |
 | Ask where a frame was taken | `RecognizePlaceByFrame` | `recognize_place_by_frame` |
 | Save it with the SLAM map | `SaveMap` | `save_map` |
 | Relocalize without a guess pose | `LocalizeInMap` with no `guess_pose` | `localize_in_map(..., guess_pose=None)` |
 | Close loops from it | `Config::loop_closure_mode = LoopClosureMode::VPR` | `Config(loop_closure_mode=LoopClosureMode.VPR)` |
+| Share one vocabulary across sessions | `VprVocabularyFitter`, `VprSettings::vocabulary_path` | `VprVocabularyFitter`, `VprSettings(vocabulary_path=...)` |
 
 [doc/place_recognition.md](doc/place_recognition.md) walks through a mapping run and a relocalizing run, explains how
 it closes loops, and how to evaluate it with `cuvslam_vpr_reporter`.
