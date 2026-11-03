@@ -58,13 +58,15 @@ async def run(session, baseline="baseline", reference="replay_inertial"):
     # transform that carries replay poses into the baseline map's gauge - it is one
     # pose alignment, not a least-squares fit, and it never touches ground truth.
     first = min(map_data.keyframes, key=lambda k: map_data.keyframes[k]["timestamp_ns"])
-    replay_at_first = interpolate(ts, replay, [map_data.keyframes[first]["timestamp_ns"]])[0]
+    replay_at_first = interpolate(ts, replay, [map_data.keyframes[first]["timestamp_ns"]], bounds_error=True)[0]
     common_gauge = map_data.poses[first] @ np.linalg.inv(replay_at_first)
 
     # Keyframe timestamps rarely coincide with replay samples, so interpolate the
     # replay at each one (Slerp for rotation, linear for translation).
     ids = list(map_data.keyframes)
-    corrected = common_gauge @ interpolate(ts, replay, [map_data.keyframes[k]["timestamp_ns"] for k in ids])
+    corrected = common_gauge @ interpolate(
+        ts, replay, [map_data.keyframes[k]["timestamp_ns"] for k in ids], bounds_error=True
+    )
     deltas = [float(np.linalg.norm(map_data.poses[k][:3, 3] - p[:3, 3])) for k, p in zip(ids, corrected)]
     for k, p in zip(ids, corrected):
         # Native poses are float32; round-trip now so the encoded bytes are exact.

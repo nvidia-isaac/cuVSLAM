@@ -44,17 +44,25 @@ def load_trajectory(path):
     return np.array([r["timestamp_ns"] for r in rows], dtype=np.int64), np.array([matrix(r) for r in rows])
 
 
-def interpolate(timestamps, transforms, query):
+def interpolate(timestamps, transforms, query, *, bounds_error=False):
     """Interpolate translation (linear) and orientation (Slerp) at ``query`` times.
 
-    Queries outside the trajectory span clamp to the nearest endpoint rather than
-    extrapolating, so a replay that starts slightly late still yields a usable pose for
-    the first keyframes. Supply a replay covering all retained keyframes to avoid it.
+    By default, queries outside the trajectory span clamp to the nearest endpoint.
+    Repair policies must set ``bounds_error=True`` to reject incomplete references
+    instead of collapsing uncovered keyframes onto an endpoint.
     """
+    if len(timestamps) < 2 or np.any(np.diff(timestamps) <= 0):
+        raise ValueError("Trajectory needs at least two strictly increasing timestamps")
+    query = np.asarray(query, dtype=np.int64)
+    if bounds_error and np.any((query < timestamps[0]) | (query > timestamps[-1])):
+        raise ValueError(
+            f"Reference trajectory [{timestamps[0]}, {timestamps[-1]}] does not cover "
+            f"requested timestamps [{query.min()}, {query.max()}]"
+        )
     # Subtract the integer nanosecond origin before converting to floating seconds.
     t0 = int(timestamps[0])
     times = (timestamps - t0).astype(float) * 1e-9
-    query_s = (np.asarray(query, dtype=np.int64) - t0).astype(float) * 1e-9
+    query_s = (query - t0).astype(float) * 1e-9
     result = np.tile(np.eye(4), (len(query_s), 1, 1))
     for axis in range(3):
         result[:, axis, 3] = np.interp(query_s, times, transforms[:, axis, 3])

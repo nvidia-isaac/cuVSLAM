@@ -32,7 +32,9 @@ repair), and ``summary.json`` (provenance, including the saved map's SHA256).
 import argparse
 import hashlib
 import json
+import math
 import os
+import threading
 import time
 from pathlib import Path
 
@@ -88,6 +90,22 @@ def apply_settings(config, values):
     return config
 
 
+def save_map(slam, destination, timeout_s):
+    """Wait for either a synchronous or asynchronous native save callback."""
+    completed = threading.Event()
+    saved = []
+
+    def on_saved(ok):
+        saved.append(ok)
+        completed.set()
+
+    slam.save_map(str(destination), on_saved)
+    if not completed.wait(timeout_s):
+        raise TimeoutError(f"Map save did not complete within {timeout_s:g} seconds")
+    if saved != [True]:
+        raise RuntimeError(f"Map save failed: {saved}")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("dataset", type=Path)
@@ -98,8 +116,11 @@ def main(argv=None):
     ap.add_argument("--odometry", action="append", metavar="KEY=VALUE", help="Odometry.Config override; repeatable")
     ap.add_argument("--slam", action="append", metavar="KEY=VALUE", help="Slam.Config override; repeatable")
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--save-timeout", type=float, default=300.0, help="Map save callback timeout in seconds")
     ap.add_argument("--source-commit", help="Commit used to build the installed cuVSLAM binding (optional provenance)")
     args = ap.parse_args(argv)
+    if not math.isfinite(args.save_timeout) or args.save_timeout <= 0:
+        ap.error("--save-timeout must be finite and positive")
     if args.mode and args.odometry_mode:
         ap.error("pass either --mode or --odometry-mode, not both")
     odometry_mode = args.odometry_mode or MODE_SHORTHAND.get(args.mode or "stereo")
@@ -122,11 +143,12 @@ def main(argv=None):
     # The map is what the repair edits, so the tracker mode has to be one that saves
     # one. Odometry-only modes produce a trajectory and nothing to repair.
     tracker = cuvslam.Tracker(rig, getattr(cuvslam.Tracker.Mode, args.tracker_mode), odom, slam)
-    # Only an inertial mode consumes the IMU stream; others would be fed samples the
-    # tracker ignores, so read them only when the chosen mode needs them.
-    frames, pairing = frame_metadata(args.dataset, "Inertial" in odometry_mode)
+    # Multisensor enables IMU fusion whenever the rig supplies an IMU.
+    use_imu = bool(rig.imus) and odometry_mode in ("Inertial", "Multisensor")
+    frames, pairing = frame_metadata(args.dataset, use_imu)
     print(json.dumps({"pairing": pairing}), flush=True)
     results = []
+    imu_samples = 0
     started = time.monotonic()
 
     def pose(p):
@@ -140,6 +162,7 @@ def main(argv=None):
             m.linear_accelerations = np.asarray(frame["accel"])
             m.angular_velocities = np.asarray(frame["gyro"])
             tracker.register_imu_measurement(0, m)
+            imu_samples += 1
             continue
         images = [load_frame(p) for p in frame["images_paths"]]
         start = time.monotonic()
@@ -169,10 +192,7 @@ def main(argv=None):
         if args.limit and len(results) >= args.limit:
             break
     (args.output / "tracking.json").write_text(json.dumps(results))
-    saved = []
-    tracker.slam.save_map(str(args.output / "map"), lambda ok: saved.append(ok))
-    if saved != [True]:
-        raise RuntimeError(f"Map save failed: {saved}")
+    save_map(tracker.slam, args.output / "map", args.save_timeout)
     # The optimized SLAM poses, not the per-frame odometry: these are post loop
     # closure and pose-graph optimization, and are what a repair policy consumes.
     optimized = [{"timestamp_ns": int(p.timestamp_ns), **pose(p.pose)} for p in tracker.slam.get_all_slam_poses()]
@@ -188,6 +208,7 @@ def main(argv=None):
         "odometry_config": {k: str(getattr(odom, k)) for k in odometry_values},
         "slam_config": {k: str(getattr(slam, k)) for k in slam_values},
         "frames": len(results),
+        "imu_samples": imu_samples,
         "tracked": sum(x["odom"] is not None for x in results),
         "elapsed_s": time.monotonic() - started,
         "source_commit": args.source_commit,

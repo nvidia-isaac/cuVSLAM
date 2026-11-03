@@ -21,11 +21,17 @@ import contextlib
 import importlib.util
 import io
 import json
+import pickle
+import sys
 import tempfile
+import threading
 import unittest
 from importlib import resources
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
+
+import numpy as np
 
 from cuvslam_tools.offline_map_repair import cli
 from cuvslam_tools.offline_map_repair.sessions.euroc import frame_metadata
@@ -119,6 +125,119 @@ class EvaluateArgumentTests(unittest.TestCase):
         self.assertEqual(result.exception.code, 2)
 
 
+class TrajectoryCoverageTests(unittest.TestCase):
+    def test_strict_interpolation_preserves_endpoints_and_interpolates_inside(self):
+        from cuvslam_tools.offline_map_repair.sessions.trajectory import interpolate
+
+        timestamps = np.array([100, 200], dtype=np.int64)
+        poses = np.tile(np.eye(4), (2, 1, 1))
+        poses[1, 0, 3] = 2
+        actual = interpolate(timestamps, poses, [100, 150, 200], bounds_error=True)
+        np.testing.assert_allclose(actual[:, 0, 3], [0, 1, 2])
+        for query in ([99], [201]):
+            with self.subTest(query=query), self.assertRaisesRegex(ValueError, "does not cover"):
+                interpolate(timestamps, poses, query, bounds_error=True)
+        np.testing.assert_allclose(interpolate(timestamps, poses, [99, 201])[:, 0, 3], [0, 2])
+
+    def test_rejects_empty_single_duplicate_or_unordered_reference(self):
+        from cuvslam_tools.offline_map_repair.sessions.trajectory import interpolate
+
+        for timestamps in ([], [1], [1, 1], [2, 1]):
+            with self.subTest(timestamps=timestamps), self.assertRaisesRegex(ValueError, "strictly increasing"):
+                interpolate(np.array(timestamps), np.tile(np.eye(4), (len(timestamps), 1, 1)), [1])
+
+
+class SequenceRunnerTests(unittest.TestCase):
+    def test_waits_for_save_callback_before_returning(self):
+        from cuvslam_tools.offline_map_repair.sessions.run_sequence import save_map
+
+        for delayed in (False, True):
+            with self.subTest(delayed=delayed):
+                callbacks = []
+
+                def native_save(destination, callback):
+                    def finish():
+                        callbacks.append(destination)
+                        callback(True)
+
+                    if delayed:
+                        timer = threading.Timer(0.01, finish)
+                        self.addCleanup(timer.join)
+                        timer.start()
+                    else:
+                        finish()
+
+                save_map(SimpleNamespace(save_map=native_save), Path("saved-map"), 1)
+                self.assertEqual(callbacks, ["saved-map"])
+
+    def test_reports_save_failure_and_timeout(self):
+        from cuvslam_tools.offline_map_repair.sessions.run_sequence import save_map
+
+        with self.assertRaisesRegex(RuntimeError, "Map save failed"):
+            save_map(SimpleNamespace(save_map=lambda path, callback: callback(False)), Path("map"), 1)
+        with self.assertRaisesRegex(TimeoutError, "did not complete"):
+            save_map(SimpleNamespace(save_map=lambda path, callback: None), Path("map"), 0.01)
+
+    def test_rejects_invalid_save_timeout_before_loading_native_binding(self):
+        from cuvslam_tools.offline_map_repair.sessions import run_sequence
+
+        for timeout in ("0", "-1", "inf", "nan"):
+            with self.subTest(timeout=timeout), contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as result:
+                    run_sequence.main(["dataset", "output", "--save-timeout", timeout])
+                self.assertEqual(result.exception.code, 2)
+
+    def test_delivers_and_records_imu_for_modes_that_consume_it(self):
+        from cuvslam_tools.offline_map_repair.sessions import run_sequence
+
+        for mode, imus, expected in (
+            ("Multisensor", [object()], 1),
+            ("Multisensor", [], 0),
+            ("Inertial", [object()], 1),
+            ("Multicamera", [object()], 0),
+        ):
+            with self.subTest(mode=mode, imus=len(imus)), tempfile.TemporaryDirectory() as folder:
+                output = Path(folder) / "session"
+
+                def frames(dataset, use_imu):
+                    events = [{"type": "imu", "timestamp": 10, "accel": [0, 0, 0], "gyro": [0, 0, 0]}]
+                    return (events if use_imu else []) + [
+                        {"type": "stereo", "timestamp": 10, "images_paths": []}
+                    ], {}
+
+                def native_save(destination, callback):
+                    Path(destination).mkdir()
+                    (Path(destination) / "data.mdb").write_bytes(b"map")
+                    callback(True)
+
+                tracker = mock.Mock()
+                tracker.track.return_value = (SimpleNamespace(world_from_rig=None), None)
+                tracker.slam.save_map.side_effect = native_save
+                tracker.slam.get_all_slam_poses.return_value = []
+                tracker_factory = mock.Mock(return_value=tracker)
+                tracker_factory.Mode = SimpleNamespace(OdometryWithSlamOffline=1)
+                binding = SimpleNamespace(
+                    Odometry=SimpleNamespace(
+                        Config=lambda: SimpleNamespace(async_sba=False, rectified_stereo_camera=False),
+                        OdometryMode=SimpleNamespace(Multisensor=1, Inertial=2, Multicamera=3),
+                    ),
+                    Slam=SimpleNamespace(Config=lambda: SimpleNamespace(sync_mode=True, enable_reading_internals=True)),
+                    Tracker=tracker_factory,
+                    ImuMeasurement=SimpleNamespace,
+                    get_version=lambda: "test",
+                )
+                with (
+                    mock.patch.dict(sys.modules, {"cuvslam": binding}),
+                    mock.patch.object(run_sequence, "get_rig", return_value=SimpleNamespace(imus=imus)),
+                    mock.patch.object(run_sequence, "frame_metadata", side_effect=frames),
+                    mock.patch.object(run_sequence, "calibration_source", return_value="sensor.yaml"),
+                    contextlib.redirect_stdout(io.StringIO()),
+                ):
+                    run_sequence.main(["dataset", str(output), "--odometry-mode", mode])
+                self.assertEqual(tracker.register_imu_measurement.call_count, expected)
+                self.assertEqual(json.loads((output / "summary.json").read_text())["imu_samples"], expected)
+
+
 # core.commit reaches the server through core.mcp_client, which imports the mcp client
 # and, for the shared table names, mcp_server.store - which imports lmdb. Both ship in
 # the map-repair extra, and the tools test step installs base dependencies only.
@@ -127,6 +246,32 @@ class EvaluateArgumentTests(unittest.TestCase):
     "Install cuvslam-tools[map-repair] for MCP client tests",
 )
 class CommitGuardTests(unittest.TestCase):
+    def test_incomplete_reference_is_rejected_before_edit_or_commit(self):
+        from cuvslam_tools.offline_map_repair.policies import full_pose_repair
+
+        for span in ([10, 20], [0, 10]):
+            with self.subTest(span=span), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                (root / "baseline").mkdir()
+                (root / "baseline/records.pkl").write_bytes(pickle.dumps({}))
+                map_data = mock.Mock()
+                map_data.keyframes = {1: {"timestamp_ns": 0}, 2: {"timestamp_ns": 20}}
+                map_data.poses = {1: np.eye(4), 2: np.eye(4)}
+                with (
+                    mock.patch.object(full_pose_repair, "HERE", root),
+                    mock.patch.object(full_pose_repair, "MapData", return_value=map_data),
+                    mock.patch.object(full_pose_repair, "load_trajectory", return_value=(
+                        np.array(span), np.tile(np.eye(4), (2, 1, 1))
+                    )),
+                    mock.patch.object(full_pose_repair, "commit") as commit,
+                    self.assertRaisesRegex(ValueError, "does not cover"),
+                ):
+                    asyncio.run(full_pose_repair.run(None))
+                commit.assert_not_called()
+                map_data.encode.assert_not_called()
+                for pose in map_data.poses.values():
+                    np.testing.assert_array_equal(pose, np.eye(4))
+
     def test_empty_change_set_is_refused_before_anything_is_cloned(self):
         # Pruning zero landmarks re-encodes to identical bytes. Cloning first would
         # leave an orphaned destination that makes every retry fail on mkdir.
