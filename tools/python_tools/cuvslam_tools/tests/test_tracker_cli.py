@@ -136,7 +136,7 @@ class TestTrackerCli(unittest.TestCase):
                 self.assertIn("--vpr_model_path", error)
                 self.assertIn("anyloc_engine", error)
 
-    def test_vpr_model_path_defaults_to_the_engine_cuvslam_vars_names(self):
+    def test_vpr_model_path_defaults_to_cuvslam_anyloc_engine(self):
         with mock.patch.dict(os.environ, {"CUVSLAM_ANYLOC_ENGINE": "/build/bin/anyloc.engine"}):
             args = _tracker_parser().parse_args([])
 
