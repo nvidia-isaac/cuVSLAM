@@ -70,3 +70,16 @@ if(CUVSLAM_ANYLOC_ENGINE)
         )
     add_dependencies(${MODULE_NAME}_test anyloc_engine)
 endif()
+
+if(USE_TENSORRT)
+    # Links no TensorRT, so LoadTensorRt() has to find it; an empty libnvinfer stands in for a missing one
+    setup_test_project(
+        MODULE_NAME tensorrt_loader
+        SOURCES tensorrt_loader_test.cpp
+        LIBRARIES slam
+        )
+    file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/no_tensorrt/libnvinfer.so.${TensorRT_VERSION_MAJOR} "")
+    target_compile_definitions(tensorrt_loader_test PRIVATE
+        CUVSLAM_NO_TENSORRT_DIR="${CMAKE_CURRENT_BINARY_DIR}/no_tensorrt"
+        )
+endif()

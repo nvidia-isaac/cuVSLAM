@@ -25,6 +25,7 @@
 
 #include <NvInfer.h>
 #include <cuda_runtime_api.h>
+#include <dlfcn.h>
 
 #include "common/log.h"
 #include "cuda_modules/cuda_helper.h"
@@ -38,6 +39,9 @@ constexpr char kOutputName[] = "patch_descriptors";
 
 const std::string kTensorRtVersion = std::to_string(NV_TENSORRT_MAJOR) + "." + std::to_string(NV_TENSORRT_MINOR) + "." +
                                      std::to_string(NV_TENSORRT_PATCH);
+const std::string kTensorRtLibrary = "libnvinfer.so." + std::to_string(NV_TENSORRT_MAJOR);
+// Major version factor in getInferLibVersion(): TensorRT 10 changed it from 1000
+constexpr int32_t kTensorRtMajorFactor = NV_TENSORRT_MAJOR < 10 ? 1000 : 10000;
 
 /// One per process, as TensorRT expects. Remembers the last error per thread.
 class TensorRtLogger : public nvinfer1::ILogger {
@@ -138,7 +142,28 @@ std::vector<char> ReadFile(const std::string& path) {
   return bytes;
 }
 
+void* TensorRtSymbol(void* handle, const char* symbol) {
+  void* address = dlsym(handle, symbol);
+  if (!address) {
+    throw std::runtime_error("VPR AnyLoc: " + kTensorRtLibrary + " has no " + symbol + ": " + dlerror());
+  }
+  return address;
+}
+
 }  // namespace
+
+CreateInferRuntime LoadTensorRt() {
+  void* handle = dlopen(kTensorRtLibrary.c_str(), RTLD_NOW | RTLD_LOCAL);
+  if (!handle) {
+    throw std::runtime_error("VPR AnyLoc needs TensorRT " + std::to_string(NV_TENSORRT_MAJOR) + ": " + dlerror());
+  }
+  const int32_t version = reinterpret_cast<int32_t (*)()>(TensorRtSymbol(handle, "getInferLibVersion"))();
+  if (version / kTensorRtMajorFactor != NV_TENSORRT_MAJOR) {
+    throw std::runtime_error("VPR AnyLoc needs TensorRT " + std::to_string(NV_TENSORRT_MAJOR) + ", but " +
+                             kTensorRtLibrary + " reports version " + std::to_string(version));
+  }
+  return reinterpret_cast<CreateInferRuntime>(TensorRtSymbol(handle, "createInferRuntime_INTERNAL"));
+}
 
 struct AnyLocNetwork::Impl {
   // Order matters: members are destroyed in reverse, as TensorRT requires.
@@ -163,7 +188,8 @@ AnyLocNetwork::AnyLocNetwork(const std::string& engine_path) : impl_(std::make_u
 
   TensorRtLogger& logger = Logger();
   logger.TakeLastError();
-  impl.runtime.reset(nvinfer1::createInferRuntime(logger));
+  static const CreateInferRuntime create_runtime = LoadTensorRt();
+  impl.runtime.reset(static_cast<nvinfer1::IRuntime*>(create_runtime(&logger, NV_TENSORRT_VERSION)));
   if (!impl.runtime) {
     throw std::runtime_error("VPR AnyLoc: could not create the TensorRT " + kTensorRtVersion + " runtime.");
   }
