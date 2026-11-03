@@ -401,8 +401,9 @@ public:
     ///  - The rig must provide at least one RGB-D camera through
     ///    MultisensorSettings::depth_camera_ids, or at least one camera pair with
     ///    overlapping frustums. A single RGB-D camera is valid, with or without an IMU.
-    ///  - The current cuNLS solver supports pinhole cameras. Other camera models emit a
-    ///    warning and are not supported in Multisensor mode.
+    ///  - Cameras listed in MultisensorSettings::depth_camera_ids must use the pinhole model;
+    ///    other models emit a warning and their depth is misaligned. Cameras without depth
+    ///    support every Distortion::Model.
     ///  - Depth images passed to `Track()` must use `Encoding::MONO` with
     ///    `DataType::UINT16` or `DataType::FLOAT32`; see `Track()` for the per-frame
     ///    matching rules against `MultisensorSettings::depth_camera_ids`.
@@ -960,7 +961,14 @@ public:
    */
   Slam(Slam&& other) noexcept;
 
-  /// Destructor
+  /**
+   * Destructor. Stops the SLAM thread and, with a map file (`Config::map_path`, or LocalizeInMap() with `attach`),
+   * writes the map there.
+   *
+   * On the SLAM thread, for example when a callback holds the last owner, this work finishes asynchronously on
+   * another thread after the destructor returns, and there is no way to wait for it. Do not exit the process right
+   * after, or the map file may be left incomplete.
+   */
   ~Slam();
 
   /**
@@ -1182,7 +1190,7 @@ public:
    */
   Tracker(Tracker&& other) noexcept = default;
 
-  /// @brief Destructor
+  /// @brief Destructor. On the SLAM thread, the Slam it owns finishes tearing down asynchronously, see ~Slam().
   ~Tracker() = default;
 
   /**

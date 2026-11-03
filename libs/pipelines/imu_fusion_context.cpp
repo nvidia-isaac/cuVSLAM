@@ -110,14 +110,14 @@ bool run_rgbd_inertial_solve(const pnp::MultisensorPoseEstimator& estimator, con
 }  // namespace
 
 ImuFusionContext::ImuFusionContext(map::UnifiedMap& map, const camera::Rig& rig, const imu::ImuCalibration& calib,
-                                   const pnp::MultisensorPoseEstimator& pose_estimator)
+                                   const pnp::MultisensorPoseEstimator& pose_estimator, bool use_gpu_bundler)
     : map_(map),
       rig_(rig),
       calib_(calib),
       pose_estimator_(pose_estimator),
       imu_storage_(1e5),
       optimizer_(10),
-      init_bundler_(calib),
+      init_bundler_(calib, use_gpu_bundler),
       sm_() {
   prev_pose_.w_from_imu = calib_.rig_from_imu();
 }

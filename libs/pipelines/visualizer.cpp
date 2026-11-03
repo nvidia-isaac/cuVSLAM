@@ -25,7 +25,9 @@
 #include <rerun/archetypes/arrows3d.hpp>
 #include <rerun/archetypes/line_strips3d.hpp>
 #include <rerun/archetypes/mesh3d.hpp>
+#include <rerun/archetypes/pinhole.hpp>
 #include <rerun/archetypes/points3d.hpp>
+#include <rerun/archetypes/transform3d.hpp>
 
 namespace cuvslam::pipelines {
 
@@ -42,6 +44,11 @@ namespace {
 thread_local std::unordered_map<TrajectoryType, std::vector<rerun::Position3D>> trajectory_positions_map;
 
 std::vector<rerun::Position3D>& getTrajectoryPositions(TrajectoryType type) { return trajectory_positions_map[type]; }
+
+// Points outside the image would stretch the 2D view's bounds past the image.
+bool IsInsideImage(const Vector2T& uv, const Vector2T& resolution) {
+  return uv.x() >= 0.f && uv.y() >= 0.f && uv.x() < resolution.x() && uv.y() < resolution.y();
+}
 }  // namespace
 
 void logObservations(const std::vector<camera::Observation>& observations, const camera::Rig& rig,
@@ -53,6 +60,9 @@ void logObservations(const std::vector<camera::Observation>& observations, const
   points.reserve(observations.size());
 
   for (const auto& obs : observations) {
+    if (obs.cam_id != 0) {
+      continue;
+    }
     // Convert from normalized xy coordinates to pixel uv coordinates
     Vector2T uv;
     if (obs.cam_id < rig.num_cameras && rig.intrinsics[obs.cam_id]) {
@@ -68,22 +78,18 @@ void logObservations(const std::vector<camera::Observation>& observations, const
     }
   }
 
-  if (!points.empty()) {
-    auto& visualizer = visualizer::RerunVisualizer::getInstance();
-    visualizer.getRecordingStream().log(viewport_name,
-                                        rerun::Points2D(points).with_colors(color).with_radii(2.0f).with_draw_order(
-                                            100.0f));  // High draw order to render on top
-  } else {
-    TraceWarning("RerunVisualizer: No observations to log for viewport %s", viewport_name.c_str());
+  auto& visualizer = visualizer::RerunVisualizer::getInstance();
+  if (points.empty()) {
+    visualizer.getRecordingStream().log(viewport_name, rerun::Points2D::clear_fields());
+    return;
   }
+  visualizer.getRecordingStream().log(viewport_name,
+                                      rerun::Points2D(points).with_colors(color).with_radii(2.0f).with_draw_order(
+                                          100.0f));  // High draw order to render on top
 }
 
 void logLandmarks(const std::unordered_map<TrackId, Vector3T>& landmarks, const Isometry3T& camera_from_world,
                   const camera::ICameraModel& camera_model, const std::string& viewport_name, const Color& color) {
-  if (landmarks.empty()) {
-    return;
-  }
-
   // Convert landmarks to 2D UV coordinates
   thread_local std::vector<rerun::Position2D> points;
 
@@ -104,30 +110,27 @@ void logLandmarks(const std::unordered_map<TrackId, Vector3T>& landmarks, const 
     // Convert normalized coordinates to pixel UV coordinates using camera intrinsics
     Vector2T uv_coords;
     if (camera_model.denormalizePoint(normalized_coords, uv_coords)) {
-      // Add the 2D UV position
-      points.emplace_back(uv_coords.x(), uv_coords.y());
+      if (IsInsideImage(uv_coords, camera_model.getResolution())) {
+        points.emplace_back(uv_coords.x(), uv_coords.y());
+      }
     } else {
       TraceWarning("RerunVisualizer: Failed to project landmark to UV coordinates");
     }
   }
 
   // Log the 2D landmark projections to Rerun
-  if (!points.empty()) {
-    auto& visualizer = visualizer::RerunVisualizer::getInstance();
-    visualizer.getRecordingStream().log(viewport_name,
-                                        rerun::Points2D(points).with_colors(color).with_radii(3.0f).with_draw_order(
-                                            10.0f));  // Slightly larger radius for 2D points
-  } else {
-    TraceWarning("RerunVisualizer: No landmarks to log for viewport %s", viewport_name.c_str());
+  auto& visualizer = visualizer::RerunVisualizer::getInstance();
+  if (points.empty()) {
+    visualizer.getRecordingStream().log(viewport_name, rerun::Points2D::clear_fields());
+    return;
   }
+  visualizer.getRecordingStream().log(viewport_name,
+                                      rerun::Points2D(points).with_colors(color).with_radii(3.0f).with_draw_order(
+                                          10.0f));  // Slightly larger radius for 2D points
 }
 
 void logLandmarks(const std::vector<pipelines::Landmark>& landmarks, const Isometry3T& camera_from_world,
                   const camera::ICameraModel& camera_model, const std::string& viewport_name, const Color& color) {
-  if (landmarks.empty()) {
-    return;
-  }
-
   // Convert landmarks to 2D UV coordinates
   thread_local std::vector<rerun::Position2D> points;
 
@@ -150,22 +153,23 @@ void logLandmarks(const std::vector<pipelines::Landmark>& landmarks, const Isome
     // Convert normalized coordinates to pixel UV coordinates using camera intrinsics
     Vector2T uv_coords;
     if (camera_model.denormalizePoint(normalized_coords, uv_coords)) {
-      // Add the 2D UV position
-      points.emplace_back(uv_coords.x(), uv_coords.y());
+      if (IsInsideImage(uv_coords, camera_model.getResolution())) {
+        points.emplace_back(uv_coords.x(), uv_coords.y());
+      }
     } else {
       TraceWarning("RerunVisualizer: Failed to project landmark to UV coordinates");
     }
   }
 
   // Log the 2D landmark projections to Rerun
-  if (!points.empty()) {
-    auto& visualizer = visualizer::RerunVisualizer::getInstance();
-    visualizer.getRecordingStream().log(viewport_name,
-                                        rerun::Points2D(points).with_colors(color).with_radii(3.0f).with_draw_order(
-                                            10.0f));  // Slightly larger radius for 2D points
-  } else {
-    TraceWarning("RerunVisualizer: No landmarks to log for viewport %s", viewport_name.c_str());
+  auto& visualizer = visualizer::RerunVisualizer::getInstance();
+  if (points.empty()) {
+    visualizer.getRecordingStream().log(viewport_name, rerun::Points2D::clear_fields());
+    return;
   }
+  visualizer.getRecordingStream().log(viewport_name,
+                                      rerun::Points2D(points).with_colors(color).with_radii(3.0f).with_draw_order(
+                                          10.0f));  // Slightly larger radius for 2D points
 }
 
 void logLandmarks3D(const std::unordered_map<TrackId, Vector3T>& landmarks, const std::string& viewport_name,
@@ -235,14 +239,16 @@ void logTrajectory(const Isometry3T& rig_from_world, const std::string& viewport
   trajectory_positions.push_back(current_pos);
 
   // Log current camera position as a point
-  recording.log(viewport_name + "/position",
-                rerun::Points3D(current_pos).with_colors(Color(0, 255, 0)).with_radii({0.001f}));
+  // Screen-space radii keep the same on-screen size for room-scale (EuRoC) and street-scale (KITTI) scenes.
+  recording.log(viewport_name + "/position", rerun::Points3D(current_pos)
+                                                 .with_colors(Color(0, 255, 0))
+                                                 .with_radii(rerun::components::Radius::ui_points(3.0f)));
 
   // Log trajectory as a line strip (if we have at least 2 points)
   if (trajectory_positions.size() >= 2) {
-    recording.log(
-        viewport_name + "/path",
-        rerun::LineStrips3D(rerun::components::LineStrip3D(trajectory_positions)).with_colors(color).with_radii(0.5f));
+    recording.log(viewport_name + "/path", rerun::LineStrips3D(rerun::components::LineStrip3D(trajectory_positions))
+                                               .with_colors(color)
+                                               .with_radii(rerun::components::Radius::ui_points(1.5f)));
   }
 
   // Optionally show camera orientation axes
@@ -338,6 +344,28 @@ void logCameraFrustums(const camera::Rig& rig, const Isometry3T& world_from_rig,
 
     recording.log(base, rerun::LineStrips3D(edges).with_colors(color).with_radii(0.003f));
   }
+}
+
+void logCameraPinhole(const camera::ICameraModel& camera_model, const std::string& entity_path,
+                      float image_plane_distance) {
+  const Vector2T res = camera_model.getResolution();
+  const Vector2T focal = camera_model.getFocal();
+  const Vector2T principal = camera_model.getPrincipal();
+  const rerun::datatypes::Mat3x3 image_from_camera(
+      std::array<float, 9>{focal.x(), 0.f, 0.f, 0.f, focal.y(), 0.f, principal.x(), principal.y(), 1.f});
+  auto& visualizer = visualizer::RerunVisualizer::getInstance();
+  visualizer.getRecordingStream().log_static(entity_path, rerun::Pinhole(image_from_camera)
+                                                              .with_resolution(res.x(), res.y())
+                                                              .with_image_plane_distance(image_plane_distance));
+}
+
+void logCameraPose(const Isometry3T& world_from_camera, const std::string& entity_path) {
+  const Vector3T t = world_from_camera.translation();
+  const Eigen::Quaternionf q(world_from_camera.linear());
+  auto& visualizer = visualizer::RerunVisualizer::getInstance();
+  visualizer.getRecordingStream().log(
+      entity_path, rerun::Transform3D::from_translation_rotation(
+                       {t.x(), t.y(), t.z()}, rerun::datatypes::Quaternion::from_xyzw(q.x(), q.y(), q.z(), q.w())));
 }
 
 void logVector3D(const Vector3T& vec, const Vector3T& origin, const std::string& viewport_name, const Color& color,

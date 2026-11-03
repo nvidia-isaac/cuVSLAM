@@ -16,8 +16,8 @@
 # externals. BUILD_SHARED_LIBS is OFF in this build (see FindExt.cmake), so cuNLS produces a
 # static archive with spdlog bundled in; consumers only need the CUDA toolkit math libraries at
 # link time. cuNLS reuses cuVSLAM's already-declared spdlog and googletest FetchContent entries
-# (declared earlier in FindExt.cmake). It downloads a prebuilt cuDSS archive at configure time for
-# its headers only: libcudss.so is dlopen()ed at runtime, and only if the cuDSS solver is selected.
+# (declared earlier in FindExt.cmake). cuVSLAM uses cuNLS's DenseQR solver, so the optional cuDSS
+# backend is disabled: no cuDSS archive is downloaded and no cuDSS code is compiled.
 
 include(FetchContent)
 
@@ -35,6 +35,7 @@ set(CUNLS_VERSION "nightly-2026-10-06")
 # Keep cuNLS's own tests and Python bindings out of this build.
 set(BUILD_TESTING OFF)
 set(BUILD_PYTHON_BINDINGS OFF)
+set(CUNLS_ENABLE_CUDSS OFF CACHE BOOL "cuVSLAM does not use the optional cuDSS solver" FORCE)
 
 # No DOWNLOAD_EXTRACT_TIMESTAMP here: the keyword does not exist on the cmake 3.22 shipped in the
 # Jetson Orin base images (it gets parsed as part of the URL_HASH value and breaks the configure).
