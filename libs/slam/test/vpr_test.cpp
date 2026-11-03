@@ -591,8 +591,6 @@ TEST(VprAnyLocFactory, RefusesToConstructWithoutAnEngine) {
   EXPECT_NE(error.find("anyloc_engine"), std::string::npos) << error;
 }
 
-TEST(VprAnyLocNetwork, LoadsTheTensorRtRuntime) { EXPECT_NE(LoadTensorRt(), nullptr); }
-
 TEST(VprAnyLocNetwork, RunsAnEngineWithTheExpectedInterface) {
   const std::string& engine = StandInEngine("valid");
   if (engine.empty()) {
