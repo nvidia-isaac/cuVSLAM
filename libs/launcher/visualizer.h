@@ -37,8 +37,6 @@ void setupFrameTimeline(const Metas& meta);
 void logCameraImages(const Metas& meta, const Sources& images, const std::vector<CameraId>& cam_ids,
                      const std::vector<std::string>& viewport_names);
 
-void logPose(const Isometry3T& pose, const std::string& viewport_name);
-
 /**
  * Log depth image for visualization
  * @param depth_source The depth image source (F32 type expected, values in meters)
