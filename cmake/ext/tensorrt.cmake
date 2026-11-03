@@ -14,7 +14,7 @@
 
 # Found, not fetched: an engine only loads in the TensorRT version that built it.
 # Defines
-#   TensorRT::headers       headers only; libcuvslam loads the runtime with dlopen()
+#   TensorRT::headers       headers and run path; libcuvslam loads the runtime with dlopen()
 #   TensorRT::nvinfer       runtime; needs no cuBLAS or cuDNN
 #   TensorRT::nvonnxparser  ONNX parser for the engine builder, with CUVSLAM_BUILD_ANYLOC_ENGINE; needs cuBLAS, cuDNN
 #   TensorRT_VERSION        e.g. 8.6.1
@@ -65,6 +65,8 @@ if(NOT TARGET TensorRT::headers)
     add_library(TensorRT::headers INTERFACE IMPORTED GLOBAL)
     set_target_properties(TensorRT::headers PROPERTIES
         INTERFACE_INCLUDE_DIRECTORIES "${TensorRT_INCLUDE_DIR};${CUDAToolkit_INCLUDE_DIRS}"
+        # So dlopen() finds a TensorRT outside the loader paths
+        INTERFACE_LINK_OPTIONS "LINKER:-rpath,${_tensorrt_library_dir}"
     )
 endif()
 
