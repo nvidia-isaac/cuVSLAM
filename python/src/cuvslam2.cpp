@@ -1069,7 +1069,14 @@ NB_MODULE(_cuvslam, m) {
       .def(nb::new_([](const Rig& rig, const std::vector<uint8_t>& primary_cameras, const Slam::Config& config) {
              return DeletedWithoutGil(new Slam(rig, primary_cameras, config));
            }),
-           nb::arg("rig"), nb::arg("primary_cameras"), nb::arg("config") = Slam::Config{})
+           nb::arg("rig"), nb::arg("primary_cameras"), nb::arg("config") = Slam::Config{},
+           "Construct SLAM for a camera rig.\n\n"
+           "Parameters:\n"
+           "    rig: Camera rig configuration\n"
+           "    primary_cameras: Distinct, non-empty list of indices of rig cameras, each in 0..255\n"
+           "    config: SLAM configuration\n"
+           "Raises TypeError if an index is not an integer in 0..255, and ValueError if the rig,\n"
+           "primary_cameras or config are invalid.")
       .def("track", &Slam::Track, nb::arg("state"), nb::arg("gt_pose") = nullptr,
            "Update SLAM pose based on Odometry state and past SLAM loop closures.\n\n"
            "This method should be called after each successful Odometry.track() call.\n"

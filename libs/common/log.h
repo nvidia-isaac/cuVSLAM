@@ -52,6 +52,9 @@ void SetVerbosity(Verbosity verbosity);
 
 Verbosity GetVerbosity();
 
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((format(printf, 2, 3)))
+#endif
 void PrintDecoratedMsg(const char* const prefix, const char* const strFormat, ...);
 
 namespace detail {
