@@ -139,16 +139,15 @@ PyCuVSLAM is the Python wrapper (bindings) for the cuVSLAM library.
 Pre-built wheels are available on the [cuVSLAM releases page](https://github.com/nvidia-isaac/cuVSLAM/releases)
 for the following configurations:
 
-| Target | Ubuntu | Python wheel tag | Package | Architecture |
-|--------|--------|------------------|---------|--------------|
-| Desktop/server | 22.04 | `cp310` (Python 3.10) | `cuvslam-cu12`, `cuvslam-cu13` | x86_64 |
-| Desktop/server | 24.04 | `cp312-abi3` (Python 3.12+) | `cuvslam-cu12`, `cuvslam-cu13` | x86_64 |
-| Jetson Orin | 22.04 (JetPack 6.x) | `cp310` (Python 3.10) | `cuvslam-cu12` | aarch64 |
-| Jetson Thor | 24.04 (JetPack 7.x) | `cp312-abi3` (Python 3.12+) | `cuvslam-cu13` | aarch64 |
+| Target | Ubuntu | Python | Package | Architecture |
+|--------|--------|--------|---------|--------------|
+| Desktop/server | 22.04 or newer | 3.10, 3.11, 3.12+ | `cuvslam-cu12`, `cuvslam-cu13` | x86_64 |
+| Jetson Orin | 22.04 (JetPack 6.x) | 3.10, 3.11, 3.12+ | `cuvslam-cu12` | aarch64 |
+| Jetson Thor | 24.04 (JetPack 7.x) | 3.10, 3.11, 3.12+ | `cuvslam-cu13` | aarch64 |
 
-Only the combinations listed above are provided as pre-built wheels. The `cp312-abi3` wheels use Python's stable ABI
-and are compatible with Python 3.12 and later. Other Python, CUDA, or Jetson combinations require an
-[installation from source](#install-from-source).
+Only the combinations listed above are provided as pre-built wheels. Their Python tags are `cp310`, `cp311` and
+`cp312-abi3`; the last uses Python's stable ABI and works with Python 3.12 and later. Other Python, CUDA, or Jetson
+combinations require an [installation from source](#install-from-source).
 
 **Prerequisite**: the wheels use cuBLAS, cuSOLVER and cuSPARSE from [CUDA Toolkit](https://developer.nvidia.com/cuda/toolkit)
 12 or 13, matching the package's `cu12` or `cu13` suffix. They come from either:
@@ -165,8 +164,8 @@ Official wheels include cuNLS support for `Multisensor` mode; no separate cuNLS 
 To install (virtual environment is recommended):
 
 1. Go to the [latest release](https://github.com/nvidia-isaac/cuVSLAM/releases/latest).
-2. Download the wheel matching the table above. On Jetson, also match the device family: Orin uses `cu12`/`cp310`;
-   Thor uses `cu13`/`cp312-abi3`.
+2. Download the wheel matching the table above and your Python version. On Jetson, also match the device family:
+   Orin uses `cu12`; Thor uses `cu13`.
 3. Install with pip:
 
 ```bash
@@ -330,9 +329,9 @@ RERUN=1 ctest --output-on-failure
 
 **Q**: What Python versions are supported by PyCuVSLAM?
 
-**A**: Pre-built wheels use `cp310` for Python 3.10 on Ubuntu 22.04 and `cp312-abi3` for Python 3.12 or later on
-Ubuntu 24.04. Jetson wheels are limited to Orin with `cu12`/`cp310` and Thor with `cu13`/`cp312-abi3`; see the
-[wheel table](#install-from-wheels). When built from source, PyCuVSLAM supports Python 3.9 and later.
+**A**: Pre-built wheels cover Python 3.10 (`cp310`), 3.11 (`cp311`) and 3.12 or later (`cp312-abi3`) on x86_64 with
+Ubuntu 22.04 or newer, on Jetson Orin (`cu12`) and on Jetson Thor (`cu13`); see the
+[wheel table](#install-from-wheels). When built from source, PyCuVSLAM supports Python 3.10 and later.
 
 
 # Troubleshooting

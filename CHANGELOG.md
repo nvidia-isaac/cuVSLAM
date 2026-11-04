@@ -21,6 +21,8 @@
 
 - `cuda` extra for the Python wheels (x86_64 and Jetson Thor): `pip install "<wheel>[cuda]"` installs the cuBLAS,
   cuSOLVER and cuSPARSE wheels from PyPI, so no system CUDA Toolkit is needed
+- Python wheels for Python 3.10, 3.11 and 3.12+ (`cp312-abi3`) on every target. x86_64 wheels are built on
+  Ubuntu 22.04 and also install on newer releases, replacing the separate Ubuntu 24.04 wheels
 - `Slam::Config::delay_warning_queue_size`: warns in verbose mode when more than the configured number of commands
   are queued to the SLAM thread, meaning SLAM falls behind odometry
 

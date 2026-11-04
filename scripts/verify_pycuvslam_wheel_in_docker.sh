@@ -3,8 +3,9 @@ set -euo pipefail
 
 if [ "$#" -ne 1 ] && [ "$#" -ne 3 ]; then
   echo "Usage: ./scripts/verify_pycuvslam_wheel_in_docker.sh <build_output_dir> [<expected_version> <expected_git_sha>]"
-  echo "  Run after build_pycuvslam_in_docker.sh. Installs the repaired wheel into a"
-  echo "  fresh environment and imports cuvslam, verifying the wheel filename is valid"
+  echo "  Run after build_pycuvslam_in_docker.sh. Installs each repaired wheel into a"
+  echo "  fresh environment of the Python version in its tag (abi3 wheels also into"
+  echo "  Python 3.14) and imports cuvslam, verifying the wheel filename is valid"
   echo "  (pip-installable) and the auditwheel-repaired extension loads with the"
   echo "  excluded CUDA libraries resolved from the system. Before installing, runs the"
   echo "  PyPI metadata check (twine check --strict) and, for abi3 wheels, abi3audit."
@@ -34,38 +35,33 @@ if [ "${#WHEELS[@]}" -eq 0 ]; then
   echo "Error: no wheel found in $OUTPUT_DIR/wheel."
   echo "Run './scripts/build_pycuvslam_in_docker.sh $OUTPUT_DIR' first."
   exit 1
-elif [ "${#WHEELS[@]}" -gt 1 ]; then
-  echo "Error: expected exactly one wheel in $OUTPUT_DIR/wheel, found ${#WHEELS[@]}:"
-  printf '  %s\n' "${WHEELS[@]}"
-  echo "Remove stale wheels (or rebuild into a clean output dir) before rerunning."
-  exit 1
 fi
-
-WHEEL_NAME=$(basename "${WHEELS[0]}")
 
 TTY_FLAG=""
 [ -t 0 ] && TTY_FLAG="-it"
 
-# --network host so pip can resolve the wheel's declared runtime deps (pyyaml).
-# --system-site-packages keeps numpy/scipy from the image available so this stays a
-# wheel-install/load smoke test rather than a full dependency-completeness audit.
+# --network host so uv can fetch the Python versions and the wheels' runtime deps (pyyaml).
 docker run --runtime=nvidia --gpus all --rm --label "cuvslam.runner=${RUNNER_NAME:-local}" $TTY_FLAG --network host \
   --user "$(id -u):$(id -g)" --group-add video -e HOME=/tmp \
   -v "$OUTPUT_DIR:/output:ro" \
-  -e WHEEL_NAME="$WHEEL_NAME" \
   -e EXPECTED_VERSION="$EXPECTED_VERSION" \
   -e EXPECTED_GIT_SHA="$EXPECTED_GIT_SHA" \
   cuvslam:local bash -c '
     set -euo pipefail
-    python3 -m venv --system-site-packages /tmp/wheel_venv
-    . /tmp/wheel_venv/bin/activate
-    twine check --strict "/output/wheel/$WHEEL_NAME"
-    case "$WHEEL_NAME" in
-      *-abi3-*) abi3audit "/output/wheel/$WHEEL_NAME" ;;
-    esac
-    pip install --no-cache-dir "/output/wheel/$WHEEL_NAME"
     cd /tmp
-    python3 - <<PY
+    for wheel in /output/wheel/*.whl; do
+      name=$(basename "$wheel")
+      twine check --strict "$wheel"
+      pythons=$(echo "$name" | sed -E "s/^[^-]+-[^-]+-cp3([0-9]+)-.*/3.\1/")
+      case "$name" in
+        *-abi3-*) abi3audit "$wheel"; pythons="$pythons 3.14" ;;
+      esac
+      for py in $pythons; do
+        echo "=== $name on Python $py"
+        venv="/tmp/venv-${name%.whl}-$py"
+        uv venv -q --managed-python --python "$py" "$venv"
+        uv pip install -q --python "$venv" "$wheel"
+        "$venv/bin/python" - <<PY
 import os
 
 import cuvslam
@@ -92,4 +88,6 @@ if expected_version:
 
 print("cuvslam wheel import OK, version:", version_info)
 PY
+      done
+    done
   '

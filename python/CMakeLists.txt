@@ -14,7 +14,8 @@
 
 # Separate pycuvslam CMakeLists.txt to use with pip install -e .
 
-cmake_minimum_required(VERSION 3.19)
+# 3.26 for FindPython's Development.SABIModule; scikit-build-core fetches a newer CMake when the system one is older
+cmake_minimum_required(VERSION 3.26)
 project(pycuvslam LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
