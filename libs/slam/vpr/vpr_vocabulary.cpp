@@ -45,18 +45,10 @@ bool ReadVocabularyFile(const std::string& path, Blob& bytes) {
   return static_cast<bool>(file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size)));
 }
 
-VocabularyBuilder::VocabularyBuilder(const VprOptions& options) : min_frames_(options.min_training_keyframes) {
-  if (!options.enabled || !options.vocabulary_path.empty()) {
-    throw std::invalid_argument("VPR: a vocabulary is fitted with place recognition on and no vocabulary_path.");
-  }
-  backend_ = CreateVpr(options);
-  capacity_ = backend_->TrainingCapacity();
-  if (capacity_ == 0) {
-    throw std::runtime_error(std::string("VPR: the ") + backend_->Name() + " backend fits no vocabulary.");
-  }
-}
-
-VocabularyBuilder::~VocabularyBuilder() = default;
+VocabularyBuilder::VocabularyBuilder(const VprOptions& options)
+    : backend_(CreateVpr(options)),
+      min_frames_(options.min_training_keyframes),
+      capacity_(options.max_training_keyframes) {}
 
 void VocabularyBuilder::AddFrame(const VprImage& image) {
   if (fitted_) {

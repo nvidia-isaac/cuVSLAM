@@ -472,14 +472,10 @@ TEST_F(TrackerTest, VprVocabularyBuilderRejectsFitSettingsOutOfOrderBeforeLoadin
   EXPECT_THROW(VprVocabularyBuilder{max_images}, std::invalid_argument);
 }
 
-// Also what a build without TensorRT reports. The score threshold and the vocabulary file are a session's.
+// Also what a build without TensorRT reports.
 TEST_F(TrackerTest, VprVocabularyBuilderNeedsAnEngine) {
   Slam::VprSettings settings;
   settings.model_path = "/nonexistent/anyloc.engine";
-  EXPECT_THROW(VprVocabularyBuilder{settings}, std::runtime_error);
-
-  settings.score_threshold = 2.f;
-  settings.vocabulary_path = "/nonexistent/test.vocabulary";
   EXPECT_THROW(VprVocabularyBuilder{settings}, std::runtime_error);
 }
 
@@ -506,7 +502,6 @@ TEST_F(TrackerTest, VprVocabularyBuilderRefusesANegativePitch) {
   image.data_type = cuvslam::ImageData::DataType::UINT8;
   image.is_gpu_mem = true;
   EXPECT_THROW(builder.AddImage(image), std::invalid_argument);
-  EXPECT_EQ(builder.GetImageCount(), 0u);
 }
 #endif
 

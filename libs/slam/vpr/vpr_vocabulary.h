@@ -31,21 +31,13 @@ bool ReadVocabularyFile(const std::string& path, Blob& bytes);
 /// frames again and writes what the backend's Serialize() then holds. Not thread safe.
 class VocabularyBuilder {
 public:
-  /// @throws std::invalid_argument if `options` are disabled or name a vocabulary_path, std::runtime_error if their
-  /// backend cannot be made or fits no vocabulary.
+  /// `options` are enabled and name no vocabulary_path. Throws std::runtime_error if their backend cannot be made.
   explicit VocabularyBuilder(const VprOptions& options);
-  ~VocabularyBuilder();
 
   /// Most frames fitted to.
   size_t Capacity() const { return capacity_; }
 
-  /// Frames added so far.
-  size_t Size() const { return size_; }
-
-  /// The vocabulary is fitted, by the first Save().
-  bool Fitted() const { return fitted_; }
-
-  /// @throws std::invalid_argument at Capacity() or once Fitted(), std::runtime_error if the backend cannot describe
+  /// @throws std::invalid_argument at Capacity() or after Save(), std::runtime_error if the backend cannot describe
   /// `image`.
   void AddFrame(const VprImage& image);
 

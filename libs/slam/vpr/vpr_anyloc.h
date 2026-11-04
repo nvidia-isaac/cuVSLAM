@@ -38,7 +38,7 @@ public:
   static constexpr int kKMeansIterations = 25;
 
   /// @throws std::runtime_error if options.model_path is not a usable engine or options.vocabulary_path not a
-  /// vocabulary of it, std::invalid_argument if the training options are out of order.
+  /// vocabulary of it.
   explicit VprAnyLoc(const VprOptions& options);
   ~VprAnyLoc() override;
 
@@ -48,7 +48,6 @@ public:
   bool HasNode(KeyFrameId node_id) const override;
   void RemoveNode(KeyFrameId node_id) override;
   size_t Size() const override { return entries_.size(); }
-  size_t TrainingCapacity() const override;
   void Finalize() override;
   VprMatch Query(const VprImage& image) override;
   std::vector<VprMatch> QueryTopK(const VprImage& image, size_t max_results) override;

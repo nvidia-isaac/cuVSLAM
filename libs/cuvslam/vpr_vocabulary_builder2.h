@@ -42,21 +42,12 @@ public:
   explicit VprVocabularyBuilder(const Slam::VprSettings& settings);
 
   /**
-   * Move constructor
-   * @param[in] other other builder
-   */
-  VprVocabularyBuilder(VprVocabularyBuilder&& other) noexcept;
-
-  /**
    * Destructor
    */
   ~VprVocabularyBuilder();
 
   /// @return most images fitted to, `Slam::VprSettings::vocabulary_max_keyframes`; spread them out
   uint32_t GetCapacity() const;
-
-  /// @return images added so far
-  uint32_t GetImageCount() const;
 
   /**
    * Describe an image of the camera SLAM maps, its first primary camera.

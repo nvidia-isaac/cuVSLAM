@@ -178,13 +178,6 @@ class TestVprBindings(unittest.TestCase):
                       'score_threshold=0.75, vocabulary_path=/tmp/a.vocabulary, vocabulary_min_keyframes=3, '
                       'vocabulary_max_keyframes=7)', text)
 
-    def test_vocabulary_settings_are_unsigned(self):
-        with self.assertRaises(TypeError):
-            vslam.Slam.VprSettings(vocabulary_min_keyframes=-1)
-        settings = vslam.Slam.VprSettings()
-        with self.assertRaises(TypeError):
-            settings.vocabulary_min_keyframes = -1
-
     def test_loop_closure_mode_enum(self):
         self.assertEqual(set(vslam.Slam.LoopClosureMode.__members__), {'LSI', 'VPR'})
         self.assertEqual(vslam.Slam.Config().loop_closure_mode, vslam.Slam.LoopClosureMode.LSI)
@@ -391,12 +384,6 @@ class TestVprAnyLocConfig(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             vslam.VprVocabularyBuilder(settings)
 
-        # The score threshold and the vocabulary file are a session's, so only the engine stops the builder.
-        settings.score_threshold = 2.0
-        settings.vocabulary_path = "/nonexistent/test.vocabulary"
-        with self.assertRaises(RuntimeError):
-            vslam.VprVocabularyBuilder(settings)
-
     @needs_anyloc
     def test_localization_without_a_guess_pose_needs_a_candidate(self):
         slam = vslam.Slam(make_rig()[0], [0, 1], make_configs(True)[1])
@@ -438,13 +425,10 @@ class TestVprVocabularyBuilder(unittest.TestCase):
     def test_capacity_is_vocabulary_max_keyframes(self):
         builder = self.make_builder()
         self.assertEqual(builder.capacity, 10)
-        self.assertEqual(builder.image_count, 0)
 
         self.add_images(builder, 10)
-        self.assertEqual(builder.image_count, 10)
         with self.assertRaises(ValueError):
             builder.add_image(noise_images(10)[0])
-        self.assertEqual(builder.image_count, 10)
 
     def test_slam_loads_a_saved_vocabulary(self):
         builder = self.make_builder(max_images=self.MIN_IMAGES + 1)
@@ -582,22 +566,6 @@ class TestVprAnyLoc(unittest.TestCase):
                 np.array(place.pose.translation), np.array(nodes[place.node_id].translation), atol=1e-5)
             self.assertLessEqual(place.score, 1.0 + 1e-5)
             self.assertLessEqual(abs(place.timestamp_ns - timestamp), self.MAX_TIME_TO_NODE_NS)
-
-    def test_the_reader_loads_the_images_its_replay_delivers(self):
-        # cuvslam_vpr_vocabulary reads the images it fits to this way.
-        replay = _FirstFrames(3)
-        reader = self.make_reader()
-        try:
-            reader.replay(replay)
-        except _StopReplay:
-            pass
-        self.assertEqual(len(replay.frames), 3)
-        for frame_id, images in replay.frames:
-            for camera, image in enumerate(images):
-                np.testing.assert_array_equal(reader.load_camera_image(frame_id, camera), image)
-        frame_id, images = replay.frames[0]
-        with self.assertRaises(ValueError):
-            reader.load_camera_image(frame_id, len(images))
 
     def test_a_session_fits_its_own_vocabulary_at_vocabulary_min_keyframes(self):
         # Fewer keyframes than the default minimum: only a minimum of 1 has a vocabulary to recognize with.
@@ -979,30 +947,6 @@ class _PrefixReplay:
 
     def get_camera_pose(self, frame_id):
         """Poses come from the pose graph instead."""
-        return None
-
-    def set_frame_metadata(self, frame_id, metadata):
-        """Ignore replay metadata: the sequence is replayed once, forward."""
-
-
-class _FirstFrames:
-    """EdexReader processor that keeps the ids and images of the first n_frames."""
-
-    def __init__(self, n_frames):
-        self.n_frames = n_frames
-        self.frames = []  # (frame_id, images)
-
-    def process_images(self, frame_id, timestamps, images, masks, depths=None):
-        if len(self.frames) == self.n_frames:
-            raise _StopReplay()
-        # The reader reuses its images list, so copy them.
-        self.frames.append((frame_id, [np.array(image, copy=True) for image in images]))
-
-    def process_imu(self, timestamp, linear_accelerations, angular_velocities):
-        """Ignore IMU samples: only the images are compared."""
-
-    def get_camera_pose(self, frame_id):
-        """Nothing is tracked."""
         return None
 
     def set_frame_metadata(self, frame_id, metadata):

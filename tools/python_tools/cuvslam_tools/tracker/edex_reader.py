@@ -717,14 +717,12 @@ class EdexReader(DatasetReader):
                 image = self.load_image(cache_path)
             else:
                 # Load from tar archive
-                # print(f"Loading from tar: {cam_data['filename']}")
                 image = self.load_image_from_tar(
                     self.tar_archives[folder_name],
                     cam_data['filename'],
                     cache_path if self.cache_uncompressed else None)
         else:
             # Load from regular file system
-            # print(f"Loading from filesystem: {image_path}")
             image = self.load_image(image_path, cache_uncompressed=self.cache_uncompressed)
 
         image_size = image.shape[:2]

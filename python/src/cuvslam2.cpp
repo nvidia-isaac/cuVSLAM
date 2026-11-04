@@ -1092,13 +1092,11 @@ NB_MODULE(_cuvslam, m) {
             .format(p.node_id, p.pose, p.score, p.timestamp_ns);
       });
 
-  auto vocabulary_builder_cls = nb::class_<VprVocabularyBuilder>(
+  nb::class_<VprVocabularyBuilder>(
       m, "VprVocabularyBuilder",
       "Fits the place recognition vocabulary of one operating domain, for `Slam.VprSettings.vocabulary_path`, as a "
       "session fits its own, to images spread over recordings of the domain. Needs what `Slam.Config.use_vpr` "
-      "needs.");
-
-  vocabulary_builder_cls
+      "needs.")
       .def(nb::init<const Slam::VprSettings&>(), nb::arg("settings"),
            "Load the engine of `settings.model_path`; sessions need an engine of the same network. "
            "`vocabulary_min_keyframes` and `vocabulary_max_keyframes` are counted in images; the rest of `settings` "
@@ -1106,7 +1104,6 @@ NB_MODULE(_cuvslam, m) {
            "and RuntimeError if the engine cannot be loaded.")
       .def_prop_ro("capacity", &VprVocabularyBuilder::GetCapacity,
                    "Most images fitted to, `Slam.VprSettings.vocabulary_max_keyframes`; spread them out")
-      .def_prop_ro("image_count", &VprVocabularyBuilder::GetImageCount, "Images added so far")
       .def(
           "add_image",
           [](VprVocabularyBuilder& self, const nb::ndarray<nb::ro>& image) {
@@ -1119,12 +1116,10 @@ NB_MODULE(_cuvslam, m) {
           "    image: uint8 array of shape (height, width) or (height, width, 3), in CPU or GPU memory\n\n"
           "Raises ValueError if `image` is unusable, past `capacity` or after `save`, and RuntimeError if the engine "
           "fails on it.")
-      .def(
-          "save", [](VprVocabularyBuilder& self, std::string_view path) { self.Save(path); }, nb::arg("path"),
-          nb::call_guard<nb::gil_scoped_release>(),
-          "Fit the vocabulary to the images added (first call only), then write it to `path`.\n\n"
-          "Raises ValueError with fewer than `vocabulary_min_keyframes` images, and RuntimeError if `path` cannot "
-          "be written.");
+      .def("save", &VprVocabularyBuilder::Save, nb::arg("path"), nb::call_guard<nb::gil_scoped_release>(),
+           "Fit the vocabulary to the images added (first call only), then write it to `path`.\n\n"
+           "Raises ValueError with fewer than `vocabulary_min_keyframes` images, and RuntimeError if `path` cannot "
+           "be written.");
 
   // Slam class methods
   slam_cls

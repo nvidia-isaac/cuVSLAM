@@ -42,9 +42,8 @@ class _FakeBuilder:
 class _FakeReader:
     """Stand-in for EdexReader whose images name the sequence, frame, and camera they come from."""
 
-    def __init__(self, edex_dir: str, frame_ids, n_cameras: int = 2):
+    def __init__(self, edex_dir: str, frame_ids):
         self.edex_dir = edex_dir
-        self.rig = types.SimpleNamespace(cameras=[None] * n_cameras)
         self.frames = {frame_id: {} for frame_id in frame_ids}
 
     def load_camera_image(self, frame_id, camera_id):
@@ -80,28 +79,18 @@ class TestSelectFrames(unittest.TestCase):
 
 
 class TestFitVocabulary(unittest.TestCase):
-    def test_images_of_the_camera_are_spread_over_the_sequences_and_saved_once(self):
+    def test_images_are_spread_over_the_sequences_and_saved_once(self):
         builder = _FakeBuilder(capacity=8)
         # Frames are taken in frame id order, not in the order the reader holds them.
         readers = [_FakeReader("a", range(109, 99, -1)), _FakeReader("b", range(30))]
 
-        counts = cli.fit_vocabulary(builder, readers, 1, "kitti.vocabulary")
+        counts = cli.fit_vocabulary(builder, readers, "kitti.vocabulary")
 
         self.assertEqual(counts, [2, 6])
         self.assertEqual(builder.calls,
-                         [("add_image", ("a", frame_id, 1)) for frame_id in (102, 107)]
-                         + [("add_image", ("b", frame_id, 1)) for frame_id in (2, 7, 12, 17, 22, 27)]
+                         [("add_image", ("a", frame_id, 0)) for frame_id in (102, 107)]
+                         + [("add_image", ("b", frame_id, 0)) for frame_id in (2, 7, 12, 17, 22, 27)]
                          + [("save", "kitti.vocabulary")])
-
-    def test_camera_outside_a_rig_fails_before_any_image(self):
-        builder = _FakeBuilder(capacity=8)
-        # Only the second rig lacks the camera.
-        readers = [_FakeReader("a", range(10), n_cameras=2), _FakeReader("b", range(30), n_cameras=1)]
-
-        with self.assertRaisesRegex(ValueError, "--camera 1 is not a camera of b"):
-            cli.fit_vocabulary(builder, readers, 1, "kitti.vocabulary")
-
-        self.assertEqual(builder.calls, [])
 
 
 class TestVprVocabularyCli(unittest.TestCase):
@@ -150,7 +139,7 @@ class TestVprVocabularyCli(unittest.TestCase):
                 cli.main(["--help"])
 
         self.assertEqual(cm.exception.code, 0)
-        for flag in ("--output", "--vpr_model_path", "--edex_filename", "--camera"):
+        for flag in ("--output", "--vpr_model_path", "--edex_filename"):
             self.assertIn(flag, stdout.getvalue())
 
     def test_usage_errors_exit_before_cuvslam_is_imported(self):
@@ -161,7 +150,6 @@ class TestVprVocabularyCli(unittest.TestCase):
             (["--output", self.output, "--vpr_model_path", missing, self.sequence], "--vpr_model_path"),
             (["--output", self.output, *engine, self.sequence, missing], f"{missing} has no stereo.edex"),
             (["--output", self.output, *engine, "--edex_filename", "mono.edex", self.sequence], "has no mono.edex"),
-            (["--output", self.output, *engine, "--camera", "-1", self.sequence], "--camera"),
             (["--output", self.root, *engine, self.sequence], "is a folder"),
             (["--output", os.path.join(missing, "kitti.vocabulary"), *engine, self.sequence], "does not exist"),
         )

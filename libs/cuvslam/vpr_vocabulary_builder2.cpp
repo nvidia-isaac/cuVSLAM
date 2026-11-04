@@ -41,13 +41,9 @@ VprVocabularyBuilder::VprVocabularyBuilder(const Slam::VprSettings& settings) : 
   impl->builder = std::make_unique<slam::vpr::VocabularyBuilder>(options);
 }
 
-VprVocabularyBuilder::VprVocabularyBuilder(VprVocabularyBuilder&& other) noexcept = default;
-
 VprVocabularyBuilder::~VprVocabularyBuilder() = default;
 
 uint32_t VprVocabularyBuilder::GetCapacity() const { return static_cast<uint32_t>(impl->builder->Capacity()); }
-
-uint32_t VprVocabularyBuilder::GetImageCount() const { return static_cast<uint32_t>(impl->builder->Size()); }
 
 void VprVocabularyBuilder::AddImage(const ImageData& image) {
   const slam::vpr::VprImage vpr_image = MakeVprImage(image, true);

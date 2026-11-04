@@ -21,7 +21,6 @@
 #include <cmath>
 #include <filesystem>
 #include <stdexcept>
-#include <string>
 
 #include "common/include_eigen.h"
 #include "common/log.h"
@@ -96,17 +95,6 @@ bool ReadCenters(const BlobReader& reader, int32_t& cluster_count, int32_t& desc
   return center_count == 0 || reader.read(centers.data(), centers.size() * sizeof(float));
 }
 
-/// Every `dim` wide row is finite and of unit length, as TrainVocabulary() leaves them.
-bool UnitRows(const std::vector<float>& rows, int dim) {
-  for (size_t begin = 0; begin < rows.size(); begin += static_cast<size_t>(dim)) {
-    const float norm = std::sqrt(Dot(rows.data() + begin, rows.data() + begin, dim));
-    if (!(std::abs(norm - 1.f) <= 1e-3f)) {
-      return false;
-    }
-  }
-  return true;
-}
-
 }  // namespace
 
 VprAnyLoc::VprAnyLoc(const VprOptions& options)
@@ -126,12 +114,6 @@ VprAnyLoc::VprAnyLoc(const VprOptions& options)
         "anyloc_engine CMake target builds. Tried \"" +
         model_path_ + "\".");
   }
-  if (min_training_keyframes_ == 0 || max_training_keyframes_ < min_training_keyframes_) {
-    throw std::invalid_argument(
-        "VPR AnyLoc: a session fits its vocabulary to 1 <= min_training_keyframes <= max_training_keyframes "
-        "frames, not " +
-        std::to_string(min_training_keyframes_) + " to " + std::to_string(max_training_keyframes_) + ".");
-  }
   network_ = std::make_unique<AnyLocNetwork>(model_path_);
   descriptor_dim_ = network_->descriptor_dim();
   TraceMessage("VPR AnyLoc: loaded %s, input %dx%d, %d patches of %d\n", model_path_.c_str(), network_->input_width(),
@@ -143,8 +125,6 @@ VprAnyLoc::VprAnyLoc(const VprOptions& options)
 
 VprAnyLoc::~VprAnyLoc() = default;
 
-size_t VprAnyLoc::TrainingCapacity() const { return vocabulary_path_.empty() ? max_training_keyframes_ : 0; }
-
 void VprAnyLoc::LoadVocabulary() {
   Blob file;
   if (!ReadVocabularyFile(vocabulary_path_, file)) {
@@ -155,24 +135,12 @@ void VprAnyLoc::LoadVocabulary() {
   int32_t descriptor_dim = 0;
   std::vector<float> centers;
   uint64_t entry_count = 0;
-  std::string problem;
-  if (!ReadCenters(reader, cluster_count, descriptor_dim, centers) || !reader.read(entry_count)) {
-    problem = "it is not a vocabulary file";
-  } else if (centers.empty()) {
-    problem = "it holds no vocabulary";
-  } else if (descriptor_dim != descriptor_dim_) {
-    problem = "its centers have " + std::to_string(descriptor_dim) + " dimensions, the engine's descriptors " +
-              std::to_string(descriptor_dim_);
-  } else if (entry_count != 0) {
-    problem = "it holds mapped places too";
-  } else if (reader.remaining() != 0) {
-    problem = "it is not a vocabulary file";
-  } else if (!UnitRows(centers, descriptor_dim)) {
-    problem = "its centers are not unit vectors";
-  }
-  if (!problem.empty()) {
-    throw std::runtime_error("VPR AnyLoc: \"" + vocabulary_path_ + "\" is not a vocabulary for this engine: " +
-                             problem + ". VprVocabularyBuilder and cuvslam_vpr_vocabulary write one.");
+  // The centers of the engine's width, then no places.
+  if (!ReadCenters(reader, cluster_count, descriptor_dim, centers) || centers.empty() ||
+      descriptor_dim != descriptor_dim_ || !reader.read(entry_count) || entry_count != 0 || reader.remaining() != 0) {
+    throw std::runtime_error("VPR AnyLoc: \"" + vocabulary_path_ +
+                             "\" is not a vocabulary for this engine. VprVocabularyBuilder and "
+                             "cuvslam_vpr_vocabulary write one.");
   }
   cluster_count_ = cluster_count;
   centers_ = std::move(centers);

@@ -92,15 +92,13 @@ words' first default was set that way and produced 75% wrong answers on the cros
 
 ## Adding a backend
 
-Implement `IVpr` and construct it in `CreateVpr`, which reports a backend that fails to load through its `error`
-instead of throwing. The tests of `VprMap` and of
+Implement `IVpr` and construct it in `CreateVpr`. The tests of `VprMap` and of
 the pose graph bookkeeping run a stand-in backend instead, through `VprMap(options, backend)` and
 `LocalizerAndMapper::SetVprMap`, so they need neither TensorRT nor a GPU. A backend that needs a
 vocabulary builds it in `Finalize()`, which `VprMap` calls before the first query and before serializing, once it
 holds `VprOptions::min_training_keyframes` frames. AnyLoc also fits it while mapping, as soon as it would hold more
 than `VprOptions::max_training_keyframes` frames, stalling the SLAM thread for about 5 s on an i9-10940X; once it has a
-vocabulary, it pools each frame as it is mapped. `TrainingCapacity()` is that maximum, which `VocabularyBuilder` fills;
-a backend that fits none, like AnyLoc with a vocabulary file, returns 0.
+vocabulary, it pools each frame as it is mapped.
 
 ## Closing loops
 

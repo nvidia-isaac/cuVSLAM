@@ -35,16 +35,12 @@ def select_frames(frame_counts: list[int], capacity: int) -> list[tuple[int, int
     return picks
 
 
-def fit_vocabulary(builder, readers: list, camera: int, output: str) -> list[int]:
-    """Add evenly spread images of `camera` to `builder`, save the vocabulary to `output`, and count them per reader."""
-    for reader in readers:
-        if camera >= len(reader.rig.cameras):
-            raise ValueError(f"--camera {camera} is not a camera of {reader.edex_dir}, whose rig has "
-                             f"{len(reader.rig.cameras)}")
+def fit_vocabulary(builder, readers: list, output: str) -> list[int]:
+    """Add evenly spread images of camera 0 to `builder`, save the vocabulary to `output`, and count them per reader."""
     frame_ids = [sorted(reader.frames) for reader in readers]
     counts = [0] * len(readers)
     for sequence, position in select_frames([len(ids) for ids in frame_ids], builder.capacity):
-        builder.add_image(readers[sequence].load_camera_image(frame_ids[sequence][position], camera))
+        builder.add_image(readers[sequence].load_camera_image(frame_ids[sequence][position], 0))
         counts[sequence] += 1
     builder.save(output)
     return counts
@@ -65,9 +61,6 @@ def main(argv: Optional[list[str]] = None) -> int:
                              "(default: $CUVSLAM_ANYLOC_ENGINE).")
     parser.add_argument("--edex_filename", type=str, default="stereo.edex",
                         help="EDEX file of each sequence (default: stereo.edex).")
-    parser.add_argument("--camera", type=int, default=0,
-                        help="Camera whose images are fitted: the first primary camera, which SLAM's place "
-                             "recognition uses (default: 0).")
 
     args = parser.parse_args(argv)
     if not os.path.isfile(args.vpr_model_path):
@@ -75,8 +68,6 @@ def main(argv: Optional[list[str]] = None) -> int:
     for sequence in args.sequences:
         if not os.path.isfile(os.path.join(sequence, args.edex_filename)):
             parser.error(f"{sequence} has no {args.edex_filename}")
-    if args.camera < 0:
-        parser.error("--camera must be a camera index, 0 or more")
     if os.path.isdir(args.output):
         parser.error(f"--output {args.output} is a folder; name the vocabulary file to write")
     output_dir = os.path.dirname(os.path.abspath(args.output))
@@ -93,7 +84,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         readers = [EdexReader(sequence, stereo_edex=os.path.join(sequence, args.edex_filename))
                    for sequence in args.sequences]
         builder = vslam.VprVocabularyBuilder(vslam.Slam.VprSettings(model_path=args.vpr_model_path))
-        counts = fit_vocabulary(builder, readers, args.camera, args.output)
+        counts = fit_vocabulary(builder, readers, args.output)
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
         parser.error(str(exc))
     for sequence, count in zip(args.sequences, counts):
