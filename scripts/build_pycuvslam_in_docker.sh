@@ -45,15 +45,21 @@ docker run --runtime=nvidia --gpus all --rm --label "cuvslam.runner=${RUNNER_NAM
     fi
 
     cp -r /cuvslam /tmp/cuvslam_src
-    python3 - /tmp/cuvslam_src/python/pyproject.toml "$CUDA_MAJOR" <<"PY"
+    python3 - /tmp/cuvslam_src/python/pyproject.toml "$CUDA_MAJOR" /tmp/cuvslam_src/scripts/install_tensorrt.sh <<"PY"
+import re
 import sys
 from pathlib import Path
 
-path, major = Path(sys.argv[1]), sys.argv[2]
+path, major, install_tensorrt = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3])
 text = path.read_text()
+trt = re.search(r"^TENSORRT_VERSION=(\d+\.\d+\.\d+)\.", install_tensorrt.read_text(), re.M).group(1)
+trt_cu12 = f"tensorrt-cu12-libs=={trt}.*; platform_machine != \"aarch64\""
+if text.count(trt_cu12) != 1:
+    raise SystemExit(f"{path} must pin {trt_cu12!r} to match {install_tensorrt}")
 replacements = [("name = \"cuvslam\"", f"name = \"cuvslam-cu{major}\"")]
 if major != "12":
     replacements.append(("==12.*; platform_machine != \"aarch64\"", f"=={major}.*"))
+    replacements.append((trt_cu12, f"tensorrt-cu{major}-libs=={trt}.*"))
 for old, new in replacements:
     if text.count(old) != 1:
         raise SystemExit(f"Expected exactly one {old!r} in {path}")

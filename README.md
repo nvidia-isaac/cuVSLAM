@@ -157,8 +157,10 @@ combinations require an [installation from source](#install-from-source).
   Toolkit from JetPack). When installed, they take precedence over a system CUDA Toolkit, unless another module has
   already loaded these libraries.
 
-Visual place recognition (`use_vpr`, AnyLoc) also needs TensorRT 10 (`libnvinfer10`), installed separately (not
-included in the wheels). The rest of cuVSLAM runs without it.
+Visual place recognition (`use_vpr`, AnyLoc) also needs TensorRT 10 (`libnvinfer10`), not included in the wheels. The
+rest of cuVSLAM runs without it. Install it separately, or with the `tensorrt` extra (x86_64 and Jetson Thor), which
+installs NVIDIA's TensorRT wheel of the version the cuVSLAM wheels are built against. An AnyLoc engine only loads in
+the TensorRT version that built it.
 
 Official wheels include cuNLS support for `Multisensor` mode; no separate cuNLS installation is required.
 

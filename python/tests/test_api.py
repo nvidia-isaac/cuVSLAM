@@ -64,5 +64,18 @@ class TestApi(unittest.TestCase):
         self.assertEqual([c.args[0] for c in pathfinder.load_nvidia_dynamic_lib.call_args_list],
                          ['cublas', 'cusparse', 'cusolver'])
 
+    def test_loads_libnvinfer_from_tensorrt_wheel(self):
+        spec = mock.Mock(submodule_search_locations=['/a', '/b', '/c'])
+        with mock.patch('importlib.util.find_spec', return_value=spec), \
+                mock.patch('ctypes.CDLL', side_effect=[OSError('/a'), None]) as cdll:
+            vslam._load_tensorrt()
+        self.assertEqual([c.args[0] for c in cdll.call_args_list],
+                         ['/a/libnvinfer.so.10', '/b/libnvinfer.so.10'])
+
+    def test_tensorrt_preload_without_wheel(self):
+        with mock.patch('importlib.util.find_spec', return_value=None), mock.patch('ctypes.CDLL') as cdll:
+            vslam._load_tensorrt()
+        cdll.assert_not_called()
+
 if __name__ == "__main__":
     unittest.main()

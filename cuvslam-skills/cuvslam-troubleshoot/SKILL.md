@@ -46,7 +46,8 @@ Pre-built wheels: https://github.com/nvidia-isaac/cuVSLAM/releases/latest
 - x86_64: Ubuntu 22.04 or newer, `cu12` and `cu13`.
 - Jetson Orin: Ubuntu 22.04 / `cu12` only.
 - Jetson Thor: Ubuntu 24.04 / `cu13` only.
-- Visual place recognition (`use_vpr`, AnyLoc) also needs TensorRT 10 (`libnvinfer10`), installed separately.
+- Visual place recognition (`use_vpr`, AnyLoc) also needs TensorRT 10 (`libnvinfer10`), installed separately or with
+  the `tensorrt` extra (not on Jetson Orin). The AnyLoc engine must come from the same TensorRT version.
 
 From source (after building C++ lib):
 ```bash
