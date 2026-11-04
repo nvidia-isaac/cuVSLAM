@@ -48,6 +48,31 @@ class _FakeExecutor:
 
 
 class TestReporterExecution(unittest.TestCase):
+    def test_process_sequence_dispatches_api_launcher_backend(self):
+        captured_args = []
+        stat = object()
+
+        def run_launcher(args):
+            captured_args.append(args)
+            return stat
+
+        args = argparse.Namespace(
+            tracker_backend="api_launcher",
+            config_path="",
+            repeat_type="none",
+            num_loops=0,
+        )
+        sequence = {
+            "sequence_title": "seq-cpp",
+            "sequence_folder": "seq",
+        }
+        with mock.patch.object(execution, "_load_api_launcher", return_value=run_launcher):
+            result = execution.process_sequence(sequence, args, "/datasets", "dataset")
+
+        self.assertIs(result, stat)
+        self.assertEqual(captured_args[0].tracker_backend, "api_launcher")
+        self.assertEqual(captured_args[0].config_path, "/datasets/dataset/seq/stereo.edex")
+
     def test_process_sequence_applies_reporter_config_fields(self):
         captured_args = []
         stat = object()

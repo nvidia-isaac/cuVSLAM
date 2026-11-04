@@ -23,7 +23,7 @@ from concurrent.futures import ProcessPoolExecutor
 from typing import Any, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from cuvslam_tools.tracker.runner import Stat
+    from cuvslam_tools.tracker.results import Stat
 
 
 LOGGER = logging.getLogger(__name__)
@@ -124,6 +124,13 @@ def _load_track():
     return track
 
 
+def _load_api_launcher():
+    """Load the binding-free C++ launcher adapter lazily."""
+    from cuvslam_tools.reporter.api_launcher_backend import run_api_launcher
+
+    return run_api_launcher
+
+
 # Checked only where present, so a disabled stub missing the required keys still passes.
 _SEQUENCE_FLAGS = ("enable", "use_slam", "gt_from_shuttle")
 
@@ -175,8 +182,6 @@ def _validate_reporter_config(reporter_config: dict) -> tuple[str, list[dict]]:
 
 def process_sequence(sequence: dict, args: argparse.Namespace, datasets_root: str, dataset_folder: str) -> "Stat":
     """Process a single reporter sequence entry."""
-    track = _load_track()
-
     _warn_unsupported_sequence_fields(sequence)
     dataset_base = _resolve_dataset_base(datasets_root, dataset_folder)
     args_copy = copy.deepcopy(args)
@@ -192,8 +197,13 @@ def process_sequence(sequence: dict, args: argparse.Namespace, datasets_root: st
     if "sequence_num_repeats" in sequence:
         args_copy.num_loops = sequence["sequence_num_repeats"]
 
-    tracker_results = track(args_copy)
-    return tracker_results.stat
+    backend = getattr(args_copy, "tracker_backend", "python")
+    if backend == "python":
+        tracker_results = _load_track()(args_copy)
+        return tracker_results.stat
+    if backend == "api_launcher":
+        return _load_api_launcher()(args_copy)
+    raise ValueError(f"Unknown tracker backend: {backend}")
 
 
 def run_parallel_tracking(

@@ -21,6 +21,7 @@ set(LIBS
     utils
     profiler
     gflags::gflags
+    jsoncpp::jsoncpp
 )
 
 setup_app(MODULE_NAME ${MODULE_NAME}

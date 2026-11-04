@@ -15,9 +15,9 @@
 """Functions for calculating tracking and performance metrics."""
 
 import numpy as np
-from typing import Dict, List
-import cuvslam as vslam
-from cuvslam_tools.tracker import conversions as conv
+from typing import Any, Dict, List, Optional
+
+from cuvslam_tools.tracker.pose_utils import pose_to_transform
 
 
 def translation_error(pose_error: np.ndarray) -> float:
@@ -187,14 +187,15 @@ def last_frame_from_segment_length(
 
 
 def calculate_sequence_errors(
-    poses: Dict[int, vslam.Pose],
+    poses: Dict[int, Any],
     gt_transforms: List[np.ndarray],
     stat,
     frame_metadata: Dict[int, Dict],
     use_segments: bool = False,
     segment_lengths: List[int] = [],
     num_loops: int = 0,
-    repeat_type: str = "none"
+    repeat_type: str = "none",
+    frame_mapping: Optional[Dict[int, int]] = None,
 ) -> None:
     """Calculate tracking errors compared to ground truth.
 
@@ -215,7 +216,8 @@ def calculate_sequence_errors(
     rot_error = 0
     n_error_segments = 0
     total_frames = len(gt_transforms)
-    frame_mapping = get_frame_mapping(total_frames, frame_metadata, num_loops, repeat_type)
+    if frame_mapping is None:
+        frame_mapping = get_frame_mapping(total_frames, frame_metadata, num_loops, repeat_type)
 
     for frame_id_pose, frame_id_gt in frame_mapping.items():
         if frame_id_gt >= len(gt_transforms):
@@ -226,7 +228,7 @@ def calculate_sequence_errors(
         if pose is None or gt_transform is None:
             continue
         gt_transforms_filtered.append(gt_transform)
-        pose_transforms.append(conv.pose_to_transform(pose))
+        pose_transforms.append(pose_to_transform(pose))
 
     kabsch_rms_metric = calc_kabsch_rms_metric(gt_transforms_filtered, pose_transforms)  # m
     total_frames = len(gt_transforms_filtered)

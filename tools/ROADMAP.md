@@ -36,9 +36,9 @@ The tracker also served as the primary tool for C++ debugging.
 
 ### Replacements
 
-**`tools/cuvslam_api_launcher`** — A C++ tool built on top of the public API. It is kept
-as small as possible, with no additional features such as shuttle mode or black-frame
-simulation. It accepts the simplest edex + TGA image sequence as input. Its primary
+**`tools/cuvslam_api_launcher`** — A C++ tool built on top of the public API. It accepts
+EDEX image sequences and exposes repeat, shuttle, blackout, performance-throttling, and
+development-only internal configuration needed by the reporter's C++ backend. Its primary
 purposes are:
 
 1. Real-time performance benchmarking (FPS simulation)
@@ -78,8 +78,10 @@ Sub-tools:
 
 ### 2. Developing a new feature and evaluating a parameter's effect on datasets
 
-- Temporarily expose the parameter through `const TrackOptions& options`.
-- Set the parameter in `python_tools/cuvslam_tools/reporter`.
+- Expose the development setting as a `cuvslam_api_launcher` gflag.
+- Pass it through with `cuvslam_reporter --tracker_backend api_launcher ... -- --expert_<setting>=<value>`.
+- Keep the Python backend for normal public-API evaluation; unstable internal parameters
+  are intentionally unavailable there.
 
 ### 3. Measuring GPU load on a target device (e.g., Jetson Orin Nano at 60 fps)
 
