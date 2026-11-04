@@ -52,6 +52,7 @@
 
 #include "cuvslam/debug_dump.h"
 #include "cuvslam/internal.h"
+#include "cuvslam/vpr_vocabulary_builder2.h"
 
 namespace cuvslam {
 
@@ -1617,12 +1618,12 @@ std::shared_ptr<const Slam::PoseGraph> Slam::ReadPoseGraph() {
   return impl->pose_graph_;
 }
 
-class Slam::VprVocabularyBuilder::Impl {
+class VprVocabularyBuilder::Impl {
 public:
   std::unique_ptr<slam::vpr::VocabularyBuilder> builder;
 };
 
-Slam::VprVocabularyBuilder::VprVocabularyBuilder(const VprSettings& settings) : impl(std::make_unique<Impl>()) {
+VprVocabularyBuilder::VprVocabularyBuilder(const Slam::VprSettings& settings) : impl(std::make_unique<Impl>()) {
   CheckVocabularyFit(settings);
   slam::vpr::VprOptions options;
   options.enabled = true;
@@ -1636,15 +1637,15 @@ Slam::VprVocabularyBuilder::VprVocabularyBuilder(const VprSettings& settings) : 
   }
 }
 
-Slam::VprVocabularyBuilder::VprVocabularyBuilder(VprVocabularyBuilder&& other) noexcept = default;
+VprVocabularyBuilder::VprVocabularyBuilder(VprVocabularyBuilder&& other) noexcept = default;
 
-Slam::VprVocabularyBuilder::~VprVocabularyBuilder() = default;
+VprVocabularyBuilder::~VprVocabularyBuilder() = default;
 
-uint32_t Slam::VprVocabularyBuilder::GetCapacity() const { return static_cast<uint32_t>(impl->builder->Capacity()); }
+uint32_t VprVocabularyBuilder::GetCapacity() const { return static_cast<uint32_t>(impl->builder->Capacity()); }
 
-uint32_t Slam::VprVocabularyBuilder::GetImageCount() const { return static_cast<uint32_t>(impl->builder->Size()); }
+uint32_t VprVocabularyBuilder::GetImageCount() const { return static_cast<uint32_t>(impl->builder->Size()); }
 
-void Slam::VprVocabularyBuilder::AddImage(const ImageData& image) {
+void VprVocabularyBuilder::AddImage(const ImageData& image) {
   const slam::vpr::VprImage vpr_image = MakeVprImage(image, true);
   THROW_INVALID_ARG_IF(vpr_image.Empty(), "VprVocabularyBuilder::AddImage needs an image with pixels.");
   slam::vpr::VocabularyBuilder& builder = *impl->builder;
@@ -1656,7 +1657,7 @@ void Slam::VprVocabularyBuilder::AddImage(const ImageData& image) {
   }
 }
 
-void Slam::VprVocabularyBuilder::Save(std::string_view path) {
+void VprVocabularyBuilder::Save(std::string_view path) {
   std::string error;
   if (!impl->builder->Save(std::string(path), error)) {
     // Too few images leave it unfitted; a write failure comes after the fit.

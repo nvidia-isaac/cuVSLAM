@@ -383,19 +383,19 @@ class TestVprAnyLocConfig(unittest.TestCase):
             settings = vslam.Slam.VprSettings(model_path="/nonexistent/anyloc.engine")
             setattr(settings, name, value)
             with self.assertRaises(ValueError, msg=name) as caught:
-                vslam.Slam.VprVocabularyBuilder(settings)
+                vslam.VprVocabularyBuilder(settings)
             self.assertIn(name, str(caught.exception))
 
     def test_vocabulary_builder_needs_an_engine(self):
         settings = vslam.Slam.VprSettings(model_path="/nonexistent/anyloc.engine")
         with self.assertRaises(RuntimeError):
-            vslam.Slam.VprVocabularyBuilder(settings)
+            vslam.VprVocabularyBuilder(settings)
 
         # The score threshold and the vocabulary file are a session's, so only the engine stops the builder.
         settings.score_threshold = 2.0
         settings.vocabulary_path = "/nonexistent/test.vocabulary"
         with self.assertRaises(RuntimeError):
-            vslam.Slam.VprVocabularyBuilder(settings)
+            vslam.VprVocabularyBuilder(settings)
 
     @needs_anyloc
     def test_localization_without_a_guess_pose_needs_a_candidate(self):
@@ -422,7 +422,7 @@ class TestVprVocabularyBuilder(unittest.TestCase):
         shutil.rmtree(self.folder, ignore_errors=True)
 
     def make_builder(self, max_images=10):
-        return vslam.Slam.VprVocabularyBuilder(
+        return vslam.VprVocabularyBuilder(
             vslam.Slam.VprSettings(model_path=ANYLOC_ENGINE, vocabulary_max_keyframes=max_images))
 
     @staticmethod
@@ -458,7 +458,7 @@ class TestVprVocabularyBuilder(unittest.TestCase):
         vslam.Slam(make_rig()[0], [0, 1], self.vocabulary_config())
 
     def test_save_needs_vocabulary_min_keyframes(self):
-        builder = vslam.Slam.VprVocabularyBuilder(
+        builder = vslam.VprVocabularyBuilder(
             vslam.Slam.VprSettings(model_path=ANYLOC_ENGINE, vocabulary_min_keyframes=3, vocabulary_max_keyframes=10))
         self.add_images(builder, 2)
         with self.assertRaises(ValueError):
@@ -541,7 +541,7 @@ class TestVprAnyLoc(unittest.TestCase):
     @classmethod
     def fit_vocabulary(cls, path):
         """Fit a vocabulary file to images spread over the whole sequence, up to the builder's capacity."""
-        builder = vslam.Slam.VprVocabularyBuilder(vslam.Slam.VprSettings(model_path=ANYLOC_ENGINE))
+        builder = vslam.VprVocabularyBuilder(vslam.Slam.VprSettings(model_path=ANYLOC_ENGINE))
         reader = cls.make_reader()
         reader.replay(_VocabularyReplay(builder, reader.total_frames // builder.capacity + 1))
         builder.save(path)

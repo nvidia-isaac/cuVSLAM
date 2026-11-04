@@ -962,61 +962,6 @@ public:
   using RecognizePlaceFinishCB = std::function<void(const Result<PlaceRecognition>& result)>;
 
   /**
-   * @brief Fits the place recognition vocabulary of one operating domain, for `VprSettings::vocabulary_path`
-   *
-   * Fits it as a session fits its own, to images spread over recordings of the domain. Needs what `Config::use_vpr`
-   * needs. Not thread safe.
-   */
-  class CUVSLAM_API VprVocabularyBuilder {
-  public:
-    /**
-     * Load the engine; sessions need an engine of the same network.
-     * @param[in] settings `model_path`, and `vocabulary_min_keyframes` and `vocabulary_max_keyframes` counted in
-     * images; the rest is ignored
-     * @throws std::invalid_argument if `vocabulary_min_keyframes` is 0 or above `vocabulary_max_keyframes`
-     * @throws std::runtime_error if the engine cannot be loaded, or cuVSLAM was built without TensorRT
-     */
-    explicit VprVocabularyBuilder(const VprSettings& settings);
-
-    /**
-     * Move constructor
-     * @param[in] other other builder
-     */
-    VprVocabularyBuilder(VprVocabularyBuilder&& other) noexcept;
-
-    /**
-     * Destructor
-     */
-    ~VprVocabularyBuilder();
-
-    /// @return most images fitted to, `VprSettings::vocabulary_max_keyframes`; spread them out
-    uint32_t GetCapacity() const;
-
-    /// @return images added so far
-    uint32_t GetImageCount() const;
-
-    /**
-     * Describe an image of the camera SLAM maps, its first primary camera.
-     * @param[in] image 8 bit mono or RGB image in CPU or GPU memory
-     * @throws std::invalid_argument if `image` is unusable, `GetCapacity()` images were added, or after Save()
-     * @throws std::runtime_error if the engine fails on it
-     */
-    void AddImage(const ImageData& image);
-
-    /**
-     * Fit the vocabulary to the images added (first call only), then write it to `path`.
-     * @param[in] path vocabulary file to write
-     * @throws std::invalid_argument with fewer than `VprSettings::vocabulary_min_keyframes` images
-     * @throws std::runtime_error if `path` cannot be written
-     */
-    void Save(std::string_view path);
-
-  private:
-    class Impl;
-    std::unique_ptr<Impl> impl;
-  };
-
-  /**
    * Construct a SLAM instance with rig and primary cameras
    * @param[in] rig Camera rig configuration
    * @param[in] primary_cameras Vector of primary camera indices: distinct, non-empty, each a camera of the rig

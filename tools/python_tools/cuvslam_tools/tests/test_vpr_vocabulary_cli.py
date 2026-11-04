@@ -26,7 +26,7 @@ from cuvslam_tools.vpr_vocabulary import cli
 
 
 class _FakeBuilder:
-    """Stand-in for Slam.VprVocabularyBuilder that records its calls."""
+    """Stand-in for VprVocabularyBuilder that records its calls."""
 
     def __init__(self, capacity: int):
         self.capacity = capacity
@@ -133,15 +133,15 @@ class TestVprVocabularyCli(unittest.TestCase):
         return stderr.getvalue()
 
     def _stub_cuvslam(self, builder):
-        """Stand in for the binding and the EDEX reader; returns the patch, the stubbed Slam and the reader mock."""
-        slam = types.SimpleNamespace(VprSettings=mock.Mock(), VprVocabularyBuilder=mock.Mock(return_value=builder))
+        """Stand in for the binding and the EDEX reader; returns the patch, the stubbed binding and the reader mock."""
         vslam = types.ModuleType("cuvslam")
-        vslam.Slam = slam
+        vslam.Slam = types.SimpleNamespace(VprSettings=mock.Mock())
+        vslam.VprVocabularyBuilder = mock.Mock(return_value=builder)
         reader_class = mock.Mock(side_effect=lambda sequence, stereo_edex: _FakeReader(sequence, range(10)))
         edex_reader = types.ModuleType("cuvslam_tools.tracker.edex_reader")
         edex_reader.EdexReader = reader_class
         modules = {"cuvslam": vslam, "cuvslam_tools.tracker.edex_reader": edex_reader}
-        return mock.patch.dict(sys.modules, modules), slam, reader_class
+        return mock.patch.dict(sys.modules, modules), vslam, reader_class
 
     def test_help_does_not_import_cuvslam(self):
         stdout = io.StringIO()
@@ -177,7 +177,7 @@ class TestVprVocabularyCli(unittest.TestCase):
 
     def test_fits_every_sequence_with_the_engine(self):
         builder = _FakeBuilder(capacity=8)
-        modules, slam, reader_class = self._stub_cuvslam(builder)
+        modules, vslam, reader_class = self._stub_cuvslam(builder)
         stdout = io.StringIO()
         with modules, contextlib.redirect_stdout(stdout):
             exit_code = cli.main(["--output", self.output, "--vpr_model_path", self.engine, self.sequence])
@@ -185,8 +185,8 @@ class TestVprVocabularyCli(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         reader_class.assert_called_once_with(self.sequence, stereo_edex=os.path.join(self.sequence, "stereo.edex"))
         # Only the engine is passed; the rest of the settings keep the binding's defaults.
-        slam.VprSettings.assert_called_once_with(model_path=self.engine)
-        slam.VprVocabularyBuilder.assert_called_once_with(slam.VprSettings.return_value)
+        vslam.Slam.VprSettings.assert_called_once_with(model_path=self.engine)
+        vslam.VprVocabularyBuilder.assert_called_once_with(vslam.Slam.VprSettings.return_value)
         self.assertEqual(builder.calls[-1], ("save", self.output))
         self.assertIn(f"{self.sequence}: 8 images", stdout.getvalue())
 

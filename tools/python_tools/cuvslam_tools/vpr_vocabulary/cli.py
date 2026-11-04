@@ -92,7 +92,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     try:
         readers = [EdexReader(sequence, stereo_edex=os.path.join(sequence, args.edex_filename))
                    for sequence in args.sequences]
-        builder = vslam.Slam.VprVocabularyBuilder(vslam.Slam.VprSettings(model_path=args.vpr_model_path))
+        builder = vslam.VprVocabularyBuilder(vslam.Slam.VprSettings(model_path=args.vpr_model_path))
         counts = fit_vocabulary(builder, readers, args.camera, args.output)
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
         parser.error(str(exc))

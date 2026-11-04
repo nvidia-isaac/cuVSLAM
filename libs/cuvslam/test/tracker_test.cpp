@@ -31,6 +31,7 @@
 
 #include "common/include_gtest.h"
 #include "cuvslam/cuvslam2.h"
+#include "cuvslam/vpr_vocabulary_builder2.h"
 
 #ifdef USE_CUDA
 #include "cuda_modules/cuda_helper.h"
@@ -42,6 +43,7 @@ using cuvslam::Odometry;
 using cuvslam::Rig;
 using cuvslam::Slam;
 using cuvslam::Tracker;
+using cuvslam::VprVocabularyBuilder;
 using Mode = Tracker::Mode;
 
 static_assert(std::is_same_v<decltype(std::declval<Tracker&>().GetOdometry()), const Odometry&>);
@@ -463,22 +465,22 @@ TEST_F(TrackerTest, VprVocabularyBuilderRejectsFitSettingsOutOfOrderBeforeLoadin
 
   Slam::VprSettings min_images = settings;
   min_images.vocabulary_min_keyframes = 0;
-  EXPECT_THROW(Slam::VprVocabularyBuilder{min_images}, std::invalid_argument);
+  EXPECT_THROW(VprVocabularyBuilder{min_images}, std::invalid_argument);
 
   Slam::VprSettings max_images = settings;
   max_images.vocabulary_max_keyframes = settings.vocabulary_min_keyframes - 1;
-  EXPECT_THROW(Slam::VprVocabularyBuilder{max_images}, std::invalid_argument);
+  EXPECT_THROW(VprVocabularyBuilder{max_images}, std::invalid_argument);
 }
 
 // Also what a build without TensorRT reports. The score threshold and the vocabulary file are a session's.
 TEST_F(TrackerTest, VprVocabularyBuilderNeedsAnEngine) {
   Slam::VprSettings settings;
   settings.model_path = "/nonexistent/anyloc.engine";
-  EXPECT_THROW(Slam::VprVocabularyBuilder{settings}, std::runtime_error);
+  EXPECT_THROW(VprVocabularyBuilder{settings}, std::runtime_error);
 
   settings.score_threshold = 2.f;
   settings.vocabulary_path = "/nonexistent/test.vocabulary";
-  EXPECT_THROW(Slam::VprVocabularyBuilder{settings}, std::runtime_error);
+  EXPECT_THROW(VprVocabularyBuilder{settings}, std::runtime_error);
 }
 
 #ifdef USE_CUDA
@@ -490,7 +492,7 @@ TEST_F(TrackerTest, VprVocabularyBuilderRefusesANegativePitch) {
   }
   Slam::VprSettings settings;
   settings.model_path = engine;
-  Slam::VprVocabularyBuilder builder{settings};
+  VprVocabularyBuilder builder{settings};
 
   constexpr int32_t kWidth = 32;
   constexpr int32_t kHeight = 16;

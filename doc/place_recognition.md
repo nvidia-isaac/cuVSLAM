@@ -66,7 +66,7 @@ In C++ the same calls are `Slam::SaveMap`, `Slam::LocalizeInMap` and
 
 Each session fits AnyLoc's vocabulary to its own first keyframes, so maps of separate sessions encode places
 differently. To share one vocabulary across the sessions of an operating domain, fit it once to images spread over
-recordings of that domain, with `cuvslam_vpr_vocabulary` or `Slam.VprVocabularyBuilder`, and give every session the
+recordings of that domain, with `cuvslam_vpr_vocabulary` or `cuvslam.VprVocabularyBuilder`, and give every session the
 file:
 
 ```python

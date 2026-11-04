@@ -183,7 +183,7 @@ bool VprAnyLoc::LoadVocabulary(std::string& error) {
   }
   if (!problem.empty()) {
     error = "VPR AnyLoc: \"" + vocabulary_path_ + "\" is not a vocabulary for this engine: " + problem +
-            ". Slam::VprVocabularyBuilder and cuvslam_vpr_vocabulary write one.";
+            ". VprVocabularyBuilder and cuvslam_vpr_vocabulary write one.";
     return false;
   }
   cluster_count_ = cluster_count;
