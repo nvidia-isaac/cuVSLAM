@@ -118,7 +118,7 @@ class TestVprBindings(unittest.TestCase):
         self.assertEqual(cfg.vpr_settings.model_path, "")
         self.assertAlmostEqual(cfg.vpr_settings.score_threshold, 0.68, places=5)
         self.assertEqual(cfg.vpr_settings.vocabulary_path, "")
-        self.assertEqual(cfg.vpr_settings.vocabulary_min_keyframes, 8)
+        self.assertEqual(cfg.vpr_settings.vocabulary_min_keyframes, 10)
         self.assertEqual(cfg.vpr_settings.vocabulary_max_keyframes, 100)
         self.assertEqual(localization_settings().vpr_candidates, 5)
 
@@ -447,7 +447,7 @@ class TestVprVocabularyBuilder(unittest.TestCase):
         self.assertEqual(builder.image_count, 10)
 
     def test_slam_loads_a_saved_vocabulary(self):
-        builder = self.make_builder()
+        builder = self.make_builder(max_images=self.MIN_IMAGES + 1)
         self.add_images(builder, self.MIN_IMAGES)
         builder.save(self.path)
         self.assertEqual(os.path.getsize(self.path), self.FILE_BYTES)
@@ -500,7 +500,7 @@ class TestVprVocabularyBuilder(unittest.TestCase):
 @unittest.skipUnless(os.path.isdir(KITTI_07_DIR), f"needs real imagery at {KITTI_07_DIR}")
 @needs_anyloc
 class TestVprAnyLoc(unittest.TestCase):
-    """End to end place recognition on KITTI-07; AnyLoc needs 8+ mapped places to answer."""
+    """End to end place recognition on KITTI-07; AnyLoc needs 10+ mapped places to answer."""
 
     # Before the loop: dozens of keyframes, no revisits.
     N_FRAMES = 300
@@ -601,13 +601,14 @@ class TestVprAnyLoc(unittest.TestCase):
 
     def test_a_session_fits_its_own_vocabulary_at_vocabulary_min_keyframes(self):
         # Fewer keyframes than the default minimum: only a minimum of 1 has a vocabulary to recognize with.
-        for min_keyframes, recognized in ((1, True), (8, False)):
+        default = vslam.Slam.VprSettings().vocabulary_min_keyframes
+        for min_keyframes, recognized in ((1, True), (default, False)):
             slam_cfg = self.anyloc_config()
             slam_cfg.vpr_settings.vocabulary_min_keyframes = min_keyframes
             tracker = self.make_tracker(slam_cfg)
             tracker.slam.get_pose_graph()  # enables publishing the pose graph
             timestamp, images = self.track_prefix(tracker, n_frames=10)[0]
-            self.assertLess(len(tracker.slam.get_pose_graph().nodes), 8)
+            self.assertLess(len(tracker.slam.get_pose_graph().nodes), default)
             place = recognize_match(tracker.slam, images, timestamp)
             self.assertEqual(place is not None, recognized, msg=min_keyframes)
 

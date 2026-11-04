@@ -1024,7 +1024,7 @@ TEST(VprVocabularyBuilder, WritesAVocabularyThatASessionLoads) {
   }
   std::unique_ptr<VocabularyBuilder> builder = MakeBuilder(AnyLocOptions(engine));
   ASSERT_NE(builder, nullptr);
-  AddFrames(*builder, 8, 1830);
+  AddFrames(*builder, VprOptions{}.min_training_keyframes, 1830);
   const std::filesystem::path path = ScratchFolder() / "written.vocabulary";
   const std::filesystem::path again = ScratchFolder() / "written_again.vocabulary";
   ASSERT_NO_THROW(builder->Save(path.string()));
@@ -1048,7 +1048,7 @@ TEST(VprVocabularyBuilder, ReportsAFileItCannotWrite) {
   }
   std::unique_ptr<VocabularyBuilder> builder = MakeBuilder(AnyLocOptions(engine));
   ASSERT_NE(builder, nullptr);
-  AddFrames(*builder, 8, 1850);
+  AddFrames(*builder, VprOptions{}.min_training_keyframes, 1850);
   const std::string path = (ScratchFolder() / "missing" / "anyloc.vocabulary").string();
   try {
     builder->Save(path);
@@ -1075,7 +1075,7 @@ TEST(VprAnyLocFactory, RefusesAFileThatIsNotAVocabularyOfTheEngine) {
   if (engine.empty() || StandInEngine("wide").empty()) {
     GTEST_SKIP() << kNoStandIns;
   }
-  const std::string good_path = FitVocabulary(engine, 8, 1860, "good.vocabulary");
+  const std::string good_path = FitVocabulary(engine, VprOptions{}.min_training_keyframes, 1860, "good.vocabulary");
   ASSERT_EQ(ConstructionError(VocabularyOptions(engine, good_path)), "");
   const Blob good = ReadFileBytes(good_path);
 
@@ -1096,12 +1096,13 @@ TEST(VprAnyLocFactory, RefusesAFileThatIsNotAVocabularyOfTheEngine) {
   trailing.push_back(0);
   std::unique_ptr<IVpr> mapper = MakeVpr(AnyLocOptions(engine));
   ASSERT_NE(mapper, nullptr);
-  for (uint32_t i = 0; i < 8; ++i) {
+  for (uint32_t i = 0; i < VprOptions{}.min_training_keyframes; ++i) {
     mapper->AddFrame(i, MakeBlockyImage(256, 256, 8, 1870 + i));
   }
   std::unique_ptr<IVpr> unfitted = MakeVpr(AnyLocOptions(engine));
   ASSERT_NE(unfitted, nullptr);
-  const std::string other_width = FitVocabulary(StandInEngine("wide"), 8, 1880, "wide.vocabulary");
+  const std::string other_width =
+      FitVocabulary(StandInEngine("wide"), VprOptions{}.min_training_keyframes, 1880, "wide.vocabulary");
 
   const std::vector<std::pair<std::string, std::string>> cases = {
       {"missing", (ScratchFolder() / "missing.vocabulary").string()},
@@ -1133,8 +1134,8 @@ TEST(VprAnyLocVocabulary, RecognizesPlacesFromTheFirstFrame) {
   if (engine.empty()) {
     GTEST_SKIP() << kNoStandIns;
   }
-  std::unique_ptr<IVpr> vpr =
-      MakeVpr(VocabularyOptions(engine, FitVocabulary(engine, 8, 1900, "first_frame.vocabulary")));
+  std::unique_ptr<IVpr> vpr = MakeVpr(VocabularyOptions(
+      engine, FitVocabulary(engine, VprOptions{}.min_training_keyframes, 1900, "first_frame.vocabulary")));
   ASSERT_NE(vpr, nullptr);
   const VprImage image = MakeBlockyImage(256, 256, 8, 1910);
   vpr->AddFrame(0, image);
@@ -1148,7 +1149,8 @@ TEST(VprAnyLocVocabulary, SessionsSharingAVocabularyEncodeAlike) {
   if (engine.empty()) {
     GTEST_SKIP() << kNoStandIns;
   }
-  const VprOptions options = VocabularyOptions(engine, FitVocabulary(engine, 8, 1915, "shared.vocabulary"));
+  const VprOptions options =
+      VocabularyOptions(engine, FitVocabulary(engine, VprOptions{}.min_training_keyframes, 1915, "shared.vocabulary"));
   std::unique_ptr<IVpr> first = MakeVpr(options);
   std::unique_ptr<IVpr> second = MakeVpr(options);
   ASSERT_NE(first, nullptr);
@@ -1166,7 +1168,7 @@ TEST(VprAnyLocVocabulary, DeserializeTakesOnlyPlacesOfItsVocabulary) {
   if (engine.empty()) {
     GTEST_SKIP() << kNoStandIns;
   }
-  const std::string vocabulary = FitVocabulary(engine, 8, 1920, "own.vocabulary");
+  const std::string vocabulary = FitVocabulary(engine, VprOptions{}.min_training_keyframes, 1920, "own.vocabulary");
   const VprOptions options = VocabularyOptions(engine, vocabulary);
 
   // Places this vocabulary encoded load.
@@ -1189,7 +1191,7 @@ TEST(VprAnyLocVocabulary, DeserializeTakesOnlyPlacesOfItsVocabulary) {
   // A session that fitted its own encoded them with another vocabulary: refused, nothing changes.
   std::unique_ptr<IVpr> online = MakeVpr(AnyLocOptions(engine));
   ASSERT_NE(online, nullptr);
-  for (uint32_t i = 0; i < 8; ++i) {
+  for (uint32_t i = 0; i < VprOptions{}.min_training_keyframes; ++i) {
     online->AddFrame(i, MakeBlockyImage(256, 256, 8, 1940 + i));
   }
   EXPECT_FALSE(session->Deserialize(BlobReader(Serialized(*online))));
@@ -2071,8 +2073,8 @@ TEST_F(VprPoseGraph, AMapOfAnotherVocabularyIsKeptAsItIs) {
   ASSERT_TRUE(mapper_->AttachToNewDatabaseSaveMapAndDetach(saved));
   const std::string recorded = vpr_record(saved);
 
-  std::unique_ptr<LocalizerAndMapper> session =
-      MakeMapper(VocabularyOptions(engine, FitVocabulary(engine, 8, 2000, "session.vocabulary")));
+  std::unique_ptr<LocalizerAndMapper> session = MakeMapper(VocabularyOptions(
+      engine, FitVocabulary(engine, VprOptions{}.min_training_keyframes, 2000, "session.vocabulary")));
   ASSERT_TRUE(session->AttachToExistingReadOnlyDatabase(saved));
   EXPECT_EQ(session->GetVprMapSize(), 0u);
   EXPECT_FALSE(session->RecognizePlace(images_.front()).found);
@@ -2091,7 +2093,8 @@ TEST_F(VprPoseGraph, AMapOfTheSameVocabularyIsRecognized) {
   if (engine.empty()) {
     GTEST_SKIP() << kNoStandIns;
   }
-  const VprOptions options = VocabularyOptions(engine, FitVocabulary(engine, 8, 2010, "same.vocabulary"));
+  const VprOptions options =
+      VocabularyOptions(engine, FitVocabulary(engine, VprOptions{}.min_training_keyframes, 2010, "same.vocabulary"));
   mapper_ = MakeMapper(options);
   BuildChain(3, 1.f);
   ASSERT_TRUE(mapper_->AttachToNewDatabaseSaveMapAndDetach(Folder()));

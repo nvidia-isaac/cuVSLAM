@@ -160,8 +160,8 @@ against 0.99%), within the overlap of their run-to-run ranges. Two costs come wi
   map and no queries, and 66 in this mode. The rest is the query and the verifications, which a backend with no
   network pays as well: the in-tree bag of words tracked KITTI-00 at 30 frames per second in this mode. With six runs sharing the machine, this
   mode ran at 22.6 frames per second against 63.3 for the LSI one; on ONNX Runtime's CPU build it ran at 2.7.
-- **Vocabulary.** `AnyLoc` fits its vocabulary once, to the first 8 keyframes; fitting it to the first 100 instead
-  changed nothing on KITTI-00 and 02. A vocabulary file fitted to KITTI 11-21 put the revisited place among the five
+- **Vocabulary.** `AnyLoc` fits its vocabulary once, to the first 10 keyframes; fitting it to the first 100 instead of
+  8 changed nothing on KITTI-00 and 02. A vocabulary file fitted to KITTI 11-21 put the revisited place among the five
   candidates for 74% of KITTI 00-09 revisits against 71% (KITTI-07: 100% against 42%), at the same mean translation
   error, 0.757% over 15 to 30 runs per sequence, but KITTI-09's rose 0.3%.
 

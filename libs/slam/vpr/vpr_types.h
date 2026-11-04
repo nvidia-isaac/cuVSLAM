@@ -53,7 +53,7 @@ struct VprOptions {
   std::string vocabulary_path;
 
   /// Frames mapped before a session fits its vocabulary; queries miss until then.
-  size_t min_training_keyframes = 8;
+  size_t min_training_keyframes = 10;
 
   /// Most frames a session's vocabulary is fitted to; it fits early once it holds more.
   size_t max_training_keyframes = 100;

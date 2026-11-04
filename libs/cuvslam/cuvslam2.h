@@ -807,7 +807,7 @@ public:
     /// Needs the two below at their defaults. A loaded map of another vocabulary keeps its VPR map unused.
     std::string vocabulary_path;
     /// Keyframes a session maps before fitting its own vocabulary; nothing is recognized before. At least 1.
-    uint32_t vocabulary_min_keyframes = 8;
+    uint32_t vocabulary_min_keyframes = 10;
     /// Most keyframes a session fits its own vocabulary to, fitting early once it maps more. At least the minimum.
     uint32_t vocabulary_max_keyframes = 100;
   };
