@@ -15,6 +15,9 @@ install. On x86_64 and Jetson Thor, the `cuda` extra installs them from PyPI ins
 pip install "cuvslam-cu12[cuda]"
 ```
 
+Visual place recognition (`use_vpr`, AnyLoc) also needs TensorRT 10 (`libnvinfer10`), installed separately. The rest of
+cuVSLAM runs without it.
+
 Supported platforms, Jetson notes and source builds are described in the
 [cuVSLAM README](https://github.com/nvidia-isaac/cuVSLAM#install-pycuvslam).
 

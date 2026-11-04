@@ -44,7 +44,7 @@ Once the user provides a path, use it consistently throughout all subsequent com
 - Ubuntu 22+ (x86_64 or aarch64/Jetson)
 - CUDA Toolkit 12 or 13 (https://developer.nvidia.com/cuda/toolkit)
 - System packages: `apt update && apt install g++ cmake git git-lfs python3-dev`
-- CMake 3.19+, Python 3.9+
+- CMake 3.19+, Python 3.10+
 
 ## 2. Install PyCuVSLAM (Quickest Path)
 

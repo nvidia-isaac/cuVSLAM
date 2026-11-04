@@ -157,7 +157,8 @@ combinations require an [installation from source](#install-from-source).
   Toolkit from JetPack). When installed, they take precedence over a system CUDA Toolkit, unless another module has
   already loaded these libraries.
 
-TensorRT 10 (`libnvinfer10`) must be installed separately (not included in the wheels).
+Visual place recognition (`use_vpr`, AnyLoc) also needs TensorRT 10 (`libnvinfer10`), installed separately (not
+included in the wheels). The rest of cuVSLAM runs without it.
 
 Official wheels include cuNLS support for `Multisensor` mode; no separate cuNLS installation is required.
 
@@ -220,7 +221,7 @@ For Python usage, [pre-built wheels](#install-from-wheels) are the recommended a
 * `apt update && apt install g++ cmake git git-lfs python3-dev`
     * git + git-lfs to clone this repository
     * CMake 3.19+, gcc
-    * Python 3.9+ (for python bindings, examples and some tools)
+    * Python 3.10+ (for python bindings, examples and some tools)
 
 ### Build on local x86
 
