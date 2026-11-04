@@ -60,6 +60,8 @@ Only these combinations are provided; use a source build for others. Pick the wh
 `cp311`, or `cp312-abi3` for 3.12 and later. The CUDA Toolkit major must match the package's
 `cu12` or `cu13` suffix. Without a system CUDA Toolkit, install the wheel with the `cuda` extra
 (`pip install "./<wheel>.whl[cuda]"`; not on Jetson Orin). Install only one cuVSLAM package per environment.
+Visual place recognition (`use_vpr`, AnyLoc) also needs TensorRT 10 (`libnvinfer10`), installed separately; the rest
+of cuVSLAM runs without it.
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
