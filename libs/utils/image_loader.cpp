@@ -60,33 +60,33 @@ bool ImageLoaderT::load(const std::string& filename) {
 
   const char* dot = std::strrchr(filePath, '.');
   if (!dot++) {
-    TraceError((std::string("Can't detect image format ") + filePath).c_str());
+    TraceError("Can't detect image format %s", filePath);
     return false;
   }
   if (!std::strcmp(dot, "png")) {
     if (FLAGS_cache_uncompressed) {
       if (!LoadPngCached(filePath, impl_->imageMatrix_u8_)) {
-        TraceError((std::string("Can't load cached PNG file ") + filePath).c_str());
+        TraceError("Can't load cached PNG file %s", filePath);
         return false;
       }
     } else {
       if (!LoadPng(filePath, impl_->imageMatrix_u8_)) {
-        TraceError((std::string("Can't load PNG file ") + filePath).c_str());
+        TraceError("Can't load PNG file %s", filePath);
         return false;
       }
     }
   } else if (!std::strcmp(dot, "tga")) {
     if (!LoadTga(filePath, impl_->imageMatrix_u8_)) {
-      TraceError((std::string("Can't load TGA file ") + filePath).c_str());
+      TraceError("Can't load TGA file %s", filePath);
       return false;
     }
   } else if (!std::strcmp(dot, "jpg") || !std::strcmp(dot, "jpeg")) {
     if (!LoadJpeg(filePath, impl_->imageMatrix_u8_)) {
-      TraceError((std::string("Can't load JPEG file ") + filePath).c_str());
+      TraceError("Can't load JPEG file %s", filePath);
       return false;
     }
   } else {
-    TraceError((std::string("Unknown image format for ") + filePath).c_str());
+    TraceError("Unknown image format for %s", filePath);
     return false;
   }
   return true;

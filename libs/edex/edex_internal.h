@@ -191,7 +191,7 @@ inline bool ReadSequence(const Json::Value& root, const Timeline& timeline, Sequ
     return true;
   }
   if (nFiles != 1) {
-    TraceError("Found %d images in edex that is not corresponded to the header (%d frames)", nFiles,
+    TraceError("Found %zu images in edex that is not corresponded to the header (%zu frames)", nFiles,
                timeline.nFrames());
     return false;
   }

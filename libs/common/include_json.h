@@ -34,7 +34,7 @@ using JSonKeyMap = std::map<std::string, Json::Value&>;
 // In case of mistake, it is important to provide details about what and where happened.
 inline void THROW_IF_FALSE(const bool exp, const std::string& errStr = "") {
   if (!exp) {
-    TraceError(errStr.c_str());
+    TraceError("%s", errStr.c_str());
     throw std::runtime_error(errStr);
   }
 }
