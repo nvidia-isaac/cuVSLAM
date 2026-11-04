@@ -119,7 +119,7 @@ class TestVprBindings(unittest.TestCase):
         self.assertAlmostEqual(cfg.vpr_settings.score_threshold, 0.68, places=5)
         self.assertEqual(cfg.vpr_settings.vocabulary_path, "")
         self.assertEqual(cfg.vpr_settings.vocabulary_min_keyframes, 8)
-        self.assertEqual(cfg.vpr_settings.vocabulary_max_keyframes, 189)
+        self.assertEqual(cfg.vpr_settings.vocabulary_max_keyframes, 100)
         self.assertEqual(localization_settings().vpr_candidates, 5)
 
     def test_config_vpr_keyword_arguments(self):

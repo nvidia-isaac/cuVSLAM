@@ -56,7 +56,7 @@ struct VprOptions {
   size_t min_training_keyframes = 8;
 
   /// Most frames a session's vocabulary is fitted to; it fits early once it holds more.
-  size_t max_training_keyframes = 189;
+  size_t max_training_keyframes = 100;
 
   /// Max frames kept in the map; 0 means unlimited.
   uint32_t max_entries = 0;

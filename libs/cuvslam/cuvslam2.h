@@ -809,7 +809,7 @@ public:
     /// Keyframes a session maps before fitting its own vocabulary; nothing is recognized before. At least 1.
     uint32_t vocabulary_min_keyframes = 8;
     /// Most keyframes a session fits its own vocabulary to, fitting early once it maps more. At least the minimum.
-    uint32_t vocabulary_max_keyframes = 189;
+    uint32_t vocabulary_max_keyframes = 100;
   };
 
   /**
