@@ -35,7 +35,8 @@ def _stat(**fields) -> types.SimpleNamespace:
     """Stand-in for tracker.runner.Stat, which needs the cuVSLAM binding."""
     values = dict(sequence_title="07", n_frames=1101, tracking_time=55.0, average_fps=20.0,
                   bird_view_with_errors_path="", gt_av_translation_error=0.0, gt_av_rotation_error=0.0,
-                  gt_n_error_segments=0, gt_simple_error=0.0, num_tracking_losts=0, odometry_mode="",
+                  gt_n_error_segments=0, gt_simple_error=0.0, gt_simple_rotation_error=0.0, num_tracking_losts=0,
+                  odometry_mode="",
                   num_loop_closures=0, loop_closure_mode="", seg_err_points=[])
     values.update(fields)
     return types.SimpleNamespace(**values)
