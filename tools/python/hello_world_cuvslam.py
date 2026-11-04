@@ -34,9 +34,9 @@ tracker = vslam.Tracker(rig, vslam.Tracker.Mode.OdometryOnlyRealtime, odom_cfg)
 
 print("cuVSLAM version:", vslam.get_version())
 print("Odometry.Config:")
-for attr in dir(cfg):
-    if not callable(getattr(cfg, attr)) and not attr.startswith("__"):
-        print(f"  {attr}: {getattr(cfg, attr)}")
+for attr in dir(odom_cfg):
+    if not callable(getattr(odom_cfg, attr)) and not attr.startswith("__"):
+        print(f"  {attr}: {getattr(odom_cfg, attr)}")
 
 # Create a synthetic stereo pair of RGB images as numpy arrays.
 # cuvslam will also work with pytorch tensors or other frameworks that support dlpack.

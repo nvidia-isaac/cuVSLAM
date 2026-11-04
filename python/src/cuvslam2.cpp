@@ -739,7 +739,8 @@ NB_MODULE(_cuvslam, m) {
           "images etc. can still be either CPU or GPU arrays/tensors. The reverse does not hold:\n"
           "odometry with `use_gpu` disabled only accepts CPU arrays/tensors.\n\n"
           "The images etc. must be in the same order as cameras in the rig.\n"
-          "If data for a camera is not available, pass empty array or tensor for that camera image.\n\n"
+          "If data for a camera is not available, pass empty array or tensor for that camera image.\n"
+          "Cycling through cameras or camera groups across calls is not supported.\n\n"
           "Parameters:\n"
           "    timestamp: Image timestamp in nanoseconds\n"
           "    images: List of numpy arrays containing the camera images\n"
@@ -749,7 +750,7 @@ NB_MODULE(_cuvslam, m) {
           "    depths: Optional list of numpy arrays containing depth images\n"
           "    options: Optional per-frame options that override default settings for this call only\n\n"
           "Returns:\n"
-          "    :class:`PoseEstimate` object with the computed pose. If tracking fails, `is_valid` will be False.")
+          "    :class:`PoseEstimate` object with the computed pose. If tracking fails, `world_from_rig` is `None`.")
       .def(
           "register_imu_measurement",
           [](Odometry& self, uint32_t sensor_index, const ImuMeasurement& imu_measurement) {
@@ -1068,7 +1069,14 @@ NB_MODULE(_cuvslam, m) {
       .def(nb::new_([](const Rig& rig, const std::vector<uint8_t>& primary_cameras, const Slam::Config& config) {
              return DeletedWithoutGil(new Slam(rig, primary_cameras, config));
            }),
-           nb::arg("rig"), nb::arg("primary_cameras"), nb::arg("config") = Slam::Config{})
+           nb::arg("rig"), nb::arg("primary_cameras"), nb::arg("config") = Slam::Config{},
+           "Construct SLAM for a camera rig.\n\n"
+           "Parameters:\n"
+           "    rig: Camera rig configuration\n"
+           "    primary_cameras: Distinct, non-empty list of indices of rig cameras, each in 0..255\n"
+           "    config: SLAM configuration\n"
+           "Raises TypeError if an index is not an integer in 0..255, and ValueError if the rig,\n"
+           "primary_cameras or config are invalid.")
       .def("track", &Slam::Track, nb::arg("state"), nb::arg("gt_pose") = nullptr,
            "Update SLAM pose based on Odometry state and past SLAM loop closures.\n\n"
            "This method should be called after each successful Odometry.track() call.\n"
@@ -1321,7 +1329,8 @@ NB_MODULE(_cuvslam, m) {
           "images etc. can still be either CPU or GPU arrays/tensors. The reverse does not hold:\n"
           "odometry with `use_gpu` disabled only accepts CPU arrays/tensors.\n\n"
           "The images etc. must be in the same order as cameras in the rig.\n"
-          "If data for a camera is not available, pass empty array or tensor for that camera image.\n\n"
+          "If data for a camera is not available, pass empty array or tensor for that camera image.\n"
+          "Cycling through cameras or camera groups across calls is not supported.\n\n"
           "Parameters:\n"
           "    timestamp: Images timestamp in nanoseconds\n"
           "    images: List of numpy arrays or tensors containing the camera images\n"

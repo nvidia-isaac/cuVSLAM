@@ -15,6 +15,7 @@
 # Source files
 set(SOURCES
     image_transform_test.cpp
+    image_loader_test.cpp
     depth_loader_test.cpp
 )
 

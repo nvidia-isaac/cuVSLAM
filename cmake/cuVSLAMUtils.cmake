@@ -86,6 +86,8 @@ macro(setup_cuvslam_settings)
             -Wextra
             -Wno-unknown-pragmas
             -Wno-deprecated-copy
+            # printf-style logging must take a literal format; pass runtime text such as file paths as "%s" data
+            $<$<COMPILE_LANGUAGE:CXX>:-Wformat-security>
         )
 
         # Architecture-specific flags

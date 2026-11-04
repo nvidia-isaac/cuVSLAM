@@ -70,8 +70,8 @@ kidnapping is `LocalizeInMap`'s job: called without a guess pose, it takes candi
 recognition map and verifies them against that map's landmarks, instead of searching a grid around a guess the robot
 does not have.
 
-Place recognition runs [AnyLoc](https://anyloc.github.io/), a VLAD aggregation of DINOv2 features, on the GPU. It needs
-a `USE_TENSORRT` build, which also makes its TensorRT engine (see [models/anyloc](models/anyloc/README.md)).
+Place recognition runs [AnyLoc](https://anyloc.github.io/), a VLAD aggregation of DINOv2 features, on the GPU, from a
+TensorRT engine that [models/anyloc](models/anyloc/README.md) builds.
 Both APIs expose it the same way:
 
 | Task | C++ (`cuvslam::Slam`) | Python (`cuvslam.Slam`) |
@@ -118,7 +118,7 @@ The accuracy and robustness of cuVSLAM can be influenced by several factors. If 
 
 - **Intrinsic and Extrinsic Calibration**: Accurate camera calibration is crucial. Ensure your calibration parameters are precise. For more details, refer to our guide on [image undistortion](examples/euroc/README.md#distortion-models). If you're new to calibration, consider working with [experienced vendors](https://nvidia-isaac-ros.github.io/v/release-3.2/getting_started/hardware_setup/sensors/amr_extrinsic_calibration.html#extrinsic-calibration-of-sensors-in-custom-locations)
 
-- **Synchronization and Timestamps**: Accurate synchronization significantly impacts cuVSLAM performance. Make sure multi-camera images are captured simultaneously—ideally through hardware synchronization—and verify correct relative timestamps across cameras. Refer to our [multi-camera hardware assembly guide](examples/realsense/multicamera_hardware_assembly.md) for building a rig with synchronized RealSense cameras
+- **Synchronization and Timestamps**: Accurate synchronization significantly impacts cuVSLAM performance. Make sure multi-camera images are captured simultaneously—ideally through hardware synchronization—and verify correct relative timestamps across cameras. Refer to our [multi-camera hardware assembly guide](examples/realsense/multicamera_hardware_assembly.md) for building a rig with synchronized RealSense cameras. Each `track()` call must carry images captured at one instant (within 1 ms); cycling through cameras or camera groups across calls is not supported. Unsynchronized cameras are not supported either; see [Cameras that are not synchronized with each other](TROUBLESHOOTING.md#cameras-that-are-not-synchronized-with-each-other) for workarounds such as one tracker per camera
 
 - **Frame Rate**: Frame rate significantly affects performance. The ideal frame rate depends on translational and rotational velocities. Typically, 30 FPS is suitable for most "human-speed" motions. Adjust accordingly for faster movements
 
@@ -157,6 +157,8 @@ and are compatible with Python 3.12 and later. Other Python, CUDA, or Jetson com
 * NVIDIA's CUDA Toolkit wheels, installed with the `cuda` extra (x86_64 and Jetson Thor; Jetson Orin uses the CUDA
   Toolkit from JetPack). When installed, they take precedence over a system CUDA Toolkit, unless another module has
   already loaded these libraries.
+
+TensorRT 10 (`libnvinfer10`) must be installed separately (not included in the wheels).
 
 Official wheels include cuNLS support for `Multisensor` mode; no separate cuNLS installation is required.
 
@@ -215,6 +217,7 @@ For Python usage, [pre-built wheels](#install-from-wheels) are the recommended a
 * Ubuntu 22+ (22.04 & 24.04 tested) x86_64/aarch64 (Desktop/Laptop & [Nvidia Jetson Orin/Thor](https://www.nvidia.com/en-us/autonomous-machines/embedded-systems/))
 * [CUDA Toolkit 12.6 or later](https://developer.nvidia.com/cuda/toolkit) for the default `USE_CUNLS=ON` build, [Jetpack 6.1/6.2/7.0/7.1](https://docs.nvidia.com/jetson/)
     * Older CUDA 12 versions require configuring with `-DUSE_CUNLS=OFF` (see [cuNLS](#cunls)).
+* [TensorRT 8.6+](https://developer.nvidia.com/tensorrt), unless configured with `-DUSE_TENSORRT=OFF`
 * `apt update && apt install g++ cmake git git-lfs python3-dev`
     * git + git-lfs to clone this repository
     * CMake 3.19+, gcc
@@ -254,8 +257,7 @@ All flags have defaults; override with `-DFLAG=VALUE`.
 | `USE_LMDB` | ON | LMDB map database |
 | `USE_RERUN` | OFF | Rerun SDK visualization |
 | `USE_NVTX` | OFF | NVIDIA NVTX profiling |
-| `USE_TENSORRT` | OFF | AnyLoc place recognition backend; requires `USE_CUDA` and TensorRT 8.6+ |
-| `CUVSLAM_BUILD_ANYLOC_ENGINE` | ON with `USE_TENSORRT` | builds AnyLoc's TensorRT engine: an ONNX export in a Python venv, then a TensorRT build (needs network access); see [models/anyloc](models/anyloc/README.md) |
+| `USE_TENSORRT` | ON | AnyLoc place recognition backend; requires TensorRT 8.6+ |
 
 Build types: `Release` (default), `Debug`, `RelWithDebInfo`, `MinSizeRel`. Do not mix types in the same build directory.
 

@@ -270,7 +270,8 @@ def prepare_frame_metadata_euroc(euroc_path: str,
             'accel': measurement['accel']
         } for measurement in imu_data)
 
-    # Sort frames by timestamp
-    frames_metadata.sort(key=lambda x: x['timestamp'])
+    # Sort frames by timestamp; an IMU sample stamped with a camera frame goes first, so the tracker has it
+    # when it processes that frame
+    frames_metadata.sort(key=lambda x: (x['timestamp'], x['type'] != 'imu'))
 
     return frames_metadata

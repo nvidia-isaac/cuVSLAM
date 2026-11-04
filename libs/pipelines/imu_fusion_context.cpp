@@ -57,7 +57,7 @@ bool check_imu_drops(sba_imu::IMUPreintegration& preint, const imu::ImuCalibrati
   const float missing = std::max(0.f, expected - actual - effective_jitter);
   const float drop_ratio = missing / expected;
   if (drop_ratio > 0.1f) {
-    TraceWarning("Lost IMU msgs: %d, Frame time delta = %f [s], drop ratio = %f [%]", static_cast<int>(missing + 0.5f),
+    TraceWarning("Lost IMU msgs: %d, Frame time delta = %f [s], drop ratio = %f [%%]", static_cast<int>(missing + 0.5f),
                  dT_s, drop_ratio * 100);
     return false;
   }
