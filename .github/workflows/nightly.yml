@@ -195,8 +195,9 @@ jobs:
           # Their eval steps are informational (continue-on-error) while runtime and variance are characterized.
           # datasets_root overrides the dataset cache location per config. Orin's home is on a small eMMC; its
           # runner work directory is on NVMe, and the job-completed hook empties only the per-repo workspace in it.
+          # Thor also compiles sm_87: its cu13 aarch64 artifacts are the ones Orin can run under JetPack 7.2+ (SBSA).
           - { name: "aarch64 / Orin (JP 6.1)",  runner: '["jetson-orin"]', cuda: "12.6.3", ubuntu: "22.04", archs: "87",  platform: "orin",  wheel: true, benchmark: true, eval: true, eval_suite: smoke, datasets_root: "/data/github-runner-workspace/cuvslam-cache", base_image: "nvcr.io/nvidia/12.6.11-devel:12.6.11-devel-aarch64-ubuntu22.04", ports_mirror: "http://mirrors.ocf.berkeley.edu/ubuntu-ports" }
-          - { name: "aarch64 / Thor (JP 7.1)",  runner: '["jetson-thor"]', cuda: "13.0.1", ubuntu: "24.04", archs: "110", platform: "thor",  wheel: true, benchmark: true, eval: true, eval_suite: smoke, ports_mirror: "http://mirrors.ocf.berkeley.edu/ubuntu-ports" }
+          - { name: "aarch64 / Thor (JP 7.1)",  runner: '["jetson-thor"]', cuda: "13.0.1", ubuntu: "24.04", archs: "87;110", platform: "thor",  wheel: true, benchmark: true, eval: true, eval_suite: smoke, ports_mirror: "http://mirrors.ocf.berkeley.edu/ubuntu-ports" }
     steps:
       - name: Verify GPU
         run: nvidia-smi
