@@ -16,11 +16,20 @@
 
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
 
 namespace cuvslam::slam::vpr {
+
+/// What nvinfer1::createInferRuntime() calls
+using CreateInferRuntime = void* (*)(void* logger, int32_t version);
+
+/// createInferRuntime_INTERNAL of the TensorRT major version cuVSLAM was built with, loaded and never unloaded, so only
+/// AnyLoc needs TensorRT installed.
+/// @throws std::runtime_error if that TensorRT is missing.
+CreateInferRuntime LoadTensorRt();
 
 /// AnyLoc's TensorRT engine (see models/anyloc). Not thread safe.
 class AnyLocNetwork {
