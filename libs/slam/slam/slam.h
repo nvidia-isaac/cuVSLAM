@@ -298,8 +298,7 @@ public:
   // ----- Visual place recognition -----
 
   // Must be called before the first keyframe; VPR stays off unless `options.enabled`.
-  // False with `error` set if the VPR backend cannot be created.
-  bool SetVprOptions(const vpr::VprOptions& options, std::string& error);
+  void SetVprOptions(const vpr::VprOptions& options);
 
   // nullptr turns VPR off; same timing rule as SetVprOptions().
   void SetVprMap(std::unique_ptr<vpr::VprMap> map);

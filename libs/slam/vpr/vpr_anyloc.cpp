@@ -20,6 +20,7 @@
 #include <array>
 #include <cmath>
 #include <filesystem>
+#include <stdexcept>
 #include <string>
 
 #include "common/include_eigen.h"
@@ -108,35 +109,7 @@ bool UnitRows(const std::vector<float>& rows, int dim) {
 
 }  // namespace
 
-std::unique_ptr<VprAnyLoc> VprAnyLoc::Create(const VprOptions& options, std::string& error) {
-  std::error_code ec;
-  if (options.model_path.empty() || !std::filesystem::is_regular_file(options.model_path, ec)) {
-    error =
-        "VPR backend AnyLoc needs its TensorRT engine: set vpr_model_path to the one the anyloc_engine CMake target "
-        "builds. Tried \"" +
-        options.model_path + "\".";
-    return nullptr;
-  }
-  if (options.min_training_keyframes == 0 || options.max_training_keyframes < options.min_training_keyframes) {
-    error =
-        "VPR AnyLoc: a session fits its vocabulary to 1 <= min_training_keyframes <= max_training_keyframes "
-        "frames, not " +
-        std::to_string(options.min_training_keyframes) + " to " + std::to_string(options.max_training_keyframes) + ".";
-    return nullptr;
-  }
-  // Load eagerly, so a bad engine fails Slam's constructor, not the SLAM worker.
-  std::unique_ptr<AnyLocNetwork> network = AnyLocNetwork::Load(options.model_path, error);
-  if (!network) {
-    return nullptr;
-  }
-  std::unique_ptr<VprAnyLoc> vpr(new VprAnyLoc(options, std::move(network)));
-  if (!options.vocabulary_path.empty() && !vpr->LoadVocabulary(error)) {
-    return nullptr;
-  }
-  return vpr;
-}
-
-VprAnyLoc::VprAnyLoc(const VprOptions& options, std::unique_ptr<AnyLocNetwork> network)
+VprAnyLoc::VprAnyLoc(const VprOptions& options)
     : model_path_(options.model_path),
       vocabulary_path_(options.vocabulary_path),
       cluster_count_(options.vocabulary_size),
@@ -144,22 +117,38 @@ VprAnyLoc::VprAnyLoc(const VprOptions& options, std::unique_ptr<AnyLocNetwork> n
       ratio_threshold_(options.ratio_threshold),
       max_entries_(options.max_entries),
       min_training_keyframes_(options.min_training_keyframes),
-      max_training_keyframes_(options.max_training_keyframes),
-      network_(std::move(network)),
-      descriptor_dim_(network_->descriptor_dim()) {
+      max_training_keyframes_(options.max_training_keyframes) {
+  // Load eagerly, so a bad engine fails Slam's constructor, not the SLAM worker.
+  std::error_code ec;
+  if (model_path_.empty() || !std::filesystem::is_regular_file(model_path_, ec)) {
+    throw std::runtime_error(
+        "VPR backend AnyLoc needs its TensorRT engine: set Slam::VprSettings::model_path to the one the "
+        "anyloc_engine CMake target builds. Tried \"" +
+        model_path_ + "\".");
+  }
+  if (min_training_keyframes_ == 0 || max_training_keyframes_ < min_training_keyframes_) {
+    throw std::invalid_argument(
+        "VPR AnyLoc: a session fits its vocabulary to 1 <= min_training_keyframes <= max_training_keyframes "
+        "frames, not " +
+        std::to_string(min_training_keyframes_) + " to " + std::to_string(max_training_keyframes_) + ".");
+  }
+  network_ = std::make_unique<AnyLocNetwork>(model_path_);
+  descriptor_dim_ = network_->descriptor_dim();
   TraceMessage("VPR AnyLoc: loaded %s, input %dx%d, %d patches of %d\n", model_path_.c_str(), network_->input_width(),
                network_->input_height(), network_->patch_count(), descriptor_dim_);
+  if (!vocabulary_path_.empty()) {
+    LoadVocabulary();
+  }
 }
 
 VprAnyLoc::~VprAnyLoc() = default;
 
 size_t VprAnyLoc::TrainingCapacity() const { return vocabulary_path_.empty() ? max_training_keyframes_ : 0; }
 
-bool VprAnyLoc::LoadVocabulary(std::string& error) {
+void VprAnyLoc::LoadVocabulary() {
   Blob file;
   if (!ReadVocabularyFile(vocabulary_path_, file)) {
-    error = "VPR AnyLoc: could not read the vocabulary \"" + vocabulary_path_ + "\".";
-    return false;
+    throw std::runtime_error("VPR AnyLoc: could not read the vocabulary \"" + vocabulary_path_ + "\".");
   }
   const BlobReader reader(file.data(), file.size());
   int32_t cluster_count = 0;
@@ -182,14 +171,12 @@ bool VprAnyLoc::LoadVocabulary(std::string& error) {
     problem = "its centers are not unit vectors";
   }
   if (!problem.empty()) {
-    error = "VPR AnyLoc: \"" + vocabulary_path_ + "\" is not a vocabulary for this engine: " + problem +
-            ". VprVocabularyBuilder and cuvslam_vpr_vocabulary write one.";
-    return false;
+    throw std::runtime_error("VPR AnyLoc: \"" + vocabulary_path_ + "\" is not a vocabulary for this engine: " +
+                             problem + ". VprVocabularyBuilder and cuvslam_vpr_vocabulary write one.");
   }
   cluster_count_ = cluster_count;
   centers_ = std::move(centers);
   TraceMessage("VPR AnyLoc: loaded the vocabulary %s, %d centers\n", vocabulary_path_.c_str(), cluster_count_);
-  return true;
 }
 
 bool VprAnyLoc::Describe(const VprImage& image, std::vector<float>& patches) {

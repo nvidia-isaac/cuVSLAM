@@ -31,8 +31,9 @@ bool ReadVocabularyFile(const std::string& path, Blob& bytes);
 /// frames again and writes what the backend's Serialize() then holds. Not thread safe.
 class VocabularyBuilder {
 public:
-  /// nullptr with `error` set if `options` are disabled, name a vocabulary_path, or make no backend that fits one.
-  static std::unique_ptr<VocabularyBuilder> Create(const VprOptions& options, std::string& error);
+  /// @throws std::invalid_argument if `options` are disabled or name a vocabulary_path, std::runtime_error if their
+  /// backend cannot be made or fits no vocabulary.
+  explicit VocabularyBuilder(const VprOptions& options);
   ~VocabularyBuilder();
 
   /// Most frames fitted to.
@@ -44,15 +45,16 @@ public:
   /// The vocabulary is fitted, by the first Save().
   bool Fitted() const { return fitted_; }
 
-  /// False with `error` set at Capacity(), once Fitted(), or if the backend cannot describe `image`.
-  bool AddFrame(const VprImage& image, std::string& error);
+  /// @throws std::invalid_argument at Capacity() or once Fitted(), std::runtime_error if the backend cannot describe
+  /// `image`.
+  void AddFrame(const VprImage& image);
 
-  /// Fit to the frames added on the first call, then write `path`; false with `error` set if either step fails.
-  bool Save(const std::string& path, std::string& error);
+  /// Fit to the frames added on the first call, then write `path`.
+  /// @throws std::invalid_argument with fewer frames than the fit's minimum, std::runtime_error if `path` cannot be
+  /// written.
+  void Save(const std::string& path);
 
 private:
-  VocabularyBuilder(std::unique_ptr<IVpr> backend, size_t min_frames);
-
   std::unique_ptr<IVpr> backend_;
   size_t min_frames_ = 0;
   size_t capacity_ = 0;

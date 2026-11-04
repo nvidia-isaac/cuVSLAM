@@ -41,7 +41,6 @@
 #include "pipelines/visualizer.h"
 #include "slam/async_slam/async_slam.h"
 #include "slam/vpr/vpr_image.h"
-#include "slam/vpr/vpr_vocabulary.h"
 #include "visualizer/visualizer.hpp"
 #ifdef USE_CUDA
 #include "odometry/rgbd_odometry.h"
@@ -52,7 +51,6 @@
 
 #include "cuvslam/debug_dump.h"
 #include "cuvslam/internal.h"
-#include "cuvslam/vpr_vocabulary_builder2.h"
 
 namespace cuvslam {
 
@@ -421,56 +419,6 @@ void FillImageSourceAndShape(const Image& image, ImageSource& source, ImageShape
   shape.height = image.height;
 }
 
-// The vocabulary fit's limits, the same for a session and VprVocabularyBuilder.
-void CheckVocabularyFit(const Slam::VprSettings& settings) {
-  THROW_INVALID_ARG_IF(settings.vocabulary_min_keyframes == 0, "vocabulary_min_keyframes must be at least 1.");
-  THROW_INVALID_ARG_IF(settings.vocabulary_max_keyframes < settings.vocabulary_min_keyframes,
-                       "vocabulary_max_keyframes must be at least vocabulary_min_keyframes.");
-}
-
-// Copy a user image into a grayscale host VprImage, which VPR may keep after the call returns.
-slam::vpr::VprImage MakeVprImage(const ImageData& image, const bool use_gpu) {
-  if (image.pixels == nullptr || image.width <= 0 || image.height <= 0) {
-    return slam::vpr::VprImage{};
-  }
-  THROW_INVALID_ARG_IF(image.data_type != ImageData::DataType::UINT8,
-                       "Place recognition images must use ImageData::DataType::UINT8");
-
-#ifdef USE_CUDA
-  THROW_INVALID_ARG_IF(image.is_gpu_mem != cuda::IsGpuPointer(image.pixels),
-                       "is_gpu_mem flag mismatch for the place recognition image");
-#else
-  THROW_INVALID_ARG_IF(image.is_gpu_mem,
-                       "GPU memory requires a build with CUDA support (USE_CUDA=ON) for the place recognition image");
-#endif
-
-  const int channels = image.encoding == ImageData::Encoding::RGB ? 3 : 1;
-  const auto format =
-      image.encoding == ImageData::Encoding::RGB ? slam::vpr::VprPixelFormat::kRgb8 : slam::vpr::VprPixelFormat::kMono8;
-
-  if (!image.is_gpu_mem) {
-    // Host images are tightly packed; pitch applies to GPU memory only.
-    return slam::vpr::MakeVprImage(image.pixels, image.width, image.height, 0, format);
-  }
-
-#ifdef USE_CUDA
-  CheckImageMemory(image, use_gpu, "place recognition image");
-  // A vertically flipped array has a negative pitch; copying forward from its first row would leave the buffer.
-  THROW_INVALID_ARG_IF(image.pitch < 0, "Place recognition images in GPU memory need a non-negative pitch.");
-  const size_t row_bytes = static_cast<size_t>(image.width) * channels;
-  const size_t pitch = image.pitch > 0 ? static_cast<size_t>(image.pitch) : row_bytes;
-  std::vector<uint8_t> host(row_bytes * static_cast<size_t>(image.height));
-  CUDA_CHECK(cudaMemcpy2D(host.data(), row_bytes, image.pixels, pitch, row_bytes, static_cast<size_t>(image.height),
-                          cudaMemcpyDeviceToHost));
-  return slam::vpr::MakeVprImage(host.data(), image.width, image.height, 0, format);
-#else
-  (void)use_gpu;
-  (void)channels;
-  THROW_INVALID_ARG_IF(true, "GPU memory requires a build with CUDA support (USE_CUDA=ON)");
-  return slam::vpr::VprImage{};
-#endif
-}
-
 // First image from a primary camera (the only cameras SLAM maps with), or nullptr if there is none.
 const Image* SelectVprImage(const Slam::ImageSet& images, const std::vector<uint8_t>& primary_cameras) {
   for (const auto& image : images) {
@@ -551,6 +499,56 @@ void CheckMultisensorDepths(const Odometry::ImageSet& depths, bool use_gpu,
 }
 
 }  // anonymous namespace
+
+// The vocabulary fit's limits, the same for a session and VprVocabularyBuilder.
+void CheckVocabularyFit(const Slam::VprSettings& settings) {
+  THROW_INVALID_ARG_IF(settings.vocabulary_min_keyframes == 0, "vocabulary_min_keyframes must be at least 1.");
+  THROW_INVALID_ARG_IF(settings.vocabulary_max_keyframes < settings.vocabulary_min_keyframes,
+                       "vocabulary_max_keyframes must be at least vocabulary_min_keyframes.");
+}
+
+// Copy a user image into a grayscale host VprImage, which VPR may keep after the call returns.
+slam::vpr::VprImage MakeVprImage(const ImageData& image, const bool use_gpu) {
+  if (image.pixels == nullptr || image.width <= 0 || image.height <= 0) {
+    return slam::vpr::VprImage{};
+  }
+  THROW_INVALID_ARG_IF(image.data_type != ImageData::DataType::UINT8,
+                       "Place recognition images must use ImageData::DataType::UINT8");
+
+#ifdef USE_CUDA
+  THROW_INVALID_ARG_IF(image.is_gpu_mem != cuda::IsGpuPointer(image.pixels),
+                       "is_gpu_mem flag mismatch for the place recognition image");
+#else
+  THROW_INVALID_ARG_IF(image.is_gpu_mem,
+                       "GPU memory requires a build with CUDA support (USE_CUDA=ON) for the place recognition image");
+#endif
+
+  const int channels = image.encoding == ImageData::Encoding::RGB ? 3 : 1;
+  const auto format =
+      image.encoding == ImageData::Encoding::RGB ? slam::vpr::VprPixelFormat::kRgb8 : slam::vpr::VprPixelFormat::kMono8;
+
+  if (!image.is_gpu_mem) {
+    // Host images are tightly packed; pitch applies to GPU memory only.
+    return slam::vpr::MakeVprImage(image.pixels, image.width, image.height, 0, format);
+  }
+
+#ifdef USE_CUDA
+  CheckImageMemory(image, use_gpu, "place recognition image");
+  // A vertically flipped array has a negative pitch; copying forward from its first row would leave the buffer.
+  THROW_INVALID_ARG_IF(image.pitch < 0, "Place recognition images in GPU memory need a non-negative pitch.");
+  const size_t row_bytes = static_cast<size_t>(image.width) * channels;
+  const size_t pitch = image.pitch > 0 ? static_cast<size_t>(image.pitch) : row_bytes;
+  std::vector<uint8_t> host(row_bytes * static_cast<size_t>(image.height));
+  CUDA_CHECK(cudaMemcpy2D(host.data(), row_bytes, image.pixels, pitch, row_bytes, static_cast<size_t>(image.height),
+                          cudaMemcpyDeviceToHost));
+  return slam::vpr::MakeVprImage(host.data(), image.width, image.height, 0, format);
+#else
+  (void)use_gpu;
+  (void)channels;
+  THROW_INVALID_ARG_IF(true, "GPU memory requires a build with CUDA support (USE_CUDA=ON)");
+  return slam::vpr::VprImage{};
+#endif
+}
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Public API
@@ -1616,54 +1614,6 @@ std::shared_ptr<const Slam::PoseGraph> Slam::ReadPoseGraph() {
     }
   }
   return impl->pose_graph_;
-}
-
-class VprVocabularyBuilder::Impl {
-public:
-  std::unique_ptr<slam::vpr::VocabularyBuilder> builder;
-};
-
-VprVocabularyBuilder::VprVocabularyBuilder(const Slam::VprSettings& settings) : impl(std::make_unique<Impl>()) {
-  CheckVocabularyFit(settings);
-  slam::vpr::VprOptions options;
-  options.enabled = true;
-  options.model_path = settings.model_path;
-  options.min_training_keyframes = settings.vocabulary_min_keyframes;
-  options.max_training_keyframes = settings.vocabulary_max_keyframes;
-  std::string error;
-  impl->builder = slam::vpr::VocabularyBuilder::Create(options, error);
-  if (!impl->builder) {
-    throw std::runtime_error(error);
-  }
-}
-
-VprVocabularyBuilder::VprVocabularyBuilder(VprVocabularyBuilder&& other) noexcept = default;
-
-VprVocabularyBuilder::~VprVocabularyBuilder() = default;
-
-uint32_t VprVocabularyBuilder::GetCapacity() const { return static_cast<uint32_t>(impl->builder->Capacity()); }
-
-uint32_t VprVocabularyBuilder::GetImageCount() const { return static_cast<uint32_t>(impl->builder->Size()); }
-
-void VprVocabularyBuilder::AddImage(const ImageData& image) {
-  const slam::vpr::VprImage vpr_image = MakeVprImage(image, true);
-  THROW_INVALID_ARG_IF(vpr_image.Empty(), "VprVocabularyBuilder::AddImage needs an image with pixels.");
-  slam::vpr::VocabularyBuilder& builder = *impl->builder;
-  std::string error;
-  if (!builder.AddFrame(vpr_image, error)) {
-    // Past capacity or after Save() is the caller's error, the rest the engine's.
-    THROW_INVALID_ARG_IF(builder.Fitted() || builder.Size() >= builder.Capacity(), error);
-    throw std::runtime_error(error);
-  }
-}
-
-void VprVocabularyBuilder::Save(std::string_view path) {
-  std::string error;
-  if (!impl->builder->Save(std::string(path), error)) {
-    // Too few images leave it unfitted; a write failure comes after the fit.
-    THROW_INVALID_ARG_IF(!impl->builder->Fitted(), error);
-    throw std::runtime_error(error);
-  }
 }
 
 }  // namespace cuvslam

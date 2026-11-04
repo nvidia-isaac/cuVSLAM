@@ -37,8 +37,9 @@ public:
   /// Max spherical k-means iterations; stops early once assignments settle.
   static constexpr int kKMeansIterations = 25;
 
-  /// nullptr with `error` set if the engine, the vocabulary file or the training options are unusable.
-  static std::unique_ptr<VprAnyLoc> Create(const VprOptions& options, std::string& error);
+  /// @throws std::runtime_error if options.model_path is not a usable engine or options.vocabulary_path not a
+  /// vocabulary of it, std::invalid_argument if the training options are out of order.
+  explicit VprAnyLoc(const VprOptions& options);
   ~VprAnyLoc() override;
 
   const char* Name() const override { return "AnyLoc"; }
@@ -55,8 +56,6 @@ public:
   bool Deserialize(const BlobReader& reader) override;
 
 private:
-  VprAnyLoc(const VprOptions& options, std::unique_ptr<AnyLocNetwork> network);
-
   struct Entry {
     KeyFrameId node_id = InvalidKeyFrameId;
     std::vector<float> vlad;     ///< cluster_count_ * descriptor_dim_ floats
@@ -72,8 +71,8 @@ private:
   /// VLAD-pool `patches` against the current centers.
   void Encode(const std::vector<float>& patches, std::vector<float>& vlad) const;
 
-  /// Take the centers of vocabulary_path_; false with `error` set if it is not a vocabulary of the engine.
-  bool LoadVocabulary(std::string& error);
+  /// Take the centers of vocabulary_path_; throws std::runtime_error if it is not a vocabulary of the engine.
+  void LoadVocabulary();
 
   std::string model_path_;
   std::string vocabulary_path_;

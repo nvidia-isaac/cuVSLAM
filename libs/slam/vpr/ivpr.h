@@ -17,7 +17,6 @@
 #pragma once
 
 #include <memory>
-#include <string>
 #include <vector>
 
 #include "slam/common/blob.h"
@@ -71,7 +70,8 @@ public:
   virtual bool Deserialize(const BlobReader& reader) = 0;
 };
 
-/// AnyLoc backend, nullptr unless `options.enabled`; nullptr with `error` set if it is not built in or fails to load.
-std::unique_ptr<IVpr> CreateVpr(const VprOptions& options, std::string& error);
+/// AnyLoc backend, nullptr unless `options.enabled`.
+/// @throws std::runtime_error if the backend is not in this build.
+std::unique_ptr<IVpr> CreateVpr(const VprOptions& options);
 
 }  // namespace cuvslam::slam::vpr

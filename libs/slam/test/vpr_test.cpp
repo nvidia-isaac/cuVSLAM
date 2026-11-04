@@ -357,35 +357,26 @@ TEST(VprImageResize, UpscaleInterpolatesBetweenTheSourcePixels) {
   EXPECT_EQ(out.row, std::vector<uint8_t>({0, 50, 150, 200}));
 }
 
-TEST(VprFactory, DisabledHasNoBackend) {
-  std::string error;
-  EXPECT_EQ(CreateVpr(VprOptions{}, error), nullptr);
-  EXPECT_EQ(error, "");
-}
+TEST(VprFactory, DisabledHasNoBackend) { EXPECT_EQ(CreateVpr(VprOptions{}), nullptr); }
 
 TEST(VprFactory, RefusesAnUnavailableBackend) {
   // Fails either way: compiled out AnyLoc is unavailable, compiled in it has no model file.
   VprOptions options;
   options.enabled = true;
   options.model_path = "/nonexistent/anyloc.engine";
-  std::string error;
-  EXPECT_EQ(CreateVpr(options, error), nullptr);
-  EXPECT_NE(error, "");
+  EXPECT_THROW(CreateVpr(options), std::runtime_error);
 }
 
 TEST(VprVocabularyBuilder, NeedsAnEnabledBackendWithoutAVocabularyFile) {
   VprOptions options;
-  std::string error;
-  EXPECT_EQ(VocabularyBuilder::Create(options, error), nullptr);
+  EXPECT_THROW(VocabularyBuilder{options}, std::invalid_argument);
   options.enabled = true;
   options.vocabulary_path = "/nonexistent/anyloc.vocabulary";
-  EXPECT_EQ(VocabularyBuilder::Create(options, error), nullptr);
+  EXPECT_THROW(VocabularyBuilder{options}, std::invalid_argument);
   // As CreateVpr(): compiled out AnyLoc is unavailable, compiled in it has no model file.
   options.vocabulary_path.clear();
   options.model_path = "/nonexistent/anyloc.engine";
-  error.clear();
-  EXPECT_EQ(VocabularyBuilder::Create(options, error), nullptr);
-  EXPECT_NE(error, "");
+  EXPECT_THROW(VocabularyBuilder{options}, std::runtime_error);
 }
 
 TEST(VprVocabularyBuilder, ReadsNoMissingEmptyOrHugeFile) {
@@ -595,45 +586,44 @@ std::vector<std::string> AnyLocEngines() {
 
 constexpr char kNoStandIns[] = "TensorRT could not build the stand-in engines, which needs a CUDA device";
 
-/// The error CreateVpr() reports for `options`, or empty.
+/// The error CreateVpr() throws for `options`, or empty.
 std::string ConstructionError(const VprOptions& options) {
-  std::string error;
-  CreateVpr(options, error);
-  return error;
+  try {
+    CreateVpr(options);
+  } catch (const std::exception& e) {
+    return e.what();
+  }
+  return "";
 }
 
-/// The error CreateVpr() reports for the engine at `path`, or empty.
+/// The error CreateVpr() throws for the engine at `path`, or empty.
 std::string ConstructionError(const std::string& path) { return ConstructionError(AnyLocOptions(path)); }
 
-/// The backend of `options`; the test fails if CreateVpr() reports an error.
+/// The backend of `options`; the test fails if CreateVpr() throws.
 std::unique_ptr<IVpr> MakeVpr(const VprOptions& options) {
-  std::string error;
-  std::unique_ptr<IVpr> vpr = CreateVpr(options, error);
-  EXPECT_EQ(error, "");
+  std::unique_ptr<IVpr> vpr;
+  EXPECT_NO_THROW(vpr = CreateVpr(options));
   return vpr;
 }
 
 /// The engine at `path`; the test fails if it does not load.
 std::unique_ptr<AnyLocNetwork> LoadNetwork(const std::string& path) {
-  std::string error;
-  std::unique_ptr<AnyLocNetwork> network = AnyLocNetwork::Load(path, error);
-  EXPECT_NE(network, nullptr) << error;
+  std::unique_ptr<AnyLocNetwork> network;
+  EXPECT_NO_THROW(network = std::make_unique<AnyLocNetwork>(path));
   return network;
 }
 
-/// A builder of `options`; the test fails if VocabularyBuilder::Create() reports an error.
+/// A builder of `options`; the test fails if its constructor throws.
 std::unique_ptr<VocabularyBuilder> MakeBuilder(const VprOptions& options) {
-  std::string error;
-  std::unique_ptr<VocabularyBuilder> builder = VocabularyBuilder::Create(options, error);
-  EXPECT_NE(builder, nullptr) << error;
+  std::unique_ptr<VocabularyBuilder> builder;
+  EXPECT_NO_THROW(builder = std::make_unique<VocabularyBuilder>(options));
   return builder;
 }
 
-/// Adds `frames` blocky pictures from `seed` on; the test fails on an error.
+/// Adds `frames` blocky pictures from `seed` on; the test fails if one throws.
 void AddFrames(VocabularyBuilder& builder, size_t frames, uint32_t seed) {
   for (size_t i = 0; i < frames; ++i) {
-    std::string error;
-    EXPECT_TRUE(builder.AddFrame(MakeBlockyImage(256, 256, 8, seed + static_cast<uint32_t>(i)), error)) << error;
+    EXPECT_NO_THROW(builder.AddFrame(MakeBlockyImage(256, 256, 8, seed + static_cast<uint32_t>(i))));
   }
 }
 
@@ -649,8 +639,7 @@ std::string FitVocabulary(const std::string& engine_path, size_t frames, uint32_
   std::unique_ptr<VocabularyBuilder> builder = MakeBuilder(AnyLocOptions(engine_path));
   if (builder) {
     AddFrames(*builder, frames, seed);
-    std::string error;
-    EXPECT_TRUE(builder->Save(path.string(), error)) << error;
+    EXPECT_NO_THROW(builder->Save(path.string()));
   }
   return path.string();
 }
@@ -1010,9 +999,7 @@ TEST(VprVocabularyBuilder, TakesNoMoreFramesThanItsCapacity) {
   ASSERT_NE(builder, nullptr);
   ASSERT_EQ(builder->Capacity(), 10u);
   AddFrames(*builder, 10, 1800);
-  std::string error;
-  EXPECT_FALSE(builder->AddFrame(MakeBlockyImage(256, 256, 8, 1810), error));
-  EXPECT_NE(error, "");
+  EXPECT_THROW(builder->AddFrame(MakeBlockyImage(256, 256, 8, 1810)), std::invalid_argument);
   EXPECT_EQ(builder->Size(), 10u);
 }
 
@@ -1025,8 +1012,7 @@ TEST(VprVocabularyBuilder, NeedsTheTrainingMinimumToSave) {
   ASSERT_NE(builder, nullptr);
   AddFrames(*builder, options.min_training_keyframes - 1, 1820);
   const std::filesystem::path path = ScratchFolder() / "too_few.vocabulary";
-  std::string error;
-  EXPECT_FALSE(builder->Save(path.string(), error));
+  EXPECT_THROW(builder->Save(path.string()), std::invalid_argument);
   EXPECT_FALSE(builder->Fitted());
   EXPECT_FALSE(std::filesystem::exists(path));
 }
@@ -1041,13 +1027,12 @@ TEST(VprVocabularyBuilder, WritesAVocabularyThatASessionLoads) {
   AddFrames(*builder, 8, 1830);
   const std::filesystem::path path = ScratchFolder() / "written.vocabulary";
   const std::filesystem::path again = ScratchFolder() / "written_again.vocabulary";
-  std::string error;
-  ASSERT_TRUE(builder->Save(path.string(), error)) << error;
-  ASSERT_TRUE(builder->Save(again.string(), error)) << error;
+  ASSERT_NO_THROW(builder->Save(path.string()));
+  ASSERT_NO_THROW(builder->Save(again.string()));
   const Blob bytes = ReadFileBytes(path);
   EXPECT_EQ(ReadFileBytes(again), bytes);
   EXPECT_TRUE(builder->Fitted());
-  EXPECT_FALSE(builder->AddFrame(MakeBlockyImage(256, 256, 8, 1840), error));
+  EXPECT_THROW(builder->AddFrame(MakeBlockyImage(256, 256, 8, 1840)), std::invalid_argument);
 
   // A session on it holds that vocabulary and no places.
   const std::unique_ptr<IVpr> vpr = MakeVpr(VocabularyOptions(engine, path.string()));
@@ -1065,10 +1050,13 @@ TEST(VprVocabularyBuilder, ReportsAFileItCannotWrite) {
   ASSERT_NE(builder, nullptr);
   AddFrames(*builder, 8, 1850);
   const std::string path = (ScratchFolder() / "missing" / "anyloc.vocabulary").string();
-  std::string error;
-  EXPECT_FALSE(builder->Save(path, error));
+  try {
+    builder->Save(path);
+    ADD_FAILURE() << "Save() wrote into a missing folder";
+  } catch (const std::runtime_error& e) {
+    EXPECT_NE(std::string(e.what()).find(path), std::string::npos) << e.what();
+  }
   EXPECT_TRUE(builder->Fitted());
-  EXPECT_NE(error.find(path), std::string::npos) << error;
 }
 
 TEST(VprVocabularyBuilder, RefusesAFrameTheBackendCannotDescribe) {
@@ -1078,9 +1066,7 @@ TEST(VprVocabularyBuilder, RefusesAFrameTheBackendCannotDescribe) {
   }
   std::unique_ptr<VocabularyBuilder> builder = MakeBuilder(AnyLocOptions(engine));
   ASSERT_NE(builder, nullptr);
-  std::string error;
-  EXPECT_FALSE(builder->AddFrame(VprImage{}, error));
-  EXPECT_NE(error, "");
+  EXPECT_THROW(builder->AddFrame(VprImage{}), std::runtime_error);
   EXPECT_EQ(builder->Size(), 0u);
 }
 
@@ -1534,8 +1520,7 @@ protected:
   std::unique_ptr<LocalizerAndMapper> MakeMapper(const VprOptions& options) {
     auto mapper = std::make_unique<LocalizerAndMapper>(rig_, FeatureDescriptorType::kNone, true);
     mapper->SetActiveCameras({0});
-    std::string error;
-    EXPECT_TRUE(mapper->SetVprOptions(options, error)) << error;
+    mapper->SetVprOptions(options);
     EXPECT_TRUE(mapper->SetPoseGraphOptimizerOptions({PoseGraphOptimizerType::Simple}));
     return mapper;
   }
@@ -2128,8 +2113,7 @@ TEST_F(VprPoseGraph, TurningVprOffLeavesEveryEntryPointInert) {
   ASSERT_TRUE(mapper_->IsVprEnabled());
   ASSERT_EQ(mapper_->GetVprMapSize(), 2u);
 
-  std::string error;
-  ASSERT_TRUE(mapper_->SetVprOptions(VprOptions{}, error)) << error;
+  mapper_->SetVprOptions(VprOptions{});
 
   EXPECT_FALSE(mapper_->IsVprEnabled());
   EXPECT_EQ(mapper_->GetVprMapSize(), 0u);

@@ -113,17 +113,12 @@ void LocalizerAndMapper::SetKeepTrackPoses(bool keep_track_poses) {
   }
 }
 
-bool LocalizerAndMapper::SetVprOptions(const vpr::VprOptions& options, std::string& error) {
+void LocalizerAndMapper::SetVprOptions(const vpr::VprOptions& options) {
   if (!options.enabled) {
     vpr_map_.reset();
-    return true;
+    return;
   }
-  std::unique_ptr<vpr::IVpr> backend = vpr::CreateVpr(options, error);
-  if (!backend) {
-    return false;
-  }
-  SetVprMap(std::make_unique<vpr::VprMap>(options, std::move(backend)));
-  return true;
+  SetVprMap(std::make_unique<vpr::VprMap>(options));
 }
 
 void LocalizerAndMapper::SetVprMap(std::unique_ptr<vpr::VprMap> map) {

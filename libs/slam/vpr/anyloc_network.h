@@ -39,8 +39,9 @@ CreateInferRuntime LoadTensorRt();
 /// AnyLoc's TensorRT engine (see models/anyloc). Not thread safe.
 class AnyLocNetwork {
 public:
-  /// Load, check and warm up the engine at `engine_path`; nullptr with `error` set if it is missing or incompatible.
-  static std::unique_ptr<AnyLocNetwork> Load(const std::string& engine_path, std::string& error);
+  /// Load, check and warm up the engine at `engine_path`.
+  /// @throws std::runtime_error if the engine is missing or incompatible.
+  explicit AnyLocNetwork(const std::string& engine_path);
 
   AnyLocNetwork(const AnyLocNetwork&) = delete;
   AnyLocNetwork& operator=(const AnyLocNetwork&) = delete;
@@ -58,8 +59,6 @@ public:
   bool Run(std::vector<float>& patches);
 
 private:
-  AnyLocNetwork() = default;
-
   // Order matters: members are destroyed in reverse, as TensorRT requires.
   cuda::Stream stream_{false, ICudaStreamProvider::StreamType::Slam};
   std::unique_ptr<nvinfer1::IRuntime> runtime_;

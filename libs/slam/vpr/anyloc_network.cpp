@@ -17,9 +17,8 @@
 #include "slam/vpr/anyloc_network.h"
 
 #include <cmath>
-#include <cstdint>
-#include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <optional>
 #include <stdexcept>
 #include <utility>
@@ -131,19 +130,16 @@ bool IsTensor(const nvinfer1::ICudaEngine& engine, const char* name, nvinfer1::T
   return true;
 }
 
-/// False unless `path` is a readable, non-empty regular file.
-bool ReadFile(const std::string& path, std::vector<char>& bytes) {
-  std::error_code error;
-  if (!std::filesystem::is_regular_file(path, error)) {
-    return false;
-  }
-  const uintmax_t size = std::filesystem::file_size(path, error);
-  if (error || size == 0) {
-    return false;
-  }
-  bytes.resize(static_cast<size_t>(size));
+std::vector<char> ReadFile(const std::string& path) {
   std::ifstream file(path, std::ios::binary);
-  return static_cast<bool>(file.read(bytes.data(), static_cast<std::streamsize>(size)));
+  std::vector<char> bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+  if (!file.good() && !file.eof()) {
+    bytes.clear();
+  }
+  if (bytes.empty()) {
+    throw std::runtime_error("VPR AnyLoc: could not read the TensorRT engine \"" + path + "\".");
+  }
+  return bytes;
 }
 
 void* TensorRtSymbol(void* handle, const char* symbol) {
@@ -169,32 +165,25 @@ CreateInferRuntime LoadTensorRt() {
   return reinterpret_cast<CreateInferRuntime>(TensorRtSymbol(handle, "createInferRuntime_INTERNAL"));
 }
 
-std::unique_ptr<AnyLocNetwork> AnyLocNetwork::Load(const std::string& engine_path, std::string& error) {
-  std::vector<char> plan;
-  if (!ReadFile(engine_path, plan)) {
-    error = "VPR AnyLoc: could not read the TensorRT engine \"" + engine_path + "\".";
-    return nullptr;
-  }
+AnyLocNetwork::AnyLocNetwork(const std::string& engine_path) {
+  const std::vector<char> plan = ReadFile(engine_path);
 
-  std::unique_ptr<AnyLocNetwork> network(new AnyLocNetwork());
   TensorRtLogger& logger = Logger();
   logger.TakeLastError();
   static const CreateInferRuntime create_runtime = LoadTensorRt();
-  network->runtime_.reset(static_cast<nvinfer1::IRuntime*>(create_runtime(&logger, NV_TENSORRT_VERSION)));
-  if (!network->runtime_) {
-    error = "VPR AnyLoc: could not create the TensorRT " + kTensorRtVersion + " runtime.";
-    return nullptr;
+  runtime_.reset(static_cast<nvinfer1::IRuntime*>(create_runtime(&logger, NV_TENSORRT_VERSION)));
+  if (!runtime_) {
+    throw std::runtime_error("VPR AnyLoc: could not create the TensorRT " + kTensorRtVersion + " runtime.");
   }
-  network->engine_.reset(network->runtime_->deserializeCudaEngine(plan.data(), plan.size()));
-  if (!network->engine_) {
-    error = "VPR AnyLoc: \"" + engine_path + "\" is not a TensorRT engine that TensorRT " + kTensorRtVersion +
-            " can run on this GPU (" + logger.TakeLastError() +
-            "). An engine only loads into the TensorRT version and onto the GPU architecture that built it: rebuild "
-            "it with the anyloc_engine CMake target or anyloc_engine_builder.";
-    return nullptr;
+  engine_.reset(runtime_->deserializeCudaEngine(plan.data(), plan.size()));
+  if (!engine_) {
+    throw std::runtime_error("VPR AnyLoc: \"" + engine_path + "\" is not a TensorRT engine that TensorRT " +
+                             kTensorRtVersion + " can run on this GPU (" + logger.TakeLastError() +
+                             "). An engine only loads into the TensorRT version and onto the GPU architecture that "
+                             "built it: rebuild it with the anyloc_engine CMake target or anyloc_engine_builder.");
   }
 
-  const nvinfer1::ICudaEngine& engine = *network->engine_;
+  const nvinfer1::ICudaEngine& engine = *engine_;
   if (engine.getNbIOTensors() != 2 || !IsTensor(engine, kInputName, nvinfer1::TensorIOMode::kINPUT, 4) ||
       engine.getTensorShape(kInputName).d[1] != 3 ||
       !IsTensor(engine, kOutputName, nvinfer1::TensorIOMode::kOUTPUT, 3)) {
@@ -205,42 +194,37 @@ std::unique_ptr<AnyLocNetwork> AnyLocNetwork::Load(const std::string& engine_pat
                (engine.getTensorIOMode(name) == nvinfer1::TensorIOMode::kINPUT ? "input " : "output ") + name + " " +
                ToString(engine.getTensorDataType(name)) + " " + ToString(engine.getTensorShape(name));
     }
-    error = "VPR AnyLoc: \"" + engine_path +
-            "\" is not the DINOv2 patch descriptor engine AnyLoc runs, which takes input image fp32 [1, 3, H, W] and "
-            "gives output patch_descriptors fp32 [1, N, D]; it has " +
-            found + ".";
-    return nullptr;
+    throw std::runtime_error("VPR AnyLoc: \"" + engine_path +
+                             "\" is not the DINOv2 patch descriptor engine AnyLoc runs, which takes input image fp32 "
+                             "[1, 3, H, W] and gives output patch_descriptors fp32 [1, N, D]; it has " +
+                             found + ".");
   }
   const nvinfer1::Dims input_dims = engine.getTensorShape(kInputName);
   const nvinfer1::Dims output_dims = engine.getTensorShape(kOutputName);
-  network->height_ = static_cast<int>(input_dims.d[2]);
-  network->width_ = static_cast<int>(input_dims.d[3]);
-  network->patches_ = static_cast<int>(output_dims.d[1]);
-  network->dim_ = static_cast<int>(output_dims.d[2]);
+  height_ = static_cast<int>(input_dims.d[2]);
+  width_ = static_cast<int>(input_dims.d[3]);
+  patches_ = static_cast<int>(output_dims.d[1]);
+  dim_ = static_cast<int>(output_dims.d[2]);
 
-  network->context_.reset(network->engine_->createExecutionContext());
-  if (!network->context_) {
-    error = "VPR AnyLoc: could not create an execution context for \"" + engine_path + "\" (" + logger.TakeLastError() +
-            ").";
-    return nullptr;
+  context_.reset(engine_->createExecutionContext());
+  if (!context_) {
+    throw std::runtime_error("VPR AnyLoc: could not create an execution context for \"" + engine_path + "\" (" +
+                             logger.TakeLastError() + ").");
   }
-  network->host_input_.resize(static_cast<size_t>(3) * network->height_ * network->width_);
-  network->host_output_.resize(static_cast<size_t>(network->patches_) * network->dim_);
-  network->device_input_.emplace(network->host_input_.size());
-  network->device_output_.emplace(network->host_output_.size());
-  if (!network->context_->setTensorAddress(kInputName, network->device_input_->ptr()) ||
-      !network->context_->setTensorAddress(kOutputName, network->device_output_->ptr())) {
-    error = "VPR AnyLoc: could not bind the inputs and outputs of \"" + engine_path + "\".";
-    return nullptr;
+  host_input_.resize(static_cast<size_t>(3) * height_ * width_);
+  host_output_.resize(static_cast<size_t>(patches_) * dim_);
+  device_input_.emplace(host_input_.size());
+  device_output_.emplace(host_output_.size());
+  if (!context_->setTensorAddress(kInputName, device_input_->ptr()) ||
+      !context_->setTensorAddress(kOutputName, device_output_->ptr())) {
+    throw std::runtime_error("VPR AnyLoc: could not bind the inputs and outputs of \"" + engine_path + "\".");
   }
 
   // Warm up, so the first keyframe does not pay for TensorRT's lazy init.
   std::vector<float> warm_up;
-  if (!network->Run(warm_up)) {
-    error = "VPR AnyLoc: the first inference of \"" + engine_path + "\" failed, see the log.";
-    return nullptr;
+  if (!Run(warm_up)) {
+    throw std::runtime_error("VPR AnyLoc: the first inference of \"" + engine_path + "\" failed, see the log.");
   }
-  return network;
 }
 
 int AnyLocNetwork::input_width() const { return width_; }

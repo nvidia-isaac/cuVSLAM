@@ -19,6 +19,8 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <stdexcept>
+#include <string>
 
 namespace cuvslam::slam::vpr {
 
@@ -43,53 +45,40 @@ bool ReadVocabularyFile(const std::string& path, Blob& bytes) {
   return static_cast<bool>(file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size)));
 }
 
-std::unique_ptr<VocabularyBuilder> VocabularyBuilder::Create(const VprOptions& options, std::string& error) {
+VocabularyBuilder::VocabularyBuilder(const VprOptions& options) : min_frames_(options.min_training_keyframes) {
   if (!options.enabled || !options.vocabulary_path.empty()) {
-    error = "VPR: a vocabulary is fitted with place recognition on and no vocabulary_path.";
-    return nullptr;
+    throw std::invalid_argument("VPR: a vocabulary is fitted with place recognition on and no vocabulary_path.");
   }
-  std::unique_ptr<IVpr> backend = CreateVpr(options, error);
-  if (!backend) {
-    return nullptr;
+  backend_ = CreateVpr(options);
+  capacity_ = backend_->TrainingCapacity();
+  if (capacity_ == 0) {
+    throw std::runtime_error(std::string("VPR: the ") + backend_->Name() + " backend fits no vocabulary.");
   }
-  if (backend->TrainingCapacity() == 0) {
-    error = std::string("VPR: the ") + backend->Name() + " backend fits no vocabulary.";
-    return nullptr;
-  }
-  return std::unique_ptr<VocabularyBuilder>(new VocabularyBuilder(std::move(backend), options.min_training_keyframes));
 }
-
-VocabularyBuilder::VocabularyBuilder(std::unique_ptr<IVpr> backend, size_t min_frames)
-    : backend_(std::move(backend)), min_frames_(min_frames), capacity_(backend_->TrainingCapacity()) {}
 
 VocabularyBuilder::~VocabularyBuilder() = default;
 
-bool VocabularyBuilder::AddFrame(const VprImage& image, std::string& error) {
+void VocabularyBuilder::AddFrame(const VprImage& image) {
   if (fitted_) {
-    error = "VPR: the vocabulary is already fitted; add frames before saving it.";
-    return false;
+    throw std::invalid_argument("VPR: the vocabulary is already fitted; add frames before saving it.");
   }
   if (size_ >= capacity_) {
-    error = "VPR: a vocabulary is fitted to at most " + std::to_string(capacity_) +
-            " frames; spread them over the recordings.";
-    return false;
+    throw std::invalid_argument("VPR: a vocabulary is fitted to at most " + std::to_string(capacity_) +
+                                " frames; spread them over the recordings.");
   }
   const KeyFrameId node_id = size_;
   backend_->AddFrame(node_id, image);
   if (!backend_->HasNode(node_id)) {
-    error = std::string("VPR: ") + backend_->Name() + " could not describe the frame, see the log.";
-    return false;
+    throw std::runtime_error(std::string("VPR: ") + backend_->Name() + " could not describe the frame, see the log.");
   }
   ++size_;
-  return true;
 }
 
-bool VocabularyBuilder::Save(const std::string& path, std::string& error) {
+void VocabularyBuilder::Save(const std::string& path) {
   if (!fitted_) {
     if (size_ < min_frames_) {
-      error = "VPR: a vocabulary is fitted to at least " + std::to_string(min_frames_) + " frames, not " +
-              std::to_string(size_) + ".";
-      return false;
+      throw std::invalid_argument("VPR: a vocabulary is fitted to at least " + std::to_string(min_frames_) +
+                                  " frames, not " + std::to_string(size_) + ".");
     }
     backend_->Finalize();
     for (size_t node_id = 0; node_id < size_; ++node_id) {
@@ -104,10 +93,8 @@ bool VocabularyBuilder::Save(const std::string& path, std::string& error) {
   file.write(reinterpret_cast<const char*>(blob.data()), static_cast<std::streamsize>(blob.size()));
   file.close();  // flushes, so fail() also sees write errors
   if (file.fail()) {
-    error = "VPR: could not write the vocabulary \"" + path + "\".";
-    return false;
+    throw std::runtime_error("VPR: could not write the vocabulary \"" + path + "\".");
   }
-  return true;
 }
 
 }  // namespace cuvslam::slam::vpr
