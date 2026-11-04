@@ -15,6 +15,7 @@
  */
 
 #include <chrono>
+#include <utility>
 
 #include "nanobind/nanobind.h"
 #include "nanobind/ndarray.h"
@@ -86,6 +87,18 @@ Odometry::Config PyDefaultOdometryConfig() {
   cfg.enable_observations_export = kPyDefaultEnableObservationsExport;
   cfg.enable_landmarks_export = kPyDefaultEnableLandmarksExport;
   return cfg;
+}
+
+// Runs a Python callback for SLAM, possibly on the SLAM thread. An exception it raises cannot unwind through SLAM,
+// so it is reported to sys.unraisablehook, as Python does for exceptions it cannot propagate.
+template <typename... Args>
+void CallSlamCallback(const nb::callable& callback, const char* context, Args&&... args) {
+  nb::gil_scoped_acquire gil;
+  try {
+    callback(std::forward<Args>(args)...);
+  } catch (nb::python_error& e) {
+    e.discard_as_unraisable(context);
+  }
 }
 
 // A callable that the SLAM thread may drop last; it is released with the GIL held.
@@ -726,7 +739,8 @@ NB_MODULE(_cuvslam, m) {
           "images etc. can still be either CPU or GPU arrays/tensors. The reverse does not hold:\n"
           "odometry with `use_gpu` disabled only accepts CPU arrays/tensors.\n\n"
           "The images etc. must be in the same order as cameras in the rig.\n"
-          "If data for a camera is not available, pass empty array or tensor for that camera image.\n\n"
+          "If data for a camera is not available, pass empty array or tensor for that camera image.\n"
+          "Cycling through cameras or camera groups across calls is not supported.\n\n"
           "Parameters:\n"
           "    timestamp: Image timestamp in nanoseconds\n"
           "    images: List of numpy arrays containing the camera images\n"
@@ -736,7 +750,7 @@ NB_MODULE(_cuvslam, m) {
           "    depths: Optional list of numpy arrays containing depth images\n"
           "    options: Optional per-frame options that override default settings for this call only\n\n"
           "Returns:\n"
-          "    :class:`PoseEstimate` object with the computed pose. If tracking fails, `is_valid` will be False.")
+          "    :class:`PoseEstimate` object with the computed pose. If tracking fails, `world_from_rig` is `None`.")
       .def(
           "register_imu_measurement",
           [](Odometry& self, uint32_t sensor_index, const ImuMeasurement& imu_measurement) {
@@ -841,7 +855,11 @@ NB_MODULE(_cuvslam, m) {
       m, "Slam",
       "Builds and optimizes a reusable map from odometry results, including loop closure, map persistence, and "
       "relocalization.\n\n"
-      "Use directly for manual orchestration, or access Tracker's instance through its `slam` property.",
+      "Use directly for manual orchestration, or access Tracker's instance through its `slam` property.\n\n"
+      "Destroying a Slam from a SLAM callback, for example when the callback holds its last reference, finishes "
+      "asynchronously: the SLAM thread is stopped and the map file written on another thread after the object is "
+      "gone, and there is no way to wait for that. Do not exit the process right after, or the map file may be left "
+      "incomplete.",
       nb::is_final());
 
   nb::enum_<Slam::DataLayer>(slam_cls, "DataLayer", "Data layer for SLAM")
@@ -1090,8 +1108,7 @@ NB_MODULE(_cuvslam, m) {
           "save_map",
           [](Slam& self, std::string_view folder_name, nb::callable callback) {
             self.SaveMap(folder_name, [callback = GilSafeCallable(std::move(callback))](bool success) {
-              nb::gil_scoped_acquire gil;
-              (*callback)(success);
+              CallSlamCallback(*callback, "Slam.save_map callback", success);
             });
           },
           nb::arg("folder_name"), nb::arg("callback"),
@@ -1102,7 +1119,8 @@ NB_MODULE(_cuvslam, m) {
           "`flush_map` saves it there. It also fails for the folder of a map that `localize_in_map` loaded and the "
           "folders that contain it.\n"
           "This method works asynchronously depending on the `sync_mode` parameter in `Slam.Config`.\n"
-          "In both cases, the callback will be called with a flag indicating if the map was saved successfully.\n\n"
+          "In both cases, the callback will be called with a flag indicating if the map was saved successfully.\n"
+          "An exception raised by the callback is reported to ``sys.unraisablehook`` instead of propagating.\n\n"
           "Parameters:\n"
           "    folder_name: Folder name where SLAM database will be saved\n"
           "    callback: Function to be called when save is complete (takes bool success parameter)")
@@ -1110,8 +1128,7 @@ NB_MODULE(_cuvslam, m) {
           "flush_map",
           [](Slam& self, nb::callable callback) {
             self.FlushMap([callback = GilSafeCallable(std::move(callback))](bool success) {
-              nb::gil_scoped_acquire gil;
-              (*callback)(success);
+              CallSlamCallback(*callback, "Slam.flush_map callback", success);
             });
           },
           nb::arg("callback"),
@@ -1119,7 +1136,8 @@ NB_MODULE(_cuvslam, m) {
           "attached.\n\n"
           "The file then holds the whole map, and mapping goes on as before. It fails without one.\n"
           "This method works asynchronously depending on the `sync_mode` parameter in `Slam.Config`.\n"
-          "In both cases, the callback will be called with a flag indicating if the map was flushed successfully.\n\n"
+          "In both cases, the callback will be called with a flag indicating if the map was flushed successfully.\n"
+          "An exception raised by the callback is reported to ``sys.unraisablehook`` instead of propagating.\n\n"
           "Parameters:\n"
           "    callback: Function to be called when flush is complete (takes bool success parameter)")
       .def(
@@ -1131,12 +1149,10 @@ NB_MODULE(_cuvslam, m) {
             self.LocalizeInMap(
                 folder_name, timestamp_ns, guess_pose, image_set, settings,
                 [start_cb = GilSafeCallable(std::move(start_cb))] {
-                  nb::gil_scoped_acquire gil;
-                  (*start_cb)();
+                  CallSlamCallback(*start_cb, "Slam.localize_in_map start_cb");
                 },
                 [finish_cb = GilSafeCallable(std::move(finish_cb))](const Result<Pose>& result) {
-                  nb::gil_scoped_acquire gil;
-                  (*finish_cb)(result.data, result.error_message);
+                  CallSlamCallback(*finish_cb, "Slam.localize_in_map finish_cb", result.data, result.error_message);
                 },
                 attach);
           },
@@ -1151,6 +1167,7 @@ NB_MODULE(_cuvslam, m) {
           "With guess_pose=None, it needs `Slam.Config.use_vpr` and a map saved with it.\n"
           "It fails if the map has more nodes than `Slam.Config.max_map_size` (0: no limit), and for the folder of "
           "the map file this session writes; `flush_map` saves that one.\n"
+          "An exception raised by either callback is reported to ``sys.unraisablehook`` instead of propagating.\n"
           "Parameters:\n"
           "    folder_name: Folder containing the saved SLAM map\n"
           "    timestamp_ns: Timestamp for the image frame in nanoseconds\n"
@@ -1191,12 +1208,13 @@ NB_MODULE(_cuvslam, m) {
             auto image_set = ImageSetFromNDArrays(images, timestamp_ns, ArrayType::Image);
             self.RecognizePlaceByFrame(image_set, [finish_cb = GilSafeCallable(std::move(finish_cb))](
                                                       const Result<Slam::PlaceRecognition>& result) {
-              nb::gil_scoped_acquire gil;
-              (*finish_cb)(result.data, result.error_message);
+              CallSlamCallback(*finish_cb, "Slam.recognize_place_by_frame finish_cb", result.data,
+                               result.error_message);
             });
           },
           nb::arg("images"), nb::arg("timestamp_ns"), nb::arg("finish_cb"),
-          "Find the pose graph node whose mapped frame looks most like `images`, without geometric verification.\n\n"
+          "Find the pose graph node whose mapped frame looks most like `images`, without geometric verification.\n"
+          "An exception raised by the callback is reported to ``sys.unraisablehook`` instead of propagating.\n\n"
           "Parameters:\n"
           "    images: List of numpy arrays containing the camera images\n"
           "    timestamp_ns: Timestamp of the frame in nanoseconds\n"
@@ -1227,7 +1245,9 @@ NB_MODULE(_cuvslam, m) {
   auto tracker_cls = nb::class_<Tracker>(m, "Tracker",
                                          "Coordinates cuVSLAM Odometry and optional SLAM.\n\n"
                                          "Submit frames and IMU measurements through this class. Use the `odometry` "
-                                         "and `slam` properties for module-specific queries and operations.",
+                                         "and `slam` properties for module-specific queries and operations.\n\n"
+                                         "Destroying a Tracker from a SLAM callback finishes asynchronously, as for "
+                                         ":class:`Slam`.",
                                          nb::is_final());
 
   nb::enum_<Tracker::Mode>(tracker_cls, "Mode", "What the tracker runs, and in which thread")
@@ -1309,7 +1329,8 @@ NB_MODULE(_cuvslam, m) {
           "images etc. can still be either CPU or GPU arrays/tensors. The reverse does not hold:\n"
           "odometry with `use_gpu` disabled only accepts CPU arrays/tensors.\n\n"
           "The images etc. must be in the same order as cameras in the rig.\n"
-          "If data for a camera is not available, pass empty array or tensor for that camera image.\n\n"
+          "If data for a camera is not available, pass empty array or tensor for that camera image.\n"
+          "Cycling through cameras or camera groups across calls is not supported.\n\n"
           "Parameters:\n"
           "    timestamp: Images timestamp in nanoseconds\n"
           "    images: List of numpy arrays or tensors containing the camera images\n"

@@ -103,9 +103,11 @@ rig = get_rig(sequence_path)
 
 # Initialize tracker
 tracker = cuvslam.Tracker(rig, cuvslam.Tracker.Mode.OdometryOnlyOffline, odom_cfg)
-print(f"cuVSLAM Tracker initilized with odometry mode: {cfg.odometry_mode}")
+print(f"cuVSLAM Tracker initilized with odometry mode: {odom_cfg.odometry_mode}")
 
 # Track frames
+accel_data = None
+gyro_data = None
 last_camera_timestamp = None
 imu_count_since_last_camera = 0
 frame_id = 0
@@ -133,7 +135,7 @@ for frame_metadata in frames_metadata:
     images = [load_frame(image_path) for image_path in frame_metadata['images_paths']]
 
     # Check IMU measurements before tracking
-    if (cfg.odometry_mode == cuvslam.Odometry.OdometryMode.Inertial
+    if (odom_cfg.odometry_mode == cuvslam.Odometry.OdometryMode.Inertial
             and last_camera_timestamp is not None):
         if imu_count_since_last_camera == 0:
             print(
@@ -159,7 +161,7 @@ for frame_metadata in frames_metadata:
     odom_trajectory.append([timestamp] + list(odom_pose.translation) + list(odom_pose.rotation))
 
     gravity = None
-    if cfg.odometry_mode == cuvslam.Odometry.OdometryMode.Inertial:
+    if odom_cfg.odometry_mode == cuvslam.Odometry.OdometryMode.Inertial:
         # Gravity estimation requires collecting sufficient number of keyframes with motion diversity
         gravity = tracker.odometry.get_last_gravity()
 
@@ -186,9 +188,12 @@ for frame_metadata in frames_metadata:
         rr.Image(images[0]).compress(jpeg_quality=80)
     )
 
+    current_observations_cam_1 = tracker.odometry.get_last_observations(1)
+    points_cam_1 = np.array([[obs.u, obs.v] for obs in current_observations_cam_1])
+    colors_cam_1 = np.array([color_from_id(obs.id) for obs in current_observations_cam_1])
     rr.log(
         "world/camera_1/observations",
-        rr.Points2D(positions=points, colors=colors, radii=5.0),
+        rr.Points2D(positions=points_cam_1, colors=colors_cam_1, radii=5.0),
         rr.Image(images[1]).compress(jpeg_quality=80)
     )
 
@@ -198,7 +203,7 @@ for frame_metadata in frames_metadata:
             rr.Arrows3D(vectors=gravity, colors=[[255, 0, 0]], radii=0.015)
         )
 
-    if cfg.odometry_mode == cuvslam.Odometry.OdometryMode.Inertial:
+    if accel_data is not None:
         rr.log("world/imu/accel/x", rr.Scalars(accel_data[0]), static=False)
         rr.log("world/imu/accel/y", rr.Scalars(accel_data[1]), static=False)
         rr.log("world/imu/accel/z", rr.Scalars(accel_data[2]), static=False)

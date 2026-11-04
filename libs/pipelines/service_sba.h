@@ -24,10 +24,6 @@
 #include "sba/sba_config.h"
 #include "sba/schur_complement_bundler_cpu.h"
 
-#ifdef USE_CUDA
-#include "sba/schur_complement_bundler_gpu.h"
-#endif
-
 #include "imu/imu_sba.h"
 #include "map/service.h"
 
@@ -306,7 +302,7 @@ template <class Bundler>
 class SbaService : public SbaServiceBase {
 public:
   SbaService(const sba::Settings& sba_settings, const camera::Rig& rig, UnifiedMap& map)
-      : SbaServiceBase(map, sba_settings.async), rig_(rig) {
+      : SbaServiceBase(map, "cuvslam:sba", sba_settings.async), rig_(rig) {
     pending_ = sba_settings;
     current_ = sba_settings;
   }
@@ -358,7 +354,7 @@ class ImuSbaService : public SbaServiceBase {
 public:
   ImuSbaService(const sba::Settings& sba_settings, const camera::Rig& rig, const imu::ImuCalibration& calib,
                 UnifiedMap& map)
-      : SbaServiceBase(map, sba_settings.async), rig_(rig), calib_(calib), imu_bundler_(calib) {
+      : SbaServiceBase(map, "cuvslam:imu_sba", sba_settings.async), rig_(rig), calib_(calib), imu_bundler_(calib) {
     pending_ = sba_settings;
     current_ = sba_settings;
   }
@@ -391,10 +387,6 @@ private:
   profiler::SBAProfiler::DomainHelper profiler_domain_ = profiler::SBAProfiler::DomainHelper("Inertial SBA Service");
 };
 
-#ifdef USE_CUDA
-using ImuSbaCPUService = ImuSbaService<sba::SchurComplementBundlerGpu, sba_imu::IMUBundlerCpuFixedVel>;
-#else
 using ImuSbaCPUService = ImuSbaService<sba::SchurComplementBundlerCpu, sba_imu::IMUBundlerCpuFixedVel>;
-#endif
 
 }  // namespace cuvslam::pipelines

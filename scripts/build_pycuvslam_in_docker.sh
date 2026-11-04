@@ -32,9 +32,9 @@ docker run --runtime=nvidia --gpus all --rm --label "cuvslam.runner=${RUNNER_NAM
     CUDA_MAJOR=$(echo "$CUDA_VERSION" | cut -d. -f1)
 
     if [ "$CUDA_MAJOR" = "12" ]; then
-      EXCLUDES="--exclude libcusolver.so.11 --exclude libcublas.so.12 --exclude libcublasLt.so.12 --exclude libcusparse.so.12 --exclude libnvJitLink.so.12"
+      EXCLUDES="--exclude libcusolver.so.11 --exclude libcublas.so.12 --exclude libcublasLt.so.12 --exclude libcusparse.so.12 --exclude libnvJitLink.so.12 --exclude libnvinfer.so.10"
     elif [ "$CUDA_MAJOR" = "13" ]; then
-      EXCLUDES="--exclude libcusolver.so.12 --exclude libcublas.so.13 --exclude libcublasLt.so.13 --exclude libcusparse.so.12 --exclude libnvJitLink.so.13"
+      EXCLUDES="--exclude libcusolver.so.12 --exclude libcublas.so.13 --exclude libcublasLt.so.13 --exclude libcusparse.so.12 --exclude libnvJitLink.so.13 --exclude libnvinfer.so.10"
     else
       echo "Error: unknown CUDA major version $CUDA_MAJOR, cannot determine auditwheel exclusions"
       exit 1
