@@ -15,6 +15,7 @@
  */
 
 #include <chrono>
+#include <csignal>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -25,6 +26,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -505,32 +507,28 @@ TEST_F(TrackerTest, VprVocabularyBuilderRefusesANegativePitch) {
 }
 #endif
 
-// The SLAM thread releases a callback after running it, so a callback that owns the Slam destroys it on that thread.
-TEST(SlamTest, CallbackCanOwnAsyncSlam) {
-  Slam::Config config;
-  config.sync_mode = false;
-  // Shared with the deleter, which may run after a timed-out test has returned
-  auto destroyed = std::make_shared<std::promise<void>>();
-  std::future<void> destroyed_future = destroyed->get_future();
-  auto slam = std::shared_ptr<Slam>(new Slam(MakeStereoRig(), {0}, config), [destroyed](Slam* owned) {
-    delete owned;
-    destroyed->set_value();
-  });
-
-  const std::string base_path =
-      std::filesystem::temp_directory_path() /
-      ("cuvslam_owned_by_callback_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-  std::promise<void> release;
-  std::shared_future<void> released = release.get_future().share();
-  Slam& session = *slam;
-  // Holds the SLAM thread until the next callback is the only owner
-  session.SaveMap(base_path + "_first", [released](bool) { released.wait(); });
-  session.SaveMap(base_path + "_second", [owner = std::move(slam)](bool) {});
-  release.set_value();
-
-  EXPECT_EQ(destroyed_future.wait_for(std::chrono::seconds(30)), std::future_status::ready);
-  std::filesystem::remove_all(base_path + "_first");
-  std::filesystem::remove_all(base_path + "_second");
+// The SLAM thread releases a callback after running it, so a callback that holds the last reference to its Slam
+// destroys the Slam on that thread, which cannot join itself.
+TEST(SlamDeathTest, CallbackThatOwnsItsSlamTerminates) {
+  // Runs the child from a fresh process, which initializes CUDA itself
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  EXPECT_EXIT(
+      {
+        Slam::Config config;
+        config.sync_mode = false;
+        auto slam = std::make_shared<Slam>(MakeStereoRig(), std::vector<uint8_t>{0}, config);
+        std::promise<void> release;
+        std::shared_future<void> released = release.get_future().share();
+        Slam& session = *slam;
+        // Without a map file, flushing fails, but the callbacks still run on the SLAM thread.
+        // The first holds that thread until the second is the only owner.
+        session.FlushMap([released](bool) { released.wait(); });
+        session.FlushMap([owner = std::move(slam)](bool) {});
+        release.set_value();
+        std::this_thread::sleep_for(std::chrono::seconds(30));
+        std::_Exit(0);
+      },
+      ::testing::KilledBySignal(SIGABRT), "");
 }
 
 }  // namespace

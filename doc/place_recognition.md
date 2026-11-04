@@ -20,9 +20,10 @@ import cuvslam as vslam
 
 engine = os.environ['CUVSLAM_ANYLOC_ENGINE']
 
-def on_place(place, error):
+def print_place(request):
+    place = request.result()
     if place is None:
-        print(error)   # no mapped place matched, or no answer at all, for example use_vpr is off
+        print(request.error_message)   # no mapped place matched, or no answer at all, for example use_vpr is off
     else:
         print(place.node_id, place.pose, place.score)
 
@@ -31,21 +32,20 @@ slam_cfg = vslam.Slam.Config(use_vpr=True, vpr_settings=vslam.Slam.VprSettings(m
 tracker = vslam.Tracker(rig, vslam.Tracker.Mode.OdometryWithSlamOffline, odom_cfg, slam_cfg)
 for timestamp, images in sequence:
     tracker.track(timestamp, images)
-tracker.slam.save_map('/path/to/map', lambda saved: print('map saved' if saved else 'map not saved'))
+print('map saved' if tracker.slam.save_map('/path/to/map').result() else 'map not saved')
 
 # Later run, starting from an unknown pose: localize in the saved map without a guess pose. On success the
 # session continues in that map, place recognition included.
 tracker = vslam.Tracker(rig, vslam.Tracker.Mode.OdometryWithSlamOffline, odom_cfg, slam_cfg)
 settings = vslam.Slam.LocalizationSettings(horizontal_search_radius=8., vertical_search_radius=2.,
                                            horizontal_step=0.5, vertical_step=0.2, angular_step_rads=0.03)
-localized = []
+localized = None
 for timestamp, images in sequence:
     tracker.track(timestamp, images)
-    if not localized:
-        tracker.slam.localize_in_map('/path/to/map', timestamp, None, images, settings, lambda: None,
-                                     lambda pose, error: pose and localized.append(pose))
+    if localized is None:
+        localized = tracker.slam.localize_in_map('/path/to/map', timestamp, None, images, settings).result()
     else:
-        tracker.slam.recognize_place_by_frame(images, timestamp, on_place)
+        print_place(tracker.slam.recognize_place_by_frame(images, timestamp))
 ```
 
 The place recognition map is part of the SLAM map: `save_map` writes both into one LMDB database, and `localize_in_map`
@@ -55,12 +55,14 @@ is written the same way when localized with `attach=True`. After `localize_in_ma
 loaded map, and its new frames are recognized too.
 
 `save_map`, `localize_in_map` and `recognize_place_by_frame` are asynchronous: they queue the work for the SLAM
-thread and their callbacks run when it finishes, possibly on that thread. `sync_mode=True` above, which
-`Tracker.Mode`'s offline modes require anyway, runs the work before the call returns, so the callback has already
-fired by the time it does.
+thread and return a request, which is done when that thread finishes the work. `request.result(timeout=None)` waits
+for it, and `request.wait(timeout)` and `request.done()` tell whether it is done. `sync_mode=True` above, which
+`Tracker.Mode`'s offline modes require anyway, runs the work before the call returns, so the request is already done
+by the time it does.
 
 In C++ the same calls are `Slam::SaveMap`, `Slam::LocalizeInMap` and
 `Slam::RecognizePlaceByFrame`, with `Slam::Config::use_vpr = true` and the engine in `Slam::VprSettings::model_path`.
+They take callbacks, which run on the SLAM thread, instead of returning a request.
 
 ## One vocabulary per operating domain
 

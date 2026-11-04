@@ -17,9 +17,7 @@ import os
 import tempfile
 import shutil
 import unittest
-from unittest import mock
 import numpy as np
-import threading
 from numpy.testing import assert_array_almost_equal
 
 # Unit tests must not require the external Rerun Viewer, even in USE_RERUN builds.
@@ -32,8 +30,8 @@ W, H = 640, 480  # Image size of tracked images
 BASELINE = 0.25  # Baseline distance between cameras (m)
 STEPS = 30       # Number of steps
 
-def end_with_pending_callbacks(use_tracker, queue):
-    """Drops an async session while the SLAM thread is inside a callback and has more callbacks queued."""
+def end_with_pending_requests(use_tracker, queue):
+    """Drops an async session right after queuing requests, and reports how each request ended."""
     rig = vslam.Rig(data.generate_stereo_camera(W, H, BASELINE), [vslam.ImuCalibration()])
     slam_cfg = vslam.Slam.Config(sync_mode=False)
     if use_tracker:
@@ -46,28 +44,33 @@ def end_with_pending_callbacks(use_tracker, queue):
     images = [np.zeros((H, W), dtype=np.uint8)] * 2
     settings = vslam.Slam.LocalizationSettings(horizontal_search_radius=0.25, vertical_search_radius=0.25,
                                                horizontal_step=0.0625, vertical_step=0.0625, angular_step_rads=0.03125)
-    callback_threads = []
-    started = threading.Event()
-    release = threading.Event()
+    # There is no map, so each fails, but SLAM still runs it, unless it drops it with the session
+    requests = [session[-1].localize_in_map("/nonexistent/cuvslam/map", 0, vslam.Pose(), images, settings)
+                for _ in range(10)]
+    requests.append(session[-1].flush_map())
+    session.clear()  # drops the Python owners while requests are pending
 
-    def first():
-        callback_threads.append(threading.get_ident())
-        started.set()
-        release.wait(60)  # set by a timer, which needs the GIL back once the session is dropped
+    outcomes = []
+    for request in requests:
+        if not request.done():
+            outcomes.append("pending")
+            continue
+        try:
+            request.result(timeout=0)
+            outcomes.append("ran")
+        except RuntimeError as error:
+            outcomes.append("dropped" if "destroyed" in str(error) else f"failed: {error}")
+    queue.put(outcomes)
 
-    def localize(start_cb):
-        # There is no map, so it fails, but its callbacks still run on the SLAM thread
-        session[-1].localize_in_map("/nonexistent/cuvslam/map", 0, vslam.Pose(), images, settings, start_cb,
-                             lambda pose, error: None)
-
-    localize(first)
-    if not started.wait(60):
-        raise RuntimeError("the first callback did not run")
-    for _ in range(10):
-        localize(lambda: None)
-    threading.Timer(0.5, release.set).start()
-    session.clear()  # drops the Python owners while callbacks are pending
-    queue.put(callback_threads[0] != threading.get_ident())
+def slam_threads():
+    names = []
+    for task in os.listdir('/proc/self/task'):
+        try:
+            with open(f'/proc/self/task/{task}/comm') as comm:
+                names.append(comm.read().strip())
+        except FileNotFoundError:
+            pass  # the thread exited
+    return [name for name in names if name == 'cuvslam:slam']
 
 plt = None
 
@@ -210,13 +213,7 @@ class TestMap(unittest.TestCase):
 
         landmark_ids = {landmark.id for landmark in tracker.slam.get_landmarks(vslam.Slam.DataLayer.Map).landmarks}
 
-        # Save the map
-        map_saved = False
-        def save_callback(success):
-            nonlocal map_saved
-            map_saved = success
-        tracker.slam.save_map(self.map_path(map_name), save_callback)
-        self.assertTrue(map_saved)
+        self.assertTrue(tracker.slam.save_map(self.map_path(map_name)).result())
         return landmark_ids
 
     def try_localize(
@@ -241,26 +238,14 @@ class TestMap(unittest.TestCase):
             guess_pose = perturb_pose(guess_pose, 0.125)
         self.add_debug(f"{step}: guess_pose={guess_pose}")
 
-        localization_complete = threading.Event()
-        result_pose = None
-
-        def localization_start_cb():
-            self.add_debug("Localization started")
-
-        def localization_finish_cb(pose, error_message):
-            nonlocal result_pose
-            self.add_debug(f"Localization result: {pose}, {error_message}")
-            result_pose = pose
-            localization_complete.set()
-
-        tracker.slam.localize_in_map(self.map_path(map_name), timestamp, guess_pose, images, loc_settings,
-                                     localization_start_cb, localization_finish_cb)
-        while not localization_complete.wait(timeout=0.1):
-            # Simulate time passing; this is necessary for the async callback to be processed
+        request = tracker.slam.localize_in_map(self.map_path(map_name), timestamp, guess_pose, images, loc_settings)
+        while not request.wait(timeout=0.1):
+            # Simulate time passing; this is necessary for the async request to be processed
             timestamp += 1_000
             _, _ = tracker.track(timestamp, images)
 
-        self.add_debug(f"{step}: result_pose={result_pose}")
+        result_pose = request.result()
+        self.add_debug(f"{step}: result_pose={result_pose}, error_message={request.error_message!r}")
         return result_pose
 
     def map_layer_after_localizing(self, img: data.ImageGenerator, map_name: str, step: int) -> set[int]:
@@ -271,11 +256,9 @@ class TestMap(unittest.TestCase):
         images, z = img.generate_zoomed_images(step)
         timestamp = step * 1_000_000
         tracker.track(timestamp, images)
-        poses = []
         guess_pose = vslam.Pose(translation=[0, 0, z], rotation=[0, 0, 0, 1.0])
-        tracker.slam.localize_in_map(self.map_path(map_name), timestamp, guess_pose, images, loc_settings,
-                                     lambda: None, lambda pose, error_message: poses.append(pose))
-        self.assertIsNotNone(poses[0])
+        self.assertIsNotNone(
+            tracker.slam.localize_in_map(self.map_path(map_name), timestamp, guess_pose, images, loc_settings).result())
         for i in range(step + 1, STEPS):
             images, _ = img.generate_zoomed_images(i)
             tracker.track(i * 1_000_000, images)
@@ -319,15 +302,11 @@ class TestMap(unittest.TestCase):
         images, z = img.generate_zoomed_images(step)
         timestamp = step * 1_000_000 + offset
         tracker.track(timestamp, images)
-        poses = []
         guess_pose = vslam.Pose(translation=[0, 0, z], rotation=[0, 0, 0, 1.0])
-        tracker.slam.localize_in_map(self.map_path('map'), timestamp, guess_pose, images, loc_settings,
-                                     lambda: None, lambda pose, error_message: poses.append(pose))
-        self.assertEqual(len(poses), 1)  # sync mode answers right away
-        self.assertIsNotNone(poses[0])
-        saved_again = []
-        tracker.slam.save_map(self.map_path('resaved'), saved_again.append)
-        self.assertEqual(saved_again, [True])
+        localization = tracker.slam.localize_in_map(self.map_path('map'), timestamp, guess_pose, images, loc_settings)
+        self.assertTrue(localization.done())  # sync mode answers right away
+        self.assertIsNotNone(localization.result())
+        self.assertTrue(tracker.slam.save_map(self.map_path('resaved')).result())
 
         # The Map layer published after localizing holds the saved landmarks
         for i in range(step + 1, STEPS):
@@ -354,9 +333,7 @@ class TestMap(unittest.TestCase):
             images, _ = img.generate_zoomed_images(i)
             tracker.track(i * 1_000_000, images)
 
-        results = []
-        tracker.slam.save_map(self.map_path('map'), results.append)
-        tracker.slam.flush_map(results.append)
+        results = [tracker.slam.save_map(self.map_path('map')).result(), tracker.slam.flush_map().result()]
         self.assertEqual(results, [False, True])  # a map at map_path is flushed, not saved
 
         # While the session goes on, the flushed map file is a whole map
@@ -377,12 +354,11 @@ class TestMap(unittest.TestCase):
         images, z = img.generate_zoomed_images(step)
         timestamp = step * 1_000_000 + offset
         tracker.track(timestamp, images)
-        poses = []
         guess_pose = vslam.Pose(translation=[0, 0, z], rotation=[0, 0, 0, 1.0])
-        tracker.slam.localize_in_map(self.map_path('map'), timestamp, guess_pose, images, loc_settings,
-                                     lambda: None, lambda pose, error_message: poses.append(pose), attach=True)
-        self.assertEqual(len(poses), 1)  # sync mode answers right away
-        self.assertIsNotNone(poses[0])
+        localization = tracker.slam.localize_in_map(self.map_path('map'), timestamp, guess_pose, images, loc_settings,
+                                                    attach=True)
+        self.assertTrue(localization.done())  # sync mode answers right away
+        self.assertIsNotNone(localization.result())
         for i in range(step + 1, STEPS):
             images, _ = img.generate_zoomed_images(i)
             tracker.track(i * 1_000_000 + offset, images)
@@ -390,9 +366,7 @@ class TestMap(unittest.TestCase):
         self.add_debug(f"the attached session added {len(added)} landmarks to the {len(saved)} saved ones")
         self.assertTrue(added)
 
-        results = []
-        tracker.slam.save_map(self.map_path('copy'), results.append)
-        tracker.slam.flush_map(results.append)
+        results = [tracker.slam.save_map(self.map_path('copy')).result(), tracker.slam.flush_map().result()]
         self.assertEqual(results, [False, True])  # the attached map is written in place
 
         # The map file has the landmarks added after attaching, and it still localizes
@@ -408,7 +382,7 @@ class TestMap(unittest.TestCase):
         step = next((i for i in range(10) if self.try_localize(img, 'map', i)), None)
         self.assertIsNotNone(step)
 
-        # Callbacks run on the SLAM thread, which also drops them
+        # Requests run on the SLAM thread
         odom_cfg, slam_cfg, loc_settings = self.get_localization_configs()
         odom_cfg.async_sba = True
         slam_cfg.sync_mode = False
@@ -416,94 +390,101 @@ class TestMap(unittest.TestCase):
         slam_cfg.map_path = own  # a string_view: `own` keeps the str alive
         tracker = vslam.Tracker(self.rig, vslam.Tracker.Mode.OdometryWithSlamRealtime, odom_cfg, slam_cfg)
 
-        def flush():
-            done = threading.Event()
-            results = []
-            tracker.slam.flush_map(lambda success: (results.append(success), done.set()))
-            self.assertTrue(done.wait(timeout=60))
-            return results
-
         for i in range(20):
             images, _ = img.generate_zoomed_images(i)
             tracker.track(i * 1_000_000, images)
             # Waits for SLAM too: a realtime session maps a keyframe only while its images are the latest
-            self.assertEqual(flush(), [True])
+            self.assertTrue(tracker.slam.flush_map().result(timeout=60))
 
-        localized = threading.Event()
-        poses = []
-        def on_localized(pose, error_message):
-            self.add_debug(f"async localization: {pose}, {error_message}")
-            poses.append(pose)
-            localized.set()
         images, z = img.generate_zoomed_images(step)
         guess_pose = vslam.Pose(translation=[0, 0, z], rotation=[0, 0, 0, 1.0])
-        tracker.slam.localize_in_map(self.map_path('map'), step * 1_000_000, guess_pose, images, loc_settings,
-                                     lambda: None, on_localized, attach=True)
-        self.assertTrue(localized.wait(timeout=120))
-        self.assertIsNotNone(poses[0])
-        self.assertEqual(flush(), [True])
+        localization = tracker.slam.localize_in_map(self.map_path('map'), step * 1_000_000, guess_pose, images,
+                                                    loc_settings, attach=True)
+        pose = localization.result(timeout=120)
+        self.add_debug(f"async localization: {pose}, {localization.error_message!r}")
+        self.assertIsNotNone(pose)
+        self.assertTrue(localization.started())
+        self.assertTrue(tracker.slam.flush_map().result(timeout=60))
         del tracker
 
         # The session wrote its own map file before it moved to the loaded one, which it wrote too
         self.assertTrue(any(self.try_localize(img, 'own', i) for i in range(0, 10)))
         self.assertTrue(any(self.try_localize(img, 'map', i) for i in range(0, 10)))
 
-    def end_with_pending_callbacks(self, use_tracker, owners):
+    def end_with_pending_requests(self, use_tracker, owners):
         # In a child process, so that a deadlock fails the test instead of hanging it
         context = multiprocessing.get_context('spawn')
         queue = context.Queue()
-        child = context.Process(target=end_with_pending_callbacks, args=(use_tracker, queue))
+        child = context.Process(target=end_with_pending_requests, args=(use_tracker, queue))
         child.start()
         child.join(timeout=120)
         if child.is_alive():
             child.kill()
             child.join()
-            self.fail(f"destroying {owners} with callbacks pending did not return")
+            self.fail(f"destroying {owners} with requests pending did not return")
         self.assertEqual(child.exitcode, 0)
-        on_slam_thread = queue.get(timeout=10)
-        self.assertTrue(on_slam_thread, "the callback did not run on the SLAM thread")
+        outcomes = queue.get(timeout=10)
+        self.assertEqual(len(outcomes), 11)
+        # Each request either ran or was dropped with the session: none is left waiting
+        self.assertEqual(set(outcomes) - {"ran", "dropped"}, set(), outcomes)
 
-    def test_destroying_slam_with_callbacks_pending_returns(self):
-        self.end_with_pending_callbacks(False, "slam")
+    def test_destroying_slam_with_requests_pending_returns(self):
+        self.end_with_pending_requests(False, "slam")
 
-    def test_destroying_tracker_with_callbacks_pending_returns(self):
-        self.end_with_pending_callbacks(True, "slam, tracker")
+    def test_destroying_tracker_with_requests_pending_returns(self):
+        self.end_with_pending_requests(True, "slam, tracker")
 
-    def check_raising_callbacks_are_reported(self, sync_mode):
+    def check_requests_report_their_outcome(self, sync_mode):
         slam = vslam.Slam(self.rig, [0], vslam.Slam.Config(sync_mode=sync_mode))
         images = [np.zeros((H, W), dtype=np.uint8)] * self.num_cameras
         _, _, settings = self.get_localization_configs()
-        done = threading.Event()
 
-        def fail(*args):
-            raise ValueError("callback failed")
+        # There is no map, so localizing and flushing fail, but SLAM still runs them
+        localization = slam.localize_in_map("/nonexistent/cuvslam/map", 0, vslam.Pose(), images, settings)
+        flush = slam.flush_map()
+        place = slam.recognize_place_by_frame(images, 0)  # use_vpr is off, so it reports an error
+        save = slam.save_map(self.map_path('map'))
+        if sync_mode:
+            for request in (localization, flush, place, save):
+                self.assertTrue(request.done())
 
-        def fail_last(*args):
-            done.set()
-            raise ValueError("callback failed")
+        self.assertIsNone(localization.result(timeout=60))
+        self.assertTrue(localization.started())
+        self.assertTrue(localization.error_message)
+        self.assertFalse(flush.result(timeout=60))
+        self.assertIsNone(place.result(timeout=60))
+        self.assertIn("use_vpr", place.error_message)
+        self.assertTrue(save.result(timeout=60))
+        for request in (localization, flush, place, save):
+            self.assertTrue(request.done())
+            self.assertTrue(request.wait(timeout=0))
 
-        reported = []
-        with mock.patch('sys.unraisablehook', lambda report: reported.append((type(report.exc_value), report.object))):
-            # There is no map, so localizing and flushing fail, but their callbacks still run
-            slam.localize_in_map("/nonexistent/cuvslam/map", 0, vslam.Pose(), images, settings, fail, fail)
-            slam.flush_map(fail)
-            slam.recognize_place_by_frame(images, 0, fail)  # use_vpr is off, so it reports an error
-            slam.save_map(self.map_path('map'), fail_last)
-            self.assertTrue(done.wait(60), "the callbacks did not run")
-            del slam  # joins the SLAM thread, which reports the last exception after setting done
-        self.assertEqual(sorted(reported, key=lambda r: r[1]), [
-            (ValueError, "Slam.flush_map callback"),
-            (ValueError, "Slam.localize_in_map finish_cb"),
-            (ValueError, "Slam.localize_in_map start_cb"),
-            (ValueError, "Slam.recognize_place_by_frame finish_cb"),
-            (ValueError, "Slam.save_map callback"),
-        ])
+    def test_requests_report_their_outcome_in_async_mode(self):
+        self.check_requests_report_their_outcome(sync_mode=False)
 
-    def test_raising_callbacks_are_reported_in_async_mode(self):
-        self.check_raising_callbacks_are_reported(sync_mode=False)
+    def test_requests_report_their_outcome_in_sync_mode(self):
+        self.check_requests_report_their_outcome(sync_mode=True)
 
-    def test_raising_callbacks_are_reported_in_sync_mode(self):
-        self.check_raising_callbacks_are_reported(sync_mode=True)
+    def test_request_rejects_a_negative_timeout(self):
+        slam = vslam.Slam(self.rig, [0], vslam.Slam.Config(sync_mode=True))
+        request = slam.flush_map()
+        with self.assertRaises(ValueError):
+            request.wait(timeout=-1)
+        with self.assertRaises(ValueError):
+            request.result(timeout=float('nan'))
+
+    def test_request_does_not_keep_its_slam_alive(self):
+        before = len(slam_threads())
+        slam = vslam.Slam(self.rig, [0], vslam.Slam.Config(sync_mode=False))
+        self.assertEqual(len(slam_threads()), before + 1)
+        request = slam.flush_map()
+        del slam  # the only owner: destroying it stops its SLAM thread
+        self.assertEqual(len(slam_threads()), before)
+        self.assertTrue(request.done())
+        try:
+            self.assertFalse(request.result(timeout=0))  # there is no map file to flush
+        except RuntimeError as error:
+            self.assertIn("destroyed", str(error))  # or it was dropped with the Slam
 
 
 if __name__ == "__main__":

@@ -16,6 +16,14 @@
 - The compiled Python module is now the private `cuvslam._cuvslam` (was `cuvslam.pycuvslam`); import from `cuvslam`
 - The Python package requires Python 3.10 or newer, and its wheels include the license (NVIDIA Community License,
   previously described as "Other/Proprietary") and a project description
+- A `Slam` destroyed on its own SLAM thread, because a callback held the last reference to it or to the `Tracker`
+  that holds it, now calls `std::terminate`. Its teardown used to run on a detached thread, which could crash the
+  process at exit
+- Python `Slam.save_map`, `flush_map`, `localize_in_map` and `recognize_place_by_frame` take no callbacks and return
+  a request instead (`Slam.MapWriteRequest`, `Slam.LocalizationRequest`, `Slam.PlaceRecognitionRequest`), with
+  `done()`, `wait(timeout)` and `result(timeout)`; the latter two wait without holding the GIL. `localize_in_map`
+  loses its `start_cb` and `finish_cb` arguments, and its request has `started()`. No Python code runs on the SLAM
+  thread anymore, and a request does not keep its `Slam` alive
 
 ### Added
 
