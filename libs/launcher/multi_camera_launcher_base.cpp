@@ -114,7 +114,7 @@ MultiCameraBaseLauncher::MultiCameraBaseLauncher(ICameraRig& cameraRig, const od
       }
       s << "] | ";
     }
-    TraceMessage(s.str().c_str());
+    TraceMessage("%s", s.str().c_str());
   }
 
   if (!fig.is_valid()) {
