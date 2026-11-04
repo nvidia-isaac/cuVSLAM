@@ -877,7 +877,7 @@ NB_MODULE(_cuvslam, m) {
 
   nb::class_<Slam::VprSettings>(slam_cls, "VprSettings",
                                 "Visual place recognition settings, for `Slam.Config.use_vpr` and "
-                                "`Slam.VprVocabularyFitter`")
+                                "`Slam.VprVocabularyBuilder`")
       .def(nb::init<std::string, float, std::string, uint32_t, uint32_t>(), nb::kw_only(),
            nb::arg("model_path") = Slam::VprSettings{}.model_path,
            nb::arg("score_threshold") = Slam::VprSettings{}.score_threshold,
@@ -886,11 +886,11 @@ NB_MODULE(_cuvslam, m) {
            nb::arg("vocabulary_max_keyframes") = Slam::VprSettings{}.vocabulary_max_keyframes)
       .def_rw("model_path", &Slam::VprSettings::model_path,
               "AnyLoc TensorRT engine, built by the `anyloc_engine` target. The engine runs only on the GPU and "
-              "TensorRT version that built it; otherwise constructing Slam or the fitter raises.")
+              "TensorRT version that built it; otherwise constructing Slam or the builder raises.")
       .def_rw("score_threshold", &Slam::VprSettings::score_threshold,
               "Minimum similarity in [0, 1] for place recognition to report a match.")
       .def_rw("vocabulary_path", &Slam::VprSettings::vocabulary_path,
-              "Vocabulary file `Slam.VprVocabularyFitter` wrote, shared by the sessions of one domain; empty fits one "
+              "Vocabulary file `Slam.VprVocabularyBuilder` wrote, shared by the sessions of one domain; empty fits one "
               "per session. Needs `vocabulary_min_keyframes` and `vocabulary_max_keyframes` at their defaults. A "
               "loaded map of another vocabulary keeps its VPR map unused.")
       .def_rw("vocabulary_min_keyframes", &Slam::VprSettings::vocabulary_min_keyframes,
@@ -1091,24 +1091,24 @@ NB_MODULE(_cuvslam, m) {
             .format(p.node_id, p.pose, p.score, p.timestamp_ns);
       });
 
-  auto vocabulary_fitter_cls = nb::class_<Slam::VprVocabularyFitter>(
-      slam_cls, "VprVocabularyFitter",
+  auto vocabulary_builder_cls = nb::class_<Slam::VprVocabularyBuilder>(
+      slam_cls, "VprVocabularyBuilder",
       "Fits the place recognition vocabulary of one operating domain, for `Slam.VprSettings.vocabulary_path`, as a "
       "session fits its own, to images spread over recordings of the domain. Needs what `Slam.Config.use_vpr` "
       "needs.");
 
-  vocabulary_fitter_cls
+  vocabulary_builder_cls
       .def(nb::init<const Slam::VprSettings&>(), nb::arg("settings"),
            "Load the engine of `settings.model_path`; sessions need an engine of the same network. "
            "`vocabulary_min_keyframes` and `vocabulary_max_keyframes` are counted in images; the rest of `settings` "
            "is ignored. Raises ValueError if `vocabulary_min_keyframes` is 0 or above `vocabulary_max_keyframes`, "
            "and RuntimeError if the engine cannot be loaded.")
-      .def_prop_ro("capacity", &Slam::VprVocabularyFitter::GetCapacity,
+      .def_prop_ro("capacity", &Slam::VprVocabularyBuilder::GetCapacity,
                    "Most images fitted to, `VprSettings.vocabulary_max_keyframes`; spread them out")
-      .def_prop_ro("image_count", &Slam::VprVocabularyFitter::GetImageCount, "Images added so far")
+      .def_prop_ro("image_count", &Slam::VprVocabularyBuilder::GetImageCount, "Images added so far")
       .def(
           "add_image",
-          [](Slam::VprVocabularyFitter& self, const nb::ndarray<nb::ro>& image) {
+          [](Slam::VprVocabularyBuilder& self, const nb::ndarray<nb::ro>& image) {
             THROW_INVALID_ARG_IF(!image.data() || image.size() == 0, GetArrayErrorMsg(ArrayType::Image));
             self.AddImage(ImageFromNDArray(image, 0, 0, ArrayType::Image));
           },
@@ -1119,7 +1119,7 @@ NB_MODULE(_cuvslam, m) {
           "Raises ValueError if `image` is unusable, past `capacity` or after `save`, and RuntimeError if the engine "
           "fails on it.")
       .def(
-          "save", [](Slam::VprVocabularyFitter& self, std::string_view path) { self.Save(path); }, nb::arg("path"),
+          "save", [](Slam::VprVocabularyBuilder& self, std::string_view path) { self.Save(path); }, nb::arg("path"),
           nb::call_guard<nb::gil_scoped_release>(),
           "Fit the vocabulary to the images added (first call only), then write it to `path`.\n\n"
           "Raises ValueError with fewer than `vocabulary_min_keyframes` images, and RuntimeError if `path` cannot "

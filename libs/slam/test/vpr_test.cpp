@@ -373,22 +373,22 @@ TEST(VprFactory, RefusesAnUnavailableBackend) {
   EXPECT_NE(error, "");
 }
 
-TEST(VprVocabularyFitter, NeedsAnEnabledBackendWithoutAVocabularyFile) {
+TEST(VprVocabularyBuilder, NeedsAnEnabledBackendWithoutAVocabularyFile) {
   VprOptions options;
   std::string error;
-  EXPECT_EQ(VocabularyFitter::Create(options, error), nullptr);
+  EXPECT_EQ(VocabularyBuilder::Create(options, error), nullptr);
   options.enabled = true;
   options.vocabulary_path = "/nonexistent/anyloc.vocabulary";
-  EXPECT_EQ(VocabularyFitter::Create(options, error), nullptr);
+  EXPECT_EQ(VocabularyBuilder::Create(options, error), nullptr);
   // As CreateVpr(): compiled out AnyLoc is unavailable, compiled in it has no model file.
   options.vocabulary_path.clear();
   options.model_path = "/nonexistent/anyloc.engine";
   error.clear();
-  EXPECT_EQ(VocabularyFitter::Create(options, error), nullptr);
+  EXPECT_EQ(VocabularyBuilder::Create(options, error), nullptr);
   EXPECT_NE(error, "");
 }
 
-TEST(VprVocabularyFitter, ReadsNoMissingEmptyOrHugeFile) {
+TEST(VprVocabularyBuilder, ReadsNoMissingEmptyOrHugeFile) {
   Blob bytes;
   EXPECT_FALSE(ReadVocabularyFile("/nonexistent/anyloc.vocabulary", bytes));
   const std::filesystem::path file = std::filesystem::temp_directory_path() /
@@ -621,19 +621,19 @@ std::unique_ptr<AnyLocNetwork> LoadNetwork(const std::string& path) {
   return network;
 }
 
-/// A fitter of `options`; the test fails if VocabularyFitter::Create() reports an error.
-std::unique_ptr<VocabularyFitter> MakeFitter(const VprOptions& options) {
+/// A builder of `options`; the test fails if VocabularyBuilder::Create() reports an error.
+std::unique_ptr<VocabularyBuilder> MakeBuilder(const VprOptions& options) {
   std::string error;
-  std::unique_ptr<VocabularyFitter> fitter = VocabularyFitter::Create(options, error);
-  EXPECT_NE(fitter, nullptr) << error;
-  return fitter;
+  std::unique_ptr<VocabularyBuilder> builder = VocabularyBuilder::Create(options, error);
+  EXPECT_NE(builder, nullptr) << error;
+  return builder;
 }
 
 /// Adds `frames` blocky pictures from `seed` on; the test fails on an error.
-void AddFrames(VocabularyFitter& fitter, size_t frames, uint32_t seed) {
+void AddFrames(VocabularyBuilder& builder, size_t frames, uint32_t seed) {
   for (size_t i = 0; i < frames; ++i) {
     std::string error;
-    EXPECT_TRUE(fitter.AddFrame(MakeBlockyImage(256, 256, 8, seed + static_cast<uint32_t>(i)), error)) << error;
+    EXPECT_TRUE(builder.AddFrame(MakeBlockyImage(256, 256, 8, seed + static_cast<uint32_t>(i)), error)) << error;
   }
 }
 
@@ -646,11 +646,11 @@ VprOptions VocabularyOptions(const std::string& engine_path, const std::string& 
 /// Fits `frames` blocky pictures from `seed` on with `engine_path` and writes the vocabulary to `name`.
 std::string FitVocabulary(const std::string& engine_path, size_t frames, uint32_t seed, const std::string& name) {
   const std::filesystem::path path = ScratchFolder() / name;
-  std::unique_ptr<VocabularyFitter> fitter = MakeFitter(AnyLocOptions(engine_path));
-  if (fitter) {
-    AddFrames(*fitter, frames, seed);
+  std::unique_ptr<VocabularyBuilder> builder = MakeBuilder(AnyLocOptions(engine_path));
+  if (builder) {
+    AddFrames(*builder, frames, seed);
     std::string error;
-    EXPECT_TRUE(fitter->Save(path.string(), error)) << error;
+    EXPECT_TRUE(builder->Save(path.string(), error)) << error;
   }
   return path.string();
 }
@@ -1000,54 +1000,54 @@ TEST(VprAnyLocFactory, RefusesTrainingOptionsOutOfOrder) {
   EXPECT_NE(ConstructionError(options), "");
 }
 
-TEST(VprVocabularyFitter, TakesNoMoreFramesThanItsCapacity) {
+TEST(VprVocabularyBuilder, TakesNoMoreFramesThanItsCapacity) {
   if (StandInEngine("valid").empty()) {
     GTEST_SKIP() << kNoStandIns;
   }
   VprOptions options = AnyLocOptions(StandInEngine("valid"));
   options.max_training_keyframes = 10;
-  std::unique_ptr<VocabularyFitter> fitter = MakeFitter(options);
-  ASSERT_NE(fitter, nullptr);
-  ASSERT_EQ(fitter->Capacity(), 10u);
-  AddFrames(*fitter, 10, 1800);
+  std::unique_ptr<VocabularyBuilder> builder = MakeBuilder(options);
+  ASSERT_NE(builder, nullptr);
+  ASSERT_EQ(builder->Capacity(), 10u);
+  AddFrames(*builder, 10, 1800);
   std::string error;
-  EXPECT_FALSE(fitter->AddFrame(MakeBlockyImage(256, 256, 8, 1810), error));
+  EXPECT_FALSE(builder->AddFrame(MakeBlockyImage(256, 256, 8, 1810), error));
   EXPECT_NE(error, "");
-  EXPECT_EQ(fitter->Size(), 10u);
+  EXPECT_EQ(builder->Size(), 10u);
 }
 
-TEST(VprVocabularyFitter, NeedsTheTrainingMinimumToSave) {
+TEST(VprVocabularyBuilder, NeedsTheTrainingMinimumToSave) {
   if (StandInEngine("valid").empty()) {
     GTEST_SKIP() << kNoStandIns;
   }
   const VprOptions options = AnyLocOptions(StandInEngine("valid"));
-  std::unique_ptr<VocabularyFitter> fitter = MakeFitter(options);
-  ASSERT_NE(fitter, nullptr);
-  AddFrames(*fitter, options.min_training_keyframes - 1, 1820);
+  std::unique_ptr<VocabularyBuilder> builder = MakeBuilder(options);
+  ASSERT_NE(builder, nullptr);
+  AddFrames(*builder, options.min_training_keyframes - 1, 1820);
   const std::filesystem::path path = ScratchFolder() / "too_few.vocabulary";
   std::string error;
-  EXPECT_FALSE(fitter->Save(path.string(), error));
-  EXPECT_FALSE(fitter->Fitted());
+  EXPECT_FALSE(builder->Save(path.string(), error));
+  EXPECT_FALSE(builder->Fitted());
   EXPECT_FALSE(std::filesystem::exists(path));
 }
 
-TEST(VprVocabularyFitter, WritesAVocabularyThatASessionLoads) {
+TEST(VprVocabularyBuilder, WritesAVocabularyThatASessionLoads) {
   const std::string& engine = StandInEngine("valid");
   if (engine.empty()) {
     GTEST_SKIP() << kNoStandIns;
   }
-  std::unique_ptr<VocabularyFitter> fitter = MakeFitter(AnyLocOptions(engine));
-  ASSERT_NE(fitter, nullptr);
-  AddFrames(*fitter, 8, 1830);
+  std::unique_ptr<VocabularyBuilder> builder = MakeBuilder(AnyLocOptions(engine));
+  ASSERT_NE(builder, nullptr);
+  AddFrames(*builder, 8, 1830);
   const std::filesystem::path path = ScratchFolder() / "written.vocabulary";
   const std::filesystem::path again = ScratchFolder() / "written_again.vocabulary";
   std::string error;
-  ASSERT_TRUE(fitter->Save(path.string(), error)) << error;
-  ASSERT_TRUE(fitter->Save(again.string(), error)) << error;
+  ASSERT_TRUE(builder->Save(path.string(), error)) << error;
+  ASSERT_TRUE(builder->Save(again.string(), error)) << error;
   const Blob bytes = ReadFileBytes(path);
   EXPECT_EQ(ReadFileBytes(again), bytes);
-  EXPECT_TRUE(fitter->Fitted());
-  EXPECT_FALSE(fitter->AddFrame(MakeBlockyImage(256, 256, 8, 1840), error));
+  EXPECT_TRUE(builder->Fitted());
+  EXPECT_FALSE(builder->AddFrame(MakeBlockyImage(256, 256, 8, 1840), error));
 
   // A session on it holds that vocabulary and no places.
   const std::unique_ptr<IVpr> vpr = MakeVpr(VocabularyOptions(engine, path.string()));
@@ -1056,32 +1056,32 @@ TEST(VprVocabularyFitter, WritesAVocabularyThatASessionLoads) {
   EXPECT_EQ(Serialized(*vpr), bytes);
 }
 
-TEST(VprVocabularyFitter, ReportsAFileItCannotWrite) {
+TEST(VprVocabularyBuilder, ReportsAFileItCannotWrite) {
   const std::string& engine = StandInEngine("valid");
   if (engine.empty()) {
     GTEST_SKIP() << kNoStandIns;
   }
-  std::unique_ptr<VocabularyFitter> fitter = MakeFitter(AnyLocOptions(engine));
-  ASSERT_NE(fitter, nullptr);
-  AddFrames(*fitter, 8, 1850);
+  std::unique_ptr<VocabularyBuilder> builder = MakeBuilder(AnyLocOptions(engine));
+  ASSERT_NE(builder, nullptr);
+  AddFrames(*builder, 8, 1850);
   const std::string path = (ScratchFolder() / "missing" / "anyloc.vocabulary").string();
   std::string error;
-  EXPECT_FALSE(fitter->Save(path, error));
-  EXPECT_TRUE(fitter->Fitted());
+  EXPECT_FALSE(builder->Save(path, error));
+  EXPECT_TRUE(builder->Fitted());
   EXPECT_NE(error.find(path), std::string::npos) << error;
 }
 
-TEST(VprVocabularyFitter, RefusesAFrameTheBackendCannotDescribe) {
+TEST(VprVocabularyBuilder, RefusesAFrameTheBackendCannotDescribe) {
   const std::string& engine = StandInEngine("valid");
   if (engine.empty()) {
     GTEST_SKIP() << kNoStandIns;
   }
-  std::unique_ptr<VocabularyFitter> fitter = MakeFitter(AnyLocOptions(engine));
-  ASSERT_NE(fitter, nullptr);
+  std::unique_ptr<VocabularyBuilder> builder = MakeBuilder(AnyLocOptions(engine));
+  ASSERT_NE(builder, nullptr);
   std::string error;
-  EXPECT_FALSE(fitter->AddFrame(VprImage{}, error));
+  EXPECT_FALSE(builder->AddFrame(VprImage{}, error));
   EXPECT_NE(error, "");
-  EXPECT_EQ(fitter->Size(), 0u);
+  EXPECT_EQ(builder->Size(), 0u);
 }
 
 TEST(VprAnyLocFactory, RefusesAFileThatIsNotAVocabularyOfTheEngine) {

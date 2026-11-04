@@ -795,7 +795,7 @@ public:
   };
 
   /**
-   * @brief Visual place recognition settings, for `Config::use_vpr` and `VprVocabularyFitter`
+   * @brief Visual place recognition settings, for `Config::use_vpr` and `VprVocabularyBuilder`
    */
   struct VprSettings {
     /// AnyLoc TensorRT engine, built by the `anyloc_engine` target.
@@ -803,7 +803,7 @@ public:
     std::string model_path;
     /// Minimum similarity in [0, 1] for place recognition to report a match.
     float score_threshold = 0.68f;
-    /// Vocabulary file `VprVocabularyFitter` wrote, shared by the sessions of one domain; empty fits one per session.
+    /// Vocabulary file `VprVocabularyBuilder` wrote, shared by the sessions of one domain; empty fits one per session.
     /// Needs the two below at their defaults. A loaded map of another vocabulary keeps its VPR map unused.
     std::string vocabulary_path;
     /// Keyframes a session maps before fitting its own vocabulary; nothing is recognized before. At least 1.
@@ -967,7 +967,7 @@ public:
    * Fits it as a session fits its own, to images spread over recordings of the domain. Needs what `Config::use_vpr`
    * needs. Not thread safe.
    */
-  class CUVSLAM_API VprVocabularyFitter {
+  class CUVSLAM_API VprVocabularyBuilder {
   public:
     /**
      * Load the engine; sessions need an engine of the same network.
@@ -976,18 +976,18 @@ public:
      * @throws std::invalid_argument if `vocabulary_min_keyframes` is 0 or above `vocabulary_max_keyframes`
      * @throws std::runtime_error if the engine cannot be loaded, or cuVSLAM was built without TensorRT
      */
-    explicit VprVocabularyFitter(const VprSettings& settings);
+    explicit VprVocabularyBuilder(const VprSettings& settings);
 
     /**
      * Move constructor
-     * @param[in] other other fitter
+     * @param[in] other other builder
      */
-    VprVocabularyFitter(VprVocabularyFitter&& other) noexcept;
+    VprVocabularyBuilder(VprVocabularyBuilder&& other) noexcept;
 
     /**
      * Destructor
      */
-    ~VprVocabularyFitter();
+    ~VprVocabularyBuilder();
 
     /// @return most images fitted to, `VprSettings::vocabulary_max_keyframes`; spread them out
     uint32_t GetCapacity() const;

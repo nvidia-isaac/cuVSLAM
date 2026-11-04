@@ -420,7 +420,7 @@ void FillImageSourceAndShape(const Image& image, ImageSource& source, ImageShape
   shape.height = image.height;
 }
 
-// The vocabulary fit's limits, the same for a session and VprVocabularyFitter.
+// The vocabulary fit's limits, the same for a session and VprVocabularyBuilder.
 void CheckVocabularyFit(const Slam::VprSettings& settings) {
   THROW_INVALID_ARG_IF(settings.vocabulary_min_keyframes == 0, "vocabulary_min_keyframes must be at least 1.");
   THROW_INVALID_ARG_IF(settings.vocabulary_max_keyframes < settings.vocabulary_min_keyframes,
@@ -1617,12 +1617,12 @@ std::shared_ptr<const Slam::PoseGraph> Slam::ReadPoseGraph() {
   return impl->pose_graph_;
 }
 
-class Slam::VprVocabularyFitter::Impl {
+class Slam::VprVocabularyBuilder::Impl {
 public:
-  std::unique_ptr<slam::vpr::VocabularyFitter> fitter;
+  std::unique_ptr<slam::vpr::VocabularyBuilder> builder;
 };
 
-Slam::VprVocabularyFitter::VprVocabularyFitter(const VprSettings& settings) : impl(std::make_unique<Impl>()) {
+Slam::VprVocabularyBuilder::VprVocabularyBuilder(const VprSettings& settings) : impl(std::make_unique<Impl>()) {
   CheckVocabularyFit(settings);
   slam::vpr::VprOptions options;
   options.enabled = true;
@@ -1630,37 +1630,37 @@ Slam::VprVocabularyFitter::VprVocabularyFitter(const VprSettings& settings) : im
   options.min_training_keyframes = settings.vocabulary_min_keyframes;
   options.max_training_keyframes = settings.vocabulary_max_keyframes;
   std::string error;
-  impl->fitter = slam::vpr::VocabularyFitter::Create(options, error);
-  if (!impl->fitter) {
+  impl->builder = slam::vpr::VocabularyBuilder::Create(options, error);
+  if (!impl->builder) {
     throw std::runtime_error(error);
   }
 }
 
-Slam::VprVocabularyFitter::VprVocabularyFitter(VprVocabularyFitter&& other) noexcept = default;
+Slam::VprVocabularyBuilder::VprVocabularyBuilder(VprVocabularyBuilder&& other) noexcept = default;
 
-Slam::VprVocabularyFitter::~VprVocabularyFitter() = default;
+Slam::VprVocabularyBuilder::~VprVocabularyBuilder() = default;
 
-uint32_t Slam::VprVocabularyFitter::GetCapacity() const { return static_cast<uint32_t>(impl->fitter->Capacity()); }
+uint32_t Slam::VprVocabularyBuilder::GetCapacity() const { return static_cast<uint32_t>(impl->builder->Capacity()); }
 
-uint32_t Slam::VprVocabularyFitter::GetImageCount() const { return static_cast<uint32_t>(impl->fitter->Size()); }
+uint32_t Slam::VprVocabularyBuilder::GetImageCount() const { return static_cast<uint32_t>(impl->builder->Size()); }
 
-void Slam::VprVocabularyFitter::AddImage(const ImageData& image) {
+void Slam::VprVocabularyBuilder::AddImage(const ImageData& image) {
   const slam::vpr::VprImage vpr_image = MakeVprImage(image, true);
-  THROW_INVALID_ARG_IF(vpr_image.Empty(), "VprVocabularyFitter::AddImage needs an image with pixels.");
-  slam::vpr::VocabularyFitter& fitter = *impl->fitter;
+  THROW_INVALID_ARG_IF(vpr_image.Empty(), "VprVocabularyBuilder::AddImage needs an image with pixels.");
+  slam::vpr::VocabularyBuilder& builder = *impl->builder;
   std::string error;
-  if (!fitter.AddFrame(vpr_image, error)) {
+  if (!builder.AddFrame(vpr_image, error)) {
     // Past capacity or after Save() is the caller's error, the rest the engine's.
-    THROW_INVALID_ARG_IF(fitter.Fitted() || fitter.Size() >= fitter.Capacity(), error);
+    THROW_INVALID_ARG_IF(builder.Fitted() || builder.Size() >= builder.Capacity(), error);
     throw std::runtime_error(error);
   }
 }
 
-void Slam::VprVocabularyFitter::Save(std::string_view path) {
+void Slam::VprVocabularyBuilder::Save(std::string_view path) {
   std::string error;
-  if (!impl->fitter->Save(std::string(path), error)) {
+  if (!impl->builder->Save(std::string(path), error)) {
     // Too few images leave it unfitted; a write failure comes after the fit.
-    THROW_INVALID_ARG_IF(!impl->fitter->Fitted(), error);
+    THROW_INVALID_ARG_IF(!impl->builder->Fitted(), error);
     throw std::runtime_error(error);
   }
 }

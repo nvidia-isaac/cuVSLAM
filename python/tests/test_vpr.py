@@ -377,25 +377,25 @@ class TestVprAnyLocConfig(unittest.TestCase):
                 vslam.Slam(make_rig()[0], [0, 1], slam_cfg)
             self.assertIn(name, str(caught.exception))
 
-    def test_vocabulary_fitter_needs_its_fit_settings_in_order(self):
+    def test_vocabulary_builder_needs_its_fit_settings_in_order(self):
         # Checked before loading the engine, as for a session.
         for name, value in (("vocabulary_min_keyframes", 0), ("vocabulary_max_keyframes", 7)):
             settings = vslam.Slam.VprSettings(model_path="/nonexistent/anyloc.engine")
             setattr(settings, name, value)
             with self.assertRaises(ValueError, msg=name) as caught:
-                vslam.Slam.VprVocabularyFitter(settings)
+                vslam.Slam.VprVocabularyBuilder(settings)
             self.assertIn(name, str(caught.exception))
 
-    def test_vocabulary_fitter_needs_an_engine(self):
+    def test_vocabulary_builder_needs_an_engine(self):
         settings = vslam.Slam.VprSettings(model_path="/nonexistent/anyloc.engine")
         with self.assertRaises(RuntimeError):
-            vslam.Slam.VprVocabularyFitter(settings)
+            vslam.Slam.VprVocabularyBuilder(settings)
 
-        # The score threshold and the vocabulary file are a session's, so only the engine stops the fitter.
+        # The score threshold and the vocabulary file are a session's, so only the engine stops the builder.
         settings.score_threshold = 2.0
         settings.vocabulary_path = "/nonexistent/test.vocabulary"
         with self.assertRaises(RuntimeError):
-            vslam.Slam.VprVocabularyFitter(settings)
+            vslam.Slam.VprVocabularyBuilder(settings)
 
     @needs_anyloc
     def test_localization_without_a_guess_pose_needs_a_candidate(self):
@@ -408,7 +408,7 @@ class TestVprAnyLocConfig(unittest.TestCase):
 
 
 @needs_anyloc
-class TestVprVocabularyFitter(unittest.TestCase):
+class TestVprVocabularyBuilder(unittest.TestCase):
     """A vocabulary file fitted to noise images, and Slam loading it."""
 
     FILE_BYTES = 24 + 32 * 384 * 4 + 8  # header, 32 centers of 384 floats, no places
@@ -421,14 +421,14 @@ class TestVprVocabularyFitter(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.folder, ignore_errors=True)
 
-    def make_fitter(self, max_images=10):
-        return vslam.Slam.VprVocabularyFitter(
+    def make_builder(self, max_images=10):
+        return vslam.Slam.VprVocabularyBuilder(
             vslam.Slam.VprSettings(model_path=ANYLOC_ENGINE, vocabulary_max_keyframes=max_images))
 
     @staticmethod
-    def add_images(fitter, count):
+    def add_images(builder, count):
         for seed in range(count):
-            fitter.add_image(noise_images(seed)[0])
+            builder.add_image(noise_images(seed)[0])
 
     def vocabulary_config(self):
         _, slam_cfg = make_configs(True)
@@ -436,51 +436,51 @@ class TestVprVocabularyFitter(unittest.TestCase):
         return slam_cfg
 
     def test_capacity_is_vocabulary_max_keyframes(self):
-        fitter = self.make_fitter()
-        self.assertEqual(fitter.capacity, 10)
-        self.assertEqual(fitter.image_count, 0)
+        builder = self.make_builder()
+        self.assertEqual(builder.capacity, 10)
+        self.assertEqual(builder.image_count, 0)
 
-        self.add_images(fitter, 10)
-        self.assertEqual(fitter.image_count, 10)
+        self.add_images(builder, 10)
+        self.assertEqual(builder.image_count, 10)
         with self.assertRaises(ValueError):
-            fitter.add_image(noise_images(10)[0])
-        self.assertEqual(fitter.image_count, 10)
+            builder.add_image(noise_images(10)[0])
+        self.assertEqual(builder.image_count, 10)
 
     def test_slam_loads_a_saved_vocabulary(self):
-        fitter = self.make_fitter()
-        self.add_images(fitter, self.MIN_IMAGES)
-        fitter.save(self.path)
+        builder = self.make_builder()
+        self.add_images(builder, self.MIN_IMAGES)
+        builder.save(self.path)
         self.assertEqual(os.path.getsize(self.path), self.FILE_BYTES)
         # Below capacity, so only the save refuses it.
         with self.assertRaises(ValueError):
-            fitter.add_image(noise_images(10)[0])
+            builder.add_image(noise_images(10)[0])
 
         vslam.Slam(make_rig()[0], [0, 1], self.vocabulary_config())
 
     def test_save_needs_vocabulary_min_keyframes(self):
-        fitter = vslam.Slam.VprVocabularyFitter(
+        builder = vslam.Slam.VprVocabularyBuilder(
             vslam.Slam.VprSettings(model_path=ANYLOC_ENGINE, vocabulary_min_keyframes=3, vocabulary_max_keyframes=10))
-        self.add_images(fitter, 2)
+        self.add_images(builder, 2)
         with self.assertRaises(ValueError):
-            fitter.save(self.path)
+            builder.save(self.path)
         self.assertEqual(os.listdir(self.folder), [])
 
-        fitter.add_image(noise_images(2)[0])
-        fitter.save(self.path)
+        builder.add_image(noise_images(2)[0])
+        builder.save(self.path)
         self.assertEqual(os.path.getsize(self.path), self.FILE_BYTES)
 
     def test_save_reports_a_path_it_cannot_write(self):
-        fitter = self.make_fitter()
-        self.add_images(fitter, self.MIN_IMAGES)
+        builder = self.make_builder()
+        self.add_images(builder, self.MIN_IMAGES)
         path = os.path.join(self.folder, "missing", "noise.vocabulary")
         with self.assertRaises(RuntimeError) as caught:
-            fitter.save(path)
+            builder.save(path)
         self.assertIn(path, str(caught.exception))
 
     def test_localize_in_map_reports_a_vocabulary_gone_since_construction(self):
-        fitter = self.make_fitter()
-        self.add_images(fitter, self.MIN_IMAGES)
-        fitter.save(self.path)
+        builder = self.make_builder()
+        self.add_images(builder, self.MIN_IMAGES)
+        builder.save(self.path)
         slam = vslam.Slam(make_rig()[0], [0, 1], self.vocabulary_config())
         os.remove(self.path)
 
@@ -540,11 +540,11 @@ class TestVprAnyLoc(unittest.TestCase):
 
     @classmethod
     def fit_vocabulary(cls, path):
-        """Fit a vocabulary file to images spread over the whole sequence, up to the fitter's capacity."""
-        fitter = vslam.Slam.VprVocabularyFitter(vslam.Slam.VprSettings(model_path=ANYLOC_ENGINE))
+        """Fit a vocabulary file to images spread over the whole sequence, up to the builder's capacity."""
+        builder = vslam.Slam.VprVocabularyBuilder(vslam.Slam.VprSettings(model_path=ANYLOC_ENGINE))
         reader = cls.make_reader()
-        reader.replay(_VocabularyReplay(fitter, reader.total_frames // fitter.capacity + 1))
-        fitter.save(path)
+        reader.replay(_VocabularyReplay(builder, reader.total_frames // builder.capacity + 1))
+        builder.save(path)
 
     @classmethod
     def make_tracker(cls, slam_cfg):
@@ -1009,16 +1009,16 @@ class _FirstFrames:
 
 
 class _VocabularyReplay:
-    """EdexReader processor that adds the first camera's image of every stride-th frame to a vocabulary fitter."""
+    """EdexReader processor that adds the first camera's image of every stride-th frame to a vocabulary builder."""
 
-    def __init__(self, fitter, stride):
-        self.fitter = fitter
+    def __init__(self, builder, stride):
+        self.builder = builder
         self.stride = stride
         self.n_frames = 0
 
     def process_images(self, frame_id, timestamps, images, masks, depths=None):
         if self.n_frames % self.stride == 0:
-            self.fitter.add_image(images[0])
+            self.builder.add_image(images[0])
         self.n_frames += 1
 
     def process_imu(self, timestamp, linear_accelerations, angular_velocities):

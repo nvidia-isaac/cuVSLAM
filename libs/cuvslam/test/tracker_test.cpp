@@ -457,40 +457,40 @@ TEST_F(TrackerTest, SlamRejectsOnlineFitSettingsOutOfOrder) {
   EXPECT_THROW(Slam(rig, {0}, max_keyframes), std::invalid_argument);
 }
 
-TEST_F(TrackerTest, VprVocabularyFitterRejectsFitSettingsOutOfOrderBeforeLoadingAnEngine) {
+TEST_F(TrackerTest, VprVocabularyBuilderRejectsFitSettingsOutOfOrderBeforeLoadingAnEngine) {
   Slam::VprSettings settings;
   settings.model_path = "/nonexistent/anyloc.engine";
 
   Slam::VprSettings min_images = settings;
   min_images.vocabulary_min_keyframes = 0;
-  EXPECT_THROW(Slam::VprVocabularyFitter{min_images}, std::invalid_argument);
+  EXPECT_THROW(Slam::VprVocabularyBuilder{min_images}, std::invalid_argument);
 
   Slam::VprSettings max_images = settings;
   max_images.vocabulary_max_keyframes = settings.vocabulary_min_keyframes - 1;
-  EXPECT_THROW(Slam::VprVocabularyFitter{max_images}, std::invalid_argument);
+  EXPECT_THROW(Slam::VprVocabularyBuilder{max_images}, std::invalid_argument);
 }
 
 // Also what a build without TensorRT reports. The score threshold and the vocabulary file are a session's.
-TEST_F(TrackerTest, VprVocabularyFitterNeedsAnEngine) {
+TEST_F(TrackerTest, VprVocabularyBuilderNeedsAnEngine) {
   Slam::VprSettings settings;
   settings.model_path = "/nonexistent/anyloc.engine";
-  EXPECT_THROW(Slam::VprVocabularyFitter{settings}, std::runtime_error);
+  EXPECT_THROW(Slam::VprVocabularyBuilder{settings}, std::runtime_error);
 
   settings.score_threshold = 2.f;
   settings.vocabulary_path = "/nonexistent/test.vocabulary";
-  EXPECT_THROW(Slam::VprVocabularyFitter{settings}, std::runtime_error);
+  EXPECT_THROW(Slam::VprVocabularyBuilder{settings}, std::runtime_error);
 }
 
 #ifdef USE_CUDA
 // A vertically flipped GPU array has a negative pitch; place recognition refuses it rather than read past it.
-TEST_F(TrackerTest, VprVocabularyFitterRefusesANegativePitch) {
+TEST_F(TrackerTest, VprVocabularyBuilderRefusesANegativePitch) {
   const char* engine = std::getenv("CUVSLAM_TEST_ANYLOC_ENGINE");
   if (engine == nullptr || !std::filesystem::is_regular_file(engine)) {
     GTEST_SKIP() << "no AnyLoc engine: set CUVSLAM_TEST_ANYLOC_ENGINE";
   }
   Slam::VprSettings settings;
   settings.model_path = engine;
-  Slam::VprVocabularyFitter fitter{settings};
+  Slam::VprVocabularyBuilder builder{settings};
 
   constexpr int32_t kWidth = 32;
   constexpr int32_t kHeight = 16;
@@ -503,8 +503,8 @@ TEST_F(TrackerTest, VprVocabularyFitterRefusesANegativePitch) {
   image.encoding = cuvslam::ImageData::Encoding::MONO;
   image.data_type = cuvslam::ImageData::DataType::UINT8;
   image.is_gpu_mem = true;
-  EXPECT_THROW(fitter.AddImage(image), std::invalid_argument);
-  EXPECT_EQ(fitter.GetImageCount(), 0u);
+  EXPECT_THROW(builder.AddImage(image), std::invalid_argument);
+  EXPECT_EQ(builder.GetImageCount(), 0u);
 }
 #endif
 

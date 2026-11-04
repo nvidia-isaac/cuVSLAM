@@ -49,7 +49,7 @@ struct VprOptions {
   /// Number of VLAD cluster centers AnyLoc fits.
   int vocabulary_size = 32;
 
-  /// Vocabulary file VocabularyFitter wrote; empty fits one per session.
+  /// Vocabulary file VocabularyBuilder wrote; empty fits one per session.
   std::string vocabulary_path;
 
   /// Frames mapped before a session fits its vocabulary; queries miss until then.

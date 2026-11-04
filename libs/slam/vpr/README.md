@@ -15,7 +15,7 @@ vpr_anyloc.*    the AnyLoc backend, built when USE_TENSORRT is ON (needs the eng
 anyloc_network.* the TensorRT engine AnyLoc runs, on the GPU
 vpr_map.*       VprMap: owns a backend and the node bookkeeping; the only type the rest of SLAM touches
 vpr_sof_image.* bridge from the tracker's sof::ImageContext to a VprImage
-vpr_vocabulary.* VocabularyFitter, which fits a vocabulary file offline, and its reader
+vpr_vocabulary.* VocabularyBuilder, which fits a vocabulary file offline, and its reader
 ```
 
 ## Design decisions
@@ -48,7 +48,7 @@ costs a relocalizer more than a missing one.
 
 **One vocabulary per operating domain can replace the one per session.** A session fits AnyLoc's vocabulary to its own
 first keyframes, so two sessions' maps encode places differently. `VprOptions::vocabulary_path` loads a vocabulary
-that `VocabularyFitter` fitted offline to frames spread over recordings of the domain; AnyLoc's own vocabularies are
+that `VocabularyBuilder` fitted offline to frames spread over recordings of the domain; AnyLoc's own vocabularies are
 per domain, which beat per map ones (Keetha et al., Table V). The file is what `Serialize()` writes once the fitted
 frames are removed again: the header and the centers. A session with a vocabulary file refuses a saved map encoded
 with other centers as it refuses another descriptor width, so that map keeps its record, unused and never overwritten.
@@ -99,7 +99,7 @@ the pose graph bookkeeping run a stand-in backend instead, through `VprMap(optio
 vocabulary builds it in `Finalize()`, which `VprMap` calls before the first query and before serializing, once it
 holds `VprOptions::min_training_keyframes` frames. AnyLoc also fits it while mapping, as soon as it would hold more
 than `VprOptions::max_training_keyframes` frames, stalling the SLAM thread for about 5 s on an i9-10940X; once it has a
-vocabulary, it pools each frame as it is mapped. `TrainingCapacity()` is that maximum, which `VocabularyFitter` fills;
+vocabulary, it pools each frame as it is mapped. `TrainingCapacity()` is that maximum, which `VocabularyBuilder` fills;
 a backend that fits none, like AnyLoc with a vocabulary file, returns 0.
 
 ## Closing loops

@@ -25,8 +25,8 @@ from unittest import mock
 from cuvslam_tools.vpr_vocabulary import cli
 
 
-class _FakeFitter:
-    """Stand-in for Slam.VprVocabularyFitter that records its calls."""
+class _FakeBuilder:
+    """Stand-in for Slam.VprVocabularyBuilder that records its calls."""
 
     def __init__(self, capacity: int):
         self.capacity = capacity
@@ -81,27 +81,27 @@ class TestSelectFrames(unittest.TestCase):
 
 class TestFitVocabulary(unittest.TestCase):
     def test_images_of_the_camera_are_spread_over_the_sequences_and_saved_once(self):
-        fitter = _FakeFitter(capacity=8)
+        builder = _FakeBuilder(capacity=8)
         # Frames are taken in frame id order, not in the order the reader holds them.
         readers = [_FakeReader("a", range(109, 99, -1)), _FakeReader("b", range(30))]
 
-        counts = cli.fit_vocabulary(fitter, readers, 1, "kitti.vocabulary")
+        counts = cli.fit_vocabulary(builder, readers, 1, "kitti.vocabulary")
 
         self.assertEqual(counts, [2, 6])
-        self.assertEqual(fitter.calls,
+        self.assertEqual(builder.calls,
                          [("add_image", ("a", frame_id, 1)) for frame_id in (102, 107)]
                          + [("add_image", ("b", frame_id, 1)) for frame_id in (2, 7, 12, 17, 22, 27)]
                          + [("save", "kitti.vocabulary")])
 
     def test_camera_outside_a_rig_fails_before_any_image(self):
-        fitter = _FakeFitter(capacity=8)
+        builder = _FakeBuilder(capacity=8)
         # Only the second rig lacks the camera.
         readers = [_FakeReader("a", range(10), n_cameras=2), _FakeReader("b", range(30), n_cameras=1)]
 
         with self.assertRaisesRegex(ValueError, "--camera 1 is not a camera of b"):
-            cli.fit_vocabulary(fitter, readers, 1, "kitti.vocabulary")
+            cli.fit_vocabulary(builder, readers, 1, "kitti.vocabulary")
 
-        self.assertEqual(fitter.calls, [])
+        self.assertEqual(builder.calls, [])
 
 
 class TestVprVocabularyCli(unittest.TestCase):
@@ -132,9 +132,9 @@ class TestVprVocabularyCli(unittest.TestCase):
         self.assertEqual(cm.exception.code, 2)
         return stderr.getvalue()
 
-    def _stub_cuvslam(self, fitter):
+    def _stub_cuvslam(self, builder):
         """Stand in for the binding and the EDEX reader; returns the patch, the stubbed Slam and the reader mock."""
-        slam = types.SimpleNamespace(VprSettings=mock.Mock(), VprVocabularyFitter=mock.Mock(return_value=fitter))
+        slam = types.SimpleNamespace(VprSettings=mock.Mock(), VprVocabularyBuilder=mock.Mock(return_value=builder))
         vslam = types.ModuleType("cuvslam")
         vslam.Slam = slam
         reader_class = mock.Mock(side_effect=lambda sequence, stereo_edex: _FakeReader(sequence, range(10)))
@@ -176,8 +176,8 @@ class TestVprVocabularyCli(unittest.TestCase):
         self.assertIn("unrecognized arguments: --out", error)
 
     def test_fits_every_sequence_with_the_engine(self):
-        fitter = _FakeFitter(capacity=8)
-        modules, slam, reader_class = self._stub_cuvslam(fitter)
+        builder = _FakeBuilder(capacity=8)
+        modules, slam, reader_class = self._stub_cuvslam(builder)
         stdout = io.StringIO()
         with modules, contextlib.redirect_stdout(stdout):
             exit_code = cli.main(["--output", self.output, "--vpr_model_path", self.engine, self.sequence])
@@ -186,15 +186,15 @@ class TestVprVocabularyCli(unittest.TestCase):
         reader_class.assert_called_once_with(self.sequence, stereo_edex=os.path.join(self.sequence, "stereo.edex"))
         # Only the engine is passed; the rest of the settings keep the binding's defaults.
         slam.VprSettings.assert_called_once_with(model_path=self.engine)
-        slam.VprVocabularyFitter.assert_called_once_with(slam.VprSettings.return_value)
-        self.assertEqual(fitter.calls[-1], ("save", self.output))
+        slam.VprVocabularyBuilder.assert_called_once_with(slam.VprSettings.return_value)
+        self.assertEqual(builder.calls[-1], ("save", self.output))
         self.assertIn(f"{self.sequence}: 8 images", stdout.getvalue())
 
     def test_runtime_error_from_cuvslam_is_a_usage_error(self):
         # The engine, TensorRT, and the file write fail with RuntimeError.
-        fitter = _FakeFitter(capacity=8)
-        fitter.save = mock.Mock(side_effect=RuntimeError("Failed to write the vocabulary"))
-        modules, _, _ = self._stub_cuvslam(fitter)
+        builder = _FakeBuilder(capacity=8)
+        builder.save = mock.Mock(side_effect=RuntimeError("Failed to write the vocabulary"))
+        modules, _, _ = self._stub_cuvslam(builder)
         stderr = io.StringIO()
         with modules, contextlib.redirect_stderr(stderr):
             with self.assertRaises(SystemExit) as cm:

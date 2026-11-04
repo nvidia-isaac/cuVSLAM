@@ -43,7 +43,7 @@ bool ReadVocabularyFile(const std::string& path, Blob& bytes) {
   return static_cast<bool>(file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size)));
 }
 
-std::unique_ptr<VocabularyFitter> VocabularyFitter::Create(const VprOptions& options, std::string& error) {
+std::unique_ptr<VocabularyBuilder> VocabularyBuilder::Create(const VprOptions& options, std::string& error) {
   if (!options.enabled || !options.vocabulary_path.empty()) {
     error = "VPR: a vocabulary is fitted with place recognition on and no vocabulary_path.";
     return nullptr;
@@ -56,15 +56,15 @@ std::unique_ptr<VocabularyFitter> VocabularyFitter::Create(const VprOptions& opt
     error = std::string("VPR: the ") + backend->Name() + " backend fits no vocabulary.";
     return nullptr;
   }
-  return std::unique_ptr<VocabularyFitter>(new VocabularyFitter(std::move(backend), options.min_training_keyframes));
+  return std::unique_ptr<VocabularyBuilder>(new VocabularyBuilder(std::move(backend), options.min_training_keyframes));
 }
 
-VocabularyFitter::VocabularyFitter(std::unique_ptr<IVpr> backend, size_t min_frames)
+VocabularyBuilder::VocabularyBuilder(std::unique_ptr<IVpr> backend, size_t min_frames)
     : backend_(std::move(backend)), min_frames_(min_frames), capacity_(backend_->TrainingCapacity()) {}
 
-VocabularyFitter::~VocabularyFitter() = default;
+VocabularyBuilder::~VocabularyBuilder() = default;
 
-bool VocabularyFitter::AddFrame(const VprImage& image, std::string& error) {
+bool VocabularyBuilder::AddFrame(const VprImage& image, std::string& error) {
   if (fitted_) {
     error = "VPR: the vocabulary is already fitted; add frames before saving it.";
     return false;
@@ -84,7 +84,7 @@ bool VocabularyFitter::AddFrame(const VprImage& image, std::string& error) {
   return true;
 }
 
-bool VocabularyFitter::Save(const std::string& path, std::string& error) {
+bool VocabularyBuilder::Save(const std::string& path, std::string& error) {
   if (!fitted_) {
     if (size_ < min_frames_) {
       error = "VPR: a vocabulary is fitted to at least " + std::to_string(min_frames_) + " frames, not " +

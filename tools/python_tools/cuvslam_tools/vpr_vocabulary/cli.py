@@ -35,18 +35,18 @@ def select_frames(frame_counts: list[int], capacity: int) -> list[tuple[int, int
     return picks
 
 
-def fit_vocabulary(fitter, readers: list, camera: int, output: str) -> list[int]:
-    """Add evenly spread images of `camera` to `fitter`, save the vocabulary to `output`, and count them per reader."""
+def fit_vocabulary(builder, readers: list, camera: int, output: str) -> list[int]:
+    """Add evenly spread images of `camera` to `builder`, save the vocabulary to `output`, and count them per reader."""
     for reader in readers:
         if camera >= len(reader.rig.cameras):
             raise ValueError(f"--camera {camera} is not a camera of {reader.edex_dir}, whose rig has "
                              f"{len(reader.rig.cameras)}")
     frame_ids = [sorted(reader.frames) for reader in readers]
     counts = [0] * len(readers)
-    for sequence, position in select_frames([len(ids) for ids in frame_ids], fitter.capacity):
-        fitter.add_image(readers[sequence].load_camera_image(frame_ids[sequence][position], camera))
+    for sequence, position in select_frames([len(ids) for ids in frame_ids], builder.capacity):
+        builder.add_image(readers[sequence].load_camera_image(frame_ids[sequence][position], camera))
         counts[sequence] += 1
-    fitter.save(output)
+    builder.save(output)
     return counts
 
 
@@ -92,8 +92,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     try:
         readers = [EdexReader(sequence, stereo_edex=os.path.join(sequence, args.edex_filename))
                    for sequence in args.sequences]
-        fitter = vslam.Slam.VprVocabularyFitter(vslam.Slam.VprSettings(model_path=args.vpr_model_path))
-        counts = fit_vocabulary(fitter, readers, args.camera, args.output)
+        builder = vslam.Slam.VprVocabularyBuilder(vslam.Slam.VprSettings(model_path=args.vpr_model_path))
+        counts = fit_vocabulary(builder, readers, args.camera, args.output)
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
         parser.error(str(exc))
     for sequence, count in zip(args.sequences, counts):

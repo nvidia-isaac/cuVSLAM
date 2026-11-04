@@ -29,11 +29,11 @@ bool ReadVocabularyFile(const std::string& path, Blob& bytes);
 
 /// Fits a vocabulary once, offline, for VprOptions::vocabulary_path: maps frames into a backend, fits it, removes the
 /// frames again and writes what the backend's Serialize() then holds. Not thread safe.
-class VocabularyFitter {
+class VocabularyBuilder {
 public:
   /// nullptr with `error` set if `options` are disabled, name a vocabulary_path, or make no backend that fits one.
-  static std::unique_ptr<VocabularyFitter> Create(const VprOptions& options, std::string& error);
-  ~VocabularyFitter();
+  static std::unique_ptr<VocabularyBuilder> Create(const VprOptions& options, std::string& error);
+  ~VocabularyBuilder();
 
   /// Most frames fitted to.
   size_t Capacity() const { return capacity_; }
@@ -51,7 +51,7 @@ public:
   bool Save(const std::string& path, std::string& error);
 
 private:
-  VocabularyFitter(std::unique_ptr<IVpr> backend, size_t min_frames);
+  VocabularyBuilder(std::unique_ptr<IVpr> backend, size_t min_frames);
 
   std::unique_ptr<IVpr> backend_;
   size_t min_frames_ = 0;
