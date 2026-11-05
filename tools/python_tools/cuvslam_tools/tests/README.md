@@ -21,3 +21,13 @@ PYTHONPATH=. python -m unittest discover \
 
 If you use a virtual environment, activate it first or replace `python` with the
 path to that environment's Python executable.
+
+For offline map repair tests, install the optional client dependencies and run:
+
+```bash
+pip install -e ".[map-repair]"
+python -m unittest cuvslam_tools.tests.test_offline_map_repair -v
+```
+
+Run the install command from `tools/python_tools`. These tests use temporary LMDB
+databases and do not require NeMo, a running MCP server, datasets, or a GPU.
