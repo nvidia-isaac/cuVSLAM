@@ -310,8 +310,8 @@ class TestTracking(unittest.TestCase):
 
     def test_keyframe_override_forces_decision_in_mono(self):
         # Mono mode uses SelectorMono internally, and kf_override_frame_selection must still force
-        # the reported keyframe decision. Forced keyframes on a static scene keep more tracks alive
-        # than automatic selection would, so both feature trackers face more tracks than desired.
+        # the reported keyframe decision. Forced keyframes on a static scene keep every track alive,
+        # so they ask the feature selector for no new features, on both trackers.
         num_frames = 6
         mode = vslam.Odometry.OdometryMode.Mono
 

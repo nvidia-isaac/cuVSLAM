@@ -281,11 +281,11 @@ void GoodFeaturesToTrackDetector::selectFeatures(const ImageMatrixT& imageGFTT, 
         continue;
       }
 
-      newSelectedFeatures.push_back(refineFeaturePosition(c, imageGFTT));
-
-      if (newSelectedFeatures.size() == desiredNewFeaturesCount) {
+      if (newSelectedFeatures.size() >= desiredNewFeaturesCount) {
         return;  // we never need to return more points than desired
       }
+
+      newSelectedFeatures.push_back(refineFeaturePosition(c, imageGFTT));
 
       mask(c.x(), c.y(), burnHalfSize);
       ++nAdded;

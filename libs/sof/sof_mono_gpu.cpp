@@ -227,7 +227,7 @@ void MonoSOFGPU::addFeatures(const ImageContextPtr &image, TracksVector &existin
   const size_t num_alive_tracks = existing_tracks.get_num_alive();
   assert(num_alive_tracks <= existing_tracks.size());
   new_tracks.clear();
-  // A forced keyframe or a per-frame num_desired_tracks override can find more alive tracks than desired
+  // A per-frame num_desired_tracks override can be lower than the tracks alive; such a keyframe adds none
   const auto num_desired_tracks = static_cast<size_t>(std::max(sof_settings.num_desired_tracks, 0));
   if (num_alive_tracks >= num_desired_tracks) {
     return;
