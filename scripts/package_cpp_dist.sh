@@ -17,6 +17,7 @@ declare -a sources=(
   "$REPO_ROOT/libs/cuvslam/cuvslam2.h"
   "$REPO_ROOT/libs/cuvslam/cuvslam_gpu.h"
   "$REPO_ROOT/libs/cuvslam/ground_constraint2.h"
+  "$REPO_ROOT/libs/cuvslam/vpr_vocabulary_builder2.h"
   "$REPO_ROOT/LICENSE"
 )
 
@@ -36,7 +37,8 @@ install -m 0755 "${sources[1]}" "$staging_dir/bin/cuvslam_api_launcher"
 install -m 0644 "${sources[2]}" "$staging_dir/include/cuvslam/cuvslam2.h"
 install -m 0644 "${sources[3]}" "$staging_dir/include/cuvslam/cuvslam_gpu.h"
 install -m 0644 "${sources[4]}" "$staging_dir/include/cuvslam/ground_constraint2.h"
-install -m 0644 "${sources[5]}" "$staging_dir/LICENSE"
+install -m 0644 "${sources[5]}" "$staging_dir/include/cuvslam/vpr_vocabulary_builder2.h"
+install -m 0644 "${sources[6]}" "$staging_dir/LICENSE"
 
 tar -czf "$ARCHIVE_PATH" -C "$staging_dir" .
 
@@ -47,7 +49,8 @@ expected_manifest=$(
     bin/libcuvslam.so \
     include/cuvslam/cuvslam2.h \
     include/cuvslam/cuvslam_gpu.h \
-    include/cuvslam/ground_constraint2.h
+    include/cuvslam/ground_constraint2.h \
+    include/cuvslam/vpr_vocabulary_builder2.h
 )
 actual_manifest=$(tar -tzf "$ARCHIVE_PATH" | sed 's#^\./##' | awk 'NF && !/\/$/' | LC_ALL=C sort)
 

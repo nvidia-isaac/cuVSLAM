@@ -16,6 +16,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <future>
 #include <limits>
@@ -30,6 +31,11 @@
 
 #include "common/include_gtest.h"
 #include "cuvslam/cuvslam2.h"
+#include "cuvslam/vpr_vocabulary_builder2.h"
+
+#ifdef USE_CUDA
+#include "cuda_modules/cuda_helper.h"
+#endif
 
 namespace {
 
@@ -37,6 +43,7 @@ using cuvslam::Odometry;
 using cuvslam::Rig;
 using cuvslam::Slam;
 using cuvslam::Tracker;
+using cuvslam::VprVocabularyBuilder;
 using Mode = Tracker::Mode;
 
 static_assert(std::is_same_v<decltype(std::declval<Tracker&>().GetOdometry()), const Odometry&>);
@@ -406,6 +413,97 @@ TEST_F(TrackerTest, LocalizeInMapWithGuessPoseReportsAMissingMap) {
   ASSERT_TRUE(error.has_value());  // sync_mode localizes before returning
   EXPECT_NE(error->find("database"), std::string::npos) << *error;
 }
+
+TEST_F(TrackerTest, SlamRejectsVprVocabularySettingsWithoutUseVpr) {
+  Slam::Config path = MakeOfflineConfig().slam;
+  path.vpr_settings.vocabulary_path = "/nonexistent/test.vocabulary";
+  EXPECT_THROW(Slam(rig, {0}, path), std::invalid_argument);
+
+  Slam::Config min_keyframes = MakeOfflineConfig().slam;
+  min_keyframes.vpr_settings.vocabulary_min_keyframes = 3;
+  EXPECT_THROW(Slam(rig, {0}, min_keyframes), std::invalid_argument);
+
+  Slam::Config max_keyframes = MakeOfflineConfig().slam;
+  max_keyframes.vpr_settings.vocabulary_max_keyframes = 200;
+  EXPECT_THROW(Slam(rig, {0}, max_keyframes), std::invalid_argument);
+}
+
+// The engine does not exist, so each std::invalid_argument comes from a check that runs before it loads.
+TEST_F(TrackerTest, SlamRejectsOnlineFitSettingsBesideAVocabularyFile) {
+  Slam::Config cfg = MakeOfflineConfig().slam;
+  cfg.use_vpr = true;
+  cfg.vpr_settings.model_path = "/nonexistent/anyloc.engine";
+  cfg.vpr_settings.vocabulary_path = "/nonexistent/test.vocabulary";
+  EXPECT_THROW(Slam(rig, {0}, cfg), std::runtime_error);
+
+  Slam::Config min_keyframes = cfg;
+  min_keyframes.vpr_settings.vocabulary_min_keyframes = 3;
+  EXPECT_THROW(Slam(rig, {0}, min_keyframes), std::invalid_argument);
+
+  Slam::Config max_keyframes = cfg;
+  max_keyframes.vpr_settings.vocabulary_max_keyframes = 200;
+  EXPECT_THROW(Slam(rig, {0}, max_keyframes), std::invalid_argument);
+}
+
+TEST_F(TrackerTest, SlamRejectsOnlineFitSettingsOutOfOrder) {
+  Slam::Config cfg = MakeOfflineConfig().slam;
+  cfg.use_vpr = true;
+  cfg.vpr_settings.model_path = "/nonexistent/anyloc.engine";
+
+  Slam::Config min_keyframes = cfg;
+  min_keyframes.vpr_settings.vocabulary_min_keyframes = 0;
+  EXPECT_THROW(Slam(rig, {0}, min_keyframes), std::invalid_argument);
+
+  Slam::Config max_keyframes = cfg;
+  max_keyframes.vpr_settings.vocabulary_max_keyframes = cfg.vpr_settings.vocabulary_min_keyframes - 1;
+  EXPECT_THROW(Slam(rig, {0}, max_keyframes), std::invalid_argument);
+}
+
+TEST_F(TrackerTest, VprVocabularyBuilderRejectsFitSettingsOutOfOrderBeforeLoadingAnEngine) {
+  Slam::VprSettings settings;
+  settings.model_path = "/nonexistent/anyloc.engine";
+
+  Slam::VprSettings min_images = settings;
+  min_images.vocabulary_min_keyframes = 0;
+  EXPECT_THROW(VprVocabularyBuilder{min_images}, std::invalid_argument);
+
+  Slam::VprSettings max_images = settings;
+  max_images.vocabulary_max_keyframes = settings.vocabulary_min_keyframes - 1;
+  EXPECT_THROW(VprVocabularyBuilder{max_images}, std::invalid_argument);
+}
+
+// Also what a build without TensorRT reports.
+TEST_F(TrackerTest, VprVocabularyBuilderNeedsAnEngine) {
+  Slam::VprSettings settings;
+  settings.model_path = "/nonexistent/anyloc.engine";
+  EXPECT_THROW(VprVocabularyBuilder{settings}, std::runtime_error);
+}
+
+#ifdef USE_CUDA
+// A vertically flipped GPU array has a negative pitch; place recognition refuses it rather than read past it.
+TEST_F(TrackerTest, VprVocabularyBuilderRefusesANegativePitch) {
+  const char* engine = std::getenv("CUVSLAM_TEST_ANYLOC_ENGINE");
+  if (engine == nullptr || !std::filesystem::is_regular_file(engine)) {
+    GTEST_SKIP() << "no AnyLoc engine: set CUVSLAM_TEST_ANYLOC_ENGINE";
+  }
+  Slam::VprSettings settings;
+  settings.model_path = engine;
+  VprVocabularyBuilder builder{settings};
+
+  constexpr int32_t kWidth = 32;
+  constexpr int32_t kHeight = 16;
+  cuvslam::cuda::GPUOnlyArray<uint8_t> pixels(kWidth * kHeight);
+  cuvslam::ImageData image{};
+  image.pixels = pixels.ptr() + (kHeight - 1) * kWidth;  // a flipped array starts at its last row
+  image.width = kWidth;
+  image.height = kHeight;
+  image.pitch = -kWidth;
+  image.encoding = cuvslam::ImageData::Encoding::MONO;
+  image.data_type = cuvslam::ImageData::DataType::UINT8;
+  image.is_gpu_mem = true;
+  EXPECT_THROW(builder.AddImage(image), std::invalid_argument);
+}
+#endif
 
 // The SLAM thread releases a callback after running it, so a callback that owns the Slam destroys it on that thread.
 TEST(SlamTest, CallbackCanOwnAsyncSlam) {

@@ -795,6 +795,24 @@ public:
   };
 
   /**
+   * @brief Visual place recognition settings, for `Config::use_vpr` and `VprVocabularyBuilder`
+   */
+  struct VprSettings {
+    /// AnyLoc TensorRT engine, built by the `anyloc_engine` target.
+    /// The engine runs only on the GPU and TensorRT version that built it; otherwise the constructor throws.
+    std::string model_path;
+    /// Minimum similarity in [0, 1] for place recognition to report a match.
+    float score_threshold = 0.68f;
+    /// Vocabulary file `VprVocabularyBuilder` wrote, shared by the sessions of one domain; empty fits one per session.
+    /// Needs the two below at their defaults. A loaded map of another vocabulary keeps its VPR map unused.
+    std::string vocabulary_path;
+    /// Keyframes a session maps before fitting its own vocabulary; nothing is recognized before. At least 1.
+    uint32_t vocabulary_min_keyframes = 10;
+    /// Most keyframes a session fits its own vocabulary to, fitting early once it maps more. At least the minimum.
+    uint32_t vocabulary_max_keyframes = 100;
+  };
+
+  /**
    * @brief SLAM configuration parameters
    */
   struct Config {
@@ -834,14 +852,11 @@ public:
     /// the poses and loop closures SLAM reports refer to an increasingly old point of the trajectory. The warning
     /// requires verbosity Warning or higher (see SetVerbosity). Default: 10 queued commands.
     uint32_t delay_warning_queue_size = 10;
-    /// Enable visual place recognition (AnyLoc); needs a USE_TENSORRT build, `use_gpu` and `vpr_model_path`.
+    /// Enable visual place recognition (AnyLoc); needs a USE_TENSORRT build, `use_gpu` and `vpr_settings.model_path`.
     /// Its map is part of the SLAM map: Track() adds one frame per pose graph node, bounded by `max_map_size`.
     bool use_vpr = false;
-    /// AnyLoc TensorRT engine, built by the `anyloc_engine` target.
-    /// The engine runs only on the GPU and TensorRT version that built it; otherwise the constructor throws.
-    std::string vpr_model_path;
-    /// Minimum similarity in [0, 1] for place recognition to report a match.
-    float vpr_score_threshold = 0.68f;
+    /// Place recognition settings; non-default vocabulary ones need `use_vpr`.
+    VprSettings vpr_settings;
     /// Where loop closure looks for revisited places, see `LoopClosureMode`.
     /// `VPR` needs `use_vpr` and `gt_align_mode` off, else throws std::invalid_argument.
     LoopClosureMode loop_closure_mode = LoopClosureMode::LSI;
