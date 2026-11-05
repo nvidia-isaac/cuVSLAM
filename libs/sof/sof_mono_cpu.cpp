@@ -17,8 +17,6 @@
 
 #include "sof/internal/sof_mono_cpu.h"
 
-#include <algorithm>
-
 #include "common/log_types.h"
 #include "epipolar/fundamental_ransac.h"
 
@@ -127,14 +125,10 @@ const TracksVector &MonoSOFCPU::finish(FrameState &state, [[maybe_unused]] const
 void MonoSOFCPU::addFeatures(const ImageContextPtr &image, TracksVector &existing_tracks,
                              std::vector<Vector2T> &new_tracks, const Settings &sof_settings) {
   const size_t num_alive_tracks = existing_tracks.get_num_alive();
-  assert(num_alive_tracks <= existing_tracks.size());
+  assert(num_alive_tracks <= static_cast<uint32_t>(sof_settings.num_desired_tracks) &&
+         num_alive_tracks <= existing_tracks.size());
+  const size_t nDesiredPointsToSelect = sof_settings.num_desired_tracks - num_alive_tracks;
   new_tracks.clear();
-  // A per-frame num_desired_tracks override can be lower than the tracks alive; such a keyframe adds none
-  const auto num_desired_tracks = static_cast<size_t>(std::max(sof_settings.num_desired_tracks, 0));
-  if (num_alive_tracks >= num_desired_tracks) {
-    return;
-  }
-  const size_t nDesiredPointsToSelect = num_desired_tracks - num_alive_tracks;
   new_tracks.reserve(nDesiredPointsToSelect);
 
   detector_.computeGFTTAndSelectFeatures(image->cpu_gradient_pyramid(), sof_settings.border_top,

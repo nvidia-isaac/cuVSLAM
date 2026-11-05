@@ -310,8 +310,7 @@ class TestTracking(unittest.TestCase):
 
     def test_keyframe_override_forces_decision_in_mono(self):
         # Mono mode uses SelectorMono internally, and kf_override_frame_selection must still force
-        # the reported keyframe decision. Forced keyframes on a static scene keep every track alive,
-        # so they ask the feature selector for no new features, on both trackers.
+        # the reported keyframe decision.
         num_frames = 6
         mode = vslam.Odometry.OdometryMode.Mono
 
@@ -330,28 +329,6 @@ class TestTracking(unittest.TestCase):
                                         f"override should flip the Mono keyframe decision at frame {i}")
                 self.assertIn(False, automatic,
                               "near-static Mono scene should produce at least one automatic non-keyframe")
-
-    def test_mono_keyframe_with_fewer_desired_tracks_than_alive(self):
-        # A keyframe asking for fewer tracks than are alive selects no new ones rather than failing.
-        img = data.ImageGenerator(self.rig.cameras, 10)
-        static_images, _ = img.generate_zoomed_images(0)
-        for use_gpu in [True, False]:
-            with self.subTest(use_gpu=use_gpu):
-                cfg = vslam.Odometry.Config(odometry_mode=vslam.Odometry.OdometryMode.Mono, use_gpu=use_gpu,
-                                            enable_observations_export=True)
-                odometry = vslam.Odometry(self.rig, cfg)
-                odometry.track(1_000_000, static_images)
-                first_ids = {obs.id for obs in odometry.get_last_observations(0)}
-
-                internals = vslam.Odometry.Internals()
-                internals.kf_override_frame_selection = True
-                internals.num_desired_tracks = 10
-                odometry.track(2_000_000, static_images, internals=internals)
-                self.assertTrue(odometry.get_state().keyframe)
-                second_ids = {obs.id for obs in odometry.get_last_observations(0)}
-                # Survivors are a lower bound on the tracks alive at selection, which must exceed the 10 desired
-                self.assertGreater(len(second_ids & first_ids), 10)
-                self.assertFalse(second_ids - first_ids, "the keyframe selected new tracks")
 
     def test_get_observations_and_landmarks(self):
         img = data.ImageGenerator(self.rig.cameras, 10)

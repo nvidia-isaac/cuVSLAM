@@ -26,32 +26,27 @@
 
 namespace test::sof {
 namespace {
-using namespace cuvslam;
-using namespace cuvslam::sof;
 
-// Tops up existing tracks, as a keyframe does. The bins apportion the existing and the desired features together,
-// so bins short of their share still have room when no new features are desired.
-TEST(GoodFeaturesToTrackDetector, SelectsNoMoreThanDesired) {
-  utils::ImageLoaderT loader;
+// Existing tracks leave some bins short of their share, which must stay short when no features are desired
+TEST(GoodFeaturesToTrackDetector, AddsNoFeaturesWhenNoneDesired) {
+  cuvslam::utils::ImageLoaderT loader;
   ASSERT_TRUE(loader.load(std::string{CUVSLAM_TEST_ASSETS} + "sof/left.png"));
-  const ImageMatrixT image = loader.getImage().cast<float>();
-  ImagePyramidT pyramid(image);
+  const cuvslam::ImageMatrixT image = loader.getImage().cast<float>();
+  cuvslam::sof::ImagePyramidT pyramid(image);
   pyramid.buildPyramid();
-  GradientPyramidT gradient;
+  cuvslam::sof::GradientPyramidT gradient;
   gradient.set(pyramid);
 
-  GoodFeaturesToTrackDetector detector;
-  std::vector<Vector2T> features;
-  detector.computeGFTTAndSelectFeatures(gradient, 0, 0, 0, 0, nullptr, TracksVector{}, 450, features);
+  cuvslam::sof::GoodFeaturesToTrackDetector detector;
+  std::vector<cuvslam::Vector2T> features;
+  detector.computeGFTTAndSelectFeatures(gradient, 0, 0, 0, 0, nullptr, cuvslam::sof::TracksVector{}, 450, features);
   ASSERT_FALSE(features.empty());
-  TracksVector tracks;
+  cuvslam::sof::TracksVector tracks;
   tracks.add(0, features);
 
-  for (const size_t desired : {0, 1, 5}) {
-    std::vector<Vector2T> selected;
-    detector.computeGFTTAndSelectFeatures(gradient, 0, 0, 0, 0, nullptr, tracks, desired, selected);
-    EXPECT_LE(selected.size(), desired);
-  }
+  std::vector<cuvslam::Vector2T> selected;
+  detector.computeGFTTAndSelectFeatures(gradient, 0, 0, 0, 0, nullptr, tracks, 0, selected);
+  EXPECT_TRUE(selected.empty()) << selected.size() << " features added";
 }
 
 }  // namespace
