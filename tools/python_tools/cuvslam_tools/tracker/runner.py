@@ -72,6 +72,7 @@ class Stat:
     gt_av_rotation_error: float = 0
     gt_n_error_segments: int = 0
     gt_simple_error: float = 0
+    gt_simple_rotation_error: float = 0
     num_tracking_losts: int = 0
     odometry_mode: str = ""
     # Set by SLAM runs only.
@@ -126,7 +127,8 @@ class Tracker:
             self.slam_cfg.use_gpu = self.odom_cfg.use_gpu
             self.slam_cfg.sync_mode = args.sync_slam
             self.slam_cfg.use_vpr = getattr(args, 'use_vpr', False)
-            self.slam_cfg.vpr_model_path = getattr(args, 'vpr_model_path', '')
+            self.slam_cfg.vpr_settings.model_path = getattr(args, 'vpr_model_path', '')
+            self.slam_cfg.vpr_settings.vocabulary_path = getattr(args, 'vpr_vocabulary_path', '')
             self.slam_cfg.loop_closure_mode = getattr(args, 'loop_closure_mode', vslam.Slam.LoopClosureMode.LSI)
             if getattr(args, 'max_map_size', None) is not None:
                 self.slam_cfg.max_map_size = args.max_map_size
@@ -597,7 +599,8 @@ def track(args: argparse.Namespace,
     if dataset.gt_transforms:
         calculate_sequence_errors(tracker.world_from_rig, dataset.gt_transforms, tracker.stat,
                                   tracker.frame_metadata, args.use_segments, args.segment_lengths,
-                                  args.num_loops, args.repeat_type)
+                                  args.num_loops, args.repeat_type,
+                                  with_scale=args.odometry_mode == vslam.Odometry.OdometryMode.Mono)
 
     suffix = "_refined" if refined_focal is not None and refined_principal is not None else ""
     plot_trajectory_path = None

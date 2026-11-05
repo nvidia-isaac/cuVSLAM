@@ -35,7 +35,8 @@ def _stat(**fields) -> types.SimpleNamespace:
     """Stand-in for tracker.runner.Stat, which needs the cuVSLAM binding."""
     values = dict(sequence_title="07", n_frames=1101, tracking_time=55.0, average_fps=20.0,
                   bird_view_with_errors_path="", gt_av_translation_error=0.0, gt_av_rotation_error=0.0,
-                  gt_n_error_segments=0, gt_simple_error=0.0, num_tracking_losts=0, odometry_mode="",
+                  gt_n_error_segments=0, gt_simple_error=0.0, gt_simple_rotation_error=0.0, num_tracking_losts=0,
+                  odometry_mode="",
                   num_loop_closures=0, loop_closure_mode="", seg_err_points=[])
     values.update(fields)
     return types.SimpleNamespace(**values)
@@ -90,6 +91,27 @@ class TestReporterCli(unittest.TestCase):
         with mock.patch.object(cli, "run_report") as run_report, contextlib.redirect_stderr(stderr):
             with self.assertRaises(SystemExit) as cm:
                 cli.main(["--test_config", "kitti.cfg", "--loop_closure_mode", "vpr"])
+
+        self.assertEqual(cm.exception.code, 2)
+        self.assertIn("--use_vpr", stderr.getvalue())
+        run_report.assert_not_called()
+
+    def test_vpr_vocabulary_reaches_the_report(self):
+        with tempfile.NamedTemporaryFile(suffix=".engine") as model, \
+                tempfile.NamedTemporaryFile(suffix=".vocabulary") as vocabulary, \
+                mock.patch.object(cli, "run_report") as run_report:
+            exit_code = cli.main(["--test_config", "kitti.cfg", "--use_vpr", "true", "--vpr_model_path", model.name,
+                                  "--vpr_vocabulary_path", vocabulary.name])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(run_report.call_args.args[0].vpr_vocabulary_path, vocabulary.name)
+
+    def test_vpr_vocabulary_without_place_recognition_fails_before_the_report(self):
+        stderr = io.StringIO()
+        with tempfile.NamedTemporaryFile(suffix=".vocabulary") as vocabulary, \
+                mock.patch.object(cli, "run_report") as run_report, contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as cm:
+                cli.main(["--test_config", "kitti.cfg", "--vpr_vocabulary_path", vocabulary.name])
 
         self.assertEqual(cm.exception.code, 2)
         self.assertIn("--use_vpr", stderr.getvalue())

@@ -38,7 +38,7 @@ MulticameraMode ParseMulticameraMode(const std::string& mode, MulticameraMode de
   if (it != modes.end()) {
     return it->second;
   }
-  TraceError("Cannot find '%s' multicam mode, defaulting to %d", mode.c_str(), default_mode);
+  TraceError("Cannot find '%s' multicam mode, defaulting to %d", mode.c_str(), static_cast<int>(default_mode));
   return default_mode;
 }
 
@@ -252,7 +252,7 @@ void FrustumIntersectionGraph::set_manual_mode(const std::vector<CameraGraphNode
       auto it = std::find_if(connected_cams.begin(), connected_cams.end(),
                              [sec_id](const CameraGraphNode::ConnectedCam& cam) { return cam.id == sec_id; });
       if (it == connected_cams.end()) {
-        TraceWarning("Cameras %d and %d frustum intersection is poor.", cam_id, sec_id);
+        TraceWarning("Cameras %zu and %d frustum intersection is poor.", cam_id, sec_id);
       }
     }
     primary_cameras_.push_back(cam_id);

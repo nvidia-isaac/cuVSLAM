@@ -177,12 +177,13 @@ jobs:
       matrix:
         include:
           # x86_64 configs (CUDA/Ubuntu controlled by Docker build args)
+          # Wheels come from the Ubuntu 22.04 configs only; their manylinux_2_35 tag also covers 24.04.
           # tools_tests is platform-independent, so one config runs it. It needs the
           # CI tools image, which is only built for eval-enabled configs.
           - { name: "x86_64 / cuda-12.6 / ubuntu-22.04", runner: '["gpu"]', cuda: "12.6.3", ubuntu: "22.04", archs: "75;80;86;89;90", platform: "x86_64", wheel: true, eval: true, docs: true, tools_tests: true }
-          - { name: "x86_64 / cuda-12.6 / ubuntu-24.04", runner: '["gpu"]', cuda: "12.6.3", ubuntu: "24.04", archs: "75;80;86;89;90", platform: "x86_64", wheel: true, eval: true }
+          - { name: "x86_64 / cuda-12.6 / ubuntu-24.04", runner: '["gpu"]', cuda: "12.6.3", ubuntu: "24.04", archs: "75;80;86;89;90", platform: "x86_64", eval: true }
           - { name: "x86_64 / cuda-13.2 / ubuntu-22.04", runner: '["gpu"]', cuda: "13.2.0", ubuntu: "22.04", archs: "75;80;86;89;100;120;121", platform: "x86_64", wheel: true, eval: true }
-          - { name: "x86_64 / cuda-13.2 / ubuntu-24.04", runner: '["gpu"]', cuda: "13.2.0", ubuntu: "24.04", archs: "75;80;86;89;100;120;121", platform: "x86_64", wheel: true, eval: true }
+          - { name: "x86_64 / cuda-13.2 / ubuntu-24.04", runner: '["gpu"]', cuda: "13.2.0", ubuntu: "24.04", archs: "75;80;86;89;100;120;121", platform: "x86_64", eval: true }
 
           # Non-default CMake configuration smoke build: builds + tests + wheel with extra
           # cmake_options, but skips eval/docs and uploads no artifacts (skip_artifacts).
@@ -319,6 +320,7 @@ jobs:
           UBUNTU_VERSION=${{ matrix.ubuntu }} \
           BASE_IMAGE="${{ matrix.base_image }}" \
           UBUNTU_PORTS_MIRROR="${{ matrix.ports_mirror }}" \
+          CUVSLAM_REQUIRE_CLEAN_SOURCE=1 \
           EXTRA_CMAKE_ARGS="-DCMAKE_CUDA_ARCHITECTURES=${{ matrix.archs }} ${{ matrix.cmake_options }}" \
           ./scripts/build_cuvslam_in_docker.sh Release ./output
 
@@ -353,9 +355,9 @@ jobs:
               >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: Build Python wheel
+      - name: Build Python wheels
         if: matrix.wheel
-        timeout-minutes: 15
+        timeout-minutes: 30
         run: |
           CUDA_VERSION=${{ matrix.cuda }} \
           UBUNTU_VERSION=${{ matrix.ubuntu }} \
@@ -363,7 +365,7 @@ jobs:
 
       - name: Verify Python wheel installs
         if: matrix.wheel
-        timeout-minutes: 10
+        timeout-minutes: 20
         env:
           PACKAGE_VERSION: ${{ needs.check-changes.outputs.package_version }}
         run: |
@@ -498,11 +500,32 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-      - name: Upload Python wheel
+      # archive: false uploads exactly one file, so each Python version gets its own step.
+      - name: Upload Python wheel (cp310)
         if: matrix.wheel && !matrix.skip_artifacts
         uses: actions/upload-artifact@v7
         with:
-          path: output/wheel/*.whl
+          path: output/wheel/*-cp310-cp310-*.whl
+          archive: false
+          overwrite: true
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload Python wheel (cp311)
+        if: matrix.wheel && !matrix.skip_artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          path: output/wheel/*-cp311-cp311-*.whl
+          archive: false
+          overwrite: true
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload Python wheel (cp312-abi3)
+        if: matrix.wheel && !matrix.skip_artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          path: output/wheel/*-cp312-abi3-*.whl
           archive: false
           overwrite: true
           retention-days: 30
