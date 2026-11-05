@@ -61,6 +61,9 @@ else
   exit 1
 fi
 
+# CI builds no AnyLoc engine: the x86 runners' A10G and Thor are not engine targets
+[ "${GITHUB_ACTIONS:-}" = true ] && EXTRA_CMAKE_ARGS="-DCUVSLAM_BUILD_ANYLOC_ENGINE=OFF ${EXTRA_CMAKE_ARGS:-}"
+
 docker run --runtime=nvidia --gpus all --rm --label "cuvslam.runner=${RUNNER_NAME:-local}" \
   $TTY_FLAG $DOCKER_USER $DOCKER_VOLUMES \
   -e CUVSLAM_SRC_DIR=/cuvslam \
