@@ -10,7 +10,7 @@
         "  lost more than max_lost_frame_pct of its frames, has no ATE, or its ATE exceeds",
         "  max_ate_pct. Failures are counted in the KPI tables (broken = fails in every",
         "  configuration, flaky = in some).",
-        "- exclude_failed: also drop failed sequences from the ATE, ARE and Kabsch means;",
+        "- exclude_failed: also drop failed sequences from the ATE, ARE, Kabsch and KabschRot means;",
         "  Losts and FPS always cover every sequence.",
         "- baseline_window, baseline_level_pct, baseline_level_min_runs,",
         "  baseline_level_min_age_days: regression check against known levels in the KPI",
@@ -43,6 +43,7 @@
             "ATE": {"tol_pct": 10},
             "ARE": {"tol_pct": 10},
             "Kabsch": {"tol_pct": 10},
+            "KabschRot": {"tol_pct": 10},
             "TrackingLosts": {"tol_abs": 1},
             "Failed": {"tol_abs": 1},
             "FPS": {"tol_pct": 15}

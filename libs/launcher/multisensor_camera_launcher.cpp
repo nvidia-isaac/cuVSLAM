@@ -90,7 +90,7 @@ void MultisensorCameraLauncher::SetupTracker(const odom::Settings& svo_settings,
     }
     s << "], depth_scale=" << ms.depth_scale_factor
       << ", stereo_depth_tracking=" << (ms.enable_depth_stereo_tracking ? "on" : "off");
-    TraceMessage(s.str().c_str());
+    TraceMessage("%s", s.str().c_str());
   }
 
   // Persist effective settings back into the launcher's stored copy so downstream code paths

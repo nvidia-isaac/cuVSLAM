@@ -237,7 +237,7 @@ ErrorCode BaseLauncher::launch() {
       const ErrorCode err = cameraRig_.getFrame(curr_sources, curr_meta, masks_sources, depth_sources);
       if (err != ErrorCode::S_True) {
         if (err != ErrorCode::E_Bounds) {
-          TraceError("getFrame fails with %d error code", err);
+          TraceError("getFrame fails with %d error code", static_cast<int>(err));
           return ErrorCode::E_FileNotFound;
         } else {
           // successfully reached last frame
@@ -320,7 +320,7 @@ ErrorCode BaseLauncher::launch() {
       if (FLAGS_print_memory_usage && frameId % 1000 == 0) {
         int rss_mb = -1, cached_mb = -1;
         if (GetProcessMemoryUsage(rss_mb, cached_mb)) {
-          TraceMessage("frame %d, resident %d mb, file_cache %d mb. Used (resident-file_cache) = %d mb", frameId,
+          TraceMessage("frame %zu, resident %d mb, file_cache %d mb. Used (resident-file_cache) = %d mb", frameId,
                        rss_mb, cached_mb, rss_mb - cached_mb);
         }
       }
@@ -350,7 +350,7 @@ ErrorCode BaseLauncher::launch() {
       Isometry3T delta;  // doesn't need to be initialized
       const bool solutionFound = launch_vo(delta, pose_info, per_frame_settings_);
       if (!solutionFound) {
-        TraceError("Failed to solveNextFrame in frame %d. Set pose delta to identity.", frameId);
+        TraceError("Failed to solveNextFrame in frame %zu. Set pose delta to identity.", frameId);
         delta = Isometry3T::Identity();
       }
 

@@ -49,6 +49,7 @@ set(HEADERS
     vpr/vpr_map.h
     vpr/vpr_sof_image.h
     vpr/vpr_types.h
+    vpr/vpr_vocabulary.h
     view/map_to_view.h
     view/view_landmarks.h
     view/view_manager.h
@@ -84,6 +85,7 @@ set(SOURCES
     vpr/vpr_image.cpp
     vpr/vpr_map.cpp
     vpr/vpr_sof_image.cpp
+    vpr/vpr_vocabulary.cpp
     view/map_to_view.cpp
 )
 
@@ -102,7 +104,7 @@ set(LIBS
 if (USE_TENSORRT)
   set(HEADERS ${HEADERS} vpr/anyloc_network.h vpr/vpr_anyloc.h)
   set(SOURCES ${SOURCES} vpr/anyloc_network.cpp vpr/vpr_anyloc.cpp)
-  set(LIBS ${LIBS} TensorRT::nvinfer)
+  set(LIBS ${LIBS} TensorRT::headers ${CMAKE_DL_LIBS})
 endif (USE_TENSORRT)
 
 if (USE_CUDA)

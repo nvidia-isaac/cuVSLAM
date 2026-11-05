@@ -83,7 +83,10 @@ Repository secrets, split read from write so fork-reachable jobs never hold a ke
 
 - Per run: `kpi_<run_id>.json` contains the flat current values used for rolling history;
   `kpi_<run_id>.report.json` contains the current values, previous per-config values, and soft drift results. KPIs are
-  ATE, ARE, Kabsch, tracking losts, failed sequences (`Failed`), and FPS, in ODOM and SLAM modes. During migration, `run_eval.sh` also emits the old
+  ATE, ARE, Kabsch, KabschRot, tracking losts, failed sequences (`Failed`), and FPS, in ODOM and SLAM modes. ATE (%)
+  and ARE (º/m) are KITTI-style segment drift. Kabsch and KabschRot, shown in tables as ATE RMSE (m) and ARE RMSE (º),
+  are absolute errors after one Umeyama alignment of the whole trajectory, matching `evo_ape --align` (SE(3)), or
+  `evo_ape --align --correct_scale` (Sim(3)) for mono. During migration, `run_eval.sh` also emits the old
   `.table` and `.drift` files; a follow-up script-only change removes those after CI switches to report JSON.
 - KPI config: `kpi_baseline_ranges.json` has `defaults` and per-prefix `datasets` overrides, each holding the
   sequence checks (`max_ate_pct`, `max_lost_frame_pct`, `exclude_failed`), the rolling-baseline settings, and per-metric drift `tolerances`; a
@@ -108,7 +111,7 @@ Repository secrets, split read from write so fork-reachable jobs never hold a ke
 - Sequence checks: `collect` also records each sequence run in the report JSON's `sequences` block and marks it failed
   if it tracked no frames, lost more than `max_lost_frame_pct` of its frames, has no ATE, or exceeds `max_ate_pct`
   (RGB-D datasets get a laxer ATE cap). Failures never fail the job. Prefixes with `exclude_failed` leave failed
-  sequences out of the ATE, ARE and Kabsch means (TUM and TartanAir); Losts and FPS always cover every sequence.
+  sequences out of the ATE, ARE, Kabsch and KabschRot means (TUM and TartanAir); Losts and FPS always cover every sequence.
 - Nightly: `cuvslam_kpi_report.py aggregate` publishes one row per evaluation (dataset, type, mode). KPI cells contain
   the mean and population standard deviation across all four x86 configurations, except the counts Losts and Failed,
   which show min–max. Each cell's second line (`<br><sub>Δ …</sub>`) is the change from the rolling-baseline median:
@@ -152,7 +155,8 @@ Repository secrets, split read from write so fork-reachable jobs never hold a ke
   requires a clean tracked source tree and verifies that every wheel identifies the checked-out SHA without the
   `-modified` suffix.
 - Final distributables are packaged once by their producing job and uploaded directly, without an Actions ZIP wrapper: `cuvslam-cpp-<version>-<slug>.tar.gz`, the versioned Python wheels, `cuvslam-docs-<version>.tar.gz`, and `cuvslam-evaluation-<version>.tar.gz`.
-- Each C++ archive contains only `bin/{libcuvslam.so,cuvslam_api_launcher}`, `include/cuvslam/{cuvslam2.h,cuvslam_gpu.h,ground_constraint2.h}`, and `LICENSE`. `scripts/package_cpp_dist.sh` creates and validates this manifest.
+- Wheels come from the x86_64 Ubuntu 22.04 configs (their `manylinux_2_35` tag also covers 24.04), Orin, and Thor. Each of these jobs builds `cp310`, `cp311` and `cp312-abi3` wheels and uploads them in one step per Python tag.
+- Each C++ archive contains only `bin/{libcuvslam.so,cuvslam_api_launcher}`, `include/cuvslam/{cuvslam2.h,cuvslam_gpu.h,ground_constraint2.h,vpr_vocabulary_builder2.h}`, and `LICENSE`. `scripts/package_cpp_dist.sh` creates and validates this manifest.
 - A release job downloads the `cuvslam-*` distributables and promotes the same bytes to the draft Release. Test-result artifacts remain Actions-only.
 - The Actions summary contains CI test and KPI status. Release notes are generated separately from the evaluation summary, so permanent releases do not contain run metadata or expiring Actions links.
 

@@ -14,17 +14,24 @@
   version. Uninstall an existing `cuvslam` before installing them; `import cuvslam` warns when several cuVSLAM
   distributions are installed
 - The compiled Python module is now the private `cuvslam._cuvslam` (was `cuvslam.pycuvslam`); import from `cuvslam`
+- The Python package requires Python 3.10 or newer, and its wheels include the license (NVIDIA Community License,
+  previously described as "Other/Proprietary") and a project description
 
 ### Added
 
 - `cuda` extra for the Python wheels (x86_64 and Jetson Thor): `pip install "<wheel>[cuda]"` installs the cuBLAS,
   cuSOLVER and cuSPARSE wheels from PyPI, so no system CUDA Toolkit is needed
-
+- `tensorrt` extra for the Python wheels (x86_64 and Jetson Thor): installs NVIDIA's TensorRT wheel of the version the
+  cuVSLAM wheels are built against, for visual place recognition (`use_vpr`)
+- Python wheels for Python 3.10, 3.11 and 3.12+ (`cp312-abi3`) on every target. x86_64 wheels are built on
+  Ubuntu 22.04 and also install on newer releases, replacing the separate Ubuntu 24.04 wheels
 - `Slam::Config::delay_warning_queue_size`: warns in verbose mode when more than the configured number of commands
   are queued to the SLAM thread, meaning SLAM falls behind odometry
 
 ### Fixed
 
+- Python `cp312-abi3` wheels now use the stable ABI. They were plain CPython 3.12 builds, which installed on
+  Python 3.13 and newer but could not be imported there
 - Unsynchronized reads of the SLAM engine during map localization (`LocalizeInMapCmd::Execute`)
 - Unnecessary mutex contention in `AsyncSlam::GetSlamPose()`
 

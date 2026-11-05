@@ -44,22 +44,24 @@ Once the user provides a path, use it consistently throughout all subsequent com
 - Ubuntu 22+ (x86_64 or aarch64/Jetson)
 - CUDA Toolkit 12 or 13 (https://developer.nvidia.com/cuda/toolkit)
 - System packages: `apt update && apt install g++ cmake git git-lfs python3-dev`
-- CMake 3.19+, Python 3.9+
+- CMake 3.19+, Python 3.10+
 
 ## 2. Install PyCuVSLAM (Quickest Path)
 
 Pre-built wheels from https://github.com/nvidia-isaac/cuVSLAM/releases/latest:
 
-| Target | Ubuntu | Python wheel tag | Package | Arch |
-|--------|--------|------------------|---------|------|
-| Desktop/server | 22.04 | `cp310` (Python 3.10) | `cuvslam-cu12`, `cuvslam-cu13` | x86_64 |
-| Desktop/server | 24.04 | `cp312-abi3` (Python 3.12+) | `cuvslam-cu12`, `cuvslam-cu13` | x86_64 |
-| Jetson Orin | 22.04 (JetPack 6.x) | `cp310` (Python 3.10) | `cuvslam-cu12` | aarch64 |
-| Jetson Thor | 24.04 (JetPack 7.x) | `cp312-abi3` (Python 3.12+) | `cuvslam-cu13` | aarch64 |
+| Target | Ubuntu | Python | Package | Arch |
+|--------|--------|--------|---------|------|
+| Desktop/server | 22.04 or newer | 3.10, 3.11, 3.12+ | `cuvslam-cu12`, `cuvslam-cu13` | x86_64 |
+| Jetson Orin | 22.04 (JetPack 6.x) | 3.10, 3.11, 3.12+ | `cuvslam-cu12` | aarch64 |
+| Jetson Thor | 24.04 (JetPack 7.x) | 3.10, 3.11, 3.12+ | `cuvslam-cu13` | aarch64 |
 
-Only these combinations are provided; use a source build for others. The CUDA Toolkit major must match the package's
+Only these combinations are provided; use a source build for others. Pick the wheel for the user's Python: `cp310`,
+`cp311`, or `cp312-abi3` for 3.12 and later. The CUDA Toolkit major must match the package's
 `cu12` or `cu13` suffix. Without a system CUDA Toolkit, install the wheel with the `cuda` extra
 (`pip install "./<wheel>.whl[cuda]"`; not on Jetson Orin). Install only one cuVSLAM package per environment.
+Visual place recognition (`use_vpr`, AnyLoc) also needs TensorRT 10 (`libnvinfer10`): install it separately or with the
+`tensorrt` extra (not on Jetson Orin). The rest of cuVSLAM runs without it.
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate

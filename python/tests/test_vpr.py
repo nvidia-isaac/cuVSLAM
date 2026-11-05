@@ -57,7 +57,7 @@ def make_configs(use_vpr):
     slam_cfg.enable_reading_internals = True
     slam_cfg.use_vpr = use_vpr
     if use_vpr:
-        slam_cfg.vpr_model_path = ANYLOC_ENGINE
+        slam_cfg.vpr_settings.model_path = ANYLOC_ENGINE
 
     return odom_cfg, slam_cfg
 
@@ -115,34 +115,68 @@ class TestVprBindings(unittest.TestCase):
     def test_vpr_defaults(self):
         cfg = vslam.Slam.Config()
         self.assertFalse(cfg.use_vpr)
-        self.assertAlmostEqual(cfg.vpr_score_threshold, 0.68, places=5)
+        self.assertEqual(cfg.vpr_settings.model_path, "")
+        self.assertAlmostEqual(cfg.vpr_settings.score_threshold, 0.68, places=5)
+        self.assertEqual(cfg.vpr_settings.vocabulary_path, "")
+        self.assertEqual(cfg.vpr_settings.vocabulary_min_keyframes, 10)
+        self.assertEqual(cfg.vpr_settings.vocabulary_max_keyframes, 100)
         self.assertEqual(localization_settings().vpr_candidates, 5)
 
     def test_config_vpr_keyword_arguments(self):
+        # Distinct values, so an argument bound to the wrong field shows.
         cfg = vslam.Slam.Config(
             use_vpr=True,
-            vpr_model_path="/tmp/anyloc.engine",
-            vpr_score_threshold=0.75)
+            vpr_settings=vslam.Slam.VprSettings(
+                model_path="/tmp/anyloc.engine",
+                score_threshold=0.75,
+                vocabulary_path="/tmp/a.vocabulary",
+                vocabulary_min_keyframes=3,
+                vocabulary_max_keyframes=7),
+            loop_closure_mode=vslam.Slam.LoopClosureMode.VPR)
 
         self.assertTrue(cfg.use_vpr)
-        self.assertEqual(cfg.vpr_model_path, "/tmp/anyloc.engine")
-        self.assertAlmostEqual(cfg.vpr_score_threshold, 0.75, places=5)
+        self.assertEqual(cfg.vpr_settings.model_path, "/tmp/anyloc.engine")
+        self.assertAlmostEqual(cfg.vpr_settings.score_threshold, 0.75, places=5)
+        self.assertEqual(cfg.vpr_settings.vocabulary_path, "/tmp/a.vocabulary")
+        self.assertEqual(cfg.vpr_settings.vocabulary_min_keyframes, 3)
+        self.assertEqual(cfg.vpr_settings.vocabulary_max_keyframes, 7)
+        self.assertEqual(cfg.loop_closure_mode, vslam.Slam.LoopClosureMode.VPR)
+
+        # unnamed parameters are not supported (kw_only)
+        with self.assertRaises(TypeError):
+            vslam.Slam.VprSettings("/tmp/anyloc.engine")  # type: ignore
 
     def test_config_vpr_modifiers(self):
         cfg = vslam.Slam.Config()
         cfg.use_vpr = True
-        cfg.vpr_model_path = "/tmp/other.engine"
-        cfg.vpr_score_threshold = 0.25
+        # Writes through vpr_settings reach the config itself.
+        cfg.vpr_settings.model_path = "/tmp/other.engine"
+        cfg.vpr_settings.score_threshold = 0.25
+        cfg.vpr_settings.vocabulary_path = "/tmp/b.vocabulary"
+        cfg.vpr_settings.vocabulary_min_keyframes = 4
+        cfg.vpr_settings.vocabulary_max_keyframes = 9
 
         self.assertTrue(cfg.use_vpr)
-        self.assertEqual(cfg.vpr_model_path, "/tmp/other.engine")
-        self.assertAlmostEqual(cfg.vpr_score_threshold, 0.25, places=5)
+        self.assertEqual(cfg.vpr_settings.model_path, "/tmp/other.engine")
+        self.assertAlmostEqual(cfg.vpr_settings.score_threshold, 0.25, places=5)
+        self.assertEqual(cfg.vpr_settings.vocabulary_path, "/tmp/b.vocabulary")
+        self.assertEqual(cfg.vpr_settings.vocabulary_min_keyframes, 4)
+        self.assertEqual(cfg.vpr_settings.vocabulary_max_keyframes, 9)
+        # Each config owns its settings: the defaults of the next one are untouched.
+        self.assertEqual(vslam.Slam.Config().vpr_settings.model_path, "")
+
+        settings = vslam.Slam.VprSettings(model_path="/tmp/third.engine")
+        cfg.vpr_settings = settings
+        settings.model_path = "/tmp/changed.engine"
+        self.assertEqual(cfg.vpr_settings.model_path, "/tmp/third.engine")
 
     def test_config_repr_mentions_vpr(self):
-        text = repr(vslam.Slam.Config(use_vpr=True, vpr_score_threshold=0.5))
-        for field in ('use_vpr', 'vpr_model_path', 'vpr_score_threshold'):
-            self.assertIn(field, text)
-        self.assertIn('use_vpr=True', text)
+        text = repr(vslam.Slam.Config(use_vpr=True, vpr_settings=vslam.Slam.VprSettings(
+            model_path="/tmp/anyloc.engine", score_threshold=0.75, vocabulary_path="/tmp/a.vocabulary",
+            vocabulary_min_keyframes=3, vocabulary_max_keyframes=7)))
+        self.assertIn('use_vpr=True, vpr_settings=cuvslam.Slam.VprSettings(model_path=/tmp/anyloc.engine, '
+                      'score_threshold=0.75, vocabulary_path=/tmp/a.vocabulary, vocabulary_min_keyframes=3, '
+                      'vocabulary_max_keyframes=7)', text)
 
     def test_loop_closure_mode_enum(self):
         self.assertEqual(set(vslam.Slam.LoopClosureMode.__members__), {'LSI', 'VPR'})
@@ -293,7 +327,7 @@ class TestVprAnyLocConfig(unittest.TestCase):
         # Checked before loading the engine, so it needs neither the file nor USE_TENSORRT.
         _, slam_cfg = make_configs(True)
         slam_cfg.use_gpu = False
-        slam_cfg.vpr_model_path = "/nonexistent/anyloc.engine"
+        slam_cfg.vpr_settings.model_path = "/nonexistent/anyloc.engine"
         with self.assertRaises(ValueError) as caught:
             vslam.Slam(make_rig()[0], [0, 1], slam_cfg)
         self.assertIn("use_gpu", str(caught.exception))
@@ -301,11 +335,54 @@ class TestVprAnyLocConfig(unittest.TestCase):
     def test_needs_a_score_threshold_in_0_1(self):
         for threshold in (-0.1, 1.5, float("nan")):
             _, slam_cfg = make_configs(True)
-            slam_cfg.vpr_score_threshold = threshold
-            slam_cfg.vpr_model_path = "/nonexistent/anyloc.engine"
+            slam_cfg.vpr_settings.score_threshold = threshold
+            slam_cfg.vpr_settings.model_path = "/nonexistent/anyloc.engine"
             with self.assertRaises(ValueError, msg=threshold) as caught:
                 vslam.Slam(make_rig()[0], [0, 1], slam_cfg)
-            self.assertIn("vpr_score_threshold", str(caught.exception))
+            self.assertIn("score_threshold", str(caught.exception))
+
+    def test_vocabulary_settings_need_use_vpr(self):
+        for name, value in (("vocabulary_path", "/nonexistent/test.vocabulary"),
+                            ("vocabulary_min_keyframes", 3), ("vocabulary_max_keyframes", 200)):
+            _, slam_cfg = make_configs(False)
+            setattr(slam_cfg.vpr_settings, name, value)
+            with self.assertRaises(ValueError, msg=name) as caught:
+                vslam.Slam(make_rig()[0], [0, 1], slam_cfg)
+            self.assertIn("use_vpr", str(caught.exception))
+
+    def test_a_vocabulary_file_replaces_the_online_fit_settings(self):
+        for name, value in (("vocabulary_min_keyframes", 3), ("vocabulary_max_keyframes", 200)):
+            _, slam_cfg = make_configs(True)
+            slam_cfg.vpr_settings.model_path = "/nonexistent/anyloc.engine"
+            slam_cfg.vpr_settings.vocabulary_path = "/nonexistent/test.vocabulary"
+            setattr(slam_cfg.vpr_settings, name, value)
+            with self.assertRaises(ValueError, msg=name) as caught:
+                vslam.Slam(make_rig()[0], [0, 1], slam_cfg)
+            self.assertIn("vocabulary_path", str(caught.exception))
+
+    def test_online_fit_settings_must_be_in_order(self):
+        # 1 <= min <= max.
+        for name, value in (("vocabulary_min_keyframes", 0), ("vocabulary_max_keyframes", 7)):
+            _, slam_cfg = make_configs(True)
+            slam_cfg.vpr_settings.model_path = "/nonexistent/anyloc.engine"
+            setattr(slam_cfg.vpr_settings, name, value)
+            with self.assertRaises(ValueError, msg=name) as caught:
+                vslam.Slam(make_rig()[0], [0, 1], slam_cfg)
+            self.assertIn(name, str(caught.exception))
+
+    def test_vocabulary_builder_needs_its_fit_settings_in_order(self):
+        # Checked before loading the engine, as for a session.
+        for name, value in (("vocabulary_min_keyframes", 0), ("vocabulary_max_keyframes", 7)):
+            settings = vslam.Slam.VprSettings(model_path="/nonexistent/anyloc.engine")
+            setattr(settings, name, value)
+            with self.assertRaises(ValueError, msg=name) as caught:
+                vslam.VprVocabularyBuilder(settings)
+            self.assertIn(name, str(caught.exception))
+
+    def test_vocabulary_builder_needs_an_engine(self):
+        settings = vslam.Slam.VprSettings(model_path="/nonexistent/anyloc.engine")
+        with self.assertRaises(RuntimeError):
+            vslam.VprVocabularyBuilder(settings)
 
     @needs_anyloc
     def test_localization_without_a_guess_pose_needs_a_candidate(self):
@@ -317,10 +394,97 @@ class TestVprAnyLocConfig(unittest.TestCase):
         self.assertIn("vpr_candidates", str(caught.exception))
 
 
+@needs_anyloc
+class TestVprVocabularyBuilder(unittest.TestCase):
+    """A vocabulary file fitted to noise images, and Slam loading it."""
+
+    FILE_BYTES = 24 + 32 * 384 * 4 + 8  # header, 32 centers of 384 floats, no places
+    MIN_IMAGES = vslam.Slam.VprSettings().vocabulary_min_keyframes
+
+    def setUp(self):
+        self.folder = tempfile.mkdtemp()
+        self.path = os.path.join(self.folder, "noise.vocabulary")
+
+    def tearDown(self):
+        shutil.rmtree(self.folder, ignore_errors=True)
+
+    def make_builder(self, max_images=10):
+        return vslam.VprVocabularyBuilder(
+            vslam.Slam.VprSettings(model_path=ANYLOC_ENGINE, vocabulary_max_keyframes=max_images))
+
+    @staticmethod
+    def add_images(builder, count):
+        for seed in range(count):
+            builder.add_image(noise_images(seed)[0])
+
+    def vocabulary_config(self):
+        _, slam_cfg = make_configs(True)
+        slam_cfg.vpr_settings.vocabulary_path = self.path
+        return slam_cfg
+
+    def test_capacity_is_vocabulary_max_keyframes(self):
+        builder = self.make_builder()
+        self.assertEqual(builder.capacity, 10)
+
+        self.add_images(builder, 10)
+        with self.assertRaises(ValueError):
+            builder.add_image(noise_images(10)[0])
+
+    def test_slam_loads_a_saved_vocabulary(self):
+        builder = self.make_builder(max_images=self.MIN_IMAGES + 1)
+        self.add_images(builder, self.MIN_IMAGES)
+        builder.save(self.path)
+        self.assertEqual(os.path.getsize(self.path), self.FILE_BYTES)
+        # Below capacity, so only the save refuses it.
+        with self.assertRaises(ValueError):
+            builder.add_image(noise_images(10)[0])
+
+        vslam.Slam(make_rig()[0], [0, 1], self.vocabulary_config())
+
+    def test_save_needs_vocabulary_min_keyframes(self):
+        builder = vslam.VprVocabularyBuilder(
+            vslam.Slam.VprSettings(model_path=ANYLOC_ENGINE, vocabulary_min_keyframes=3, vocabulary_max_keyframes=10))
+        self.add_images(builder, 2)
+        with self.assertRaises(ValueError):
+            builder.save(self.path)
+        self.assertEqual(os.listdir(self.folder), [])
+
+        builder.add_image(noise_images(2)[0])
+        builder.save(self.path)
+        self.assertEqual(os.path.getsize(self.path), self.FILE_BYTES)
+
+    def test_save_reports_a_path_it_cannot_write(self):
+        builder = self.make_builder()
+        self.add_images(builder, self.MIN_IMAGES)
+        path = os.path.join(self.folder, "missing", "noise.vocabulary")
+        with self.assertRaises(RuntimeError) as caught:
+            builder.save(path)
+        self.assertIn(path, str(caught.exception))
+
+    def test_localize_in_map_reports_a_vocabulary_gone_since_construction(self):
+        builder = self.make_builder()
+        self.add_images(builder, self.MIN_IMAGES)
+        builder.save(self.path)
+        slam = vslam.Slam(make_rig()[0], [0, 1], self.vocabulary_config())
+        os.remove(self.path)
+
+        # Localizing reads the file again; its error reaches the callback instead of escaping.
+        pose, error = localize_in_map(slam, self.folder, noise_images(0), 0, localization_settings())
+        self.assertIsNone(pose)
+        self.assertIn(self.path, error)
+
+    def test_slam_rejects_a_file_that_is_no_vocabulary(self):
+        with open(self.path, "wb") as file:
+            file.write(b"not a vocabulary")
+        with self.assertRaises(RuntimeError) as caught:
+            vslam.Slam(make_rig()[0], [0, 1], self.vocabulary_config())
+        self.assertIn(self.path, str(caught.exception))
+
+
 @unittest.skipUnless(os.path.isdir(KITTI_07_DIR), f"needs real imagery at {KITTI_07_DIR}")
 @needs_anyloc
 class TestVprAnyLoc(unittest.TestCase):
-    """End to end place recognition on KITTI-07; AnyLoc needs 8+ mapped places to answer."""
+    """End to end place recognition on KITTI-07; AnyLoc needs 10+ mapped places to answer."""
 
     # Before the loop: dozens of keyframes, no revisits.
     N_FRAMES = 300
@@ -338,21 +502,33 @@ class TestVprAnyLoc(unittest.TestCase):
             lambda: EdexReader(KITTI_07_DIR, stereo_edex=os.path.join(KITTI_07_DIR, "stereo.edex")))
         cls.rig = cls.make_reader().rig
         cls.map_dir = tempfile.mkdtemp()
+        cls.vocabulary_dir = tempfile.mkdtemp()
         cls.tracker = cls.make_tracker(cls.anyloc_config())
         cls.tracker.slam.get_pose_graph()  # enables publishing the pose graph
         cls.frames = cls.track_prefix(cls.tracker)
         if not save_map(cls.tracker.slam, cls.map_dir):
             raise RuntimeError(f"could not save the KITTI-07 map to {cls.map_dir}")
+        cls.vocabulary_path = os.path.join(cls.vocabulary_dir, "kitti_07.vocabulary")
+        cls.fit_vocabulary(cls.vocabulary_path)
 
     @classmethod
     def tearDownClass(cls):
         shutil.rmtree(cls.map_dir, ignore_errors=True)
+        shutil.rmtree(cls.vocabulary_dir, ignore_errors=True)
 
     @staticmethod
     def anyloc_config():
         _, slam_cfg = make_configs(True)
         slam_cfg.max_map_size = 0  # never merge nodes out of the VPR map
         return slam_cfg
+
+    @classmethod
+    def fit_vocabulary(cls, path):
+        """Fit a vocabulary file to images spread over the whole sequence, up to the builder's capacity."""
+        builder = vslam.VprVocabularyBuilder(vslam.Slam.VprSettings(model_path=ANYLOC_ENGINE))
+        reader = cls.make_reader()
+        reader.replay(_VocabularyReplay(builder, reader.total_frames // builder.capacity + 1))
+        builder.save(path)
 
     @classmethod
     def make_tracker(cls, slam_cfg):
@@ -390,6 +566,19 @@ class TestVprAnyLoc(unittest.TestCase):
                 np.array(place.pose.translation), np.array(nodes[place.node_id].translation), atol=1e-5)
             self.assertLessEqual(place.score, 1.0 + 1e-5)
             self.assertLessEqual(abs(place.timestamp_ns - timestamp), self.MAX_TIME_TO_NODE_NS)
+
+    def test_a_session_fits_its_own_vocabulary_at_vocabulary_min_keyframes(self):
+        # Fewer keyframes than the default minimum: only a minimum of 1 has a vocabulary to recognize with.
+        default = vslam.Slam.VprSettings().vocabulary_min_keyframes
+        for min_keyframes, recognized in ((1, True), (default, False)):
+            slam_cfg = self.anyloc_config()
+            slam_cfg.vpr_settings.vocabulary_min_keyframes = min_keyframes
+            tracker = self.make_tracker(slam_cfg)
+            tracker.slam.get_pose_graph()  # enables publishing the pose graph
+            timestamp, images = self.track_prefix(tracker, n_frames=10)[0]
+            self.assertLess(len(tracker.slam.get_pose_graph().nodes), default)
+            place = recognize_match(tracker.slam, images, timestamp)
+            self.assertEqual(place is not None, recognized, msg=min_keyframes)
 
     def test_unrelated_image_is_not_recognized(self):
         timestamp, images = self.frames[-1]
@@ -444,9 +633,9 @@ class TestVprAnyLoc(unittest.TestCase):
         finally:
             shutil.rmtree(map_dir, ignore_errors=True)
 
-    def relocalize(self, timestamp, images, settings, folder):
+    def relocalize(self, timestamp, images, settings, folder, slam_cfg=None):
         """Localize one frame of a fresh session in the saved map, without a guess pose."""
-        tracker = self.make_tracker(self.anyloc_config())
+        tracker = self.make_tracker(slam_cfg or self.anyloc_config())
         tracker.track(timestamp, images)
         return localize_in_map(tracker.slam, folder, images, timestamp, settings)
 
@@ -478,6 +667,43 @@ class TestVprAnyLoc(unittest.TestCase):
 
             self.assertIsNone(pose)
             self.assertIn("did not recognize this place", error)
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
+
+    def test_a_session_of_another_vocabulary_leaves_the_saved_index_unused(self):
+        # The saved map fitted its own vocabulary, so only a guess pose localizes in it.
+        slam_cfg = self.anyloc_config()
+        slam_cfg.vpr_settings.vocabulary_path = self.vocabulary_path
+        poses = {stamped.timestamp_ns: stamped.pose for stamped in self.tracker.slam.get_all_slam_poses()}
+
+        localized = 0
+        for timestamp, images in self.frames[::3]:
+            session = self.make_tracker(slam_cfg)
+            session.track(timestamp, images)
+            pose, error = localize_in_map(session.slam, self.map_dir, images, timestamp,
+                                          localization_settings(vpr_candidates=3))
+            self.assertIsNone(pose)
+            self.assertIn("did not recognize this place", error)
+
+            pose, _ = localize_in_map(session.slam, self.map_dir, images, timestamp, localization_settings(),
+                                      poses[timestamp])
+            localized += pose is not None
+        self.assertGreater(localized, 0, "no frame localized in the saved map even with a guess pose")
+
+    def test_sessions_that_share_a_vocabulary_file_localize_in_each_others_maps(self):
+        slam_cfg = self.anyloc_config()
+        slam_cfg.vpr_settings.vocabulary_path = self.vocabulary_path
+        tracker = self.make_tracker(slam_cfg)
+        frames = self.track_prefix(tracker, n_frames=200)
+        folder = tempfile.mkdtemp()
+        try:
+            self.assertTrue(save_map(tracker.slam, folder))
+            del tracker
+
+            results = [self.relocalize(timestamp, images, localization_settings(vpr_candidates=3), folder, slam_cfg)
+                       for timestamp, images in frames[::3]]
+            self.assertTrue(any(pose is not None for pose, _ in results),
+                            f"no frame relocalized without a guess pose; errors were {sorted({e for _, e in results})}")
         finally:
             shutil.rmtree(folder, ignore_errors=True)
 
@@ -519,7 +745,7 @@ class TestVprFollowsPoseGraph(unittest.TestCase):
         # Unbounded, so early nodes are not merged away before the loop closes.
         slam_cfg.max_map_size = 0
         slam_cfg.use_vpr = True
-        slam_cfg.vpr_model_path = ANYLOC_ENGINE
+        slam_cfg.vpr_settings.model_path = ANYLOC_ENGINE
 
         self.tracker = vslam.Tracker(
             self.reader.rig, vslam.Tracker.Mode.OdometryWithSlamOffline, odom_cfg, slam_cfg)
@@ -622,7 +848,7 @@ class TestVprLoopClosureMode(unittest.TestCase):
         slam_cfg.enable_reading_internals = True
         slam_cfg.max_map_size = 0
         slam_cfg.use_vpr = True
-        slam_cfg.vpr_model_path = ANYLOC_ENGINE
+        slam_cfg.vpr_settings.model_path = ANYLOC_ENGINE
         slam_cfg.loop_closure_mode = vslam.Slam.LoopClosureMode.VPR
 
         self.tracker = vslam.Tracker(
@@ -721,6 +947,30 @@ class _PrefixReplay:
 
     def get_camera_pose(self, frame_id):
         """Poses come from the pose graph instead."""
+        return None
+
+    def set_frame_metadata(self, frame_id, metadata):
+        """Ignore replay metadata: the sequence is replayed once, forward."""
+
+
+class _VocabularyReplay:
+    """EdexReader processor that adds the first camera's image of every stride-th frame to a vocabulary builder."""
+
+    def __init__(self, builder, stride):
+        self.builder = builder
+        self.stride = stride
+        self.n_frames = 0
+
+    def process_images(self, frame_id, timestamps, images, masks, depths=None):
+        if self.n_frames % self.stride == 0:
+            self.builder.add_image(images[0])
+        self.n_frames += 1
+
+    def process_imu(self, timestamp, linear_accelerations, angular_velocities):
+        """Ignore IMU samples: the vocabulary is fitted to images alone."""
+
+    def get_camera_pose(self, frame_id):
+        """Nothing is tracked."""
         return None
 
     def set_frame_metadata(self, frame_id, metadata):

@@ -76,6 +76,8 @@ set(SOURCES
     ground_constraint2.h
     tracker.cpp
     version.cpp
+    vpr_vocabulary_builder2.cpp
+    vpr_vocabulary_builder2.h
     )
 
 add_library(cuvslam ${LIB_TYPE} ${SOURCES})
