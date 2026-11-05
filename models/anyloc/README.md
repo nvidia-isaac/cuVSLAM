@@ -6,7 +6,7 @@ part of the cuVSLAM build, in two steps, from pinned inputs.
 
 ## Building it
 
-With `-DCUVSLAM_BUILD_ANYLOC_ENGINE=ON` (see Options), the default build target makes:
+Unless configured with `-DCUVSLAM_BUILD_ANYLOC_ENGINE=OFF` (see Options), the default build target makes:
 
 | Target | Makes, in the build tree | Takes |
 |--------|--------------------------|-------|
@@ -101,7 +101,7 @@ anyloc_engine_builder --onnx=anyloc_vits14_l9_value_322.onnx \
 
 | CMake variable | Default | Purpose |
 |----------------|---------|---------|
-| `CUVSLAM_BUILD_ANYLOC_ENGINE` | OFF | builds the model, the engine and `anyloc_engine_builder`; needs network access |
+| `CUVSLAM_BUILD_ANYLOC_ENGINE` | ON | builds the model, the engine and `anyloc_engine_builder`; needs network access |
 | `CUVSLAM_ANYLOC_LAYER` | 9 | DINOv2 block whose value facet AnyLoc reads |
 | `CUVSLAM_ANYLOC_INPUT_SIZE` | 322 | square input size, a multiple of 14 |
 | `CUVSLAM_ANYLOC_TARGET` | `rtx4090` on x86_64, `orin_nano` on aarch64 | the GPU the engine is built for: `rtx4090` (sm_89) or `orin_nano` (Jetson Orin Nano, sm_87); the build machine has to have that GPU |

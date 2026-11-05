@@ -66,5 +66,5 @@ docker run --runtime=nvidia --gpus all --rm --label "cuvslam.runner=${RUNNER_NAM
   -e CUVSLAM_SRC_DIR=/cuvslam \
   -e CUVSLAM_DST_DIR=$INSTALL_DIR/build \
   -e CUVSLAM_REQUIRE_CLEAN_SOURCE="${CUVSLAM_REQUIRE_CLEAN_SOURCE:-false}" \
-  -e EXTRA_CMAKE_ARGS="${EXTRA_CMAKE_ARGS:-}" \
+  -e EXTRA_CMAKE_ARGS="-DCUVSLAM_BUILD_ANYLOC_ENGINE=OFF ${EXTRA_CMAKE_ARGS:-}" \
   cuvslam:local /cuvslam/build_release.sh --build_type="$BUILD_TYPE" "${JOBS_ARG[@]}"

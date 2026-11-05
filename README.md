@@ -226,7 +226,9 @@ For Python usage, [pre-built wheels](#install-from-wheels) are the recommended a
 * [CUDA Toolkit 12.6 or later](https://developer.nvidia.com/cuda/toolkit) for the default `USE_CUNLS=ON` build, [Jetpack 6.1/6.2/7.0/7.1](https://docs.nvidia.com/jetson/)
     * Older CUDA 12 versions require configuring with `-DUSE_CUNLS=OFF` (see [cuNLS](#cunls)).
 * [TensorRT 8.6+](https://developer.nvidia.com/tensorrt), unless configured with `-DUSE_TENSORRT=OFF`
-* `apt update && apt install g++ cmake git git-lfs python3-dev`
+* An RTX 4090 or Jetson Orin Nano to build the [AnyLoc engine](models/anyloc/README.md), unless configured with
+  `-DCUVSLAM_BUILD_ANYLOC_ENGINE=OFF`
+* `apt update && apt install g++ cmake git git-lfs python3-dev python3-venv`
     * git + git-lfs to clone this repository
     * CMake 3.19+, gcc
     * Python 3.10+ (for python bindings, examples and some tools)

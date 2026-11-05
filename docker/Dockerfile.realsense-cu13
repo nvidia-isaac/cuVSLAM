@@ -56,7 +56,7 @@ RUN /tmp/install_tensorrt.sh && rm /tmp/install_tensorrt.sh
 
 # Build cuVSLAM, install Python packages, and clean up source
 COPY . /tmp/cuvslam_src
-RUN cmake -DCMAKE_BUILD_TYPE=Release -S /tmp/cuvslam_src -B /tmp/cuvslam_build \
+RUN cmake -DCMAKE_BUILD_TYPE=Release -DCUVSLAM_BUILD_ANYLOC_ENGINE=OFF -S /tmp/cuvslam_src -B /tmp/cuvslam_build \
     && make -j$(nproc) -C /tmp/cuvslam_build cuvslam \
     && CUVSLAM_BUILD_DIR=/tmp/cuvslam_build pip3 install /tmp/cuvslam_src/python/ --break-system-packages \
     && pip3 install -r /tmp/cuvslam_src/examples/requirements.txt --break-system-packages \
