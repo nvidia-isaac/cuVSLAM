@@ -59,17 +59,20 @@ set(CUVSLAM_OUTPUT ${CMAKE_BINARY_DIR}/output CACHE PATH "Path to output folder"
 set(CUDAToolkit_ROOT /usr/local/cuda CACHE PATH "Path to installed CUDA toolkit")
 set(CMAKE_CUDA_COMPILER ${CUDAToolkit_ROOT}/bin/nvcc CACHE PATH "Path to installed CUDA compiler")
 
-option(USE_CUNLS "Build with cunls support." ON)
+include(CMakeDependentOption)
+
+option(USE_CUDA "Use CUDA Toolkit" ON)
+cmake_dependent_option(USE_CUNLS "Build with cunls support." ON "USE_CUDA" OFF)
 option(USE_CERES "Build with ceres support." OFF)
 option(USE_NVTX "Build with nvtx tracing support." OFF)
 option(USE_SLAM_OUTPUT "Build with option to enable debug output of SLAM" OFF)
 option(USE_LMDB "Use lmdb library for the database of landmarks (map)" ON)
-option(USE_CUDA "Use CUDA Toolkit" ON)
 option(CUVSLAM_LOG_ENABLE "Enable root cuvslam::Log." OFF)
 option(CUVSLAM_BUILD_SHARED_LIB "Build shared library version of cuVSLAM" TRUE)
 option(USE_RERUN "Use Rerun for visualization" OFF)
 # Needed for VPR AnyLoc
-option(USE_TENSORRT "Build the AnyLoc visual place recognition backend (requires TensorRT 8.6+)" ON)
+cmake_dependent_option(USE_TENSORRT "Build the AnyLoc visual place recognition backend (requires TensorRT 8.6+)" ON
+    "USE_CUDA" OFF)
 # ONNX export in a Python venv, then a TensorRT engine build; see models/anyloc
 option(CUVSLAM_BUILD_ANYLOC_ENGINE
     "Build the AnyLoc TensorRT engine (needs network access and a GPU)" OFF)
