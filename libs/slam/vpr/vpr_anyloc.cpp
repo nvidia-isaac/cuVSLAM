@@ -26,6 +26,7 @@
 #include "common/log.h"
 #include "slam/vpr/anyloc_network.h"
 #include "slam/vpr/vpr_image.h"
+#include "slam/vpr/vpr_vocabulary.h"
 
 namespace cuvslam::slam::vpr {
 
@@ -69,19 +70,47 @@ int NearestCenter(const float* descriptor, const std::vector<float>& centers, in
   return best;
 }
 
+/// Read the header and centers Serialize() writes first; false if malformed. No centers: saved before the fit.
+bool ReadCenters(const BlobReader& reader, int32_t& cluster_count, int32_t& descriptor_dim,
+                 std::vector<float>& centers) {
+  uint32_t magic = 0;
+  uint32_t version = 0;
+  if (!reader.read(magic) || !reader.read(version) || magic != kBlobMagic || version != kBlobVersion) {
+    return false;
+  }
+  uint64_t center_count = 0;
+  if (!reader.read(cluster_count) || !reader.read(descriptor_dim) || !reader.read(center_count)) {
+    return false;
+  }
+  // Zero centers is valid (saved before training); otherwise the full set.
+  if (cluster_count < 0 || descriptor_dim < 0 ||
+      (center_count != 0 &&
+       center_count != static_cast<uint64_t>(cluster_count) * static_cast<uint64_t>(descriptor_dim))) {
+    return false;
+  }
+  if (center_count > reader.remaining() / sizeof(float)) {
+    return false;
+  }
+  centers.resize(static_cast<size_t>(center_count));
+  return center_count == 0 || reader.read(centers.data(), centers.size() * sizeof(float));
+}
+
 }  // namespace
 
 VprAnyLoc::VprAnyLoc(const VprOptions& options)
     : model_path_(options.model_path),
+      vocabulary_path_(options.vocabulary_path),
       cluster_count_(options.vocabulary_size),
       score_threshold_(options.score_threshold),
       ratio_threshold_(options.ratio_threshold),
-      max_entries_(options.max_entries) {
+      max_entries_(options.max_entries),
+      min_training_keyframes_(options.min_training_keyframes),
+      max_training_keyframes_(options.max_training_keyframes) {
   // Load eagerly, so a bad engine fails Slam's constructor, not the SLAM worker.
   std::error_code ec;
   if (model_path_.empty() || !std::filesystem::is_regular_file(model_path_, ec)) {
     throw std::runtime_error(
-        "VPR backend AnyLoc needs its TensorRT engine: set Slam::Config::vpr_model_path to the one the "
+        "VPR backend AnyLoc needs its TensorRT engine: set Slam::VprSettings::model_path to the one the "
         "anyloc_engine CMake target builds. Tried \"" +
         model_path_ + "\".");
   }
@@ -89,9 +118,34 @@ VprAnyLoc::VprAnyLoc(const VprOptions& options)
   descriptor_dim_ = network_->descriptor_dim();
   TraceMessage("VPR AnyLoc: loaded %s, input %dx%d, %d patches of %d\n", model_path_.c_str(), network_->input_width(),
                network_->input_height(), network_->patch_count(), descriptor_dim_);
+  if (!vocabulary_path_.empty()) {
+    LoadVocabulary();
+  }
 }
 
 VprAnyLoc::~VprAnyLoc() = default;
+
+void VprAnyLoc::LoadVocabulary() {
+  Blob file;
+  if (!ReadVocabularyFile(vocabulary_path_, file)) {
+    throw std::runtime_error("VPR AnyLoc: could not read the vocabulary \"" + vocabulary_path_ + "\".");
+  }
+  const BlobReader reader(file.data(), file.size());
+  int32_t cluster_count = 0;
+  int32_t descriptor_dim = 0;
+  std::vector<float> centers;
+  uint64_t entry_count = 0;
+  // The centers of the engine's width, then no places.
+  if (!ReadCenters(reader, cluster_count, descriptor_dim, centers) || centers.empty() ||
+      descriptor_dim != descriptor_dim_ || !reader.read(entry_count) || entry_count != 0 || reader.remaining() != 0) {
+    throw std::runtime_error("VPR AnyLoc: \"" + vocabulary_path_ +
+                             "\" is not a vocabulary for this engine. VprVocabularyBuilder and "
+                             "cuvslam_vpr_vocabulary write one.");
+  }
+  cluster_count_ = cluster_count;
+  centers_ = std::move(centers);
+  TraceMessage("VPR AnyLoc: loaded the vocabulary %s, %d centers\n", vocabulary_path_.c_str(), cluster_count_);
+}
 
 bool VprAnyLoc::Describe(const VprImage& image, std::vector<float>& patches) {
   patches.clear();
@@ -150,12 +204,12 @@ void VprAnyLoc::AddFrame(KeyFrameId node_id, const VprImage& image) {
   entries_[index].patches.shrink_to_fit();
 
   if (centers_.empty()) {
-    size_t pending = patches.size();
+    size_t held = 1;  // this frame
     for (const auto& entry : entries_) {
-      pending += entry.patches.size();
+      held += entry.patches.empty() ? 0 : 1;
     }
-    // Fit before raw patches outgrow the training set.
-    if (pending > kMaxTrainingDescriptors * static_cast<size_t>(descriptor_dim_)) {
+    // Fit before the frames held outgrow the training set.
+    if (held > max_training_keyframes_) {
       Finalize();
     }
   }
@@ -192,28 +246,10 @@ void VprAnyLoc::TrainVocabulary() {
     return;
   }
 
-  size_t available = 0;
-  for (const auto& entry : entries_) {
-    available += entry.patches.size() / static_cast<size_t>(descriptor_dim_);
-  }
-  if (available == 0) {
-    return;
-  }
-
-  // Fixed stride, not a random sample: deterministic and even over the trajectory.
-  const size_t stride = std::max<size_t>(1, (available + kMaxTrainingDescriptors - 1) / kMaxTrainingDescriptors);
+  // AddFrame() holds at most max_training_keyframes_ frames, so every patch they hold fits.
   std::vector<float> training;
-  training.reserve(std::min(available, kMaxTrainingDescriptors) * static_cast<size_t>(descriptor_dim_));
-  size_t seen = 0;
   for (const auto& entry : entries_) {
-    const size_t count = entry.patches.size() / static_cast<size_t>(descriptor_dim_);
-    for (size_t i = 0; i < count; ++i, ++seen) {
-      if (seen % stride != 0) {
-        continue;
-      }
-      const float* row = entry.patches.data() + i * static_cast<size_t>(descriptor_dim_);
-      training.insert(training.end(), row, row + descriptor_dim_);
-    }
+    training.insert(training.end(), entry.patches.begin(), entry.patches.end());
   }
 
   const int dim = descriptor_dim_;
@@ -276,8 +312,8 @@ void VprAnyLoc::TrainVocabulary() {
 
   cluster_count_ = clusters;
   centers_ = std::move(centers);
-  TraceMessage("VPR AnyLoc: trained %d clusters on %d of %zu patch descriptors in %d iterations\n", clusters, points,
-               available, iteration + 1);
+  TraceMessage("VPR AnyLoc: trained %d clusters on %d patch descriptors in %d iterations\n", clusters, points,
+               iteration + 1);
 }
 
 void VprAnyLoc::Encode(const std::vector<float>& patches, std::vector<float>& vlad) const {
@@ -307,7 +343,7 @@ void VprAnyLoc::Finalize() {
   }
   dirty_ = false;
 
-  if (centers_.empty() && entries_.size() < kMinTrainingFrames) {
+  if (centers_.empty() && entries_.size() < min_training_keyframes_) {
     dirty_ = true;
     return;
   }
@@ -419,22 +455,10 @@ void VprAnyLoc::Serialize(BlobWriter& writer) {
 }
 
 bool VprAnyLoc::Deserialize(const BlobReader& reader) {
-  uint32_t magic = 0;
-  uint32_t version = 0;
-  if (!reader.read(magic) || !reader.read(version) || magic != kBlobMagic || version != kBlobVersion) {
-    return false;
-  }
-
   int32_t cluster_count = 0;
   int32_t descriptor_dim = 0;
-  uint64_t center_count = 0;
-  if (!reader.read(cluster_count) || !reader.read(descriptor_dim) || !reader.read(center_count)) {
-    return false;
-  }
-  // Zero centers is valid (saved before training); otherwise the full set.
-  if (cluster_count < 0 || descriptor_dim < 0 ||
-      (center_count != 0 &&
-       center_count != static_cast<uint64_t>(cluster_count) * static_cast<uint64_t>(descriptor_dim))) {
+  std::vector<float> centers;
+  if (!ReadCenters(reader, cluster_count, descriptor_dim, centers)) {
     return false;
   }
   // 0 means saved before the first frame; otherwise it must match the engine.
@@ -443,12 +467,9 @@ bool VprAnyLoc::Deserialize(const BlobReader& reader) {
                descriptor_dim, descriptor_dim_);
     return false;
   }
-
-  if (center_count > reader.remaining() / sizeof(float)) {
-    return false;
-  }
-  std::vector<float> centers(static_cast<size_t>(center_count));
-  if (center_count != 0 && !reader.read(centers.data(), centers.size() * sizeof(float))) {
+  // A loaded vocabulary stays: only places it encoded, or none yet, fit in.
+  if (!vocabulary_path_.empty() && !centers.empty() && (cluster_count != cluster_count_ || centers != centers_)) {
+    TraceError("VPR AnyLoc: the map's places were encoded with another vocabulary than %s\n", vocabulary_path_.c_str());
     return false;
   }
 
@@ -485,8 +506,10 @@ bool VprAnyLoc::Deserialize(const BlobReader& reader) {
     entries.push_back(std::move(entry));
   }
 
-  cluster_count_ = cluster_count;
-  centers_ = std::move(centers);
+  if (vocabulary_path_.empty()) {
+    cluster_count_ = cluster_count;
+    centers_ = std::move(centers);
+  }
   entries_ = std::move(entries);
   index_by_node_ = std::move(index_by_node);
   // Everything loaded is already encoded.

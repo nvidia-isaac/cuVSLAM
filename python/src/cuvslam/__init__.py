@@ -79,7 +79,8 @@ from ._cuvslam import (
     Landmark,
     Odometry,
     Slam,
-    Tracker)
+    Tracker,
+    VprVocabularyBuilder)
 from . import _cuvslam as _core
 
 # Python helper functions for file-based config loading
@@ -90,6 +91,7 @@ __all__ = [
     'Odometry',
     'Slam',
     'Tracker',
+    'VprVocabularyBuilder',
     'utils',
     'get_version',
     'set_verbosity',

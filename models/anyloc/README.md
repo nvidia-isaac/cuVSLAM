@@ -14,7 +14,8 @@ With `-DCUVSLAM_BUILD_ANYLOC_ENGINE=ON` (see Options), the default build target 
 | `anyloc_onnx` | `anyloc/anyloc_vits14_l9_value_322.onnx`, and the reference arrays both steps check against | seconds |
 | `anyloc_engine` | `bin/anyloc_vits14_l9_value_322_fp16_trt<TensorRT version>_sm<GPU>.engine` | about 20 seconds |
 
-`cuvslam_tracker` and `cuvslam_vpr_reporter` take `CUVSLAM_ANYLOC_ENGINE` as their default `--vpr_model_path`:
+`cuvslam_tracker`, `cuvslam_vpr_reporter` and `cuvslam_vpr_vocabulary` take `CUVSLAM_ANYLOC_ENGINE` as their default
+`--vpr_model_path`:
 
 ```bash
 source build/cuvslam_vars.sh
