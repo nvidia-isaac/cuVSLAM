@@ -21,10 +21,6 @@
 
 include(FetchContent)
 
-if(NOT USE_CUDA)
-    message(FATAL_ERROR "USE_CUNLS requires USE_CUDA")
-endif()
-
 if(CUDAToolkit_VERSION VERSION_LESS "12.6")
     message(FATAL_ERROR "USE_CUNLS requires CUDA >= 12.6 (found ${CUDAToolkit_VERSION}). "
                         "Either install CUDA 12.6+ or set -DUSE_CUNLS=OFF.")

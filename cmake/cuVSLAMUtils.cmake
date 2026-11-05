@@ -14,6 +14,25 @@
 
 include(CMakeParseArguments)
 
+# Declare an option that needs <dependency>: AUTO (the default) follows it, and ON without it is an error.
+# A cached ON is thus always the user's choice. AUTO counts as true in if(), so <name> is set to ON or OFF
+# in the caller's scope, over the cached value.
+function(cuvslam_dependent_option name description dependency)
+    set(${name} AUTO CACHE STRING "${description}: AUTO (follow ${dependency}), ON or OFF")
+    set_property(CACHE ${name} PROPERTY STRINGS AUTO ON OFF)
+    string(TOUPPER "${${name}}" value)
+    if(value STREQUAL "AUTO")
+        set(value "${${dependency}}")
+    elseif("${value}" AND NOT ${dependency})
+        message(FATAL_ERROR "${name}=ON requires ${dependency}=ON")
+    endif()
+    if("${value}")
+        set(${name} ON PARENT_SCOPE)
+    else()
+        set(${name} OFF PARENT_SCOPE)
+    endif()
+endfunction()
+
 # Create an INTERFACE library target with common cuVSLAM settings that all targets should link to.
 # This target includes compile definitions, compiler flags, and linker options.
 macro(setup_cuvslam_settings)
