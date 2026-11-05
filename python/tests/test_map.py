@@ -131,6 +131,7 @@ class TestMap(unittest.TestCase):
         self.num_cameras = len(cameras)
         imu = vslam.ImuCalibration()
         self.rig = vslam.Rig(cameras, [imu])
+        self.use_gpu = True
         self.debug_messages = []
         self.temp_dir = tempfile.mkdtemp()
 
@@ -148,9 +149,11 @@ class TestMap(unittest.TestCase):
         odom_cfg.odometry_mode = vslam.Odometry.OdometryMode.Multicamera
         odom_cfg.rectified_stereo_camera = True
         odom_cfg.async_sba = False
+        odom_cfg.use_gpu = self.use_gpu
 
         slam_cfg = vslam.Slam.Config()
         slam_cfg.sync_mode = True
+        slam_cfg.use_gpu = self.use_gpu
 
         loc_settings = vslam.Slam.LocalizationSettings(
             horizontal_search_radius=0.25,
@@ -287,7 +290,14 @@ class TestMap(unittest.TestCase):
     ### Test cases for map creation and localization
 
     def test_map(self):
+        self.check_creating_and_localizing_in_a_map()
 
+    def test_map_on_cpu(self):
+        # The only implementation a build without CUDA has
+        self.use_gpu = False
+        self.check_creating_and_localizing_in_a_map()
+
+    def check_creating_and_localizing_in_a_map(self):
         img = data.ImageGenerator(self.rig.cameras, 30)
 
         self.create_map(img, 'map')

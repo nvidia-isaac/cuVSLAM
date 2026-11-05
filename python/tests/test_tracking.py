@@ -31,6 +31,15 @@ class TestTracking(unittest.TestCase):
         imu = vslam.ImuCalibration()
         self.rig = vslam.Rig(cameras, [imu])
 
+    def make_tracker(self, rig, cfg):
+        """An odometry-only tracker, or a skip if this build lacks what cfg.odometry_mode needs."""
+        try:
+            return vslam.Tracker(rig, TrackerMode.OdometryOnlyRealtime, cfg)
+        except ValueError as e:
+            if "requires a build with" in str(e):
+                self.skipTest(str(e))
+            raise
+
     def test_init_arguments(self):
         # accept partial, positional & keyword arguments
         _ = vslam.Tracker(self.rig, TrackerMode.OdometryOnlyRealtime, vslam.Odometry.Config())
@@ -141,7 +150,7 @@ class TestTracking(unittest.TestCase):
                     cfg.rgbd_settings.depth_scale_factor = 1000.0
                     cfg.rgbd_settings.depth_camera_id = 0
                     cfg.rgbd_settings.enable_depth_stereo_tracking = False
-                    tracker = vslam.Tracker(self.rig, TrackerMode.OdometryOnlyRealtime, cfg)
+                    tracker = self.make_tracker(self.rig, cfg)
                     for i in range(60):
                         # Add 10 IMU measurements between frames
                         if mode == vslam.Odometry.OdometryMode.Inertial:
@@ -180,7 +189,7 @@ class TestTracking(unittest.TestCase):
                 multisensor_settings=vslam.Odometry.MultisensorSettings(
                     depth_camera_ids=[0], depth_scale_factor=1000.0))
             rig = vslam.Rig([self.rig.cameras[0]])
-            tracker = vslam.Tracker(rig, TrackerMode.OdometryOnlyRealtime, config)
+            tracker = self.make_tracker(rig, config)
             tracker.track(1000, [image], depths=[depth])
             tracker.track(2000, [image], depths=[depth])
 
@@ -188,7 +197,7 @@ class TestTracking(unittest.TestCase):
             config = vslam.Odometry.Config(
                 odometry_mode=vslam.Odometry.OdometryMode.Multisensor)
             rig = vslam.Rig(self.rig.cameras)
-            tracker = vslam.Tracker(rig, TrackerMode.OdometryOnlyRealtime, config)
+            tracker = self.make_tracker(rig, config)
             stereo_images = [image.copy(), image.copy()]
             tracker.track(1000, stereo_images)
             tracker.track(2000, stereo_images)
@@ -199,7 +208,7 @@ class TestTracking(unittest.TestCase):
                 multisensor_settings=vslam.Odometry.MultisensorSettings(
                     depth_camera_ids=[0], depth_scale_factor=1000.0))
             rig = vslam.Rig([self.rig.cameras[0]], [vslam.ImuCalibration()])
-            tracker = vslam.Tracker(rig, TrackerMode.OdometryOnlyRealtime, config)
+            tracker = self.make_tracker(rig, config)
             for frame in range(2):
                 frame_start_ns = frame * 1100
                 for sample in range(10):
@@ -236,7 +245,7 @@ class TestTracking(unittest.TestCase):
         for cam in distorted_cameras:
             cam.distortion = vslam.Distortion(vslam.Distortion.Model.Brown, [k1, 0, 0, 0, 0])
         config = vslam.Odometry.Config(odometry_mode=vslam.Odometry.OdometryMode.Multisensor)
-        tracker = vslam.Tracker(vslam.Rig(distorted_cameras), TrackerMode.OdometryOnlyRealtime, config)
+        tracker = self.make_tracker(vslam.Rig(distorted_cameras), config)
 
         for i in range(steps):
             images, z = img.generate_zoomed_images(i)
@@ -247,7 +256,7 @@ class TestTracking(unittest.TestCase):
             np.testing.assert_allclose(pose.translation, [0, 0, z], atol=0.05, err_msg=f"frame {i}")
             np.testing.assert_allclose(pose.rotation, [0, 0, 0, 1], atol=0.01, err_msg=f"frame {i}")
 
-    def _run_keyframe_overrides(self, mode, overrides):
+    def _run_keyframe_overrides(self, mode, overrides, use_gpu=True):
         """Track a fixed feature-rich frame repeatedly, applying a per-frame keyframe override.
 
         ``overrides`` is one entry per frame: None for automatic selection, True/False to force the
@@ -260,6 +269,7 @@ class TestTracking(unittest.TestCase):
 
         cfg = vslam.Odometry.Config()
         cfg.odometry_mode = mode
+        cfg.use_gpu = use_gpu
         cfg.enable_observations_export = True  # required so get_state() (and its keyframe flag) is available
         odometry = vslam.Odometry(self.rig, cfg)
 
@@ -300,22 +310,46 @@ class TestTracking(unittest.TestCase):
 
     def test_keyframe_override_forces_decision_in_mono(self):
         # Mono mode uses SelectorMono internally, and kf_override_frame_selection must still force
-        # the reported keyframe decision.
+        # the reported keyframe decision. Forced keyframes on a static scene keep more tracks alive
+        # than automatic selection would, so both feature trackers face more tracks than desired.
         num_frames = 6
         mode = vslam.Odometry.OdometryMode.Mono
 
-        forced_kf = self._run_keyframe_overrides(mode, [True] * num_frames)
-        forced_non_kf = self._run_keyframe_overrides(mode, [None] + [False] * (num_frames - 1))
-        automatic = self._run_keyframe_overrides(mode, [None] * num_frames)
+        for use_gpu in [True, False]:
+            with self.subTest(use_gpu=use_gpu):
+                forced_kf = self._run_keyframe_overrides(mode, [True] * num_frames, use_gpu)
+                forced_non_kf = self._run_keyframe_overrides(mode, [None] + [False] * (num_frames - 1), use_gpu)
+                automatic = self._run_keyframe_overrides(mode, [None] * num_frames, use_gpu)
 
-        self.assertTrue(all(forced_kf), f"override=True should force Mono keyframes, got {forced_kf}")
-        self.assertTrue(forced_non_kf[0], "first frame is a keyframe under automatic selection")
-        self.assertFalse(any(forced_non_kf[1:]),
-                         f"override=False should force Mono non-keyframes, got {forced_non_kf}")
-        for i in range(1, num_frames):
-            self.assertNotEqual(forced_kf[i], forced_non_kf[i],
-                                f"override should flip the Mono keyframe decision at frame {i}")
-        self.assertIn(False, automatic, "near-static Mono scene should produce at least one automatic non-keyframe")
+                self.assertTrue(all(forced_kf), f"override=True should force Mono keyframes, got {forced_kf}")
+                self.assertTrue(forced_non_kf[0], "first frame is a keyframe under automatic selection")
+                self.assertFalse(any(forced_non_kf[1:]),
+                                 f"override=False should force Mono non-keyframes, got {forced_non_kf}")
+                for i in range(1, num_frames):
+                    self.assertNotEqual(forced_kf[i], forced_non_kf[i],
+                                        f"override should flip the Mono keyframe decision at frame {i}")
+                self.assertIn(False, automatic,
+                              "near-static Mono scene should produce at least one automatic non-keyframe")
+
+    def test_mono_keyframe_with_fewer_desired_tracks_than_alive(self):
+        # A keyframe asking for fewer tracks than are alive selects no new ones rather than failing.
+        img = data.ImageGenerator(self.rig.cameras, 10)
+        static_images, _ = img.generate_zoomed_images(0)
+        for use_gpu in [True, False]:
+            with self.subTest(use_gpu=use_gpu):
+                cfg = vslam.Odometry.Config(odometry_mode=vslam.Odometry.OdometryMode.Mono, use_gpu=use_gpu,
+                                            enable_observations_export=True)
+                odometry = vslam.Odometry(self.rig, cfg)
+                odometry.track(1_000_000, static_images)
+                alive = len(odometry.get_last_observations(0))
+                self.assertGreater(alive, 10)
+
+                internals = vslam.Odometry.Internals()
+                internals.kf_override_frame_selection = True
+                internals.num_desired_tracks = 10
+                odometry.track(2_000_000, static_images, internals=internals)
+                self.assertTrue(odometry.get_state().keyframe)
+                self.assertLessEqual(len(odometry.get_last_observations(0)), alive)
 
     def test_get_observations_and_landmarks(self):
         img = data.ImageGenerator(self.rig.cameras, 10)

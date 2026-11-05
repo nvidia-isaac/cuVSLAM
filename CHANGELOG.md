@@ -34,6 +34,11 @@
   Python 3.13 and newer but could not be imported there
 - Unsynchronized reads of the SLAM engine during map localization (`LocalizeInMapCmd::Execute`)
 - Unnecessary mutex contention in `AsyncSlam::GetSlamPose()`
+- Mono odometry threw `std::length_error` on a keyframe that found more tracks alive than
+  `num_desired_tracks`, as after forced keyframes (`Internals::kf_override_frame_selection`) or a lowered
+  `Internals::num_desired_tracks`
+- Builds without CUDA ignore `use_gpu` instead of half-selecting GPU code they only have as stubs. With the default
+  `use_gpu = true`, map localization never succeeded
 
 ### Security
 
