@@ -176,19 +176,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # x86 and Thor rows turn off the AnyLoc engine: it has no target for the A10G (sm_86) or Thor (sm_110).
           # x86_64 configs (CUDA/Ubuntu controlled by Docker build args)
           # Wheels come from the Ubuntu 22.04 configs only; their manylinux_2_35 tag also covers 24.04.
           # tools_tests is platform-independent, so one config runs it. It needs the
           # CI tools image, which is only built for eval-enabled configs.
-          - { name: "x86_64 / cuda-12.6 / ubuntu-22.04", runner: '["gpu"]', cuda: "12.6.3", ubuntu: "22.04", archs: "75;80;86;89;90", platform: "x86_64", wheel: true, eval: true, docs: true, tools_tests: true }
-          - { name: "x86_64 / cuda-12.6 / ubuntu-24.04", runner: '["gpu"]', cuda: "12.6.3", ubuntu: "24.04", archs: "75;80;86;89;90", platform: "x86_64", eval: true }
-          - { name: "x86_64 / cuda-13.2 / ubuntu-22.04", runner: '["gpu"]', cuda: "13.2.0", ubuntu: "22.04", archs: "75;80;86;89;100;120;121", platform: "x86_64", wheel: true, eval: true }
-          - { name: "x86_64 / cuda-13.2 / ubuntu-24.04", runner: '["gpu"]', cuda: "13.2.0", ubuntu: "24.04", archs: "75;80;86;89;100;120;121", platform: "x86_64", eval: true }
+          - { name: "x86_64 / cuda-12.6 / ubuntu-22.04", runner: '["gpu"]', cuda: "12.6.3", ubuntu: "22.04", archs: "75;80;86;89;90", platform: "x86_64", wheel: true, eval: true, docs: true, tools_tests: true, cmake_options: "-DCUVSLAM_BUILD_ANYLOC_ENGINE=OFF" }
+          - { name: "x86_64 / cuda-12.6 / ubuntu-24.04", runner: '["gpu"]', cuda: "12.6.3", ubuntu: "24.04", archs: "75;80;86;89;90", platform: "x86_64", eval: true, cmake_options: "-DCUVSLAM_BUILD_ANYLOC_ENGINE=OFF" }
+          - { name: "x86_64 / cuda-13.2 / ubuntu-22.04", runner: '["gpu"]', cuda: "13.2.0", ubuntu: "22.04", archs: "75;80;86;89;100;120;121", platform: "x86_64", wheel: true, eval: true, cmake_options: "-DCUVSLAM_BUILD_ANYLOC_ENGINE=OFF" }
+          - { name: "x86_64 / cuda-13.2 / ubuntu-24.04", runner: '["gpu"]', cuda: "13.2.0", ubuntu: "24.04", archs: "75;80;86;89;100;120;121", platform: "x86_64", eval: true, cmake_options: "-DCUVSLAM_BUILD_ANYLOC_ENGINE=OFF" }
 
           # Non-default CMake configuration smoke build: builds + tests + wheel with extra
           # cmake_options, but skips eval/docs and uploads no artifacts (skip_artifacts).
           # Add another such row to cover a different option set (e.g. USE_CUDA).
-          - { name: "x86_64 / USE_RERUN (config smoke)", runner: '["gpu"]', cuda: "12.6.3", ubuntu: "24.04", archs: "75;80;86;89;90", platform: "x86_64-rerun", wheel: true, cmake_options: "-DUSE_RERUN=ON", skip_artifacts: true }
+          - { name: "x86_64 / USE_RERUN (config smoke)", runner: '["gpu"]', cuda: "12.6.3", ubuntu: "24.04", archs: "75;80;86;89;90", platform: "x86_64-rerun", wheel: true, cmake_options: "-DUSE_RERUN=ON -DCUVSLAM_BUILD_ANYLOC_ENGINE=OFF", skip_artifacts: true }
 
           # Jetson configs (CUDA version must match host JetPack driver)
           # Orin uses base_image override; cuda value is not used for the Docker base but kept for artifact naming
@@ -197,7 +198,7 @@ jobs:
           # datasets_root overrides the dataset cache location per config. Orin's home is on a small eMMC; its
           # runner work directory is on NVMe, and the job-completed hook empties only the per-repo workspace in it.
           - { name: "aarch64 / Orin (JP 6.1)",  runner: '["jetson-orin"]', cuda: "12.6.3", ubuntu: "22.04", archs: "87",  platform: "orin",  wheel: true, benchmark: true, eval: true, eval_suite: smoke, datasets_root: "/data/github-runner-workspace/cuvslam-cache", base_image: "nvcr.io/nvidia/12.6.11-devel:12.6.11-devel-aarch64-ubuntu22.04", ports_mirror: "http://mirrors.ocf.berkeley.edu/ubuntu-ports" }
-          - { name: "aarch64 / Thor (JP 7.1)",  runner: '["jetson-thor"]', cuda: "13.0.1", ubuntu: "24.04", archs: "110", platform: "thor",  wheel: true, benchmark: true, eval: true, eval_suite: smoke, ports_mirror: "http://mirrors.ocf.berkeley.edu/ubuntu-ports" }
+          - { name: "aarch64 / Thor (JP 7.1)",  runner: '["jetson-thor"]', cuda: "13.0.1", ubuntu: "24.04", archs: "110", platform: "thor",  wheel: true, benchmark: true, eval: true, eval_suite: smoke, ports_mirror: "http://mirrors.ocf.berkeley.edu/ubuntu-ports", cmake_options: "-DCUVSLAM_BUILD_ANYLOC_ENGINE=OFF" }
     steps:
       - name: Verify GPU
         run: nvidia-smi

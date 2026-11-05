@@ -69,7 +69,8 @@ jobs:
     runs-on: [gpu]
     timeout-minutes: 60
     env:
-      EXTRA_CMAKE_ARGS: "-DCMAKE_CUDA_ARCHITECTURES=native"
+      # No AnyLoc engine target for the runners' A10G (sm_86)
+      EXTRA_CMAKE_ARGS: "-DCMAKE_CUDA_ARCHITECTURES=native -DCUVSLAM_BUILD_ANYLOC_ENGINE=OFF"
     steps:
       - name: Verify GPU
         run: nvidia-smi
@@ -373,7 +374,8 @@ jobs:
     env:
       CUDA_VERSION: "13.0.1"
       UBUNTU_VERSION: "24.04"
-      EXTRA_CMAKE_ARGS: "-DCMAKE_CUDA_ARCHITECTURES=110"
+      # No AnyLoc engine target for Thor (sm_110)
+      EXTRA_CMAKE_ARGS: "-DCMAKE_CUDA_ARCHITECTURES=110 -DCUVSLAM_BUILD_ANYLOC_ENGINE=OFF"
     steps:
       - name: System info
         run: |
@@ -484,7 +486,7 @@ jobs:
         timeout-minutes: 45
         env:
           # PR binaries are built and tested on the same GPU runner.
-          EXTRA_CMAKE_ARGS: "-DUSE_RERUN=ON -DCMAKE_CUDA_ARCHITECTURES=native"
+          EXTRA_CMAKE_ARGS: "-DUSE_RERUN=ON -DCMAKE_CUDA_ARCHITECTURES=native -DCUVSLAM_BUILD_ANYLOC_ENGINE=OFF"
         run: ./scripts/build_cuvslam_in_docker.sh Release ./output-rerun
 
       - name: Run C++ tests
