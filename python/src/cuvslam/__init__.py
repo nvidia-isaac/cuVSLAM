@@ -10,6 +10,9 @@
 """cuVSLAM Python bindings."""
 
 import contextlib
+import ctypes
+import importlib.util
+import os
 import warnings
 from importlib import metadata as _metadata
 
@@ -42,8 +45,21 @@ def _load_cuda_libraries():
             load_nvidia_dynamic_lib(name)
 
 
+def _load_tensorrt():
+    """Load libnvinfer from the NVIDIA TensorRT wheel (the [tensorrt] extra), which VPR later opens by name."""
+    # find_spec does not import tensorrt_libs, whose __init__ loads several GB of TensorRT builder libraries.
+    spec = importlib.util.find_spec('tensorrt_libs')
+    if spec is None:
+        return
+    for directory in spec.submodule_search_locations or []:
+        with contextlib.suppress(OSError):
+            ctypes.CDLL(os.path.join(directory, 'libnvinfer.so.10'))
+            return
+
+
 _warn_if_multiple_distributions()
 _load_cuda_libraries()
+_load_tensorrt()
 
 # Import select bindings for the main namespace
 from ._cuvslam import (
@@ -63,7 +79,8 @@ from ._cuvslam import (
     Landmark,
     Odometry,
     Slam,
-    Tracker)
+    Tracker,
+    VprVocabularyBuilder)
 from . import _cuvslam as _core
 
 # Python helper functions for file-based config loading
@@ -74,6 +91,7 @@ __all__ = [
     'Odometry',
     'Slam',
     'Tracker',
+    'VprVocabularyBuilder',
     'utils',
     'get_version',
     'set_verbosity',

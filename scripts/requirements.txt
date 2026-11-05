@@ -4,8 +4,14 @@
 # Pin versions to prevent supply chain attacks on self-hosted runners.
 # Test dependencies are in python/tests/requirements.txt (installed separately)
 
-# Wheel packaging (used by scripts/build_pycuvslam_in_docker.sh)
+# Wheel packaging (used by scripts/build_pycuvslam_in_docker.sh); uv also installs the
+# Python versions the wheels are built and verified with
 auditwheel==6.6.0
+uv==0.13.7
+
+# PyPI/Kitmaker package checks (used by scripts/verify_pycuvslam_wheel_in_docker.sh)
+abi3audit==0.0.26
+twine==7.0.0
 
 # Documentation build (used by python/docs/conf.py)
 # Sphinx 8.2+ requires Python 3.11; Thor/Orin use Ubuntu 22.04 with Python 3.10

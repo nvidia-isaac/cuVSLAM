@@ -188,7 +188,7 @@ bool EdexFile::readBody(const Json::Value& body) {
     const Json::Value sequenceDepth = body[EDEX_DEPTH_SEQUENCE];
     nDepthCams = std::count_if(cameras.begin(), cameras.end(), [](const Camera& cam) { return cam.has_depth; });
     if (!sequenceDepth.isArray() || sequenceDepth.size() != nDepthCams) {
-      TraceError("%s expected to be array of %zu", EDEX_DEPTH_SEQUENCE, nDepthCams);
+      TraceError("%s expected to be array of %d", EDEX_DEPTH_SEQUENCE, nDepthCams);
       return false;
     }
   }

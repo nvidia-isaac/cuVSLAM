@@ -26,6 +26,7 @@
 #ifdef USE_CUDA
 #include "cuda_modules/cuda_helper.h"
 #endif
+#include "slam/vpr/vpr_types.h"
 #include "sof/image_context.h"
 
 #include "cuvslam/cuvslam2.h"
@@ -84,6 +85,12 @@ inline void WarmUpGpuImpl() {
   cuda::WarmUpGpu();
 #endif
 }
+
+/// Throws std::invalid_argument unless 1 <= vocabulary_min_keyframes <= vocabulary_max_keyframes.
+void CheckVocabularyFit(const Slam::VprSettings& settings);
+
+/// A grayscale host copy of `image` for place recognition; empty if `image` has no pixels.
+slam::vpr::VprImage MakeVprImage(const ImageData& image, bool use_gpu);
 
 }  // namespace cuvslam
 
