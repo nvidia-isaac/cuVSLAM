@@ -256,7 +256,7 @@ class TestTracking(unittest.TestCase):
             np.testing.assert_allclose(pose.translation, [0, 0, z], atol=0.05, err_msg=f"frame {i}")
             np.testing.assert_allclose(pose.rotation, [0, 0, 0, 1], atol=0.01, err_msg=f"frame {i}")
 
-    def _run_keyframe_overrides(self, mode, overrides, use_gpu=True):
+    def _run_keyframe_overrides(self, mode, overrides, use_gpu=vslam.is_cuda_build()):
         """Track a fixed feature-rich frame repeatedly, applying a per-frame keyframe override.
 
         ``overrides`` is one entry per frame: None for automatic selection, True/False to force the
@@ -316,6 +316,8 @@ class TestTracking(unittest.TestCase):
 
         for use_gpu in [True, False]:
             with self.subTest(use_gpu=use_gpu):
+                if use_gpu and not vslam.is_cuda_build():
+                    self.skipTest("use_gpu needs a CUDA build")
                 forced_kf = self._run_keyframe_overrides(mode, [True] * num_frames, use_gpu)
                 forced_non_kf = self._run_keyframe_overrides(mode, [None] + [False] * (num_frames - 1), use_gpu)
                 automatic = self._run_keyframe_overrides(mode, [None] * num_frames, use_gpu)

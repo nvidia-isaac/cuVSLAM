@@ -430,6 +430,9 @@ TEST_F(TrackerTest, SlamRejectsVprVocabularySettingsWithoutUseVpr) {
 
 // The engine does not exist, so each std::invalid_argument comes from a check that runs before it loads.
 TEST_F(TrackerTest, SlamRejectsOnlineFitSettingsBesideAVocabularyFile) {
+  if (!cuvslam::IsCudaBuild()) {
+    GTEST_SKIP() << "use_vpr needs use_gpu, which needs a CUDA build";
+  }
   Slam::Config cfg = MakeOfflineConfig().slam;
   cfg.use_vpr = true;
   cfg.vpr_settings.model_path = "/nonexistent/anyloc.engine";
@@ -446,6 +449,9 @@ TEST_F(TrackerTest, SlamRejectsOnlineFitSettingsBesideAVocabularyFile) {
 }
 
 TEST_F(TrackerTest, SlamRejectsOnlineFitSettingsOutOfOrder) {
+  if (!cuvslam::IsCudaBuild()) {
+    GTEST_SKIP() << "use_vpr needs use_gpu, which needs a CUDA build";
+  }
   Slam::Config cfg = MakeOfflineConfig().slam;
   cfg.use_vpr = true;
   cfg.vpr_settings.model_path = "/nonexistent/anyloc.engine";
@@ -536,6 +542,18 @@ TEST(SlamTest, CallbackCanOwnAsyncSlam) {
 }  // namespace
 
 #ifndef USE_CUDA
+TEST_F(TrackerTest, UseGpuRequiresCudaBuild) {
+  EXPECT_FALSE(cuvslam::IsCudaBuild());
+  EXPECT_NO_THROW(Tracker(rig, Mode::OdometryWithSlamRealtime));  // use_gpu defaults to false
+
+  Odometry::Config odometry;
+  odometry.use_gpu = true;
+  EXPECT_THROW(Tracker(rig, Mode::OdometryOnlyRealtime, odometry), std::invalid_argument);
+  Slam::Config slam;
+  slam.use_gpu = true;
+  EXPECT_THROW(Slam(rig, {0}, slam), std::invalid_argument);
+}
+
 TEST_F(TrackerTest, RgbdModeRequiresCudaBuild) {
   // RGBDOdometry is only compiled under USE_CUDA, so the mode has to be reported as unavailable
   // rather than silently constructing a tracker that cannot run it.

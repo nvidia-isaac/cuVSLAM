@@ -131,7 +131,7 @@ class TestMap(unittest.TestCase):
         self.num_cameras = len(cameras)
         imu = vslam.ImuCalibration()
         self.rig = vslam.Rig(cameras, [imu])
-        self.use_gpu = True
+        self.use_gpu = vslam.is_cuda_build()
         self.debug_messages = []
         self.temp_dir = tempfile.mkdtemp()
 

@@ -334,16 +334,6 @@ void CheckImuCalibration(const ImuCalibration& imu_calibration) {
   THROW_INVALID_ARG_IF(std::isnan(imu_calibration.frequency), "IMU Calibration: IMU data frequency is not valid");
 }
 
-// Code below the API takes use_gpu to mean the GPU implementation, which a build without CUDA only has as stubs.
-bool ResolveUseGpu(bool use_gpu) {
-#ifdef USE_CUDA
-  return use_gpu;
-#else
-  TraceWarningIf(use_gpu, "use_gpu is ignored: this build has no CUDA support (USE_CUDA=OFF)");
-  return false;
-#endif
-}
-
 // Device memory is only readable when tracking runs on the GPU. The CPU pipeline dereferences
 // `pixels` itself, so a device address handed to it would be read as if it were host memory.
 void CheckImageMemory(const ImageData& image, bool use_gpu, const std::string& what) {
@@ -576,6 +566,14 @@ void SetVerbosity(int verbosity) {
 
 void WarmUpGPU() { WarmUpGpuImpl(); }
 
+bool IsCudaBuild() {
+#ifdef USE_CUDA
+  return true;
+#else
+  return false;
+#endif
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Odometry class implementation
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -656,9 +654,9 @@ Odometry::Odometry(Odometry&&) noexcept = default;
 Odometry::~Odometry() = default;
 
 Odometry::Odometry(const Rig& rig, const Config& cfg) {
-  const bool use_gpu = ResolveUseGpu(cfg.use_gpu);
+  THROW_INVALID_ARG_IF(cfg.use_gpu && !IsCudaBuild(), "use_gpu requires a build with CUDA support (USE_CUDA=ON)");
   std::string message;
-  TracePrintIf(use_gpu && !CheckCudaCompatibility(message), "[WARNING] %s\n", message.c_str());
+  TracePrintIf(cfg.use_gpu && !CheckCudaCompatibility(message), "[WARNING] %s\n", message.c_str());
   CheckCameras(rig);
 
   THROW_INVALID_ARG_IF(cfg.odometry_mode == OdometryMode::Inertial && rig.imus.empty(),
@@ -674,7 +672,7 @@ Odometry::Odometry(const Rig& rig, const Config& cfg) {
 
   svo_settings.sba_settings.async = cfg.async_sba;
   // Inertial bundler with IMU fusion, visual otherwise; on the GPU only with use_gpu in CUDA builds.
-  svo_settings.sba_settings.mode = sba::SelectMode(imu_fusion_enabled, use_gpu);
+  svo_settings.sba_settings.mode = sba::SelectMode(imu_fusion_enabled, cfg.use_gpu);
 
   // Use only first camera border settings. Other camera border settings are ignored now.
   svo_settings.sof_settings.multicam_mode = ToMulticamMode(cfg.multicam_mode);
@@ -749,13 +747,13 @@ Odometry::Odometry(const Rig& rig, const Config& cfg) {
     case OdometryMode::Multicamera: {
       svo_settings.use_prediction = cfg.use_motion_model;
       tracker->visual_odometry =
-          std::make_unique<odom::MultiVisualOdometry>(tracker->rig, tracker->fig, svo_settings, use_gpu);
+          std::make_unique<odom::MultiVisualOdometry>(tracker->rig, tracker->fig, svo_settings, cfg.use_gpu);
       break;
     }
     case OdometryMode::Inertial: {
       svo_settings.use_prediction = cfg.use_motion_model;
       tracker->visual_odometry = std::make_unique<odom::StereoInertialOdometry>(
-          tracker->rig, tracker->fig, svo_settings, use_gpu, cfg.debug_imu_mode,
+          tracker->rig, tracker->fig, svo_settings, cfg.use_gpu, cfg.debug_imu_mode,
           /*disable_fusion_except_gravity=*/true);
       break;
     }
@@ -766,14 +764,14 @@ Odometry::Odometry(const Rig& rig, const Config& cfg) {
       THROW_INVALID_ARG_IF(
           rig_from_camera.rotation != Pose{}.rotation || rig_from_camera.translation != Pose{}.translation,
           "Mono mode tracks camera 0 as the rig, so cameras[0].rig_from_camera must be identity");
-      tracker->visual_odometry = std::make_unique<odom::MonoVisualOdometry>(tracker->rig, svo_settings, use_gpu);
+      tracker->visual_odometry = std::make_unique<odom::MonoVisualOdometry>(tracker->rig, svo_settings, cfg.use_gpu);
       break;
     }
     case OdometryMode::RGBD: {
 #ifdef USE_CUDA
       tracker->rgbd_settings = cfg.rgbd_settings;
       tracker->visual_odometry =
-          std::make_unique<odom::RGBDOdometry>(tracker->rig, tracker->fig, svo_settings, use_gpu);
+          std::make_unique<odom::RGBDOdometry>(tracker->rig, tracker->fig, svo_settings, cfg.use_gpu);
       break;
 #else
       throw std::invalid_argument{"OdometryMode::RGBD requires a build with CUDA support (USE_CUDA=ON)"};
@@ -789,7 +787,7 @@ Odometry::Odometry(const Rig& rig, const Config& cfg) {
           cfg.multisensor_settings.enable_depth_stereo_tracking;
       svo_settings.use_prediction = cfg.use_motion_model;
       tracker->visual_odometry =
-          std::make_unique<odom::MultisensorOdometry>(tracker->rig, tracker->fig, svo_settings, use_gpu);
+          std::make_unique<odom::MultisensorOdometry>(tracker->rig, tracker->fig, svo_settings, cfg.use_gpu);
       break;
 #else
       throw std::invalid_argument{"OdometryMode::Multisensor requires a build with cuNLS support (USE_CUNLS=ON)"};
@@ -804,7 +802,7 @@ Odometry::Odometry(const Rig& rig, const Config& cfg) {
   tracker->enable_final_landmarks_export = cfg.enable_final_landmarks_export;
 
   tracker->svo_settings = svo_settings;
-  tracker->use_gpu = use_gpu;
+  tracker->use_gpu = cfg.use_gpu;
   tracker->imu_fusion_enabled = imu_fusion_enabled;
   tracker->debug_dump_directory = cfg.debug_dump_directory;
   tracker->max_frame_delta_ns = static_cast<int64_t>(cfg.max_frame_delta_s * 1e9);
@@ -829,7 +827,7 @@ Odometry::Odometry(const Rig& rig, const Config& cfg) {
   const size_t num_no_depth_cams = rig.cameras.size() - num_depth_cams;
   tracker->image_manager = std::make_unique<sof::ImageManager>();
   ImageShape shape{rig.cameras[0].size[0], rig.cameras[0].size[1]};
-  tracker->image_manager->init(shape, num_no_depth_cams * cache_size, use_gpu, num_depth_cams * cache_size);
+  tracker->image_manager->init(shape, num_no_depth_cams * cache_size, cfg.use_gpu, num_depth_cams * cache_size);
 
   impl = std::move(tracker);
 
@@ -1191,6 +1189,7 @@ public:
 
   Impl(const Rig& rig, const std::vector<uint8_t>& primary_cameras, const Config& config)
       : primary_cameras_(primary_cameras) {
+    THROW_INVALID_ARG_IF(config.use_gpu && !IsCudaBuild(), "use_gpu requires a build with CUDA support (USE_CUDA=ON)");
     std::string message;
     TracePrintIf(!CheckCudaCompatibility(message), "[WARNING] %s\n", message.c_str());
 
@@ -1200,10 +1199,9 @@ public:
 
     SetTrackerRigAndIntrinsics(cameras_models_, rig_, rig.cameras);
 
-    use_gpu_ = ResolveUseGpu(config.use_gpu);
     slam::AsyncSlamOptions options;
     options.map_path = config.map_path;
-    options.use_gpu = use_gpu_;
+    options.use_gpu = config.use_gpu;
     options.reproduce_mode = config.sync_mode;
     options.pose_for_frame_required = true;  // required for localization
     options.spatial_index_options.cell_size = config.map_cell_size;
@@ -1237,6 +1235,7 @@ public:
       THROW_INVALID_ARG_IF(!config.use_vpr, "loop_closure_mode is VPR but use_vpr is false.");
       options.loop_closure_solver_type = slam::LoopClosureSolverType::kVpr;
     }
+    use_gpu_ = config.use_gpu;
     gt_align_mode_ = config.gt_align_mode;
     if (config.gt_align_mode) {
       THROW_INVALID_ARG_IF(!config.sync_mode, "sync_mode should be enabled for gt_align_mode.");

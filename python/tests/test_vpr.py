@@ -40,6 +40,7 @@ KITTI_07_DIR = os.environ.get("CUVSLAM_KITTI_07_DIR") or os.path.join(
 ANYLOC_ENGINE = os.environ.get("CUVSLAM_ANYLOC_ENGINE", "")
 needs_anyloc = unittest.skipUnless(
     os.path.isfile(ANYLOC_ENGINE), "needs the AnyLoc engine in CUVSLAM_ANYLOC_ENGINE")
+needs_cuda = unittest.skipUnless(vslam.is_cuda_build(), "use_vpr needs use_gpu, which needs a CUDA build")
 
 def make_rig():
     cameras = data.generate_stereo_camera(W, H, BASELINE)
@@ -299,6 +300,7 @@ class TestVprLoopClosureModeConfig(unittest.TestCase):
     def test_needs_a_place_recognition_backend(self):
         self.assert_slam_rejects(self.vpr_loop_closure_config(use_vpr=False), "use_vpr")
 
+    @needs_cuda
     def test_rejects_gt_align_mode(self):
         slam_cfg = self.vpr_loop_closure_config()
         slam_cfg.gt_align_mode = True
@@ -332,6 +334,7 @@ class TestVprAnyLocConfig(unittest.TestCase):
             vslam.Slam(make_rig()[0], [0, 1], slam_cfg)
         self.assertIn("use_gpu", str(caught.exception))
 
+    @needs_cuda
     def test_needs_a_score_threshold_in_0_1(self):
         for threshold in (-0.1, 1.5, float("nan")):
             _, slam_cfg = make_configs(True)
@@ -350,6 +353,7 @@ class TestVprAnyLocConfig(unittest.TestCase):
                 vslam.Slam(make_rig()[0], [0, 1], slam_cfg)
             self.assertIn("use_vpr", str(caught.exception))
 
+    @needs_cuda
     def test_a_vocabulary_file_replaces_the_online_fit_settings(self):
         for name, value in (("vocabulary_min_keyframes", 3), ("vocabulary_max_keyframes", 200)):
             _, slam_cfg = make_configs(True)
@@ -360,6 +364,7 @@ class TestVprAnyLocConfig(unittest.TestCase):
                 vslam.Slam(make_rig()[0], [0, 1], slam_cfg)
             self.assertIn("vocabulary_path", str(caught.exception))
 
+    @needs_cuda
     def test_online_fit_settings_must_be_in_order(self):
         # 1 <= min <= max.
         for name, value in (("vocabulary_min_keyframes", 0), ("vocabulary_max_keyframes", 7)):

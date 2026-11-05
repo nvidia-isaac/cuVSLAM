@@ -63,6 +63,12 @@ CUVSLAM_API
 void SetVerbosity(int verbosity);
 
 /**
+ * Whether the library is built with CUDA support (USE_CUDA=ON). `use_gpu` defaults to this, and needs it.
+ */
+CUVSLAM_API
+bool IsCudaBuild();
+
+/**
  * Warms up GPU, creates CUDA runtime context.
  * This function is not mandatory to call, but helps to save some time in tracker initialization.
  * It can also be used to quickly diagnose issues with CUDA or CUDA libraries.
@@ -477,8 +483,8 @@ public:
     MulticameraMode multicam_mode = MulticameraMode::Precision;
     /// Odometry mode. Default: OdometryMode::Multicamera
     OdometryMode odometry_mode = OdometryMode::Multicamera;
-    /// Enable tracking using GPU. Default: true.
-    bool use_gpu = true;
+    /// Enable tracking using GPU; needs a CUDA build. Default: IsCudaBuild().
+    bool use_gpu = IsCudaBuild();
     /// Enable SBA asynchronous mode. Default: true.
     bool async_sba = true;
     /**
@@ -821,8 +827,8 @@ public:
     /// To load an existing map, use LocalizeInMap(); once it succeeds, the session writes the loaded folder if
     /// `attach` is set, and no map file otherwise.
     std::string map_path;
-    /// Enable GPU use for SLAM
-    bool use_gpu = true;
+    /// Enable GPU use for SLAM; needs a CUDA build. Default: IsCudaBuild().
+    bool use_gpu = IsCudaBuild();
     /// Synchronous mode (does not run a separate work thread if true)
     bool sync_mode = false;
     /// Enable reading internal data from SLAM (Pose Graph, Loop Closures, Landmarks, etc.).
