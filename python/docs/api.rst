@@ -18,6 +18,9 @@ Main classes
 .. autoclass:: Slam
    :members:
 
+.. autoclass:: VprVocabularyBuilder
+   :members:
+
 Data Structures
 ---------------
 

@@ -355,9 +355,11 @@ def _slam_config(vslam, args: argparse.Namespace):
     cfg.max_map_size = 0
     cfg.use_vpr = True
     if args.vpr_score_threshold is not None:
-        cfg.vpr_score_threshold = args.vpr_score_threshold
+        cfg.vpr_settings.score_threshold = args.vpr_score_threshold
     if args.vpr_model_path:
-        cfg.vpr_model_path = args.vpr_model_path
+        cfg.vpr_settings.model_path = args.vpr_model_path
+    if args.vpr_vocabulary_path:
+        cfg.vpr_settings.vocabulary_path = args.vpr_vocabulary_path
     return cfg
 
 

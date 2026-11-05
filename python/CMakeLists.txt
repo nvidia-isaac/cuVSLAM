@@ -14,12 +14,15 @@
 
 # Separate pycuvslam CMakeLists.txt to use with pip install -e .
 
-cmake_minimum_required(VERSION 3.19)
+# 3.26 for FindPython's Development.SABIModule; scikit-build-core fetches a newer CMake when the system one is older
+cmake_minimum_required(VERSION 3.26)
 project(pycuvslam LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 
-find_package(Python 3.9 REQUIRED COMPONENTS Interpreter Development.Module)
+# Without SKBUILD_SABI_COMPONENT (Development.SABIModule), nanobind silently drops STABLE_ABI while scikit-build-core
+# still tags the wheel abi3.
+find_package(Python 3.10 REQUIRED COMPONENTS Interpreter Development.Module ${SKBUILD_SABI_COMPONENT})
 find_package(nanobind CONFIG REQUIRED)
 
 set(CUVSLAM_BUILD_DIR_HELP "Use absolute path or shell expansion:\n"

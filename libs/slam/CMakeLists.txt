@@ -49,6 +49,7 @@ set(HEADERS
     vpr/vpr_map.h
     vpr/vpr_sof_image.h
     vpr/vpr_types.h
+    vpr/vpr_vocabulary.h
     view/map_to_view.h
     view/view_landmarks.h
     view/view_manager.h
@@ -84,6 +85,7 @@ set(SOURCES
     vpr/vpr_image.cpp
     vpr/vpr_map.cpp
     vpr/vpr_sof_image.cpp
+    vpr/vpr_vocabulary.cpp
     view/map_to_view.cpp
 )
 

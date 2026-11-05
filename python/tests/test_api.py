@@ -13,6 +13,8 @@
 # of the software or derivative works thereof, you agree to be bound by this License.
 
 import importlib.metadata
+import os
+import sys
 import unittest
 import warnings
 from unittest import mock
@@ -40,6 +42,10 @@ class TestApi(unittest.TestCase):
         self.assertIs(core.Odometry, vslam.Odometry)
         self.assertIs(core.Slam, vslam.Slam)
 
+    @unittest.skipIf(sys.version_info < (3, 12), 'stable ABI builds need Python 3.12 or newer')
+    def test_extension_uses_stable_abi(self):
+        self.assertIn('.abi3.', os.path.basename(vslam._core.__file__))
+
     def test_warns_about_several_distributions(self):
         with _fake_distributions('cuvslam', 'cuvslam_cu12'):
             with self.assertWarnsRegex(RuntimeWarning, r'\(cuvslam, cuvslam-cu12\)'):
@@ -57,6 +63,19 @@ class TestApi(unittest.TestCase):
             vslam._load_cuda_libraries()
         self.assertEqual([c.args[0] for c in pathfinder.load_nvidia_dynamic_lib.call_args_list],
                          ['cublas', 'cusparse', 'cusolver'])
+
+    def test_loads_libnvinfer_from_tensorrt_wheel(self):
+        spec = mock.Mock(submodule_search_locations=['/a', '/b', '/c'])
+        with mock.patch('importlib.util.find_spec', return_value=spec), \
+                mock.patch('ctypes.CDLL', side_effect=[OSError('/a'), None]) as cdll:
+            vslam._load_tensorrt()
+        self.assertEqual([c.args[0] for c in cdll.call_args_list],
+                         ['/a/libnvinfer.so.10', '/b/libnvinfer.so.10'])
+
+    def test_tensorrt_preload_without_wheel(self):
+        with mock.patch('importlib.util.find_spec', return_value=None), mock.patch('ctypes.CDLL') as cdll:
+            vslam._load_tensorrt()
+        cdll.assert_not_called()
 
 if __name__ == "__main__":
     unittest.main()
