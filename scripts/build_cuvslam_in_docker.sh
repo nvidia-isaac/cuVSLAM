@@ -61,6 +61,14 @@ else
   exit 1
 fi
 
+# AnyLoc engine targets of the CI runners: A10G on x86_64, Thor with CUDA 13 on aarch64; Orin keeps the default
+if [ "${GITHUB_ACTIONS:-}" = true ]; then
+  case "$(uname -m)-${CUDA_VERSION:-}" in
+    x86_64-*) EXTRA_CMAKE_ARGS="-DCUVSLAM_ANYLOC_TARGET=a10g ${EXTRA_CMAKE_ARGS:-}" ;;
+    aarch64-13.*) EXTRA_CMAKE_ARGS="-DCUVSLAM_ANYLOC_TARGET=thor ${EXTRA_CMAKE_ARGS:-}" ;;
+  esac
+fi
+
 docker run --runtime=nvidia --gpus all --rm --label "cuvslam.runner=${RUNNER_NAME:-local}" \
   $TTY_FLAG $DOCKER_USER $DOCKER_VOLUMES \
   -e CUVSLAM_SRC_DIR=/cuvslam \

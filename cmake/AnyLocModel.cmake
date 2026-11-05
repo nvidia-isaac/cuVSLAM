@@ -30,16 +30,18 @@ set(CUVSLAM_ANYLOC_LAYER 9 CACHE STRING "DINOv2 block whose value facet AnyLoc r
 set(CUVSLAM_ANYLOC_INPUT_SIZE 322 CACHE STRING "Square input size of the AnyLoc network in pixels, a multiple of 14")
 
 # TensorRT builds only for the GPU it runs on, so each target is built on its own device.
-set(_anyloc_targets rtx4090 orin_nano)
+set(_anyloc_targets rtx4090 a10g orin_nano thor)
 set(_anyloc_sm_rtx4090 89)
+set(_anyloc_sm_a10g 86)
 set(_anyloc_sm_orin_nano 87)
+set(_anyloc_sm_thor 110)
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
     set(_anyloc_default_target orin_nano)
 else()
     set(_anyloc_default_target rtx4090)
 endif()
 set(CUVSLAM_ANYLOC_TARGET "${_anyloc_default_target}" CACHE STRING
-    "GPU the AnyLoc engine is built for: rtx4090 (sm_89) or orin_nano (sm_87); the default follows the processor")
+    "GPU the AnyLoc engine is built for: rtx4090, a10g, orin_nano or thor; the default follows the processor")
 set_property(CACHE CUVSLAM_ANYLOC_TARGET PROPERTY STRINGS ${_anyloc_targets})
 if(NOT CUVSLAM_ANYLOC_TARGET IN_LIST _anyloc_targets)
     list(JOIN _anyloc_targets ", " _anyloc_target_names)
