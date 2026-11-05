@@ -341,15 +341,17 @@ class TestTracking(unittest.TestCase):
                                             enable_observations_export=True)
                 odometry = vslam.Odometry(self.rig, cfg)
                 odometry.track(1_000_000, static_images)
-                alive = len(odometry.get_last_observations(0))
-                self.assertGreater(alive, 10)
+                first_ids = {obs.id for obs in odometry.get_last_observations(0)}
 
                 internals = vslam.Odometry.Internals()
                 internals.kf_override_frame_selection = True
                 internals.num_desired_tracks = 10
                 odometry.track(2_000_000, static_images, internals=internals)
                 self.assertTrue(odometry.get_state().keyframe)
-                self.assertLessEqual(len(odometry.get_last_observations(0)), alive)
+                second_ids = {obs.id for obs in odometry.get_last_observations(0)}
+                # Survivors are a lower bound on the tracks alive at selection, which must exceed the 10 desired
+                self.assertGreater(len(second_ids & first_ids), 10)
+                self.assertFalse(second_ids - first_ids, "the keyframe selected new tracks")
 
     def test_get_observations_and_landmarks(self):
         img = data.ImageGenerator(self.rig.cameras, 10)
