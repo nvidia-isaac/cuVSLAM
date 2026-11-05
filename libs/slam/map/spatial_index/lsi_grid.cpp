@@ -166,7 +166,7 @@ void LSIGrid::SyncDatabase(const PoseGraphHypothesis& pose_graph_hypothesis) {
     const auto landmark_id = it_landmarks.first;
     landmark_to_db(landmark_id, it_landmarks.second);
   }
-  TraceDebug("saving before: cells num = %d", cells_.size());
+  TraceDebug("saving before: cells num = %zu", cells_.size());
   std::set<HashCellId> cells_to_reduce;
   for (auto& [landmark_id, staged_landmark] : staged_landmarks_) {
     landmark_to_db(landmark_id, staged_landmark);
@@ -193,7 +193,7 @@ void LSIGrid::SyncDatabase(const PoseGraphHypothesis& pose_graph_hypothesis) {
   }
 
   // move all cells to DB
-  TraceDebug("saving after: cells num = %d", cells_.size());
+  TraceDebug("saving after: cells num = %zu", cells_.size());
   for (auto& it_cells : cells_) {
     database_->SetRecord(SlamDatabaseTable::SpatialCells, it_cells.first, 0, [&](BlobWriter& blob_writer) {
       const auto& cell = it_cells.second;

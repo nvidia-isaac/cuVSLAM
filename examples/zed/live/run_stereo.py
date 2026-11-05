@@ -52,9 +52,9 @@ def main():
     )
 
     if RAW:
-        cfg.rectified_stereo_camera = False
+        odom_cfg.rectified_stereo_camera = False
     else:
-        cfg.rectified_stereo_camera = True
+        odom_cfg.rectified_stereo_camera = True
 
     # Create rig using utility function
     rig = get_zed_stereo_rig(camera_info, raw = RAW)

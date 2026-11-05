@@ -259,7 +259,7 @@ def add_loop_closure_arguments(parser: argparse.ArgumentParser) -> None:
         type=str,
         default=os.environ.get("CUVSLAM_ANYLOC_ENGINE", ""),
         help="AnyLoc TensorRT engine for --use_vpr, the one the anyloc_engine "
-             "CMake target builds from here (default: $CUVSLAM_ANYLOC_ENGINE, which cuvslam_vars.sh sets).",
+             "CMake target builds from here (default: $CUVSLAM_ANYLOC_ENGINE).",
     )
     parser.add_argument(
         "--max_map_size",
@@ -279,7 +279,7 @@ def validate_loop_closure_arguments(parser: argparse.ArgumentParser, args: argpa
         parser.error("--loop_closure_mode and --use_vpr only affect SLAM; add --use_slam true")
     if args.use_vpr and not os.path.isfile(args.vpr_model_path):
         parser.error("--use_vpr needs the AnyLoc TensorRT engine; set --vpr_model_path to the one the "
-                     "anyloc_engine CMake target builds, or source cuvslam_vars.sh of that build")
+                     "anyloc_engine CMake target builds, or set CUVSLAM_ANYLOC_ENGINE")
     if args.max_map_size is not None and args.max_map_size < 0:
         parser.error("--max_map_size must be 0 (no limit) or a positive number of pose graph nodes")
 
@@ -296,6 +296,7 @@ def stat_to_dict(stat: Any) -> dict:
         "gt_av_rotation_error": stat.gt_av_rotation_error,
         "gt_n_error_segments": stat.gt_n_error_segments,
         "gt_simple_error": stat.gt_simple_error,
+        "gt_simple_rotation_error": stat.gt_simple_rotation_error,
         "num_tracking_losts": stat.num_tracking_losts,
         "odometry_mode": stat.odometry_mode,
         "num_loop_closures": stat.num_loop_closures,

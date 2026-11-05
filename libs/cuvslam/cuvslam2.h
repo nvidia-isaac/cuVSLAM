@@ -949,8 +949,9 @@ public:
   /**
    * Construct a SLAM instance with rig and primary cameras
    * @param[in] rig Camera rig configuration
-   * @param[in] primary_cameras Vector of primary camera indices
+   * @param[in] primary_cameras Vector of primary camera indices: distinct, non-empty, each a camera of the rig
    * @param[in] config SLAM configuration
+   * @throws std::invalid_argument if the rig, primary_cameras or config are invalid
    * @throws std::runtime_error if SLAM initialization fails
    */
   Slam(const Rig& rig, const std::vector<uint8_t>& primary_cameras, const Config& config = GetDefaultConfig());

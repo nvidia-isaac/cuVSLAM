@@ -17,6 +17,7 @@
 import os
 import json
 import base64
+import math
 import subprocess
 from collections import defaultdict
 from datetime import datetime
@@ -47,6 +48,7 @@ def save_stats_to_json(stats, output_dir):
             'gt_av_rotation_error': stat.gt_av_rotation_error,
             'gt_n_error_segments': stat.gt_n_error_segments,
             'gt_simple_error': stat.gt_simple_error,
+            'gt_simple_rotation_error': stat.gt_simple_rotation_error,
             'num_tracking_losts': stat.num_tracking_losts,
             'odometry_mode': stat.odometry_mode,
             'num_loop_closures': stat.num_loop_closures,
@@ -102,8 +104,10 @@ def calc_summary(title, stats):
     total_gt_av_rotation_error = 0
     total_gt_n_error_segments = 0
     total_gt_simple_error = 0
+    total_gt_simple_rotation_error = 0
     num_correct_sequences = 0
     num_stats_with_gt = 0
+    num_stats_with_rotation = 0
     total_tracking_losts = 0
     for s in stats:
         tracking_time += s.tracking_time
@@ -117,15 +121,21 @@ def calc_summary(title, stats):
             num_stats_with_gt += 1
             if s.gt_av_translation_error <= 0.011:
                 num_correct_sequences += 1
+            if not math.isnan(s.gt_simple_rotation_error):
+                total_gt_simple_rotation_error += s.gt_simple_rotation_error
+                num_stats_with_rotation += 1
 
     summary_av_gt_translation_error = 0
     summary_av_gt_rotation_error = 0
 
     summary_av_gt_simple_error = 0
+    summary_av_gt_simple_rotation_error = 0
     if num_stats_with_gt > 0:
         summary_av_gt_translation_error = total_gt_av_translation_error / num_stats_with_gt
         summary_av_gt_rotation_error = total_gt_av_rotation_error / num_stats_with_gt
         summary_av_gt_simple_error = total_gt_simple_error / num_stats_with_gt
+    if num_stats_with_rotation > 0:
+        summary_av_gt_simple_rotation_error = total_gt_simple_rotation_error / num_stats_with_rotation
     return {
         "title": title,
         "n_frames": n_frames,
@@ -133,6 +143,7 @@ def calc_summary(title, stats):
         "summary_av_gt_translation_error": summary_av_gt_translation_error,
         "summary_av_gt_rotation_error": summary_av_gt_rotation_error,
         "summary_av_gt_simple_error": summary_av_gt_simple_error,
+        "summary_av_gt_simple_rotation_error": summary_av_gt_simple_rotation_error,
         "total_sequences": num_stats_with_gt,
         "num_correct_sequences": num_correct_sequences,
         "total_tracking_losts": total_tracking_losts
@@ -284,6 +295,7 @@ def generate_report(test_folder, comments, stats, generate_pdf=False, config_nam
             'gt_av_translation_error': s.gt_av_translation_error,
             'gt_av_rotation_error': s.gt_av_rotation_error,
             'gt_simple_error': s.gt_simple_error,
+            'gt_simple_rotation_error': s.gt_simple_rotation_error,
             'num_loop_closures': s.num_loop_closures,
             'loop_closure_mode': s.loop_closure_mode,
             'bird_view_with_errors_path': s.bird_view_with_errors_path,
@@ -339,6 +351,7 @@ def generate_report(test_folder, comments, stats, generate_pdf=False, config_nam
                     'gt_av_translation_error': s.gt_av_translation_error,
                     'gt_av_rotation_error': s.gt_av_rotation_error,
                     'gt_simple_error': s.gt_simple_error,
+                    'gt_simple_rotation_error': s.gt_simple_rotation_error,
                     'num_loop_closures': s.num_loop_closures,
                     'loop_closure_mode': s.loop_closure_mode,
                     'bird_view_with_errors_path': s.bird_view_with_errors_path,
