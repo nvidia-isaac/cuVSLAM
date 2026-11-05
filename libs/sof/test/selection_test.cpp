@@ -24,30 +24,29 @@
 #include "sof/image_pyramid_float.h"
 #include "utils/image_loader.h"
 
-namespace test::sof {
 namespace {
+using namespace cuvslam;
 
 // Existing tracks leave some bins short of their share, which must stay short when no features are desired
 TEST(GoodFeaturesToTrackDetector, AddsNoFeaturesWhenNoneDesired) {
-  cuvslam::utils::ImageLoaderT loader;
+  utils::ImageLoaderT loader;
   ASSERT_TRUE(loader.load(std::string{CUVSLAM_TEST_ASSETS} + "sof/left.png"));
-  const cuvslam::ImageMatrixT image = loader.getImage().cast<float>();
-  cuvslam::sof::ImagePyramidT pyramid(image);
+  const ImageMatrixT image = loader.getImage().cast<float>();
+  sof::ImagePyramidT pyramid(image);
   pyramid.buildPyramid();
-  cuvslam::sof::GradientPyramidT gradient;
+  sof::GradientPyramidT gradient;
   gradient.set(pyramid);
 
-  cuvslam::sof::GoodFeaturesToTrackDetector detector;
-  std::vector<cuvslam::Vector2T> features;
-  detector.computeGFTTAndSelectFeatures(gradient, 0, 0, 0, 0, nullptr, cuvslam::sof::TracksVector{}, 450, features);
+  sof::GoodFeaturesToTrackDetector detector;
+  std::vector<Vector2T> features;
+  detector.computeGFTTAndSelectFeatures(gradient, 0, 0, 0, 0, nullptr, sof::TracksVector{}, 450, features);
   ASSERT_FALSE(features.empty());
-  cuvslam::sof::TracksVector tracks;
+  sof::TracksVector tracks;
   tracks.add(0, features);
 
-  std::vector<cuvslam::Vector2T> selected;
+  std::vector<Vector2T> selected;
   detector.computeGFTTAndSelectFeatures(gradient, 0, 0, 0, 0, nullptr, tracks, 0, selected);
   EXPECT_TRUE(selected.empty()) << selected.size() << " features added";
 }
 
 }  // namespace
-}  // namespace test::sof
