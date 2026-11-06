@@ -9,7 +9,8 @@ if [ "$#" -ne 1 ] && [ "$#" -ne 3 ]; then
   echo "  (pip-installable) and the auditwheel-repaired extension loads with the"
   echo "  excluded CUDA libraries resolved from the system. Before installing, runs the"
   echo "  PyPI metadata check (twine check --strict) and, for abi3 wheels, abi3audit."
-  echo "  The abi3 wheel on Python 3.12 also builds and loads an AnyLoc engine."
+  echo "  The abi3 wheel also builds and loads an AnyLoc engine, with the TensorRT of"
+  echo "  its tensorrt extra in place of the image's (Orin's wheel: JetPack's)."
   echo "  When expected_version and expected_git_sha are provided, also verifies that"
   echo "  get_version() identifies that clean source revision without '-modified'."
   exit 1
@@ -89,15 +90,39 @@ if expected_version:
 
 print("cuvslam wheel import OK, version:", version_info)
 PY
-        if [[ "$name" == *-abi3-* && "$py" == 3.12 ]]; then
-          "$venv/bin/python" - <<PY
+      done
+    done
+  '
+
+# The abi3 wheel's AnyLoc engine, with the TensorRT of its tensorrt extra once the image's is gone.
+# Orin's wheel has no such extra and keeps JetPack's TensorRT.
+docker run --runtime=nvidia --gpus all --rm --label "cuvslam.runner=${RUNNER_NAME:-local}" $TTY_FLAG --network host \
+  -v "$OUTPUT_DIR:/output:ro" \
+  cuvslam:local bash -c '
+    set -euo pipefail
+    cd /tmp
+    for wheel in /output/wheel/*-abi3-*.whl; do
+      name=$(basename "$wheel")
+      requirement="${name%%-*} @ file://$wheel"
+      if [[ "$name" != cuvslam_cu12-*_aarch64.whl ]]; then
+        rm -f /usr/lib/*-linux-gnu/libnvinfer* /usr/lib/*-linux-gnu/libnvonnxparser*
+        ldconfig
+        if ldconfig -p | grep -E "libnv(infer|onnxparser)"; then
+          echo "The image still has TensorRT" >&2
+          exit 1
+        fi
+        requirement="${name%%-*}[tensorrt] @ file://$wheel"
+      fi
+      echo "=== $requirement: AnyLoc engine"
+      venv="/tmp/venv-anyloc-${name%.whl}"
+      uv venv -q --managed-python --python 3.12 "$venv"
+      uv pip install -q --python "$venv" "$requirement"
+      "$venv/bin/python" - <<PY
 import cuvslam
 
 cuvslam.build_anyloc_engine("/tmp/anyloc.engine")
 cuvslam.VprVocabularyBuilder(cuvslam.Slam.VprSettings(model_path="/tmp/anyloc.engine"))
 print("AnyLoc engine from the wheel OK")
 PY
-        fi
-      done
     done
   '
