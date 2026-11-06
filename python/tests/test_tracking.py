@@ -314,7 +314,7 @@ class TestTracking(unittest.TestCase):
         num_frames = 6
         mode = vslam.Odometry.OdometryMode.Mono
 
-        for use_gpu in [True, False]:
+        for use_gpu in [False, True]:
             with self.subTest(use_gpu=use_gpu):
                 if use_gpu and not vslam.is_cuda_build():
                     self.skipTest("use_gpu needs a CUDA build")
