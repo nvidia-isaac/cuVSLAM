@@ -64,6 +64,7 @@ _load_tensorrt()
 # Import select bindings for the main namespace
 from ._cuvslam import (
     get_version,
+    is_cuda_build,
     set_verbosity,
     warm_up_gpu,
     Pose,
@@ -94,6 +95,7 @@ __all__ = [
     'VprVocabularyBuilder',
     'utils',
     'get_version',
+    'is_cuda_build',
     'set_verbosity',
     'warm_up_gpu',
     'Pose',

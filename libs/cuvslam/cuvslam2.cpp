@@ -566,6 +566,14 @@ void SetVerbosity(int verbosity) {
 
 void WarmUpGPU() { WarmUpGpuImpl(); }
 
+bool IsCudaBuild() {
+#ifdef USE_CUDA
+  return true;
+#else
+  return false;
+#endif
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Odometry class implementation
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -646,6 +654,7 @@ Odometry::Odometry(Odometry&&) noexcept = default;
 Odometry::~Odometry() = default;
 
 Odometry::Odometry(const Rig& rig, const Config& cfg) {
+  THROW_INVALID_ARG_IF(cfg.use_gpu && !IsCudaBuild(), "use_gpu requires a build with CUDA support (USE_CUDA=ON)");
   std::string message;
   TracePrintIf(cfg.use_gpu && !CheckCudaCompatibility(message), "[WARNING] %s\n", message.c_str());
   CheckCameras(rig);
@@ -1180,6 +1189,7 @@ public:
 
   Impl(const Rig& rig, const std::vector<uint8_t>& primary_cameras, const Config& config)
       : primary_cameras_(primary_cameras) {
+    THROW_INVALID_ARG_IF(config.use_gpu && !IsCudaBuild(), "use_gpu requires a build with CUDA support (USE_CUDA=ON)");
     std::string message;
     TracePrintIf(!CheckCudaCompatibility(message), "[WARNING] %s\n", message.c_str());
 
