@@ -98,7 +98,7 @@ The Python wheel runs its copy with `cuvslam.build_anyloc_engine("anyloc.engine"
 
 | CMake variable | Default | Purpose |
 |----------------|---------|---------|
-| `CUVSLAM_BUILD_ANYLOC_ENGINE` | ON | builds the model, the engine and `anyloc_engine_builder`; needs network access |
+| `CUVSLAM_BUILD_ANYLOC_ENGINE` | AUTO | builds the model, the engine and `anyloc_engine_builder`; needs network access; `AUTO` follows `USE_TENSORRT` |
 | `CUVSLAM_ANYLOC_LAYER` | 9 | DINOv2 block whose value facet AnyLoc reads |
 | `CUVSLAM_ANYLOC_INPUT_SIZE` | 322 | square input size, a multiple of 14 |
 | `CUVSLAM_ANYLOC_PYTHON` | empty | a Python that already has `requirements.txt` installed, instead of creating the venv; without it the venv is made from a Python 3.10 to 3.12 found on the system (`Python3_EXECUTABLE`) |
