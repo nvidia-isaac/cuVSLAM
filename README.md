@@ -263,7 +263,8 @@ All flags have defaults; override with `-DFLAG=VALUE`.
 | `USE_TENSORRT` | AUTO | AnyLoc place recognition backend; requires `USE_CUDA` and TensorRT 8.6+ |
 
 `AUTO` follows `USE_CUDA`, so `-DUSE_CUDA=OFF` alone also turns off cuNLS and TensorRT. Setting either to `ON` with
-`USE_CUDA=OFF` is a configure error.
+`USE_CUDA=OFF` is a configure error. A build directory configured before `AUTO` was introduced has both cached as
+`ON`: to turn off CUDA there, also pass `-DUSE_CUNLS=AUTO -DUSE_TENSORRT=AUTO`, or use a fresh build directory.
 
 Build types: `Release` (default), `Debug`, `RelWithDebInfo`, `MinSizeRel`. Do not mix types in the same build directory.
 
