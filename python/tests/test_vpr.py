@@ -67,13 +67,16 @@ def noise_images(seed):
     rng = np.random.RandomState(seed)
     return [np.ascontiguousarray(rng.randint(0, 256, (H, W), dtype=np.uint8)) for _ in range(2)]
 
+def finished(request):
+    """The request, which sync_mode must have finished by the time the call that made it returns."""
+    if not request.done():
+        raise AssertionError("sync_mode must finish the request before the call returns")
+    return request
+
 def recognize_place(slam, images, timestamp_ns):
     """Return the (result, error_message) of a place recognition query; needs sync_mode."""
-    answers = []
-    slam.recognize_place_by_frame(images, timestamp_ns, lambda result, error: answers.append((result, error)))
-    if len(answers) != 1:
-        raise AssertionError(f"sync_mode must call the callback exactly once, it ran {len(answers)} times")
-    return answers[0]
+    request = finished(slam.recognize_place_by_frame(images, timestamp_ns))
+    return request.result(), request.error_message
 
 def recognize_match(slam, images, timestamp_ns):
     """Return the matched place, or None when no mapped place matched; fail on any other error."""
@@ -89,21 +92,13 @@ def localization_settings(**kwargs):
         horizontal_step=0.0625, vertical_step=0.0625, angular_step_rads=0.03125, **kwargs)
 
 def localize_in_map(slam, folder, images, timestamp_ns, settings, guess_pose=None):
-    """Localize and return the (pose, error_message) pair the callback got."""
-    answers = []
-    slam.localize_in_map(folder, timestamp_ns, guess_pose, images, settings,
-                         lambda: None, lambda pose, error: answers.append((pose, error)))
-    if len(answers) != 1:
-        raise AssertionError(f"sync_mode must call the callback exactly once, it ran {len(answers)} times")
-    return answers[0]
+    """Localize and return the (pose, error_message) of the request; needs sync_mode."""
+    request = finished(slam.localize_in_map(folder, timestamp_ns, guess_pose, images, settings))
+    return request.result(), request.error_message
 
 def save_map(slam, folder):
-    """Save the map and return the flag the callback reported."""
-    answers = []
-    slam.save_map(folder, answers.append)
-    if len(answers) != 1:
-        raise AssertionError(f"sync_mode must call the callback exactly once, it ran {len(answers)} times")
-    return answers[0]
+    """Save the map and return whether it was saved; needs sync_mode."""
+    return finished(slam.save_map(folder)).result()
 
 def pose_arrays(pose):
     """Translation and rotation of a Pose as numpy arrays."""
@@ -473,7 +468,7 @@ class TestVprVocabularyBuilder(unittest.TestCase):
         slam = vslam.Slam(make_rig()[0], [0, 1], self.vocabulary_config())
         os.remove(self.path)
 
-        # Localizing reads the file again; its error reaches the callback instead of escaping.
+        # Localizing reads the file again; its error reaches the request instead of escaping.
         pose, error = localize_in_map(slam, self.folder, noise_images(0), 0, localization_settings())
         self.assertIsNone(pose)
         self.assertIn(self.path, error)

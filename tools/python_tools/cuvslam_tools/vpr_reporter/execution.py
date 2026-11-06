@@ -433,18 +433,16 @@ class _MapQuerier:
         self.n_frames += 1
         if frame_id % self.query_stride != 0:
             return
-        answers: list[tuple[Any, str]] = []
         start = time.perf_counter()
-        self.tracker.slam.recognize_place_by_frame(
-            images, timestamp, lambda place, error_message: answers.append((place, error_message)))
+        request = self.tracker.slam.recognize_place_by_frame(images, timestamp)
         self.search_time_s += time.perf_counter() - start
         self.n_queries += 1
         self.thumbnails.offer(frame_id, images[0])
         # sync_mode answers before returning, so no answer is a bug, not a frame to skip.
-        if not answers:
+        if not request.done():
             raise RuntimeError(f"recognize_place_by_frame returned before answering frame {frame_id}; "
                                "the reporter needs Slam.Config.sync_mode to collect its result")
-        place, error_message = answers[0]
+        place, error_message = request.result(), request.error_message
         if place is None and error_message == _NO_MATCH:
             self.hits.append(_QueryHit(frame_index=frame_id, found=False, node_id=0, score=0.0, timestamp_ns=0,
                                        position=None))
@@ -495,12 +493,11 @@ def _build_vpr_map(pair: VprPair, args: argparse.Namespace, map_dir: str) -> tup
             builder.world_from_rig[frame_index] = slam_pose.pose
 
     # One LMDB database with the landmarks and the place recognition map.
-    saved: list[bool] = []
-    tracker.slam.save_map(map_dir, saved.append)
-    if not saved:
+    save = tracker.slam.save_map(map_dir)
+    if not save.done():
         raise RuntimeError(f"save_map returned before saving the map to {map_dir}; "
                            "the reporter needs Slam.Config.sync_mode to know whether it worked")
-    if not saved[0]:
+    if not save.result():
         raise RuntimeError(f"Failed to write the map to {map_dir}")
 
     build = _MapBuild(

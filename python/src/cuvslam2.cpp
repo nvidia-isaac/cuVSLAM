@@ -14,7 +14,15 @@
  * of the software or derivative works thereof, you agree to be bound by this License.
  */
 
+#include <algorithm>
 #include <chrono>
+#include <condition_variable>
+#include <memory>
+#include <mutex>
+#include <new>
+#include <optional>
+#include <stdexcept>
+#include <string>
 #include <utility>
 
 #include "nanobind/nanobind.h"
@@ -90,33 +98,178 @@ Odometry::Config PyDefaultOdometryConfig() {
   return cfg;
 }
 
-// Runs a Python callback for SLAM, possibly on the SLAM thread. An exception it raises cannot unwind through SLAM,
-// so it is reported to sys.unraisablehook, as Python does for exceptions it cannot propagate.
-template <typename... Args>
-void CallSlamCallback(const nb::callable& callback, const char* context, Args&&... args) {
-  nb::gil_scoped_acquire gil;
-  try {
-    callback(std::forward<Args>(args)...);
-  } catch (nb::python_error& e) {
-    e.discard_as_unraisable(context);
+constexpr const char* kRequestDroppedMsg = "The Slam was destroyed before it ran the request.";
+
+// The outcome of an asynchronous Slam request, which the SLAM thread settles. It holds no Python object, so that
+// thread never takes the GIL, and never releases the last reference to a Slam or Tracker.
+template <typename T>
+class SlamRequest {
+public:
+  void Start() {
+    std::lock_guard lock(mutex_);
+    started_ = true;
+  }
+
+  void Finish(T outcome) {
+    {
+      std::lock_guard lock(mutex_);
+      started_ = true;
+      outcome_ = std::move(outcome);
+    }
+    settled_.notify_all();
+  }
+
+  // No-op once finished
+  void Drop() {
+    {
+      std::lock_guard lock(mutex_);
+      if (outcome_.has_value()) {
+        return;
+      }
+      dropped_ = true;
+    }
+    settled_.notify_all();
+  }
+
+  bool Started() const {
+    std::lock_guard lock(mutex_);
+    return started_;
+  }
+
+  bool Done() const {
+    std::lock_guard lock(mutex_);
+    return IsSettled();
+  }
+
+  bool WaitFor(std::chrono::nanoseconds timeout) const {
+    std::unique_lock lock(mutex_);
+    return settled_.wait_for(lock, timeout, [this] { return IsSettled(); });
+  }
+
+  // Empty until finished, and for a dropped request
+  std::optional<T> Outcome() const {
+    std::lock_guard lock(mutex_);
+    return outcome_;
+  }
+
+  bool Dropped() const {
+    std::lock_guard lock(mutex_);
+    return dropped_;
+  }
+
+private:
+  bool IsSettled() const { return outcome_.has_value() || dropped_; }
+
+  mutable std::mutex mutex_;
+  mutable std::condition_variable settled_;
+  bool started_ = false;
+  bool dropped_ = false;
+  std::optional<T> outcome_;
+};
+
+// Held by the callback that finishes a request. SLAM destroys that callback unrun when the Slam is destroyed with the
+// request still queued, and this then marks the request dropped, so that waiting for it does not block forever.
+template <typename T>
+class RequestSettler {
+public:
+  explicit RequestSettler(std::shared_ptr<SlamRequest<T>> request) : request_(std::move(request)) {}
+  RequestSettler(const RequestSettler&) = delete;
+  RequestSettler& operator=(const RequestSettler&) = delete;
+  ~RequestSettler() { request_->Drop(); }
+
+  void Finish(T outcome) const { request_->Finish(std::move(outcome)); }
+
+private:
+  std::shared_ptr<SlamRequest<T>> request_;
+};
+
+// Callbacks are copied, so they share the settler
+template <typename T>
+std::shared_ptr<const RequestSettler<T>> MakeSettler(std::shared_ptr<SlamRequest<T>> request) {
+  return std::make_shared<const RequestSettler<T>>(std::move(request));
+}
+
+// Waits without the GIL until `request` settles, for at most `timeout_s` seconds, or without a limit if it is empty.
+// Waits in slices between which it checks for signals, so that Ctrl+C interrupts it.
+template <typename T>
+bool WaitForRequest(const SlamRequest<T>& request, std::optional<double> timeout_s) {
+  using Clock = std::chrono::steady_clock;
+  constexpr std::chrono::duration<double> kSlice = std::chrono::milliseconds(100);
+  THROW_INVALID_ARG_IF(timeout_s.has_value() && !(*timeout_s >= 0), "timeout must be None or non-negative");
+  const auto start = Clock::now();
+  for (;;) {
+    std::chrono::duration<double> slice = kSlice;
+    if (timeout_s.has_value()) {
+      const std::chrono::duration<double> left = std::chrono::duration<double>(*timeout_s) - (Clock::now() - start);
+      if (left <= std::chrono::duration<double>::zero()) {
+        return request.Done();
+      }
+      slice = std::min(slice, left);
+    }
+    bool settled;
+    {
+      nb::gil_scoped_release release;
+      settled = request.WaitFor(std::chrono::duration_cast<std::chrono::nanoseconds>(slice));
+    }
+    if (settled) {
+      return true;
+    }
+    if (PyErr_CheckSignals() != 0) {
+      throw nb::python_error();
+    }
   }
 }
 
-// A callable that the SLAM thread may drop last; it is released with the GIL held.
-std::shared_ptr<nb::callable> GilSafeCallable(nb::callable callable) {
-  return std::shared_ptr<nb::callable>(new nb::callable(std::move(callable)), [](nb::callable* held) {
-    nb::gil_scoped_acquire gil;
-    delete held;
-  });
+// Raises TimeoutError if `request` does not settle within `timeout_s`, and RuntimeError if it was dropped
+template <typename T>
+T WaitForOutcome(const SlamRequest<T>& request, std::optional<double> timeout_s) {
+  if (!WaitForRequest(request, timeout_s)) {
+    PyErr_SetString(PyExc_TimeoutError, "The SLAM request did not finish within the timeout.");
+    throw nb::python_error();
+  }
+  std::optional<T> outcome = request.Outcome();
+  if (!outcome.has_value()) {
+    throw std::runtime_error(kRequestDroppedMsg);
+  }
+  return *std::move(outcome);
 }
 
-// Owned by its Python object, which deletes it without the GIL: the SLAM thread it joins may wait for the GIL.
+// Binds what all SlamRequest classes share; the caller adds `result`.
 template <typename T>
-std::shared_ptr<T> DeletedWithoutGil(T* object) {
-  return std::shared_ptr<T>(object, [](T* owned) {
-    nb::gil_scoped_release release;
-    delete owned;
-  });
+nb::class_<SlamRequest<T>> BindSlamRequest(nb::handle scope, const char* name, const char* doc) {
+  return nb::class_<SlamRequest<T>>(scope, name, doc)
+      .def("done", &SlamRequest<T>::Done,
+           "True once SLAM has run the request, or dropped it because the Slam was destroyed first.")
+      .def(
+          "wait",
+          [](const SlamRequest<T>& self, std::optional<double> timeout) { return WaitForRequest(self, timeout); },
+          nb::arg("timeout") = nb::none(),
+          "Wait until the request is done, without holding the GIL.\n\n"
+          "Parameters:\n"
+          "    timeout: Most seconds to wait, or None to wait until it is done\n"
+          "Returns:\n"
+          "    True if the request is done, False if the timeout expired first");
+}
+
+// Binds `result` and `error_message` of a request whose outcome is a Result<Data>
+template <typename Data>
+void BindResultOutcome(nb::class_<SlamRequest<Result<Data>>>& cls, const char* result_doc) {
+  cls.def(
+         "result",
+         [](const SlamRequest<Result<Data>>& self, std::optional<double> timeout) -> std::optional<Data> {
+           return WaitForOutcome(self, timeout).data;
+         },
+         nb::arg("timeout") = nb::none(), result_doc)
+      .def_prop_ro(
+          "error_message",
+          [](const SlamRequest<Result<Data>>& self) -> std::string {
+            if (self.Dropped()) {
+              return kRequestDroppedMsg;
+            }
+            const std::optional<Result<Data>> outcome = self.Outcome();
+            return outcome.has_value() ? outcome->error_message : std::string{};
+          },
+          "Why the request failed; empty while it runs, and once it succeeds");
 }
 
 enum class ArrayType {
@@ -854,17 +1007,14 @@ NB_MODULE(_cuvslam, m) {
           "    parameters (dict[str, str]): Map of key/value string pairs to apply.");
 
   // Slam class must be defined before its nested enums/classes are bound to it.
-  // Final, since __new__ builds it: a subclass __init__ could not change how.
   auto slam_cls = nb::class_<Slam>(
       m, "Slam",
       "Builds and optimizes a reusable map from odometry results, including loop closure, map persistence, and "
       "relocalization.\n\n"
       "Use directly for manual orchestration, or access Tracker's instance through its `slam` property.\n\n"
-      "Destroying a Slam from a SLAM callback, for example when the callback holds its last reference, finishes "
-      "asynchronously: the SLAM thread is stopped and the map file written on another thread after the object is "
-      "gone, and there is no way to wait for that. Do not exit the process right after, or the map file may be left "
-      "incomplete.",
-      nb::is_final());
+      "`save_map`, `flush_map`, `localize_in_map` and `recognize_place_by_frame` return a request, which tells when "
+      "SLAM has run it and what came of it. Unless `Slam.Config.sync_mode` is set, SLAM runs it on its own thread, "
+      "and the request is done some time after the call returns.");
 
   nb::enum_<Slam::DataLayer>(slam_cls, "DataLayer", "Data layer for SLAM")
       .value("Landmarks", Slam::DataLayer::Landmarks, "Landmarks that are visible in the current frame")
@@ -1095,6 +1245,42 @@ NB_MODULE(_cuvslam, m) {
             .format(p.node_id, p.pose, p.score, p.timestamp_ns);
       });
 
+#define CUVSLAM_REQUEST_DOC                                                                                       \
+  "SLAM runs it on its own thread unless `Slam.Config.sync_mode` is set, in which case it is done when the call " \
+  "that made it returns. The request does not keep its Slam alive: destroying the Slam first may drop it unrun."
+  BindSlamRequest<bool>(slam_cls, "MapWriteRequest",
+                        "Request made by :meth:`Slam.save_map` or :meth:`Slam.flush_map`.\n\n" CUVSLAM_REQUEST_DOC)
+      .def(
+          "result",
+          [](const SlamRequest<bool>& self, std::optional<double> timeout) { return WaitForOutcome(self, timeout); },
+          nb::arg("timeout") = nb::none(),
+          "Wait for the request, without holding the GIL, and tell whether the map was written.\n\n"
+          "Parameters:\n"
+          "    timeout: Most seconds to wait, or None to wait until it is done\n"
+          "Raises TimeoutError if it is not done within `timeout`, and RuntimeError if it was dropped.");
+
+  auto localization_request_cls = BindSlamRequest<Result<Pose>>(
+      slam_cls, "LocalizationRequest", "Request made by :meth:`Slam.localize_in_map`.\n\n" CUVSLAM_REQUEST_DOC);
+  localization_request_cls.def("started", &SlamRequest<Result<Pose>>::Started,
+                               "True once SLAM has begun localizing, which may be long after the request was made.");
+  BindResultOutcome(localization_request_cls,
+                    "Wait for the request, without holding the GIL, and return the localized rig pose, or None if "
+                    "localization failed; `error_message` then tells why.\n\n"
+                    "Parameters:\n"
+                    "    timeout: Most seconds to wait, or None to wait until it is done\n"
+                    "Raises TimeoutError if it is not done within `timeout`, and RuntimeError if it was dropped.");
+
+  auto place_request_cls = BindSlamRequest<Result<Slam::PlaceRecognition>>(
+      slam_cls, "PlaceRecognitionRequest",
+      "Request made by :meth:`Slam.recognize_place_by_frame`.\n\n" CUVSLAM_REQUEST_DOC);
+#undef CUVSLAM_REQUEST_DOC
+  BindResultOutcome(place_request_cls,
+                    "Wait for the request, without holding the GIL, and return the matched place, or None if no "
+                    "mapped place matched or recognition is off; `error_message` then tells which.\n\n"
+                    "Parameters:\n"
+                    "    timeout: Most seconds to wait, or None to wait until it is done\n"
+                    "Raises TimeoutError if it is not done within `timeout`, and RuntimeError if it was dropped.");
+
   nb::class_<VprVocabularyBuilder>(
       m, "VprVocabularyBuilder",
       "Fits the place recognition vocabulary of one operating domain, for `Slam.VprSettings.vocabulary_path`, as a "
@@ -1126,10 +1312,8 @@ NB_MODULE(_cuvslam, m) {
 
   // Slam class methods
   slam_cls
-      .def(nb::new_([](const Rig& rig, const std::vector<uint8_t>& primary_cameras, const Slam::Config& config) {
-             return DeletedWithoutGil(new Slam(rig, primary_cameras, config));
-           }),
-           nb::arg("rig"), nb::arg("primary_cameras"), nb::arg("config") = Slam::Config{},
+      .def(nb::init<const Rig&, const std::vector<uint8_t>&, const Slam::Config&>(), nb::arg("rig"),
+           nb::arg("primary_cameras"), nb::arg("config") = Slam::Config{},
            "Construct SLAM for a camera rig.\n\n"
            "Parameters:\n"
            "    rig: Camera rig configuration\n"
@@ -1166,79 +1350,69 @@ NB_MODULE(_cuvslam, m) {
           "This call could be blocked by slam thread.")
       .def(
           "save_map",
-          [](Slam& self, std::string_view folder_name, nb::callable callback) {
-            self.SaveMap(folder_name, [callback = GilSafeCallable(std::move(callback))](bool success) {
-              CallSlamCallback(*callback, "Slam.save_map callback", success);
-            });
+          [](Slam& self, std::string_view folder_name) {
+            auto request = std::make_shared<SlamRequest<bool>>();
+            self.SaveMap(folder_name, [settler = MakeSettler(request)](bool success) { settler->Finish(success); });
+            return request;
           },
-          nb::arg("folder_name"), nb::arg("callback"),
+          nb::arg("folder_name"),
           "Save SLAM database (map) to a folder.\n\n"
           "This folder will be created if it does not exist.\n"
           "**WARNING**: *Contents of the folder will be overwritten.*\n"
           "It fails while the session writes its map in place (`map_path`, or `localize_in_map` with `attach`): "
           "`flush_map` saves it there. It also fails for the folder of a map that `localize_in_map` loaded and the "
           "folders that contain it.\n"
-          "This method works asynchronously depending on the `sync_mode` parameter in `Slam.Config`.\n"
-          "In both cases, the callback will be called with a flag indicating if the map was saved successfully.\n"
-          "An exception raised by the callback is reported to ``sys.unraisablehook`` instead of propagating.\n\n"
+          "Unless `Slam.Config.sync_mode` is set, the map is saved on the SLAM thread after this call returns.\n\n"
           "Parameters:\n"
           "    folder_name: Folder name where SLAM database will be saved\n"
-          "    callback: Function to be called when save is complete (takes bool success parameter)")
+          "Returns:\n"
+          "    A :class:`Slam.MapWriteRequest`, whose `result()` tells whether the map was saved")
       .def(
           "flush_map",
-          [](Slam& self, nb::callable callback) {
-            self.FlushMap([callback = GilSafeCallable(std::move(callback))](bool success) {
-              CallSlamCallback(*callback, "Slam.flush_map callback", success);
-            });
+          [](Slam& self) {
+            auto request = std::make_shared<SlamRequest<bool>>();
+            self.FlushMap([settler = MakeSettler(request)](bool success) { settler->Finish(success); });
+            return request;
           },
-          nb::arg("callback"),
           "Write all unsaved data of the map to its map file: `map_path`, or the folder that `localize_in_map` "
           "attached.\n\n"
           "The file then holds the whole map, and mapping goes on as before. It fails without one.\n"
-          "This method works asynchronously depending on the `sync_mode` parameter in `Slam.Config`.\n"
-          "In both cases, the callback will be called with a flag indicating if the map was flushed successfully.\n"
-          "An exception raised by the callback is reported to ``sys.unraisablehook`` instead of propagating.\n\n"
-          "Parameters:\n"
-          "    callback: Function to be called when flush is complete (takes bool success parameter)")
+          "Unless `Slam.Config.sync_mode` is set, the map is written on the SLAM thread after this call returns.\n\n"
+          "Returns:\n"
+          "    A :class:`Slam.MapWriteRequest`, whose `result()` tells whether the map was flushed")
       .def(
           "localize_in_map",
           [](Slam& self, std::string_view folder_name, int64_t timestamp_ns, const Pose* guess_pose,
-             const std::vector<nb::ndarray<nb::ro>>& images, const Slam::LocalizationSettings& settings,
-             nb::callable start_cb, nb::callable finish_cb, bool attach) {
+             const std::vector<nb::ndarray<nb::ro>>& images, const Slam::LocalizationSettings& settings, bool attach) {
             auto image_set = ImageSetFromNDArrays(images, timestamp_ns, ArrayType::Image);
+            auto request = std::make_shared<SlamRequest<Result<Pose>>>();
             self.LocalizeInMap(
-                folder_name, timestamp_ns, guess_pose, image_set, settings,
-                [start_cb = GilSafeCallable(std::move(start_cb))] {
-                  CallSlamCallback(*start_cb, "Slam.localize_in_map start_cb");
-                },
-                [finish_cb = GilSafeCallable(std::move(finish_cb))](const Result<Pose>& result) {
-                  CallSlamCallback(*finish_cb, "Slam.localize_in_map finish_cb", result.data, result.error_message);
-                },
-                attach);
+                folder_name, timestamp_ns, guess_pose, image_set, settings, [request] { request->Start(); },
+                [settler = MakeSettler(request)](const Result<Pose>& result) { settler->Finish(result); }, attach);
+            return request;
           },
           nb::arg("folder_name"), nb::arg("timestamp_ns"), nb::arg("guess_pose").none(), nb::arg("images"),
-          nb::arg("settings"), nb::arg("start_cb"), nb::arg("finish_cb"), nb::arg("attach") = false,
+          nb::arg("settings"), nb::arg("attach") = false,
           "Localize in the existing database (map).\n\n"
-          "If ``Slam.Config.sync_mode`` is false, work is queued for the background slam thread and the callback runs "
-          "when localization finishes (possibly on another thread than the caller). If ``Slam.Config.sync_mode`` is "
-          "true, localization runs immediately before this call returns.\n"
+          "If ``Slam.Config.sync_mode`` is false, work is queued for the background slam thread, and the request "
+          "is done when localization finishes. If ``Slam.Config.sync_mode`` is true, localization runs immediately "
+          "before this call returns.\n"
           "Finds the rig pose in the saved map. If successful, replace current map with saved one.\n"
-          "`finish_cb` receives the localization result or an error message.\n"
           "With guess_pose=None, it needs `Slam.Config.use_vpr` and a map saved with it.\n"
           "It fails if the map has more nodes than `Slam.Config.max_map_size` (0: no limit), and for the folder of "
           "the map file this session writes; `flush_map` saves that one.\n"
-          "An exception raised by either callback is reported to ``sys.unraisablehook`` instead of propagating.\n"
           "Parameters:\n"
           "    folder_name: Folder containing the saved SLAM map\n"
           "    timestamp_ns: Timestamp for the image frame in nanoseconds\n"
           "    guess_pose: Initial guess for rig pose at the image timestamp, or None to use place recognition\n"
           "    images: List of numpy arrays containing the camera images\n"
           "    settings: Localization settings\n"
-          "    start_cb: Called when localization begins (no arguments)\n"
-          "    finish_cb: Called when localization completes (receives pose result and error message)\n"
           "    attach: On success, the session writes its map into folder_name from then on, as with `map_path`: "
           "`flush_map` saves it there, `save_map` fails, and destroying Slam writes it there. The folder holds a "
-          "whole map only after that. Nothing else may open the folder while it is attached.")
+          "whole map only after that. Nothing else may open the folder while it is attached.\n"
+          "Returns:\n"
+          "    A :class:`Slam.LocalizationRequest`, whose `result()` is the localized pose, or None with an "
+          "`error_message`")
       .def(
           "get_landmarks",
           [](Slam& self, Slam::DataLayer layer) -> Slam::Landmarks {
@@ -1264,22 +1438,23 @@ NB_MODULE(_cuvslam, m) {
           "    Pose graph with nodes and edges")
       .def(
           "recognize_place_by_frame",
-          [](Slam& self, const std::vector<nb::ndarray<nb::ro>>& images, int64_t timestamp_ns, nb::callable finish_cb) {
+          [](Slam& self, const std::vector<nb::ndarray<nb::ro>>& images, int64_t timestamp_ns) {
             auto image_set = ImageSetFromNDArrays(images, timestamp_ns, ArrayType::Image);
-            self.RecognizePlaceByFrame(image_set, [finish_cb = GilSafeCallable(std::move(finish_cb))](
-                                                      const Result<Slam::PlaceRecognition>& result) {
-              CallSlamCallback(*finish_cb, "Slam.recognize_place_by_frame finish_cb", result.data,
-                               result.error_message);
-            });
+            auto request = std::make_shared<SlamRequest<Result<Slam::PlaceRecognition>>>();
+            self.RecognizePlaceByFrame(image_set,
+                                       [settler = MakeSettler(request)](const Result<Slam::PlaceRecognition>& result) {
+                                         settler->Finish(result);
+                                       });
+            return request;
           },
-          nb::arg("images"), nb::arg("timestamp_ns"), nb::arg("finish_cb"),
-          "Find the pose graph node whose mapped frame looks most like `images`, without geometric verification.\n"
-          "An exception raised by the callback is reported to ``sys.unraisablehook`` instead of propagating.\n\n"
+          nb::arg("images"), nb::arg("timestamp_ns"),
+          "Find the pose graph node whose mapped frame looks most like `images`, without geometric verification.\n\n"
           "Parameters:\n"
           "    images: List of numpy arrays containing the camera images\n"
           "    timestamp_ns: Timestamp of the frame in nanoseconds\n"
-          "    finish_cb: Called on completion, possibly on another thread (receives the result and an error message,\n"
-          "        which is set when no mapped place matched)")
+          "Returns:\n"
+          "    A :class:`Slam.PlaceRecognitionRequest`, whose `result()` is the matched place, or None with an "
+          "`error_message`, which tells whether no mapped place matched")
       .def(
           "get_slam_metrics",
           [](const Slam& self) -> Slam::Metrics {
@@ -1301,14 +1476,10 @@ NB_MODULE(_cuvslam, m) {
           "Returns:\n"
           "    List of poses with timestamps");
 
-  // Final, since __new__ builds it: a subclass __init__ could not change how.
   auto tracker_cls = nb::class_<Tracker>(m, "Tracker",
                                          "Coordinates cuVSLAM Odometry and optional SLAM.\n\n"
                                          "Submit frames and IMU measurements through this class. Use the `odometry` "
-                                         "and `slam` properties for module-specific queries and operations.\n\n"
-                                         "Destroying a Tracker from a SLAM callback finishes asynchronously, as for "
-                                         ":class:`Slam`.",
-                                         nb::is_final());
+                                         "and `slam` properties for module-specific queries and operations.");
 
   nb::enum_<Tracker::Mode>(tracker_cls, "Mode", "What the tracker runs, and in which thread")
       .value("OdometryOnlyRealtime", Tracker::Mode::OdometryOnlyRealtime,
@@ -1321,30 +1492,31 @@ NB_MODULE(_cuvslam, m) {
              "Odometry and SLAM, both in the calling thread, which makes a run reproducible.");
 
   tracker_cls
-      .def(nb::new_([](const Rig& rig, Tracker::Mode mode, const std::optional<Odometry::Config>& odom_config,
-                       const std::optional<Slam::Config>& slam_config) {
-             // An omitted config means the Python default, which is not the C++ default.
-             const Odometry::Config odometry_config = odom_config.value_or(PyDefaultOdometryConfig());
-             return DeletedWithoutGil(
-                 new Tracker(rig, mode, odometry_config, slam_config.has_value() ? &*slam_config : nullptr));
-           }),
-           nb::arg("rig"), nb::arg("mode"), nb::arg("odom_config") = nb::none(), nb::arg("slam_config") = nb::none(),
-           "Initialize the cuVSLAM system. Each `Odometry.OdometryMode` has specific `rig` requirements.\n\n"
-           "`mode` picks whether SLAM runs and whether the bundle adjuster and SLAM get threads of their own. It has "
-           "to agree with the configurations: a realtime mode needs `odom_config.async_sba == True` and "
-           "`slam_config.sync_mode == False`, an offline mode needs the opposite. The tracker checks these rather than "
-           "changing them, so what you configure is what runs. Both fields default to the realtime values, so the "
-           "offline modes need configurations that say so.\n\n"
-           "Parameters:\n"
-           "    rig: Camera rig configuration\n"
-           "    mode: What to run, and whether to run it in the background, see :class:`cuvslam.Tracker.Mode`\n"
-           "    odom_config: Optional odometry configuration (uses defaults if omitted)\n"
-           "    slam_config: SLAM configuration, used only in the SLAM modes; None uses the SLAM defaults, which suit "
-           "`Mode.OdometryWithSlamRealtime`. Must be None in the odometry-only modes. `gt_align_mode` requires "
-           "standalone Odometry and Slam instances.\n\n"
-           "Raises:\n"
-           "    ValueError: If the rig is invalid, if a configuration disagrees with `mode`, or if `slam_config` is "
-           "given in an odometry-only mode.")
+      .def(
+          "__init__",
+          [](Tracker* self, const Rig& rig, Tracker::Mode mode, const std::optional<Odometry::Config>& odom_config,
+             const std::optional<Slam::Config>& slam_config) {
+            // An omitted config means the Python default, which is not the C++ default.
+            const Odometry::Config odometry_config = odom_config.value_or(PyDefaultOdometryConfig());
+            new (self) Tracker(rig, mode, odometry_config, slam_config.has_value() ? &*slam_config : nullptr);
+          },
+          nb::arg("rig"), nb::arg("mode"), nb::arg("odom_config") = nb::none(), nb::arg("slam_config") = nb::none(),
+          "Initialize the cuVSLAM system. Each `Odometry.OdometryMode` has specific `rig` requirements.\n\n"
+          "`mode` picks whether SLAM runs and whether the bundle adjuster and SLAM get threads of their own. It has "
+          "to agree with the configurations: a realtime mode needs `odom_config.async_sba == True` and "
+          "`slam_config.sync_mode == False`, an offline mode needs the opposite. The tracker checks these rather than "
+          "changing them, so what you configure is what runs. Both fields default to the realtime values, so the "
+          "offline modes need configurations that say so.\n\n"
+          "Parameters:\n"
+          "    rig: Camera rig configuration\n"
+          "    mode: What to run, and whether to run it in the background, see :class:`cuvslam.Tracker.Mode`\n"
+          "    odom_config: Optional odometry configuration (uses defaults if omitted)\n"
+          "    slam_config: SLAM configuration, used only in the SLAM modes; None uses the SLAM defaults, which suit "
+          "`Mode.OdometryWithSlamRealtime`. Must be None in the odometry-only modes. `gt_align_mode` requires "
+          "standalone Odometry and Slam instances.\n\n"
+          "Raises:\n"
+          "    ValueError: If the rig is invalid, if a configuration disagrees with `mode`, or if `slam_config` is "
+          "given in an odometry-only mode.")
       .def(
           "track",
           [](Tracker& self, int64_t timestamp, const std::vector<nb::ndarray<nb::ro>>& images,

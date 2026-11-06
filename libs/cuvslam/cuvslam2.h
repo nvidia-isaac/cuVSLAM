@@ -987,9 +987,9 @@ public:
    * Destructor. Stops the SLAM thread and, with a map file (`Config::map_path`, or LocalizeInMap() with `attach`),
    * writes the map there.
    *
-   * On the SLAM thread, for example when a callback holds the last owner, this work finishes asynchronously on
-   * another thread after the destructor returns, and there is no way to wait for it. Do not exit the process right
-   * after, or the map file may be left incomplete.
+   * Must not run on this Slam's own SLAM thread, which cannot join itself; there it calls std::terminate. That
+   * thread runs the callbacks and releases each one after running it, so a callback must not hold the last
+   * reference to its Slam, or to the Tracker that holds it.
    */
   ~Slam();
 
@@ -1212,7 +1212,7 @@ public:
    */
   Tracker(Tracker&& other) noexcept = default;
 
-  /// @brief Destructor. On the SLAM thread, the Slam it owns finishes tearing down asynchronously, see ~Slam().
+  /// @brief Destructor. Must not run on the SLAM thread of the Slam it owns, see ~Slam().
   ~Tracker() = default;
 
   /**

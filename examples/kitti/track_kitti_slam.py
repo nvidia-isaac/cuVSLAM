@@ -13,7 +13,6 @@
 # of the software or derivative works thereof, you agree to be bound by this License.
 
 import os
-import threading
 import time
 from PIL import Image
 from numpy import loadtxt, asarray, array_equal as np_array_equal, savetxt, timedelta64
@@ -95,22 +94,6 @@ def transform_landmarks(landmarks, initial_pose):
         transformed_landmarks.append(transformed_landmark)
 
     return transformed_landmarks
-
-
-# Save callback to set map_saved to True if map saving is successful
-def save_callback(success):
-    global map_saved
-    map_saved = success
-
-def localization_start_cb():
-    print("Localization started")
-
-# Localization callback to set slam_initial_pose and trigger localization_complete event
-def localization_finish_cb(pose, error_message):
-    global slam_initial_pose  # Declare slam_initial_pose as global
-    print(f"Localization result: {pose}, {error_message}")
-    slam_initial_pose = pose
-    localization_complete.set()
 
 
 # Generate pseudo-random colour from integer identifier for visualization
@@ -199,11 +182,8 @@ trajectory_file = os.path.join(sequence_path, 'trajectory_tum.txt')
 if not os.path.exists(map_path):
     print(f"Map folder not found at {map_path}")
 
-# Define these variables before the callback function
-localization_complete = threading.Event()
 slam_initial_pose = None
 guess_pose = None
-map_saved = False
 
 # Define localization settings
 loc_settings = cuvslam.Slam.LocalizationSettings(
@@ -233,14 +213,15 @@ if os.path.exists(map_path) and (guess_pose is not None):
     ]
     _, _ = tracker.track(timestamp, init_images)
 
-    tracker.slam.localize_in_map(map_path, timestamp, guess_pose, init_images, loc_settings, localization_start_cb,
-                                 localization_finish_cb)
+    localization = tracker.slam.localize_in_map(map_path, timestamp, guess_pose, init_images, loc_settings)
 
     wait_time = 0
     wait_timestamp_ns = timestamp
-    # Wait for localization to complete with proper tracking, but only up to max_wait_time seconds
-    while not SLAM_SYNC_MODE and not localization_complete.wait(timeout=0.5) and wait_time < max_wait_time:
-        print(f"Waiting for localization... timestamp: {wait_time}")
+    # Wait for localization to complete with proper tracking, but only up to max_wait_time seconds.
+    # In sync mode, it is done already.
+    while not localization.wait(timeout=0.5) and wait_time < max_wait_time:
+        state = "running" if localization.started() else "queued"
+        print(f"Waiting for localization ({state})... timestamp: {wait_time}")
         # call track() every 0.5 seconds only for the first 5 seconds
         if wait_time < 5.0:
             # Increment timestamp as track() requires strictly increasing timestamps.
@@ -250,7 +231,10 @@ if os.path.exists(map_path) and (guess_pose is not None):
             _, slam_pose = tracker.track(wait_timestamp_ns, init_images)
             print(f"  slam_pose.t: {[f'{x:.3f}' for x in slam_pose.translation]}")
         wait_time += 0.5
-    if not localization_complete.is_set():
+    if localization.done():
+        slam_initial_pose = localization.result()
+        print(f"Localization result: {slam_initial_pose}, {localization.error_message}")
+    else:
         print(f"Localization did not complete within {max_wait_time} seconds")
     IDX += 1
 
@@ -364,18 +348,15 @@ if guess_pose is None:
     print(f"Saving trajectory to {trajectory_file} of length {len(trajectory_tum)}")
     savetxt(trajectory_file, trajectory_tum)
 
-    tracker.slam.save_map(map_path, save_callback)
+    save = tracker.slam.save_map(map_path)
 
     # Wait for map saving to complete
-    start_time = time.time()
-    while not map_saved and (time.time() - start_time) < max_wait_time:
-        time.sleep(0.1)
-        print(f"Waiting for map saving to complete... {time.time() - start_time} seconds")
-
-    if map_saved:
+    if not save.wait(timeout=max_wait_time):
+        print("WARNING: Map saving may not have completed")
+    elif save.result():
         print("Map saved successfully")
     else:
-        print("WARNING: Map saving may not have completed")
+        print("WARNING: Failed to save the map")
 
 
 print("Cleaning up resources...")

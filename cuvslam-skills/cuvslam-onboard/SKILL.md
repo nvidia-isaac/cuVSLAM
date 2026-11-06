@@ -268,33 +268,18 @@ tracker = cuvslam.Tracker(cuvslam.Rig(...), cuvslam.Tracker.Mode.OdometryWithSla
 odom_pose, slam_pose = tracker.track(...)
 slam = tracker.slam
 
-# Save map
-def map_saved(success):
-    print(f"Map save {'succeeded' if success else 'failed'}")
-
-slam.save_map("map/", map_saved)
+# Save map: returns a request; result() waits for it (sync mode has finished it already)
+saved = slam.save_map("map/").result()
+print(f"Map save {'succeeded' if saved else 'failed'}")
 
 # Later: localize
 loc_settings = cuvslam.Slam.LocalizationSettings()
-
-def localization_started():
-    print("Localization started")
-
-def localization_finished(pose, error_message):
-    if pose is not None:
-        print(f"Localized pose: {pose}")
-    else:
-        print(f"Localization failed: {error_message}")
-
-slam.localize_in_map(
-    "map/",
-    timestamp,
-    pose_hint,
-    images,
-    loc_settings,
-    localization_started,
-    localization_finished,
-)
+localization = slam.localize_in_map("map/", timestamp, pose_hint, images, loc_settings)
+pose = localization.result()  # in async mode, keep calling track() while waiting: see examples/kitti
+if pose is not None:
+    print(f"Localized pose: {pose}")
+else:
+    print(f"Localization failed: {localization.error_message}")
 ```
 
 See `examples/kitti/track_kitti_slam.py` for the complete workflow.
