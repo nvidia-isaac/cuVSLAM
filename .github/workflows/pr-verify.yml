@@ -183,6 +183,14 @@ jobs:
         timeout-minutes: 15
         run: ./scripts/test_cuvslam_in_docker.sh ./output
 
+      - name: Build Python wheels
+        timeout-minutes: 30
+        run: ./scripts/build_pycuvslam_in_docker.sh ./output
+
+      - name: Verify Python wheel installs
+        timeout-minutes: 20
+        run: ./scripts/verify_pycuvslam_wheel_in_docker.sh ./output
+
       - name: Run Python tests
         timeout-minutes: 15
         run: ./scripts/test_pycuvslam_in_docker.sh ./output
@@ -330,6 +338,14 @@ jobs:
         timeout-minutes: 15
         run: ./scripts/test_cuvslam_in_docker.sh ./output
 
+      - name: Build Python wheels
+        timeout-minutes: 30
+        run: ./scripts/build_pycuvslam_in_docker.sh ./output
+
+      - name: Verify Python wheel installs
+        timeout-minutes: 20
+        run: ./scripts/verify_pycuvslam_wheel_in_docker.sh ./output
+
       - name: Run Python tests
         timeout-minutes: 15
         run: ./scripts/test_pycuvslam_in_docker.sh ./output
@@ -424,6 +440,14 @@ jobs:
       - name: Run C++ tests
         timeout-minutes: 15
         run: ./scripts/test_cuvslam_in_docker.sh ./output
+
+      - name: Build Python wheels
+        timeout-minutes: 30
+        run: ./scripts/build_pycuvslam_in_docker.sh ./output
+
+      - name: Verify Python wheel installs
+        timeout-minutes: 20
+        run: ./scripts/verify_pycuvslam_wheel_in_docker.sh ./output
 
       - name: Run Python tests
         timeout-minutes: 15
