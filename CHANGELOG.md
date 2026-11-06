@@ -27,6 +27,7 @@
 
 ### Added
 
+- `IsCudaBuild()` (`cuvslam.is_cuda_build()` in Python): whether the library is built with CUDA support
 - `cuda` extra for the Python wheels (x86_64 and Jetson Thor): `pip install "<wheel>[cuda]"` installs the cuBLAS,
   cuSOLVER and cuSPARSE wheels from PyPI, so no system CUDA Toolkit is needed
 - `tensorrt` extra for the Python wheels (x86_64 and Jetson Thor): installs NVIDIA's TensorRT wheel of the version the
@@ -42,6 +43,9 @@
   Python 3.13 and newer but could not be imported there
 - Unsynchronized reads of the SLAM engine during map localization (`LocalizeInMapCmd::Execute`)
 - Unnecessary mutex contention in `AsyncSlam::GetSlamPose()`
+- CPU Mono odometry could throw `std::length_error` after forced keyframes (`Internals::kf_override_frame_selection`)
+- In builds without CUDA, `use_gpu` defaults to false and `true` throws `std::invalid_argument`. Map localization
+  never succeeded there with the old default of `true`
 
 ### Security
 
@@ -50,6 +54,10 @@
   CVE-2021-41496), SciPy 1.15.3 (CVE-2023-25399, CVE-2023-29824), fonttools 4.60.2
   (CVE-2025-66034), and optional WeasyPrint 70.0 (CVE-2025-68616, CVE-2026-49452,
   CVE-2026-55073)
+- Updated auxiliary Python dependencies on Python 3.11 and newer to Pillow 13.0.0 (38 Black Duck
+  advisories, BDSA-2026-37840 to BDSA-2026-38134) and, in the AnyLoc export venv, filelock 4.2.7
+  (11 advisories, BDSA-2026-38098 to BDSA-2026-38635). Neither has a fixed release for Python 3.10,
+  which stays on Pillow 12.3.0 and filelock 4.0.12
 
 ## [17.0.0] - 2026-07-21
 

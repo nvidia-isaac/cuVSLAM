@@ -1,0 +1,32 @@
+# Separate runtime: NAT 1.9 requires NumPy >=2.3, while cuvslam-tools pins 2.2.6.
+[build-system]
+requires = ["setuptools>=65,<81", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cuvslam-map-repair-nat"
+version = "0.1.0"
+description = "NeMo MCP server for cuvslam-tools offline map repair"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "nvidia-nat==1.9.0",
+    "nvidia-nat-mcp==1.9.0",
+    "nvidia-nat-langchain==1.9.0",
+    "mcp==1.29.1",
+    "lmdb==3.0.0",
+]
+
+[project.entry-points."nat.components"]
+cuvslam_map_repair = "cuvslam_tools.offline_map_repair.mcp_server.register"
+
+[project.scripts]
+cuvslam_map_repair_server = "cuvslam_tools.offline_map_repair.mcp_server.server:main"
+
+[tool.setuptools]
+packages = ["cuvslam_tools.offline_map_repair.mcp_server"]
+
+[tool.setuptools.package-dir]
+"cuvslam_tools.offline_map_repair.mcp_server" = "."
+
+[tool.setuptools.package-data]
+"cuvslam_tools.offline_map_repair.mcp_server" = ["configs/*.yaml", "configs/*.json"]

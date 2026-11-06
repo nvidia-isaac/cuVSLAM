@@ -91,6 +91,11 @@ it closes loops, and how to evaluate it with `cuvslam_vpr_reporter`.
 The quickest way to get started is to [install PyCuVSLAM from a pre-built wheel](#install-from-wheels)
 and explore the [examples](examples/).
 
+For experimental offline editing of saved SLAM maps through NVIDIA NeMo Agent
+Toolkit's MCP server, see [Offline map repair](tools/python_tools/cuvslam_tools/offline_map_repair/README.md).
+The guide covers map inspection, replay-based repair, maintenance, and native
+relocalization checks for the supported map serialization.
+
 ## ROS2 Support
 
 To use cuVSLAM in a ROS2 environment:
@@ -256,17 +261,21 @@ All flags have defaults; override with `-DFLAG=VALUE`.
 | Flag | Default | Purpose |
 |------|---------|---------|
 | `USE_CUDA` | ON | CUDA acceleration |
-| `USE_CUNLS` | ON | cuNLS (CUDA nonlinear least squares); requires `USE_CUDA` |
+| `USE_CUNLS` | AUTO | cuNLS (CUDA nonlinear least squares); requires `USE_CUDA` |
 | `USE_LMDB` | ON | LMDB map database |
 | `USE_RERUN` | OFF | Rerun SDK visualization |
 | `USE_NVTX` | OFF | NVIDIA NVTX profiling |
-| `USE_TENSORRT` | ON | AnyLoc place recognition backend; requires TensorRT 8.6+ |
+| `USE_TENSORRT` | AUTO | AnyLoc place recognition backend; requires `USE_CUDA` and TensorRT 8.6+ |
+
+`AUTO` follows `USE_CUDA`, so `-DUSE_CUDA=OFF` alone also turns off cuNLS and TensorRT. Setting either to `ON` with
+`USE_CUDA=OFF` is a configure error. A build directory configured before `AUTO` was introduced has both cached as
+`ON`: to turn off CUDA there, also pass `-DUSE_CUNLS=AUTO -DUSE_TENSORRT=AUTO`, or use a fresh build directory.
 
 Build types: `Release` (default), `Debug`, `RelWithDebInfo`, `MinSizeRel`. Do not mix types in the same build directory.
 
 ### cuNLS
 
-**cuNLS** (CUDA nonlinear least squares) is enabled by default (`USE_CUNLS=ON`) and is built from
+**cuNLS** (CUDA nonlinear least squares) is enabled by default in CUDA builds and is built from
 source via `FetchContent`, like the other external dependencies — no separate install or path is
 required. The source is pinned in `cmake/ext/cunls.cmake`, and spdlog is shared with cuVSLAM.
 cuVSLAM uses cuNLS's DenseQR solver and builds with the optional cuDSS backend disabled, so no

@@ -382,6 +382,9 @@ NB_MODULE(_cuvslam, m) {
       "Set the verbosity level of the library.\n\n"
       "Available values: 0 (default) for no output, 1 for error messages, 2 for warnings, 3 for info messages.");
 
+  m.def("is_cuda_build", &IsCudaBuild,
+        "Whether the library is built with CUDA support. `use_gpu` defaults to this, and needs it.");
+
   m.def(
       "warm_up_gpu", []() { WarmUpGPU(); },
       "Warm up the GPU (CUDA runtime).\n\n"

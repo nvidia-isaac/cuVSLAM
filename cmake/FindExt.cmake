@@ -54,10 +54,6 @@ if(USE_CERES)
     # include(cmake/ext/ceres.cmake)
 endif()
 
-if(USE_CUNLS AND NOT USE_CUDA)
-    message(FATAL_ERROR "USE_CUNLS requires USE_CUDA")
-endif()
-
 if (MSVC)
     # TODO: move to cuVSLAMUtils.cmake?
     set(CMAKE_CONFIGURATION_TYPES "Debug;Release" CACHE INTERNAL "hardcoded. do not change it. hide from user" FORCE)
@@ -82,9 +78,6 @@ if(USE_CUDA)
 endif()
 
 if(USE_TENSORRT)
-    if(NOT USE_CUDA)
-        message(FATAL_ERROR "USE_TENSORRT requires USE_CUDA")
-    endif()
     include(${CMAKE_CURRENT_LIST_DIR}/ext/tensorrt.cmake)
 endif()
 if(CUVSLAM_BUILD_ANYLOC_ENGINE)

@@ -11,6 +11,7 @@ It provides command-line tools for:
 - Evaluating visual place recognition across two passes of a route.
 - Running multi-dataset validation.
 - Undistorting EDEX images.
+- Inspecting and repairing saved SLAM maps through a local NeMo MCP server.
 
 ## Install
 
@@ -31,6 +32,10 @@ pip install -e ".[pdf]"
 ```
 
 `cuvslam_tracker`, `cuvslam_reporter`, `cuvslam_vpr_reporter`, `cuvslam_vpr_vocabulary`, and `cuvslam_validator` require the `cuvslam` Python binding in the same environment. Dataset preparation, ROS bag conversion, and undistortion should stay usable without importing `cuvslam` when their workflows do not need it.
+
+For offline map repair, install the optional client dependencies with `pip install -e ".[map-repair]"`.
+The NeMo server uses a separate environment because its NumPy requirement differs from this package's pin.
+See the [offline map repair guide](cuvslam_tools/offline_map_repair/README.md) for installation and the full workflow.
 
 ## Install The cuVSLAM Python Binding
 
@@ -84,6 +89,7 @@ Reinstall the binding after rebuilding `libcuvslam.so`.
 | `cuvslam_vpr_reporter` | Build a place recognition map from one sequence, recognize places in another, and report the result. |
 | `cuvslam_vpr_vocabulary` | Fit a place recognition vocabulary to EDEX sequences of one operating domain. |
 | `cuvslam_validator` | Run multiple reporter configs, combine results, and apply validation checks. |
+| `cuvslam_map_repair` | Inspect, repair, maintain, and evaluate offline SLAM maps through MCP. |
 | `rosbag_extract_edex` | Convert a ROS 2 bag to an EDEX sequence directory. |
 | `rosbag_extract_images` | Extract images from a ROS 2 bag. |
 | `rosbag_extract_urdf` | Inspect/extract TF and URDF data from a ROS 2 bag. |
@@ -105,6 +111,7 @@ cuvslam_reporter --help
 cuvslam_vpr_reporter --help
 cuvslam_vpr_vocabulary --help
 cuvslam_validator --help
+cuvslam_map_repair --help
 rosbag_extract_edex --help
 rosbag_extract_images --help
 rosbag_extract_urdf --help
