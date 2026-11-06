@@ -164,9 +164,8 @@ combinations require an [installation from source](#install-from-source).
   already loaded these libraries.
 
 Visual place recognition (`use_vpr`, AnyLoc) also needs TensorRT 10 (`libnvinfer10`), not included in the wheels. The
-rest of cuVSLAM runs without it. Install it separately, or with the `tensorrt` extra (x86_64 and Jetson Thor), which
-installs NVIDIA's TensorRT wheel of the version the cuVSLAM wheels are built against. An AnyLoc engine only loads in
-the TensorRT version that built it.
+rest of cuVSLAM runs without it. Install it separately, or with the `tensorrt` extra (x86_64 and Jetson Thor). Then
+build the AnyLoc engine for your GPU once with `cuvslam.build_anyloc_engine(path)`.
 
 Official wheels include cuNLS support for `Multisensor` mode; no separate cuNLS installation is required.
 
@@ -214,7 +213,9 @@ Pre-built C++ SDK archives are available on the
 
 The desktop/server row represents four archives covering both Ubuntu versions with both listed CUDA versions. Select
 the archive matching your target, Ubuntu version, and CUDA version. Each archive contains `bin/libcuvslam.so`,
-`bin/cuvslam_api_launcher`, and the public headers under `include/cuvslam/`.
+`bin/cuvslam_api_launcher`, the public headers under `include/cuvslam/`, and the
+[AnyLoc engine](models/anyloc/README.md) builder `bin/anyloc_engine_builder` with its model under
+`share/cuvslam/anyloc/`.
 
 For Python usage, [pre-built wheels](#install-from-wheels) are the recommended approach.
 
@@ -226,7 +227,7 @@ For Python usage, [pre-built wheels](#install-from-wheels) are the recommended a
 * [CUDA Toolkit 12.6 or later](https://developer.nvidia.com/cuda/toolkit) for the default `USE_CUNLS=ON` build, [Jetpack 6.1/6.2/7.0/7.1](https://docs.nvidia.com/jetson/)
     * Older CUDA 12 versions require configuring with `-DUSE_CUNLS=OFF` (see [cuNLS](#cunls)).
 * [TensorRT 8.6+](https://developer.nvidia.com/tensorrt), unless configured with `-DUSE_TENSORRT=OFF`
-* An RTX 4090 or Jetson Orin Nano to build the [AnyLoc engine](models/anyloc/README.md), unless configured with
+* A GPU and network access to build the [AnyLoc engine](models/anyloc/README.md), unless configured with
   `-DCUVSLAM_BUILD_ANYLOC_ENGINE=OFF`
 * `apt update && apt install g++ cmake git git-lfs python3-dev python3-venv`
     * git + git-lfs to clone this repository

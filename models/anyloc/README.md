@@ -12,7 +12,7 @@ Unless configured with `-DCUVSLAM_BUILD_ANYLOC_ENGINE=OFF` (see Options), the de
 |--------|--------------------------|-------|
 | `anyloc_venv` | `anyloc/venv`, a Python venv from `requirements.txt` | about a minute, once |
 | `anyloc_onnx` | `anyloc/anyloc_vits14_l9_value_322.onnx`, and the reference arrays both steps check against | seconds |
-| `anyloc_engine` | `bin/anyloc_vits14_l9_value_322_fp16_trt<TensorRT version>_sm<GPU>.engine` | about 20 seconds |
+| `anyloc_engine` | `bin/anyloc_vits14_l9_value_322_fp16_trt<TensorRT version>.engine` | about 20 seconds |
 
 `cuvslam_tracker`, `cuvslam_vpr_reporter` and `cuvslam_vpr_vocabulary` take `CUVSLAM_ANYLOC_ENGINE` as their default
 `--vpr_model_path`:
@@ -59,7 +59,7 @@ It also saves the reference image as the network input (`*_reference_input.npy`)
 
 ## Step 2: the TensorRT engine
 
-`anyloc_engine_builder` (`build_engine.cpp`) builds the engine for the `CUVSLAM_ANYLOC_TARGET` GPU, on that GPU:
+`anyloc_engine_builder` (`build_engine.cpp`) builds the engine for the GPU it runs on:
 
 - **FP16, with an FP32 head.** Everything after the last matrix multiply, the bias and L2 normalization of the value
   projection, stays in FP32. The layer norms are left alone on purpose: TensorRT computes them in FP32 inside
@@ -74,29 +74,25 @@ It also saves the reference image as the network input (`*_reference_input.npy`)
 On an RTX 4090 with TensorRT 8.6.1 that gives a 34.5 MB engine running in 0.48 ms per frame, with a cosine of 0.99993
 on average and 0.99865 for the worst patch.
 
-## An engine belongs to one GPU and one TensorRT
-
-The build makes the engine for one of four GPUs, which `CUVSLAM_ANYLOC_TARGET` names: `rtx4090` (sm_89), the
-default on x86_64, `orin_nano`, a Jetson Orin Nano (sm_87), the default on aarch64, and the CI runners' `a10g`
-(sm_86) and `thor`, a Jetson Thor (sm_110). TensorRT can only build an
-engine on the GPU it is for, so each one is built on its own device: the `orin_nano` engine by a build on the Orin
-Nano, with the TensorRT of its JetPack. A build on any other GPU stops at the engine: build only the builder there
-and make the engine by hand as below.
+## An engine belongs to one GPU architecture and one TensorRT
 
 A serialized engine only loads into the TensorRT version, and only runs on the GPU architecture, that built it, and
-`VprAnyLoc` refuses any other with an error that says to rebuild it. The engine's name records both, so building with
-another TensorRT, or for another GPU, makes a new file instead of reusing one that no longer loads, and the builder
-refuses to build when CUDA device 0 is not the GPU the name promises. To run AnyLoc on another machine, copy the ONNX
-model and the reference arrays there and build the engine with the builder of a build there with
-`CUVSLAM_BUILD_ANYLOC_ENGINE` (its configure still fetches DINOv2, or uses the offline settings under Options):
+`VprAnyLoc` refuses any other with an error that says to rebuild it. The build makes the engine for its own GPU and
+names it after its TensorRT version, so building with another TensorRT makes a new file instead of reusing one that no
+longer loads.
+
+To run AnyLoc on another machine, build the engine there with the builder and model the packages ship; the builder
+needs TensorRT's ONNX parser (`libnvonnxparsers10`). The C++ package has the builder in `bin/` and, in
+`share/cuvslam/anyloc/`, the model, its reference arrays and `LICENSE.dinov2`, the license of the DINOv2 weights the
+model holds:
 
 ```bash
-cmake --build build --target anyloc_engine_builder
-anyloc_engine_builder --onnx=anyloc_vits14_l9_value_322.onnx \
-    --engine=anyloc_vits14_l9_value_322_fp16.engine \
-    --reference_input=anyloc_vits14_l9_value_322_reference_input.npy \
-    --reference_output=anyloc_vits14_l9_value_322_reference_output.npy
+bin/anyloc_engine_builder --onnx=share/cuvslam/anyloc/anyloc_vits14_l9_value_322.onnx --engine=anyloc.engine \
+    --reference_input=share/cuvslam/anyloc/anyloc_vits14_l9_value_322_reference_input.npy \
+    --reference_output=share/cuvslam/anyloc/anyloc_vits14_l9_value_322_reference_output.npy
 ```
+
+The Python wheel runs its copy with `cuvslam.build_anyloc_engine("anyloc.engine")`.
 
 ## Options
 
@@ -105,7 +101,6 @@ anyloc_engine_builder --onnx=anyloc_vits14_l9_value_322.onnx \
 | `CUVSLAM_BUILD_ANYLOC_ENGINE` | ON | builds the model, the engine and `anyloc_engine_builder`; needs network access |
 | `CUVSLAM_ANYLOC_LAYER` | 9 | DINOv2 block whose value facet AnyLoc reads |
 | `CUVSLAM_ANYLOC_INPUT_SIZE` | 322 | square input size, a multiple of 14 |
-| `CUVSLAM_ANYLOC_TARGET` | `rtx4090` on x86_64, `orin_nano` on aarch64 | the GPU the engine is built for: `rtx4090` (sm_89), `a10g` (sm_86), `orin_nano` (Jetson Orin Nano, sm_87) or `thor` (Jetson Thor, sm_110); the build machine has to have that GPU |
 | `CUVSLAM_ANYLOC_PYTHON` | empty | a Python that already has `requirements.txt` installed, instead of creating the venv; without it the venv is made from a Python 3.10 to 3.12 found on the system (`Python3_EXECUTABLE`) |
 | `CUVSLAM_DINOV2_CHECKPOINT` | empty | a local copy of `dinov2_vits14_pretrain.pth`, instead of downloading it |
 | `TENSORRT_ROOT` | empty | TensorRT install prefix, when it is not next to CUDA or in the system paths |

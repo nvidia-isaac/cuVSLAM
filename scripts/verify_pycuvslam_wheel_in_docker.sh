@@ -9,6 +9,7 @@ if [ "$#" -ne 1 ] && [ "$#" -ne 3 ]; then
   echo "  (pip-installable) and the auditwheel-repaired extension loads with the"
   echo "  excluded CUDA libraries resolved from the system. Before installing, runs the"
   echo "  PyPI metadata check (twine check --strict) and, for abi3 wheels, abi3audit."
+  echo "  The abi3 wheel on Python 3.12 also builds and loads an AnyLoc engine."
   echo "  When expected_version and expected_git_sha are provided, also verifies that"
   echo "  get_version() identifies that clean source revision without '-modified'."
   exit 1
@@ -88,6 +89,15 @@ if expected_version:
 
 print("cuvslam wheel import OK, version:", version_info)
 PY
+        if [[ "$name" == *-abi3-* && "$py" == 3.12 ]]; then
+          "$venv/bin/python" - <<PY
+import cuvslam
+
+cuvslam.build_anyloc_engine("/tmp/anyloc.engine")
+cuvslam.VprVocabularyBuilder(cuvslam.Slam.VprSettings(model_path="/tmp/anyloc.engine"))
+print("AnyLoc engine from the wheel OK")
+PY
+        fi
       done
     done
   '

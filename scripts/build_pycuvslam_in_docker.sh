@@ -36,9 +36,9 @@ docker run --runtime=nvidia --gpus all --rm --label "cuvslam.runner=${RUNNER_NAM
     CUDA_MAJOR=$(echo "$CUDA_VERSION" | cut -d. -f1)
 
     if [ "$CUDA_MAJOR" = "12" ]; then
-      EXCLUDES="--exclude libcusolver.so.11 --exclude libcublas.so.12 --exclude libcublasLt.so.12 --exclude libcusparse.so.12 --exclude libnvJitLink.so.12 --exclude libnvinfer.so.10"
+      EXCLUDES="--exclude libcusolver.so.11 --exclude libcublas.so.12 --exclude libcublasLt.so.12 --exclude libcusparse.so.12 --exclude libnvJitLink.so.12 --exclude libnvinfer.so.10 --exclude libnvonnxparser.so.10"
     elif [ "$CUDA_MAJOR" = "13" ]; then
-      EXCLUDES="--exclude libcusolver.so.12 --exclude libcublas.so.13 --exclude libcublasLt.so.13 --exclude libcusparse.so.12 --exclude libnvJitLink.so.13 --exclude libnvinfer.so.10"
+      EXCLUDES="--exclude libcusolver.so.12 --exclude libcublas.so.13 --exclude libcublasLt.so.13 --exclude libcusparse.so.12 --exclude libnvJitLink.so.13 --exclude libnvinfer.so.10 --exclude libnvonnxparser.so.10"
     else
       echo "Error: unknown CUDA major version $CUDA_MAJOR, cannot determine auditwheel exclusions"
       exit 1
@@ -53,13 +53,13 @@ from pathlib import Path
 path, major, install_tensorrt = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3])
 text = path.read_text()
 trt = re.search(r"^TENSORRT_VERSION=(\d+\.\d+\.\d+)\.", install_tensorrt.read_text(), re.M).group(1)
-trt_cu12 = f"tensorrt-cu12-libs=={trt}.*; platform_machine != \"aarch64\""
+trt_cu12 = f"tensorrt-cu12-libs>={trt},<11; platform_machine != \"aarch64\""
 if text.count(trt_cu12) != 1:
-    raise SystemExit(f"{path} must pin {trt_cu12!r} to match {install_tensorrt}")
+    raise SystemExit(f"{path} must require {trt_cu12!r} to match {install_tensorrt}")
 replacements = [("name = \"cuvslam\"", f"name = \"cuvslam-cu{major}\"")]
 if major != "12":
     replacements.append(("==12.*; platform_machine != \"aarch64\"", f"=={major}.*"))
-    replacements.append((trt_cu12, f"tensorrt-cu{major}-libs=={trt}.*"))
+    replacements.append((trt_cu12, f"tensorrt-cu{major}-libs>={trt},<11"))
 for old, new in replacements:
     if text.count(old) != 1:
         raise SystemExit(f"Expected exactly one {old!r} in {path}")
