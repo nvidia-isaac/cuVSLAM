@@ -25,6 +25,7 @@ set(SOURCES
     image_test.cpp
     kf_selector_test.cpp
     lk_tracker_test.cpp
+    selection_test.cpp
     sof_l2r_test.cpp
     st_tracker_test.cpp
 )

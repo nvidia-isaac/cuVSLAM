@@ -19,6 +19,7 @@
 
 ### Added
 
+- `IsCudaBuild()` (`cuvslam.is_cuda_build()` in Python): whether the library is built with CUDA support
 - `cuda` extra for the Python wheels (x86_64 and Jetson Thor): `pip install "<wheel>[cuda]"` installs the cuBLAS,
   cuSOLVER and cuSPARSE wheels from PyPI, so no system CUDA Toolkit is needed
 - `tensorrt` extra for the Python wheels (x86_64 and Jetson Thor): installs NVIDIA's TensorRT wheel of the version the
@@ -34,6 +35,9 @@
   Python 3.13 and newer but could not be imported there
 - Unsynchronized reads of the SLAM engine during map localization (`LocalizeInMapCmd::Execute`)
 - Unnecessary mutex contention in `AsyncSlam::GetSlamPose()`
+- CPU Mono odometry could throw `std::length_error` after forced keyframes (`Internals::kf_override_frame_selection`)
+- In builds without CUDA, `use_gpu` defaults to false and `true` throws `std::invalid_argument`. Map localization
+  never succeeded there with the old default of `true`
 
 ### Security
 
