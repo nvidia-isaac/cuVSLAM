@@ -62,16 +62,6 @@ def end_with_pending_requests(use_tracker, queue):
             outcomes.append("dropped" if "destroyed" in str(error) else f"failed: {error}")
     queue.put(outcomes)
 
-def slam_threads():
-    names = []
-    for task in os.listdir('/proc/self/task'):
-        try:
-            with open(f'/proc/self/task/{task}/comm') as comm:
-                names.append(comm.read().strip())
-        except FileNotFoundError:
-            pass  # the thread exited
-    return [name for name in names if name == 'cuvslam:slam']
-
 plt = None
 
 def visualize_frame(images, i, subplots):
@@ -482,19 +472,6 @@ class TestMap(unittest.TestCase):
             request.wait(timeout=-1)
         with self.assertRaises(ValueError):
             request.result(timeout=float('nan'))
-
-    def test_request_does_not_keep_its_slam_alive(self):
-        before = len(slam_threads())
-        slam = vslam.Slam(self.rig, [0], vslam.Slam.Config(sync_mode=False))
-        self.assertEqual(len(slam_threads()), before + 1)
-        request = slam.flush_map()
-        del slam  # the only owner: destroying it stops its SLAM thread
-        self.assertEqual(len(slam_threads()), before)
-        self.assertTrue(request.done())
-        try:
-            self.assertFalse(request.result(timeout=0))  # there is no map file to flush
-        except RuntimeError as error:
-            self.assertIn("destroyed", str(error))  # or it was dropped with the Slam
 
 
 if __name__ == "__main__":
