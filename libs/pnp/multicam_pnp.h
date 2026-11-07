@@ -64,9 +64,11 @@ public:
   // OUT: rig_from_world  - if success updated pose otherwise it has unpredicted behavior
   //      static_info_exp - information matrix for the static pose in exponential mapping form in
   //                        the world coordinate system
+  //      final_cost      - optional cost at the returned pose
   bool solve(Isometry3T& rig_from_world, Matrix6T& static_info_exp,
              const std::vector<camera::Observation>& observations,
-             const std::unordered_map<TrackId, Vector3T>& landmarks, const PNPSettings& settings) const;
+             const std::unordered_map<TrackId, Vector3T>& landmarks, const PNPSettings& settings,
+             float* final_cost = nullptr) const;
 
 private:
   float evaluate_cost(const Isometry3T& rig_from_world, const PNPSettings& settings) const;
