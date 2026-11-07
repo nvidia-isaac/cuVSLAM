@@ -21,7 +21,7 @@ import unittest
 from pathlib import Path
 
 from cuvslam_tools import dataset_registry
-from cuvslam_tools.dataset_registry import DatasetSpec, EvalSpec, RegistryError
+from cuvslam_tools.dataset_registry import DatasetSpec, EvalSpec, RegistryError, VprSpec
 
 KITTI_PREPARE = "cuvslam_tools.dataset_preparation.kitti.prepare"
 
@@ -125,6 +125,59 @@ class TestShippedRegistry(unittest.TestCase):
 
         self.assertEqual(actual, expected)
 
+    def test_vpr_config_is_exact(self):
+        # Title prefixes key the KPI history; a pair of two sequences needs ground truth in one frame.
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "vpr.cfg"
+            self.assertTrue(dataset_registry.write_vpr_config(path))
+            config = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            config,
+            {
+                "pairs": [
+                    {"title": "KITTI-07", "map_sequence": "kitti/07", "query_sequence": "kitti/07"},
+                    {
+                        "title": "EUROC-MH_01_easy",
+                        "map_sequence": "euroc/MH_01_easy",
+                        "query_sequence": "euroc/MH_01_easy",
+                    },
+                    {
+                        "title": "CODA-0 to CODA-5",
+                        "map_sequence": "coda/0",
+                        "query_sequence": "coda/5",
+                        "map_gt": "gt_global.txt",
+                        "query_gt": "gt_global.txt",
+                    },
+                ]
+            },
+        )
+
+    def test_vpr_config_is_runnable_as_a_module(self):
+        # run_eval.sh runs the reporter on the printed path.
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "vpr.cfg"
+            completed = subprocess.run(
+                [sys.executable, "-m", "cuvslam_tools.dataset_registry", "vpr-config", "--suite", "smoke",
+                 "--output", str(path)],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            self.assertEqual(completed.stdout.strip(), str(path))
+            titles = [pair["title"] for pair in json.loads(path.read_text(encoding="utf-8"))["pairs"]]
+        self.assertEqual(titles, ["KITTI-07", "EUROC-MH_01_easy"])
+
+    def test_suite_without_vpr_pairs_writes_no_config(self):
+        original = dataset_registry.DATASETS
+        dataset_registry.DATASETS = {"kitti": DatasetSpec("kitti", KITTI_PREPARE, (stereo_eval(),))}
+        try:
+            with tempfile.TemporaryDirectory() as root:
+                path = Path(root) / "vpr.cfg"
+                self.assertFalse(dataset_registry.write_vpr_config(path))
+                self.assertFalse(path.exists())
+        finally:
+            dataset_registry.DATASETS = original
+
     def test_archive_and_mount_derive_from_the_dataset_id(self):
         for spec in dataset_registry.provisionable_datasets():
             self.assertEqual(spec.archive_name, f"{spec.dataset_id}.tar")
@@ -132,7 +185,7 @@ class TestShippedRegistry(unittest.TestCase):
 
     def test_eval_enabled_datasets_are_exact(self):
         enabled = [spec.dataset_id for spec in dataset_registry.eval_datasets()]
-        self.assertEqual(enabled, ["kitti", "euroc", "tum", "icl_nuim", "m3ed_spot", "tartanair_v1"])
+        self.assertEqual(enabled, ["kitti", "euroc", "tum", "icl_nuim", "m3ed_spot", "tartanair_v1", "coda"])
 
     def test_listing_the_registry_imports_no_converter_dependencies(self):
         # In a subprocess, because sibling test modules import converters and
@@ -349,6 +402,26 @@ class TestSuiteSelection(unittest.TestCase):
         finally:
             dataset_registry.DATASETS = original
 
+    def test_vpr_record_outside_full_is_rejected(self):
+        spec = DatasetSpec("kitti", KITTI_PREPARE, vpr=VprSpec((("07", "07"),), frozenset({"smoke"})))
+        original = dataset_registry.DATASETS
+        dataset_registry.DATASETS = {"kitti": spec}
+        try:
+            with self.assertRaisesRegex(RegistryError, "kitti VPR: every record must belong to 'full'"):
+                dataset_registry.validate()
+        finally:
+            dataset_registry.DATASETS = original
+
+    def test_vpr_only_dataset_is_staged(self):
+        # Staging lists eval_datasets, so a dataset only the VPR reporter reads still gets staged.
+        spec = DatasetSpec("kitti", KITTI_PREPARE, vpr=VprSpec((("07", "07"),), frozenset(dataset_registry.SUITES)))
+        original = dataset_registry.DATASETS
+        dataset_registry.DATASETS = {"kitti": spec}
+        try:
+            self.assertEqual(dataset_registry.eval_datasets("smoke"), [spec])
+        finally:
+            dataset_registry.DATASETS = original
+
     def test_smoke_covers_every_modality(self):
         # Pre-merge has to exercise stereo, stereo-inertial, RGB-D and
         # multi-sensor. Which datasets provide that is free to change; the
@@ -413,6 +486,14 @@ class TestKpiKeys(unittest.TestCase):
                 for mode in dataset_registry.KPI_MODES
             },
         )
+
+    def test_suite_keys_include_place_recognition(self):
+        smoke, full = dataset_registry.suite_kpi_keys("smoke"), dataset_registry.suite_kpi_keys("full")
+        for metric in dataset_registry.VPR_KPI_METRICS:
+            for prefix in ("KITTI", "EUROC"):
+                self.assertIn(f"{prefix}_{metric}_VPR_SLAM", smoke)
+            self.assertNotIn(f"CODA_{metric}_VPR_SLAM", smoke)
+            self.assertIn(f"CODA_{metric}_VPR_SLAM", full)
 
     def test_every_accepted_mode_names_a_type_that_survives_key_parsing(self):
         # cuvslam_kpi_report.parse_kpi_key splits a key on "_" and reads the type

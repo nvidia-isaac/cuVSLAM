@@ -32,9 +32,9 @@ import shutil
 import sys
 
 from cuvslam_kpi_report import (COUNT_METRICS, COUNT_MIN_BAND, DEFAULT_BASELINE, HIGHER_IS_BETTER, LEVEL_MAD_FACTOR,
-                                METRIC_UNITS, MIN_BASELINE_RUNS, REQUIRED_METRICS, config_group, get_display_name,
-                                load_json_object, load_kpi_config, parse_kpi_key, resolve_baseline_settings,
-                                safe_float, stored_baseline_settings, write_json)
+                                METRIC_UNITS, MIN_BASELINE_RUNS, REQUIRED_METRICS, VPR_METRICS, config_group,
+                                get_display_name, load_json_object, load_kpi_config, parse_kpi_key,
+                                resolve_baseline_settings, safe_float, stored_baseline_settings, write_json)
 
 SITE_SUBDIR = "kpi"
 SCHEMA_VERSION = 3
@@ -168,7 +168,7 @@ def build_data(configs, stored_settings, kpi_config_path):
                 "higher_is_better": metric in HIGHER_IS_BETTER,
                 "count": metric in COUNT_METRICS,
             }
-            for metric in REQUIRED_METRICS
+            for metric in REQUIRED_METRICS + VPR_METRICS
         },
         "baseline": {
             "min_runs": MIN_BASELINE_RUNS,

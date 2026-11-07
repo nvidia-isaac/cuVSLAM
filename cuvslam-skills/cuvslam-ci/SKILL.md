@@ -33,8 +33,8 @@ CI scripts (`scripts/`):
 - `benchmark_cuvslam_in_docker.sh` - runs the active `cuda_modules_test` speed benchmarks in the product container and captures runner metadata, raw output, and GoogleTest XML.
 - `cuvslam_benchmark_report.py` - validates benchmark XML properties and renders per-Jetson JSON and Markdown reports.
 - `eval_cuvslam_in_docker.sh` - host wrapper: mounts datasets and KPI history, starts the eval container.
-- `run_eval.sh` - in container: reads evaluation records from the registry, runs `cuvslam_app.py`, then collects
-  machine-readable KPI JSON.
+- `run_eval.sh` - in container: reads evaluation records from the registry, runs `cuvslam_app.py` and
+  `cuvslam_vpr_reporter`, then collects machine-readable KPI JSON.
 - `cuvslam_kpi_report.py` - owns KPI collection, rolling diffs, cross-config aggregation, soft drift data, and all
   KPI Markdown rendering. `collect` writes raw and report JSON; `render` and `aggregate` produce publication Markdown.
 - `kpi_baseline_ranges.json` - committed KPI config: defaults and per-dataset overrides for sequence failure checks, drift tolerances, and calibrated expected values.
@@ -52,7 +52,7 @@ The dataset ID is the only name: it is the preparation module, the `<id>.tar` ob
 2. Add a `DatasetSpec` to `DATASETS` in `tools/python_tools/cuvslam_tools/dataset_registry.py` with the ID and the preparation module, and no `evals` yet. Run `python3 -m cuvslam_tools.dataset_registry validate`.
 3. Add the ID to the `dataset` choice input in `provision-datasets.yml`. A registry test asserts every choice resolves.
 4. Run Provision dataset (`workflow_dispatch`) on the default branch. It writes `<S3_DATASETS_BUCKET>/<id>.tar`.
-5. Enable evaluation by adding one or more `EvalSpec` records to that `DatasetSpec`: the reporter config filename, the `cuvslam_app` flags, and suite membership. Nothing else needs editing; staging and eval both read the registry.
+5. Enable evaluation by adding one or more `EvalSpec` records to that `DatasetSpec`: the reporter config filename, the `cuvslam_app` flags, and suite membership. A `VprSpec` (map and query stereo sequence pairs, suites) adds a place recognition run. Nothing else needs editing; staging and eval both read the registry.
 6. `scripts/kpi_baseline_ranges.json` needs no entry: the drift check takes the suite's KPI keys from the registry, and every key starts uncalibrated. Add a `datasets.<PREFIX>` entry only if the dataset needs its own ATE cap, `exclude_failed`, or drift tolerances. The key prefix is derived from the config filename (first hyphen-delimited token, upper-cased), so name configs with underscores inside the prefix and a hyphen only as its terminator: `tartan_flaky-vo_slam.cfg` gives `TARTAN_FLAKY`, whereas `tartan-flaky-vo_slam.cfg` would collide with `TARTAN`.
 
 ## Task: change dataset format or packing
@@ -71,7 +71,7 @@ Do not reintroduce gzip: provisioning uses uncompressed `.tar` to cap memory on 
 - Nightly configs: `nightly.yml` `strategy.matrix.include`. Eval runs on entries flagged `eval: true` (currently the four x86 configs). Every eval-enabled config needs the `RUNNER_STORAGE_ROOT` mount and configured repo secrets/variables; the `cuvslam-ci:local` image supplies the AWS CLI.
 - Jetson CUDA micro-benchmarks run only on nightly entries flagged `benchmark: true` (currently Orin and Thor). The normal C++ test invocation continues to exclude `*SpeedUp*` and `*Speedup*`; the dedicated benchmark wrapper runs the positive filter and excludes `DISABLED_` tests.
 - PR config: `pr-verify.yml` runs eval only on `build-test-x86` (fork-gated). `EVAL_CONFIG` is the static slug label for the PR table.
-- Active dataset set: `EVAL_SUITE=smoke|full` selects records. `stage_eval_datasets.sh`, `check_eval_prerequisites.sh`, and `run_eval.sh` pass it to the registry; `eval_cuvslam_in_docker.sh` forwards it into the container. Leaving it unset selects every record, which equals `full` because validation requires every `EvalSpec` to belong to `full`. Set but empty is an error, since that usually means a workflow interpolated a missing input. No workflow sets it yet, so PR and nightly still run the same set; wiring that up is a protected change.
+- Active dataset set: `EVAL_SUITE=smoke|full` selects records. `stage_eval_datasets.sh`, `check_eval_prerequisites.sh`, and `run_eval.sh` pass it to the registry; `eval_cuvslam_in_docker.sh` forwards it into the container. Leaving it unset selects every record, which equals `full` because validation requires every record to belong to `full`. Set but empty is an error, since that usually means a workflow interpolated a missing input. No workflow sets it yet, so PR and nightly still run the same set; wiring that up is a protected change.
 
 ## Task: preserve nightly version provenance
 
