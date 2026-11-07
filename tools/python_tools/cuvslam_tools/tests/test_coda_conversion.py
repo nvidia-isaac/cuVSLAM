@@ -252,6 +252,23 @@ class TestCodaGroundTruth(CodaConversionTestCase):
         for actual, wanted in zip(rows[1], expected):
             self.assertAlmostEqual(actual, wanted, places=6)
 
+    def test_global_poses_stay_in_the_shared_map_frame(self):
+        _write_archive(self.raw_dir, poses=_default_poses())
+
+        _convert(self.raw_dir, self.output_dir)
+
+        rows = [[float(value) for value in line.split()]
+                for line in (self.output_dir / "0" / "gt_global.txt").read_text().strip().splitlines()]
+        # Not rebased, in camera axes (x right, y down, z forward): cam0 a metre below the LiDAR is y = 1, and
+        # the map's forward x is z, so frames of other sequences compare directly.
+        expected = [[0, -1, 0, 0, 0, 0, -1, _CAMERA_FROM_LIDAR_Z, 1, 0, 0, 0],
+                    [-1, 0, 0, 0, 0, 0, -1, _CAMERA_FROM_LIDAR_Z, 0, -1, 0, 1],
+                    [0, -1, 0, 0, 0, 0, -1, _CAMERA_FROM_LIDAR_Z, 1, 0, 0, 2]]
+        self.assertEqual(len(rows), len(expected))
+        for row, wanted in zip(rows, expected):
+            for actual, value in zip(row, wanted):
+                self.assertAlmostEqual(actual, value, places=6)
+
     def test_dense_poses_are_used_when_dense_global_is_absent(self):
         _write_archive(self.raw_dir, poses=_default_poses(), pose_member=f"{convert_coda._GT_FALLBACK}/0.txt")
 
@@ -259,6 +276,8 @@ class TestCodaGroundTruth(CodaConversionTestCase):
 
         self.assertEqual(metadata["sequences"][0]["ground_truth_source"], "poses/dense/0.txt")
         self.assertEqual(len(self._gt_rows()), 3)
+        # Per-sequence poses share no frame with other sequences.
+        self.assertFalse((self.output_dir / "0" / "gt_global.txt").exists())
 
     def test_frames_past_the_pose_file_are_dropped_from_images_and_poses(self):
         # Four stereo pairs but only three poses: the last pair has no ground truth.
