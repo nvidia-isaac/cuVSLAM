@@ -19,7 +19,6 @@ Produces, per sequence::
     <sequence>/00/<sequence>.0.00001.png   left rectified image, 1-indexed
     <sequence>/01/<sequence>.1.00001.png   right rectified image, 1-indexed
     <sequence>/gt.txt                      3x4 pose per frame, relative to frame 0
-    <sequence>/gt_global.txt               3x4 pose per frame in CODa's shared map frame
     <sequence>/stereo.edex                 rig, intrinsics, and baseline
 
 plus a ``dataset_metadata.json`` and the reporter configs at the dataset root.
@@ -40,7 +39,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
 _SCHEMA_VERSION = 1
-_CONVERTER_VERSION = 2
+_CONVERTER_VERSION = 1
 
 DATASET_ID = "coda"
 
@@ -65,9 +64,6 @@ _FRAME_DIGITS = 5
 
 _FPS = 10
 SEGMENT_LENGTHS: Tuple[int, ...] = (100, 200, 300, 400, 500, 600, 700, 800)
-
-# Turns CODa's z-up map frame to the camera axes gt.txt has: x right, y down, z forward.
-_CAMERA_AXES_FROM_MAP = ([[0.0, -1.0, 0.0], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]], [0.0, 0.0, 0.0])
 
 _IDENTITY_POSE_LINE = (
     "1.000000e+00 0.000000e+00 0.000000e+00 0.000000e+00 "
@@ -500,13 +496,18 @@ def _ground_truth_member(archive: zipfile.ZipFile, sequence: str) -> Optional[st
     return None
 
 
-def _camera_poses(
+def _ground_truth_lines(
     poses: Sequence[str],
     frames: Sequence[int],
     lidar_to_camera: Tuple[List[List[float]], List[float]],
     sequence: str,
-) -> List[Tuple[List[List[float]], List[float]]]:
-    """Return ``T_world_from_cam0`` per frame; CODa stores ``T_world_from_os1`` in the LiDAR frame."""
+) -> List[str]:
+    """Render ``gt.txt``: one row-major 3x4 pose per frame, relative to frame 0.
+
+    CODa stores ``T_world_from_os1`` in the LiDAR frame, while cuVSLAM tracks in
+    the cam0 frame with the first pose pinned to identity, so each pose is moved
+    onto cam0 and then expressed relative to the first one.
+    """
     camera_rotation, camera_translation = lidar_to_camera
     on_camera = []
     for frame in frames:
@@ -516,15 +517,7 @@ def _camera_poses(
         translation = [float(value) for value in row[1:4]]
         rotation = quaternion_to_matrix([float(value) for value in row[4:8]])
         on_camera.append(compose_transforms(rotation, translation, camera_rotation, camera_translation))
-    return on_camera
 
-
-def _ground_truth_lines(on_camera: Sequence[Tuple[List[List[float]], List[float]]]) -> List[str]:
-    """Render ``gt.txt``: one row-major 3x4 pose per frame, relative to frame 0.
-
-    cuVSLAM tracks in the cam0 frame with the first pose pinned to identity, so
-    each cam0 pose is expressed relative to the first one.
-    """
     inverse = invert_transform(*on_camera[0])
     lines = [_IDENTITY_POSE_LINE]
     for rotation, translation in on_camera[1:]:
@@ -591,12 +584,10 @@ def convert_sequence(archive_path: Path, sequence: str, output_dir: Path) -> Dic
             (right_dir / right_names[-1]).write_bytes(archive.read(right_images[frame]))
 
         if poses is not None:
-            on_camera = _camera_poses(poses, frames, lidar_to_camera, sequence)
-            (sequence_dir / "gt.txt").write_text("\n".join(_ground_truth_lines(on_camera)) + "\n", encoding="utf-8")
-            # Only dense_global poses share one frame across sequences.
-            if member.startswith(f"{_GT_PREFERRED}/"):
-                lines = [_pose_line(*compose_transforms(*_CAMERA_AXES_FROM_MAP, *pose)) for pose in on_camera]
-                (sequence_dir / "gt_global.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+            (sequence_dir / "gt.txt").write_text(
+                "\n".join(_ground_truth_lines(poses, frames, lidar_to_camera, sequence)) + "\n",
+                encoding="utf-8",
+            )
 
     (sequence_dir / "stereo.edex").write_text(
         json.dumps(edex_document(calibration, len(frames), left_names[0], right_names[0]), indent=4) + "\n",
