@@ -35,10 +35,10 @@ cuda = [
     'cuda-toolkit[cublas,cusolver,cusparse]==12.*; platform_machine != "aarch64"',
     "cuda-pathfinder",
 ]
-# TensorRT runtime for visual place recognition (use_vpr), in the version scripts/install_tensorrt.sh builds against:
-# an AnyLoc engine only loads in the TensorRT version that built it. Release builds swap in the wheel's CUDA major.
+# TensorRT runtime for visual place recognition (use_vpr), at least the version scripts/install_tensorrt.sh builds
+# against. Release builds swap in the wheel's CUDA major.
 tensorrt = [
-    'tensorrt-cu12-libs==10.16.1.*; platform_machine != "aarch64"',
+    'tensorrt-cu12-libs>=10.16.1,<11; platform_machine != "aarch64"',
 ]
 
 [tool.scikit-build]

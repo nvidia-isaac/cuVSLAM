@@ -74,8 +74,8 @@ option(USE_RERUN "Use Rerun for visualization" OFF)
 cuvslam_dependent_option(USE_TENSORRT "Build the AnyLoc visual place recognition backend (requires TensorRT 8.6+)"
     USE_CUDA)
 # ONNX export in a Python venv, then a TensorRT engine build; see models/anyloc
-option(CUVSLAM_BUILD_ANYLOC_ENGINE
-    "Build the AnyLoc TensorRT engine (needs network access and a GPU)" OFF)
+cuvslam_dependent_option(CUVSLAM_BUILD_ANYLOC_ENGINE
+    "Build the AnyLoc TensorRT engine (needs network access and a GPU)" USE_TENSORRT)
 
 setup_cuvslam_settings()
 

@@ -9,7 +9,8 @@ closes loops and how to evaluate it. Relocalizing in a saved map with `LocalizeI
 ## The engine
 
 `Slam::VprSettings::model_path` (Python: `Slam.VprSettings.model_path`) names the AnyLoc TensorRT engine, built as
-[models/anyloc](https://github.com/nvidia-isaac/cuVSLAM/blob/main/models/anyloc/README.md) describes.
+[models/anyloc](https://github.com/nvidia-isaac/cuVSLAM/blob/main/models/anyloc/README.md) describes. With the wheel,
+build it once per machine with `cuvslam.build_anyloc_engine(path)`.
 
 ## Mapping and recognizing places
 
@@ -97,7 +98,7 @@ sequence, with the pose graph unbounded so that no place is merged out of the pl
 ```bash
 cuvslam_tracker --edex <kitti>/00 --use_slam true --max_map_size 0 --loop_closure_mode lsi ...
 cuvslam_tracker --edex <kitti>/00 --use_slam true --max_map_size 0 --loop_closure_mode vpr \
-    --use_vpr true --vpr_model_path <build>/bin/anyloc_vits14_l9_value_322_fp16_trt<version>_sm<gpu>.engine ...
+    --use_vpr true --vpr_model_path <build>/bin/anyloc_vits14_l9_value_322_fp16_trt<version>.engine ...
 ```
 
 `cuvslam_reporter` takes the same flags, and both record `num_loop_closures` in their stats.

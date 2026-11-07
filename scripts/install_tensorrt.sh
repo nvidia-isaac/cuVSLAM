@@ -18,9 +18,14 @@ else
   trt="${JETSON_TENSORRT_VERSION}"
 fi
 apt-get update
-apt-get install -y --no-install-recommends libnvinfer10="$trt" libnvinfer-headers-dev="$trt"
-apt-mark hold libnvinfer10 libnvinfer-headers-dev
+apt-get install -y --no-install-recommends libnvinfer10="$trt" libnvinfer-headers-dev="$trt" libnvonnxparsers10="$trt"
+apt-mark hold libnvinfer10 libnvinfer-headers-dev libnvonnxparsers10
 so=$(dpkg -L libnvinfer10 | grep -m1 '/libnvinfer\.so\.[0-9]*$')
 ln -s "$(basename "$so")" "${so%.*}"
+# The ONNX parser's -dev files for the AnyLoc engine builder; the package itself depends on libnvinfer-dev
+cd /tmp
+apt-get download libnvonnxparsers-dev="$trt"
+dpkg-deb -x libnvonnxparsers-dev_*.deb /
+rm libnvonnxparsers-dev_*.deb
 apt-get clean
 rm -rf /var/lib/apt/lists/*
