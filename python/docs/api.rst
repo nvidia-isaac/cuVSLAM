@@ -60,6 +60,8 @@ Data Structures
 Functions
 ---------
 
+.. autofunction:: build_anyloc_engine
+
 .. autofunction:: get_version
 
 .. autofunction:: set_verbosity

@@ -13,6 +13,7 @@ import contextlib
 import ctypes
 import importlib.util
 import os
+import subprocess
 import warnings
 from importlib import metadata as _metadata
 
@@ -87,6 +88,22 @@ from . import _cuvslam as _core
 # Python helper functions for file-based config loading
 from . import utils
 
+
+def build_anyloc_engine(engine_path):
+    """Build the AnyLoc TensorRT engine for this GPU and TensorRT with the builder and model this package ships."""
+    anyloc = os.path.join(os.path.dirname(__file__), 'anyloc')
+    model = os.path.join(anyloc, 'anyloc_vits14_l9_value_322')
+    env = dict(os.environ)
+    spec = importlib.util.find_spec('tensorrt_libs')
+    if spec is not None:
+        # The TensorRT of the [tensorrt] extra, which VPR runs with too
+        env['LD_LIBRARY_PATH'] = os.pathsep.join(
+            [*(spec.submodule_search_locations or []), *filter(None, [env.get('LD_LIBRARY_PATH')])])
+    subprocess.run([os.path.join(anyloc, 'anyloc_engine_builder'), f'--onnx={model}.onnx', f'--engine={engine_path}',
+                    f'--reference_input={model}_reference_input.npy',
+                    f'--reference_output={model}_reference_output.npy'], check=True, env=env)
+
+
 # # Explicit exports for better IntelliSense
 __all__ = [
     'Odometry',
@@ -94,6 +111,7 @@ __all__ = [
     'Tracker',
     'VprVocabularyBuilder',
     'utils',
+    'build_anyloc_engine',
     'get_version',
     'is_cuda_build',
     'set_verbosity',

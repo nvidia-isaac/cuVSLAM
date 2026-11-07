@@ -41,6 +41,7 @@ ANYLOC_ENGINE = os.environ.get("CUVSLAM_ANYLOC_ENGINE", "")
 needs_anyloc = unittest.skipUnless(
     os.path.isfile(ANYLOC_ENGINE), "needs the AnyLoc engine in CUVSLAM_ANYLOC_ENGINE")
 needs_cuda = unittest.skipUnless(vslam.is_cuda_build(), "use_vpr needs use_gpu, which needs a CUDA build")
+PACKAGED_BUILDER = os.path.join(os.path.dirname(vslam.__file__), "anyloc", "anyloc_engine_builder")
 
 def make_rig():
     cameras = data.generate_stereo_camera(W, H, BASELINE)
@@ -479,6 +480,15 @@ class TestVprVocabularyBuilder(unittest.TestCase):
         with self.assertRaises(RuntimeError) as caught:
             vslam.Slam(make_rig()[0], [0, 1], self.vocabulary_config())
         self.assertIn(self.path, str(caught.exception))
+
+
+@unittest.skipUnless(os.path.isfile(PACKAGED_BUILDER), "needs the AnyLoc builder of a TensorRT build")
+class TestBuildAnyLocEngine(unittest.TestCase):
+    def test_the_packaged_builder_makes_an_engine_vpr_runs(self):
+        with tempfile.TemporaryDirectory() as folder:
+            engine = os.path.join(folder, "anyloc.engine")
+            vslam.build_anyloc_engine(engine)
+            vslam.VprVocabularyBuilder(vslam.Slam.VprSettings(model_path=engine)).add_image(noise_images(0)[0])
 
 
 @unittest.skipUnless(os.path.isdir(KITTI_07_DIR), f"needs real imagery at {KITTI_07_DIR}")
