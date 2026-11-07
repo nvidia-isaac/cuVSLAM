@@ -73,6 +73,10 @@ ODOMETRY_MODE_TYPES = {
 # than filing the run under another mode's keys.
 ODOMETRY_MODES = tuple(ODOMETRY_MODE_TYPES)
 
+# cuvslam_vpr_reporter KPIs; keep in step with VPR_METRICS and VPR_ROW in scripts/cuvslam_kpi_report.py.
+VPR_KPI_METRICS = ("Success", "FalsePositive", "Unrecognized")
+VPR_KPI_ROW = "VPR_SLAM"
+
 _DATASET_ID = re.compile(r"^[a-z0-9_]+$")
 _KPI_PREFIX = re.compile(r"^[A-Z0-9_]+$")
 
@@ -141,12 +145,23 @@ class EvalSpec:
 
 
 @dataclass(frozen=True)
+class VprSpec:
+    """One cuvslam_vpr_reporter run: each query sequence is recognized in a map of its map sequence."""
+
+    pairs: tuple[tuple[str, str], ...]
+    suites: frozenset[str]
+    # Ground truth file both sequences of a pair share a frame in; the reporter's gt.txt if None.
+    ground_truth: str | None = None
+
+
+@dataclass(frozen=True)
 class DatasetSpec:
     """One dataset: how to prepare it, and the reporter runs it feeds."""
 
     dataset_id: str
     prepare_module: str
     evals: tuple[EvalSpec, ...] = field(default_factory=tuple)
+    vpr: VprSpec | None = None
 
     @property
     def archive_name(self) -> str:
@@ -218,6 +233,7 @@ DATASETS: dict[str, DatasetSpec] = {
                 gating="informational",
             ),
         ),
+        vpr=VprSpec(pairs=(("07", "07"),), suites=frozenset(SUITES)),
     ),
     "euroc": DatasetSpec(
         dataset_id="euroc",
@@ -246,6 +262,7 @@ DATASETS: dict[str, DatasetSpec] = {
                 gating="informational",
             ),
         ),
+        vpr=VprSpec(pairs=(("MH_01_easy", "MH_01_easy"),), suites=frozenset(SUITES)),
     ),
     # Kept out of smoke deliberately: ICL-NUIM already covers RGB-D pre-merge for
     # a fraction of the staging cost.
@@ -325,6 +342,8 @@ DATASETS: dict[str, DatasetSpec] = {
     "coda": DatasetSpec(
         dataset_id="coda",
         prepare_module="cuvslam_tools.dataset_preparation.coda.prepare",
+        # Two recordings of one route, the only such pair here. Full only: the two sequences take 59 GiB.
+        vpr=VprSpec(pairs=(("0", "5"),), suites=frozenset({FULL_SUITE}), ground_truth="gt_global.txt"),
     ),
 }
 
@@ -345,7 +364,7 @@ def provisionable_datasets() -> list[DatasetSpec]:
 
 def eval_datasets(suite: str | None = None) -> list[DatasetSpec]:
     """Datasets with at least one reporter run, optionally filtered by suite."""
-    return [spec for spec in DATASETS.values() if eval_records(spec, suite)]
+    return [spec for spec in DATASETS.values() if eval_records(spec, suite) or vpr_record(spec, suite)]
 
 
 def eval_records(spec: DatasetSpec, suite: str | None = None) -> list[EvalSpec]:
@@ -354,6 +373,13 @@ def eval_records(spec: DatasetSpec, suite: str | None = None) -> list[EvalSpec]:
     if suite not in SUITES:
         raise RegistryError(f"unknown suite '{suite}' (known: {', '.join(SUITES)})")
     return [record for record in spec.evals if suite in record.suites]
+
+
+def vpr_record(spec: DatasetSpec, suite: str | None = None) -> VprSpec | None:
+    """The dataset's cuvslam_vpr_reporter run, if the suite selects it."""
+    if spec.vpr is None or (suite is not None and suite not in spec.vpr.suites):
+        return None
+    return spec.vpr
 
 
 def reporter_config_path(spec: DatasetSpec, record: EvalSpec) -> str:
@@ -385,19 +411,23 @@ def _validate_eval(spec: DatasetSpec, record: EvalSpec) -> None:
             f"{where}: --odometry_mode must be one of {', '.join(ODOMETRY_MODES)}; "
             "the KPI collector has no type for anything else"
         )
-    if not record.suites:
+    _validate_suites(where, record.suites)
+    if record.gating not in GATING_POLICIES:
+        raise RegistryError(f"{where}: gating must be one of {', '.join(GATING_POLICIES)}")
+
+
+def _validate_suites(where: str, suites: frozenset[str]) -> None:
+    if not suites:
         raise RegistryError(f"{where}: must belong to at least one suite")
-    unknown = sorted(record.suites - set(SUITES))
+    unknown = sorted(suites - set(SUITES))
     if unknown:
         raise RegistryError(f"{where}: unknown suite(s) {', '.join(unknown)}")
-    if FULL_SUITE not in record.suites:
+    if FULL_SUITE not in suites:
         raise RegistryError(
             f"{where}: every record must belong to '{FULL_SUITE}'. Smaller suites are subsets of it, "
             "so a record outside it would never run on a nightly, and an omitted --suite would "
             "select more than the full suite does"
         )
-    if record.gating not in GATING_POLICIES:
-        raise RegistryError(f"{where}: gating must be one of {', '.join(GATING_POLICIES)}")
 
 
 def _validate_kpi_identities() -> None:
@@ -445,6 +475,8 @@ def validate(dataset_ids: Iterable[str] | None = None, suite: str | None = None)
             raise RegistryError(f"{spec.dataset_id}: preparation module not found: {spec.prepare_module}")
         for record in spec.evals:
             _validate_eval(spec, record)
+        if spec.vpr is not None:
+            _validate_suites(f"{spec.dataset_id} VPR", spec.vpr.suites)
 
     _validate_kpi_identities()
 
@@ -494,7 +526,39 @@ def suite_kpi_keys(suite: str | None = None) -> list[str]:
     for spec in eval_datasets(suite):
         for record in eval_records(spec, suite):
             keys.update(record.kpi_keys())
+        if vpr_record(spec, suite):
+            keys.update(f"{spec.dataset_id.upper()}_{metric}_{VPR_KPI_ROW}" for metric in VPR_KPI_METRICS)
     return sorted(keys)
+
+
+def write_vpr_config(path: Path, suite: str | None = None) -> bool:
+    """Write one cuvslam_vpr_reporter config, so one report, with every pair the suite selects.
+
+    Sequences resolve against the datasets root. Returns False, writing nothing, when the suite selects no pair.
+    """
+    pairs = []
+    for spec in eval_datasets(suite):
+        record = vpr_record(spec, suite)
+        if record is None:
+            continue
+        # The KPI collector names a pair's row after its title's first hyphen-delimited token.
+        prefix = spec.dataset_id.upper()
+        for map_sequence, query_sequence in record.pairs:
+            title = f"{prefix}-{map_sequence}"
+            if query_sequence != map_sequence:
+                title += f" to {prefix}-{query_sequence}"
+            pair = {
+                "title": title,
+                "map_sequence": f"{spec.mount_name}/{map_sequence}",
+                "query_sequence": f"{spec.mount_name}/{query_sequence}",
+            }
+            if record.ground_truth:
+                pair.update(map_gt=record.ground_truth, query_gt=record.ground_truth)
+            pairs.append(pair)
+    if not pairs:
+        return False
+    path.write_text(json.dumps({"pairs": pairs}, indent=2) + "\n", encoding="utf-8")
+    return True
 
 
 def _print_records(suite: str | None) -> None:
@@ -541,6 +605,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     keys_parser.add_argument("--suite", default=None, choices=SUITES)
 
+    vpr_parser = subparsers.add_parser(
+        "vpr-config", help="Write the cuvslam_vpr_reporter config of a suite and print its path; nothing if no pair."
+    )
+    vpr_parser.add_argument("--suite", default=None, choices=SUITES)
+    vpr_parser.add_argument("--output", type=Path, required=True)
+
     module_parser = subparsers.add_parser("prepare-module", help="Print a dataset's preparation module path.")
     module_parser.add_argument("dataset")
 
@@ -577,6 +647,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif args.command == "kpi-keys":
             for key in suite_kpi_keys(args.suite):
                 print(key)
+        elif args.command == "vpr-config":
+            if write_vpr_config(args.output, args.suite):
+                print(args.output)
         elif args.command == "prepare-module":
             print(dataset(args.dataset).prepare_module)
         elif args.command == "prepare":
