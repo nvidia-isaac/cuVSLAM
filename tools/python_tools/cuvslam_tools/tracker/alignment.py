@@ -14,10 +14,11 @@
 
 """Trajectory alignment and absolute (ATE / ARE RMSE) error metrics.
 
-NumPy only, so the module imports without a cuvslam build. The metrics follow
-the usual absolute-trajectory-error definition (as in evo_ape --align, plus
---correct_scale for monocular runs): align the whole estimated trajectory to
-ground truth once, then take the RMSE of the position and orientation errors.
+NumPy only, so the module imports without a cuvslam build. ATE RMSE follows
+evo_ape --align (plus --correct_scale for monocular runs): align the whole
+estimated trajectory's positions to ground truth once, then take the RMSE of the
+position errors. ARE RMSE aligns the orientations by their own best-fit rotation,
+since positions barely constrain roll about a near-straight path.
 """
 
 from typing import Sequence, Tuple
@@ -82,8 +83,7 @@ def absolute_trajectory_errors(gt_transforms: Sequence[np.ndarray], est_transfor
         with_scale: Align with Sim(3) instead of SE(3), for scale-ambiguous (monocular) tracking
 
     Returns:
-        (ate_rmse, are_rmse), or (0.0, 0.0) for an empty trajectory. are_rmse is NaN when the
-        positions are stationary or collinear, since rotation about them is unobservable.
+        (ate_rmse, are_rmse), or (0.0, 0.0) for an empty trajectory
     """
     if len(gt_transforms) != len(est_transforms):
         raise ValueError(f"Trajectories differ in length: {len(gt_transforms)} vs {len(est_transforms)}")
@@ -98,9 +98,9 @@ def absolute_trajectory_errors(gt_transforms: Sequence[np.ndarray], est_transfor
     position_errors = gt_positions - (scale * est_positions @ R.T + t)
     ate_rmse = np.sqrt(np.mean(np.sum(position_errors ** 2, axis=1)))
 
-    covariance = (gt_positions - gt_positions.mean(axis=0)).T @ (est_positions - est_positions.mean(axis=0))
-    if np.linalg.matrix_rank(covariance) < 2:
-        return float(ate_rmse), float("nan")
+    # Positions barely constrain roll about a near-straight path, so fit the rotation to the orientations.
+    U, _, Vt = np.linalg.svd(np.sum(gt[:, :3, :3] @ est[:, :3, :3].transpose(0, 2, 1), axis=0))
+    R = U @ np.diag([1.0, 1.0, np.sign(np.linalg.det(U @ Vt))]) @ Vt
     rotation_errors = gt[:, :3, :3].transpose(0, 2, 1) @ R @ est[:, :3, :3]
     are_rmse = np.sqrt(np.mean(rotation_angles_deg(rotation_errors) ** 2))
     return float(ate_rmse), float(are_rmse)
