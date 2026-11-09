@@ -76,6 +76,16 @@ class TestAbsoluteTrajectoryErrors(unittest.TestCase):
         self.assertAlmostEqual(ate, 0.0, places=9)
         self.assertAlmostEqual(are, 5.0, places=6)
 
+    def test_rotation_error_on_a_straight_line(self):
+        R_offset = rotation([0, 0, 1], 40)
+        gt = [pose(np.eye(3), [x, 0, 0]) for x in np.linspace(0, 10, 20)]
+        est = [pose(R_offset @ T[:3, :3], R_offset @ T[:3, 3]) for T in gt]
+
+        ate, are = absolute_trajectory_errors(gt, est)
+
+        self.assertAlmostEqual(ate, 0.0, places=9)
+        self.assertAlmostEqual(are, 0.0, places=6)
+
     def test_rotation_error_on_a_nearly_straight_path(self):
         # Sideways wiggle comparable to position noise leaves roll about the path to the orientations.
         rng = np.random.default_rng(0)
