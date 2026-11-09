@@ -5,4 +5,5 @@ ruamel.yaml.clib==0.2.6 # required by rosbags
 zstandard==0.16.0       # required by rosbags
 rosbags==0.9.6
 scipy==1.15.3
-Pillow==12.3.0          # to read png
+Pillow==12.3.0; python_version < "3.11"   # to read png
+Pillow==13.0.0; python_version >= "3.11"  # to read png

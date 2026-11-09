@@ -16,11 +16,11 @@ pip install "cuvslam-cu12[cuda]"
 ```
 
 Visual place recognition (`use_vpr`, AnyLoc) also needs TensorRT 10. The rest of cuVSLAM runs without it. Install it
-separately, or on x86_64 and Jetson Thor with the `tensorrt` extra, which installs the TensorRT version the packages are
-built against. An AnyLoc engine only loads in the TensorRT version that built it.
+separately, or on x86_64 and Jetson Thor with the `tensorrt` extra. Then build the AnyLoc engine for your GPU once:
 
 ```bash
 pip install "cuvslam-cu12[cuda,tensorrt]"
+python3 -c 'import cuvslam; cuvslam.build_anyloc_engine("anyloc.engine")'
 ```
 
 Supported platforms, Jetson notes and source builds are described in the

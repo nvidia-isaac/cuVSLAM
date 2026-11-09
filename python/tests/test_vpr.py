@@ -40,6 +40,8 @@ KITTI_07_DIR = os.environ.get("CUVSLAM_KITTI_07_DIR") or os.path.join(
 ANYLOC_ENGINE = os.environ.get("CUVSLAM_ANYLOC_ENGINE", "")
 needs_anyloc = unittest.skipUnless(
     os.path.isfile(ANYLOC_ENGINE), "needs the AnyLoc engine in CUVSLAM_ANYLOC_ENGINE")
+needs_cuda = unittest.skipUnless(vslam.is_cuda_build(), "use_vpr needs use_gpu, which needs a CUDA build")
+PACKAGED_BUILDER = os.path.join(os.path.dirname(vslam.__file__), "anyloc", "anyloc_engine_builder")
 
 def make_rig():
     cameras = data.generate_stereo_camera(W, H, BASELINE)
@@ -66,13 +68,16 @@ def noise_images(seed):
     rng = np.random.RandomState(seed)
     return [np.ascontiguousarray(rng.randint(0, 256, (H, W), dtype=np.uint8)) for _ in range(2)]
 
+def finished(request):
+    """The request, which sync_mode must have finished by the time the call that made it returns."""
+    if not request.done():
+        raise AssertionError("sync_mode must finish the request before the call returns")
+    return request
+
 def recognize_place(slam, images, timestamp_ns):
     """Return the (result, error_message) of a place recognition query; needs sync_mode."""
-    answers = []
-    slam.recognize_place_by_frame(images, timestamp_ns, lambda result, error: answers.append((result, error)))
-    if len(answers) != 1:
-        raise AssertionError(f"sync_mode must call the callback exactly once, it ran {len(answers)} times")
-    return answers[0]
+    request = finished(slam.recognize_place_by_frame(images, timestamp_ns))
+    return request.result(), request.error_message
 
 def recognize_match(slam, images, timestamp_ns):
     """Return the matched place, or None when no mapped place matched; fail on any other error."""
@@ -88,21 +93,13 @@ def localization_settings(**kwargs):
         horizontal_step=0.0625, vertical_step=0.0625, angular_step_rads=0.03125, **kwargs)
 
 def localize_in_map(slam, folder, images, timestamp_ns, settings, guess_pose=None):
-    """Localize and return the (pose, error_message) pair the callback got."""
-    answers = []
-    slam.localize_in_map(folder, timestamp_ns, guess_pose, images, settings,
-                         lambda: None, lambda pose, error: answers.append((pose, error)))
-    if len(answers) != 1:
-        raise AssertionError(f"sync_mode must call the callback exactly once, it ran {len(answers)} times")
-    return answers[0]
+    """Localize and return the (pose, error_message) of the request; needs sync_mode."""
+    request = finished(slam.localize_in_map(folder, timestamp_ns, guess_pose, images, settings))
+    return request.result(), request.error_message
 
 def save_map(slam, folder):
-    """Save the map and return the flag the callback reported."""
-    answers = []
-    slam.save_map(folder, answers.append)
-    if len(answers) != 1:
-        raise AssertionError(f"sync_mode must call the callback exactly once, it ran {len(answers)} times")
-    return answers[0]
+    """Save the map and return whether it was saved; needs sync_mode."""
+    return finished(slam.save_map(folder)).result()
 
 def pose_arrays(pose):
     """Translation and rotation of a Pose as numpy arrays."""
@@ -299,6 +296,7 @@ class TestVprLoopClosureModeConfig(unittest.TestCase):
     def test_needs_a_place_recognition_backend(self):
         self.assert_slam_rejects(self.vpr_loop_closure_config(use_vpr=False), "use_vpr")
 
+    @needs_cuda
     def test_rejects_gt_align_mode(self):
         slam_cfg = self.vpr_loop_closure_config()
         slam_cfg.gt_align_mode = True
@@ -332,6 +330,7 @@ class TestVprAnyLocConfig(unittest.TestCase):
             vslam.Slam(make_rig()[0], [0, 1], slam_cfg)
         self.assertIn("use_gpu", str(caught.exception))
 
+    @needs_cuda
     def test_needs_a_score_threshold_in_0_1(self):
         for threshold in (-0.1, 1.5, float("nan")):
             _, slam_cfg = make_configs(True)
@@ -350,6 +349,7 @@ class TestVprAnyLocConfig(unittest.TestCase):
                 vslam.Slam(make_rig()[0], [0, 1], slam_cfg)
             self.assertIn("use_vpr", str(caught.exception))
 
+    @needs_cuda
     def test_a_vocabulary_file_replaces_the_online_fit_settings(self):
         for name, value in (("vocabulary_min_keyframes", 3), ("vocabulary_max_keyframes", 200)):
             _, slam_cfg = make_configs(True)
@@ -360,6 +360,7 @@ class TestVprAnyLocConfig(unittest.TestCase):
                 vslam.Slam(make_rig()[0], [0, 1], slam_cfg)
             self.assertIn("vocabulary_path", str(caught.exception))
 
+    @needs_cuda
     def test_online_fit_settings_must_be_in_order(self):
         # 1 <= min <= max.
         for name, value in (("vocabulary_min_keyframes", 0), ("vocabulary_max_keyframes", 7)):
@@ -468,7 +469,7 @@ class TestVprVocabularyBuilder(unittest.TestCase):
         slam = vslam.Slam(make_rig()[0], [0, 1], self.vocabulary_config())
         os.remove(self.path)
 
-        # Localizing reads the file again; its error reaches the callback instead of escaping.
+        # Localizing reads the file again; its error reaches the request instead of escaping.
         pose, error = localize_in_map(slam, self.folder, noise_images(0), 0, localization_settings())
         self.assertIsNone(pose)
         self.assertIn(self.path, error)
@@ -479,6 +480,15 @@ class TestVprVocabularyBuilder(unittest.TestCase):
         with self.assertRaises(RuntimeError) as caught:
             vslam.Slam(make_rig()[0], [0, 1], self.vocabulary_config())
         self.assertIn(self.path, str(caught.exception))
+
+
+@unittest.skipUnless(os.path.isfile(PACKAGED_BUILDER), "needs the AnyLoc builder of a TensorRT build")
+class TestBuildAnyLocEngine(unittest.TestCase):
+    def test_the_packaged_builder_makes_an_engine_vpr_runs(self):
+        with tempfile.TemporaryDirectory() as folder:
+            engine = os.path.join(folder, "anyloc.engine")
+            vslam.build_anyloc_engine(engine)
+            vslam.VprVocabularyBuilder(vslam.Slam.VprSettings(model_path=engine)).add_image(noise_images(0)[0])
 
 
 @unittest.skipUnless(os.path.isdir(KITTI_07_DIR), f"needs real imagery at {KITTI_07_DIR}")

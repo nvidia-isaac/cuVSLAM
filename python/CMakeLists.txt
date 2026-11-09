@@ -69,6 +69,19 @@ set_target_properties(_cuvslam PROPERTIES
 install(TARGETS _cuvslam LIBRARY DESTINATION cuvslam)
 install(FILES ${CUVSLAM_LIBRARY} DESTINATION cuvslam)
 
+# The AnyLoc engine builder and model for build_anyloc_engine(), when the build made them
+set(ANYLOC_DIR "${CUVSLAM_BUILD_DIR_PATH}/anyloc")
+if(EXISTS "${CUVSLAM_BUILD_DIR_PATH}/bin/anyloc_engine_builder")
+    install(PROGRAMS "${CUVSLAM_BUILD_DIR_PATH}/bin/anyloc_engine_builder" DESTINATION cuvslam/anyloc)
+    # The build's RPATH would outrank the LD_LIBRARY_PATH that build_anyloc_engine() sets
+    install(CODE "file(RPATH_REMOVE FILE \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/cuvslam/anyloc/anyloc_engine_builder\")")
+    install(FILES "${ANYLOC_DIR}/anyloc_vits14_l9_value_322.onnx"
+                  "${ANYLOC_DIR}/anyloc_vits14_l9_value_322_reference_input.npy"
+                  "${ANYLOC_DIR}/anyloc_vits14_l9_value_322_reference_output.npy"
+                  "${ANYLOC_DIR}/LICENSE.dinov2"
+            DESTINATION cuvslam/anyloc)
+endif()
+
 nanobind_add_stub(_cuvslam_stub
     MODULE _cuvslam
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/_cuvslam.pyi

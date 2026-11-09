@@ -42,9 +42,6 @@ DEFINE_string(reference_input, "", "Network input to validate the engine on, .np
 DEFINE_string(reference_output, "", "AnyLoc's fp32 descriptors of that input, .npy, fp32 [1, N, D]");
 DEFINE_bool(fp16, true, "Run in FP16, keeping the descriptor head in FP32");
 DEFINE_int32(workspace_mb, 1024, "Most scratch GPU memory TensorRT may use per layer while building, in MiB");
-DEFINE_int32(expect_sm, 0,
-             "Compute capability the engine is meant for, e.g. 89 for an RTX 4090; refuses to build on another GPU, "
-             "since TensorRT builds for the GPU it runs on. 0 builds for whatever CUDA device 0 is");
 
 namespace {
 
@@ -209,21 +206,6 @@ std::optional<Reference> LoadReference() {
   }
 }
 
-// TensorRT builds for the GPU it runs on, which must be the one the engine's name promises.
-bool IsExpectedGpu() {
-  cudaDeviceProp properties;
-  if (!Succeeded(cudaGetDeviceProperties(&properties, 0), "cudaGetDeviceProperties")) {
-    return false;
-  }
-  const int sm = properties.major * 10 + properties.minor;
-  if (FLAGS_expect_sm > 0 && sm != FLAGS_expect_sm) {
-    std::fprintf(stderr, "the engine is meant for sm_%d, but CUDA device 0 is %s, sm_%d\n", FLAGS_expect_sm,
-                 properties.name, sm);
-    return false;
-  }
-  return true;
-}
-
 // Compares the engine's descriptors of the reference input with the reference output.
 bool Validate(const nvinfer1::IHostMemory& plan, Logger& logger, const Reference& reference) {
   const cnpy::NpyArray& input = reference.input;
@@ -367,9 +349,6 @@ int main(int argc, char** argv) {
     if (!reference) {
       return 1;
     }
-  }
-  if (!IsExpectedGpu()) {
-    return 1;
   }
 
   Logger logger;

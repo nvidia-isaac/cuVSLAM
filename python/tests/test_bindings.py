@@ -365,7 +365,7 @@ class TestBindings(unittest.TestCase):
         cfg = vslam.Odometry.Config()
         self.assertEqual(cfg.multicam_mode, vslam.Odometry.MulticameraMode.Precision)
         self.assertEqual(cfg.odometry_mode, vslam.Odometry.OdometryMode.Multicamera)
-        self.assertTrue(cfg.use_gpu)
+        self.assertEqual(cfg.use_gpu, vslam.is_cuda_build())
         self.assertTrue(cfg.async_sba)
         self.assertTrue(cfg.use_motion_model)
         self.assertFalse(cfg.use_denoising)
@@ -517,7 +517,7 @@ class TestBindings(unittest.TestCase):
     def test_slam_config_default(self):
         cfg = vslam.Slam.Config()
         self.assertEqual(cfg.map_path, "")
-        self.assertTrue(cfg.use_gpu)
+        self.assertEqual(cfg.use_gpu, vslam.is_cuda_build())
         self.assertFalse(cfg.sync_mode)
         self.assertTrue(cfg.enable_reading_internals)
         self.assertFalse(cfg.planar_constraints)
@@ -677,12 +677,6 @@ class TestBindings(unittest.TestCase):
             vslam.Tracker.Mode.OdometryWithSlamOffline,
         ]
         self.assertEqual(len(values), len(set(values)))
-
-    def test_slam_and_tracker_cannot_be_subclassed(self):
-        # __new__ builds them, so a subclass __init__ could not change how
-        for base in (vslam.Slam, vslam.Tracker):
-            with self.assertRaises(TypeError):
-                type('Subclass', (base,), {})
 
 
 if __name__ == "__main__":

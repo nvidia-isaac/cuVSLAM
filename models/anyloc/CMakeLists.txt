@@ -88,6 +88,8 @@ add_custom_command(
 )
 add_custom_target(anyloc_onnx ALL DEPENDS ${CUVSLAM_ANYLOC_ONNX})
 add_dependencies(anyloc_onnx anyloc_venv)
+# The ONNX model holds DINOv2 weights, so it ships with their license.
+configure_file(${dinov2_SOURCE_DIR}/LICENSE ${CMAKE_BINARY_DIR}/anyloc/LICENSE.dinov2 COPYONLY)
 
 # Step 2.
 if(CUVSLAM_ANYLOC_ENGINE)
@@ -98,7 +100,6 @@ if(CUVSLAM_ANYLOC_ENGINE)
                 --engine=${CUVSLAM_ANYLOC_ENGINE}
                 --reference_input=${CUVSLAM_ANYLOC_REFERENCE_INPUT}
                 --reference_output=${CUVSLAM_ANYLOC_REFERENCE_OUTPUT}
-                --expect_sm=${CUVSLAM_ANYLOC_ENGINE_SM}
         DEPENDS anyloc_engine_builder ${CUVSLAM_ANYLOC_ONNX} ${CUVSLAM_ANYLOC_REFERENCE_INPUT}
                 ${CUVSLAM_ANYLOC_REFERENCE_OUTPUT}
         COMMENT "AnyLoc step 2/2: building the FP16 TensorRT engine ${CUVSLAM_ANYLOC_ENGINE}"

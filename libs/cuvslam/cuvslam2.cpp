@@ -21,12 +21,12 @@
 #include <algorithm>
 #include <atomic>
 #include <cstddef>
+#include <exception>
 #include <limits>
 #include <mutex>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <thread>
 
 #include "common/error.h"
 #include "common/isometry.h"
@@ -566,6 +566,14 @@ void SetVerbosity(int verbosity) {
 
 void WarmUpGPU() { WarmUpGpuImpl(); }
 
+bool IsCudaBuild() {
+#ifdef USE_CUDA
+  return true;
+#else
+  return false;
+#endif
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Odometry class implementation
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -646,6 +654,7 @@ Odometry::Odometry(Odometry&&) noexcept = default;
 Odometry::~Odometry() = default;
 
 Odometry::Odometry(const Rig& rig, const Config& cfg) {
+  THROW_INVALID_ARG_IF(cfg.use_gpu && !IsCudaBuild(), "use_gpu requires a build with CUDA support (USE_CUDA=ON)");
   std::string message;
   TracePrintIf(cfg.use_gpu && !CheckCudaCompatibility(message), "[WARNING] %s\n", message.c_str());
   CheckCameras(rig);
@@ -1180,6 +1189,7 @@ public:
 
   Impl(const Rig& rig, const std::vector<uint8_t>& primary_cameras, const Config& config)
       : primary_cameras_(primary_cameras) {
+    THROW_INVALID_ARG_IF(config.use_gpu && !IsCudaBuild(), "use_gpu requires a build with CUDA support (USE_CUDA=ON)");
     std::string message;
     TracePrintIf(!CheckCudaCompatibility(message), "[WARNING] %s\n", message.c_str());
 
@@ -1278,10 +1288,11 @@ Slam::Slam(const Rig& rig, const std::vector<uint8_t>& primary_cameras, const Co
 Slam::Slam(Slam&& other) noexcept = default;
 
 Slam::~Slam() {
-  // A callback may own this Slam, and the SLAM thread releases callbacks after running them. That thread cannot join
-  // itself, so another thread tears down the state and joins it once it finishes the current command.
+  // The SLAM thread releases callbacks after running them, so one that held the last owner lands here. That thread
+  // cannot join itself, and a teardown left running elsewhere can outlive the process and crash its exit.
   if (impl && impl->async_slam_->IsWorkerThread()) {
-    std::thread([doomed = std::move(impl)]() mutable { doomed.reset(); }).detach();
+    TraceError("Slam destroyed on its own SLAM thread: a callback held the last reference to it");
+    std::terminate();
   }
 }
 
