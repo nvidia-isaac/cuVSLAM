@@ -17,7 +17,6 @@
 import os
 import json
 import base64
-import math
 import subprocess
 from collections import defaultdict
 from datetime import datetime
@@ -107,7 +106,6 @@ def calc_summary(title, stats):
     total_gt_simple_rotation_error = 0
     num_correct_sequences = 0
     num_stats_with_gt = 0
-    num_stats_with_rotation = 0
     total_tracking_losts = 0
     for s in stats:
         tracking_time += s.tracking_time
@@ -121,9 +119,7 @@ def calc_summary(title, stats):
             num_stats_with_gt += 1
             if s.gt_av_translation_error <= 0.011:
                 num_correct_sequences += 1
-            if not math.isnan(s.gt_simple_rotation_error):
-                total_gt_simple_rotation_error += s.gt_simple_rotation_error
-                num_stats_with_rotation += 1
+            total_gt_simple_rotation_error += s.gt_simple_rotation_error
 
     summary_av_gt_translation_error = 0
     summary_av_gt_rotation_error = 0
@@ -134,8 +130,7 @@ def calc_summary(title, stats):
         summary_av_gt_translation_error = total_gt_av_translation_error / num_stats_with_gt
         summary_av_gt_rotation_error = total_gt_av_rotation_error / num_stats_with_gt
         summary_av_gt_simple_error = total_gt_simple_error / num_stats_with_gt
-    if num_stats_with_rotation > 0:
-        summary_av_gt_simple_rotation_error = total_gt_simple_rotation_error / num_stats_with_rotation
+        summary_av_gt_simple_rotation_error = total_gt_simple_rotation_error / num_stats_with_gt
     return {
         "title": title,
         "n_frames": n_frames,

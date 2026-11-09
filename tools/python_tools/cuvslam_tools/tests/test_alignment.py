@@ -68,14 +68,15 @@ class TestAbsoluteTrajectoryErrors(unittest.TestCase):
     def test_orientation_error_is_measured_after_alignment(self):
         gt = random_trajectory()
         R_offset = rotation([0, 0, 1], 40)
-        est = [pose(R_offset @ T[:3, :3] @ rotation([1, 0, 0], 5), R_offset @ T[:3, 3]) for T in gt]
+        est = [pose(R_offset @ rotation([1, 0, 0], 5 * (-1) ** i) @ T[:3, :3], R_offset @ T[:3, 3])
+               for i, T in enumerate(gt)]
 
         ate, are = absolute_trajectory_errors(gt, est)
 
         self.assertAlmostEqual(ate, 0.0, places=9)
         self.assertAlmostEqual(are, 5.0, places=6)
 
-    def test_rotation_error_is_unavailable_for_a_straight_line(self):
+    def test_rotation_error_on_a_straight_line(self):
         R_offset = rotation([0, 0, 1], 40)
         gt = [pose(np.eye(3), [x, 0, 0]) for x in np.linspace(0, 10, 20)]
         est = [pose(R_offset @ T[:3, :3], R_offset @ T[:3, 3]) for T in gt]
@@ -83,7 +84,19 @@ class TestAbsoluteTrajectoryErrors(unittest.TestCase):
         ate, are = absolute_trajectory_errors(gt, est)
 
         self.assertAlmostEqual(ate, 0.0, places=9)
-        self.assertTrue(np.isnan(are))
+        self.assertAlmostEqual(are, 0.0, places=6)
+
+    def test_rotation_error_on_a_nearly_straight_path(self):
+        # Sideways wiggle comparable to position noise leaves roll about the path to the orientations.
+        rng = np.random.default_rng(0)
+        R_offset = rotation([0, 0, 1], 40)
+        gt = [pose(np.eye(3), [x, 0.2 * np.sin(x / 10), 0]) for x in np.linspace(0, 100, 50)]
+        est = [pose(R_offset @ rotation([1, 0, 0], 3 * (-1) ** i), R_offset @ (T[:3, 3] + rng.normal(0, 0.1, 3)))
+               for i, T in enumerate(gt)]
+
+        _, are = absolute_trajectory_errors(gt, est)
+
+        self.assertAlmostEqual(are, 3.0, places=6)
 
 
 if __name__ == "__main__":
