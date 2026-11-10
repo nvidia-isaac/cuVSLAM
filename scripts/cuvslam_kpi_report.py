@@ -505,14 +505,15 @@ def summarize_vpr(stats):
     groups = {}
     for stat in stats:
         groups.setdefault(str(stat.get("title", "")).split("-")[0].upper(), []).append(stat)
+
+    def total(group, field):
+        return sum(safe_float(stat.get(field)) or 0 for stat in group)
+
     kpis = {}
     for prefix, group in groups.items():
-        def total(field):
-            return sum(safe_float(stat.get(field)) or 0 for stat in group)
-
-        n_frames = total("n_query_frames")
+        n_frames = total(group, "n_query_frames")
         for metric, field in VPR_COUNTS.items():
-            kpis[f"{prefix}_{metric}_{VPR_ROW}"] = 100.0 * total(field) / n_frames if n_frames else None
+            kpis[f"{prefix}_{metric}_{VPR_ROW}"] = 100.0 * total(group, field) / n_frames if n_frames else None
     return kpis
 
 
@@ -550,7 +551,7 @@ def process_dataset_folder(dataset_folder_path, kpi_config=None):
     if os.path.exists(vpr_stats_json):
         vpr_stats = parse_all_stats_json(vpr_stats_json)
         if not vpr_stats:
-            print(f'Warning: failed to parse {vpr_stats_json}')
+            print(f'Warning: no VPR stats in {vpr_stats_json}')
             return None
         return summarize_vpr(vpr_stats), {}
 
