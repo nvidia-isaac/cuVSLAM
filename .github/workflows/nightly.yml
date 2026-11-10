@@ -185,10 +185,13 @@ jobs:
           - { name: "x86_64 / cuda-13.2 / ubuntu-22.04", runner: '["gpu"]', cuda: "13.2.0", ubuntu: "22.04", archs: "75;80;86;89;100;120;121", platform: "x86_64", wheel: true, eval: true }
           - { name: "x86_64 / cuda-13.2 / ubuntu-24.04", runner: '["gpu"]', cuda: "13.2.0", ubuntu: "24.04", archs: "75;80;86;89;100;120;121", platform: "x86_64", eval: true }
 
-          # Non-default CMake configuration smoke build: builds + tests + wheel with extra
-          # cmake_options, but skips eval/docs and uploads no artifacts (skip_artifacts).
-          # Add another such row to cover a different option set (e.g. USE_CUDA).
+          # Non-default CMake configuration smoke builds: build + C++ and Python tests with extra
+          # cmake_options and an optional build_type (default Release), but skip eval/docs and upload
+          # no artifacts (skip_artifacts). RelWithDebInfo keeps asserts enabled.
           - { name: "x86_64 / USE_RERUN (config smoke)", runner: '["gpu"]', cuda: "12.6.3", ubuntu: "24.04", archs: "75;80;86;89;90", platform: "x86_64-rerun", wheel: true, cmake_options: "-DUSE_RERUN=ON", skip_artifacts: true }
+          - { name: "x86_64 / no CUDA (config smoke)", runner: '["gpu"]', cuda: "12.6.3", ubuntu: "24.04", archs: "75;80;86;89;90", platform: "x86_64-nocuda", cmake_options: "-DUSE_CUDA=OFF -DUSE_CUNLS=OFF -DUSE_TENSORRT=OFF", skip_artifacts: true }
+          - { name: "x86_64 / no cuNLS, no TensorRT (config smoke)", runner: '["gpu"]', cuda: "12.6.3", ubuntu: "24.04", archs: "75;80;86;89;90", platform: "x86_64-nocunls", cmake_options: "-DUSE_CUNLS=OFF -DUSE_TENSORRT=OFF", skip_artifacts: true }
+          - { name: "x86_64 / RelWithDebInfo + NVTX (config smoke)", runner: '["gpu"]', cuda: "12.6.3", ubuntu: "24.04", archs: "75;80;86;89;90", platform: "x86_64-relwithdebinfo", build_type: "RelWithDebInfo", cmake_options: "-DUSE_NVTX=ON", skip_artifacts: true }
 
           # Jetson configs (CUDA version must match host JetPack driver)
           # Orin uses base_image override; cuda value is not used for the Docker base but kept for artifact naming
@@ -322,7 +325,7 @@ jobs:
           UBUNTU_PORTS_MIRROR="${{ matrix.ports_mirror }}" \
           CUVSLAM_REQUIRE_CLEAN_SOURCE=1 \
           EXTRA_CMAKE_ARGS="-DCMAKE_CUDA_ARCHITECTURES=${{ matrix.archs }} ${{ matrix.cmake_options }}" \
-          ./scripts/build_cuvslam_in_docker.sh Release ./output
+          ./scripts/build_cuvslam_in_docker.sh ${{ matrix.build_type || 'Release' }} ./output
 
       - name: Run C++ tests
         timeout-minutes: 15
