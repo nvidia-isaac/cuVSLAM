@@ -472,6 +472,8 @@ def validate(dataset_ids: Iterable[str] | None = None, suite: str | None = None)
         for record in spec.evals:
             _validate_eval(spec, record)
         if spec.vpr is not None:
+            if not spec.vpr.sequences:
+                raise RegistryError(f"{spec.dataset_id} VPR: must have at least one sequence")
             _validate_suites(f"{spec.dataset_id} VPR", spec.vpr.suites)
 
     _validate_kpi_identities()

@@ -301,6 +301,12 @@ class TestValidationFailures(unittest.TestCase):
         with self.assertRaisesRegex(RegistryError, "at least one suite"):
             self._validate({"kitti": spec})
 
+    def test_vpr_record_without_sequences_fails(self):
+        # Its KPI keys would be expected, but no pair would produce them.
+        spec = DatasetSpec("kitti", KITTI_PREPARE, vpr=VprSpec((), frozenset(dataset_registry.SUITES)))
+        with self.assertRaisesRegex(RegistryError, "kitti VPR: must have at least one sequence"):
+            self._validate({"kitti": spec})
+
     def test_unknown_gating_policy_fails(self):
         spec = DatasetSpec("kitti", KITTI_PREPARE, (stereo_eval(gating="blocking"),))
         with self.assertRaisesRegex(RegistryError, "gating must be one of"):
