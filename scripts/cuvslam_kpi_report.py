@@ -85,7 +85,7 @@ METRIC_DISPLAY_NAMES = {"Kabsch": "ATE RMSE", "KabschRot": "ARE RMSE", "Tracking
                         "FalsePositive": "False positive"}
 # Decimal places of non-count metrics; 4 if not listed.
 METRIC_DECIMALS = {"FPS": 1, "Success": 2, "FalsePositive": 2, "Unrecognized": 2}
-VPR_NOTE = " VPR rows are % of the frames cuvslam_vpr_reporter queried over the dataset's map and query pairs."
+VPR_NOTE = "Rates are % of the frames cuvslam_vpr_reporter queried over the dataset's map and query pairs."
 
 
 def display_dataset_key(key):
@@ -1066,19 +1066,22 @@ def baseline_note(config_reports):
             f"worse than all of them{fps}")
 
 
-def vpr_table(rows, **table_args):
-    """The place recognition table, or "" without place recognition rows."""
-    return "\n" + create_table(rows, VPR_METRICS, **table_args) if rows else ""
+def render_tables(note, tracking, tracking_note, vpr, tracking_extra=None, **table_args):
+    """The note on both tables, then each table under its title with its own note."""
+    text = (f"_{note}_\n\n**Tracking**\n\n" + create_table(tracking, extra=tracking_extra, **table_args)
+            + f"\n_{tracking_note}_\n")
+    if vpr:
+        text += "\n**Place recognition**\n\n" + create_table(vpr, VPR_METRICS, **table_args) + f"\n_{VPR_NOTE}_\n"
+    return text
 
 
 def render_report(report, config):
     results = baseline_results([(config, report)])
     tracking, vpr = split_rows(apply_baseline_deltas(organize_data(report["current"]), results))
     classified = classify_sequences([(config, report)])
-    settings_note = baseline_note([(config, report)]) + ", against main's nightly history"
-    note = (f"{settings_note}. Failed counts sequences that failed.{sequence_check_note(classified)}"
-            + (VPR_NOTE if vpr else ""))
-    return (create_table(tracking, config=config) + vpr_table(vpr, config=config) + f"\n_{note}_\n"
+    note = baseline_note([(config, report)]) + ", against main's nightly history."
+    tracking_note = f"Failed counts sequences that failed.{sequence_check_note(classified)}"
+    return (render_tables(note, tracking, tracking_note, vpr, config=config)
             + render_regressions(results) + render_failed_sequences(classified, 1))
 
 
@@ -1157,7 +1160,7 @@ def aggregate_reports(config_reports):
 
 
 def render_aggregate_report(config_reports, *, values_only=False):
-    """Render the cross-configuration table, with its notes below it.
+    """Render the cross-configuration tables with their notes.
 
     values_only drops the Δ lines, the Broken / flaky column, the regression
     list, and the failed-sequence list, for release notes.
@@ -1167,29 +1170,24 @@ def render_aggregate_report(config_reports, *, values_only=False):
     classified = classify_sequences(config_reports)
     count = len(config_reports)
     configs = ", ".join(f"`{config}`" for config, _ in config_reports)
-    note = (
-        f"Across {count} configuration{'s' if count != 1 else ''}: {configs}. Values are mean ± population σ; "
-        "Losts and Failed are min–max. Failed counts the sequences that failed in a configuration"
-    )
-    vpr_note = VPR_NOTE if vpr else ""
+    note = f"Across {count} configuration{'s' if count != 1 else ''}: {configs}. Values are mean ± population σ."
+    tracking_note = "Losts and Failed are min–max. Failed counts the sequences that failed in a configuration"
     if values_only:
-        note += "." + sequence_check_note(classified) + vpr_note
-        return (create_table(tracking, aggregate=True, diffs=False) + vpr_table(vpr, aggregate=True, diffs=False)
-                + f"\n_{note}_\n")
+        tracking_note += "." + sequence_check_note(classified)
+        return render_tables(note, tracking, tracking_note, vpr, aggregate=True, diffs=False)
     results = baseline_results(config_reports)
     apply_baseline_deltas(organized, results)
-    settings_note = baseline_note(config_reports)
-    note += (
+    note += f" {baseline_note(config_reports)}."
+    tracking_note += (
         "; of those, a broken sequence failed in every configuration and a flaky one in some. "
-        f"{settings_note}. For Losts and Failed, Δ is of min/max."
-        + sequence_check_note(classified) + vpr_note
+        "For Losts and Failed, Δ is of min/max." + sequence_check_note(classified)
     )
     broken_flaky = (
         "Broken / flaky",
         {row: f"{len(c['broken'])} / {len(c['flaky'])}" for row, c in classified.items()},
     )
-    return (create_table(tracking, aggregate=True, extra=broken_flaky) + vpr_table(vpr, aggregate=True)
-            + f"\n_{note}_\n" + render_regressions(results) + render_failed_sequences(classified, count))
+    return (render_tables(note, tracking, tracking_note, vpr, tracking_extra=broken_flaky, aggregate=True)
+            + render_regressions(results) + render_failed_sequences(classified, count))
 
 
 def parse_config_report(value):
