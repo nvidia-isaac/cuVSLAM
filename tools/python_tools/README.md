@@ -78,6 +78,7 @@ Reinstall the binding after rebuilding `libcuvslam.so`.
 | Command | Purpose |
 |---|---|
 | `prepare_kitti` | Download KITTI odometry archives, convert them to cuVSLAM format, and generate KITTI reporter configs. |
+| `prepare_kitti_recalibrated` | Re-rectify the converted KITTI odometry dataset with the Cvišić et al. (ECMR 2021) calibration, see [its README](cuvslam_tools/dataset_preparation/kitti_recalibrated/README.md). |
 | `prepare_euroc` | Download and convert all 11 official EuRoC MAV sequences, or an explicit subset, to portable EDEX and reporter configs. |
 | `prepare_tartan` | Download TartanGround data and convert TartanGround stereo pairs or compatible TartanAir-layout sequences to EDEX. |
 | `prepare_tum` | Download and convert the 15 evaluated TUM RGB-D freiburg3 sequences, or an explicit subset, to portable EDEX and a reporter config. |
@@ -100,6 +101,7 @@ Smoke-check installed commands:
 
 ```bash
 prepare_kitti --help
+prepare_kitti_recalibrated --help
 prepare_euroc --help
 prepare_tartan --help
 prepare_tum --help

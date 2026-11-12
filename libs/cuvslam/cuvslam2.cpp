@@ -143,6 +143,7 @@ odom::TrackPerFrameSettings BuildTrackFrameSettings(const cuvslam::internal::Int
   result.sof.border_right = internals.border_right;
   result.sof.box3_prefilter = internals.box3_prefilter;
   result.sof.ransac_filter = internals.ransac_filter;
+  result.sof.feature_selection_settings.survivor_from_last = internals.feature_survivor_from_last;
   result.kf.survivor_from_last = internals.kf_survivor_from_last;
   result.kf.max_timedelta_between_kfs_s = internals.kf_max_timedelta_between_kfs_s;
   result.kf.override_frame_selection = internals.kf_override_frame_selection;

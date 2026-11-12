@@ -45,7 +45,8 @@ public:
 
   void set_image_width(uint32_t width) override;
   void reset_selector() override;
-  bool select(const TracksVector& cur_frame_tracks) override;
+  // Uses SelectorMonoSettings; sof_settings has no mono selection fields.
+  bool select(const TracksVector& cur_frame_tracks, const Settings& sof_settings) override;
   void set_tracks(const TracksVector& cur_frame_tracks) override;
 
 private:

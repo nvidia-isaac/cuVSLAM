@@ -30,15 +30,13 @@ struct SelectorStereoSettings {
 
 class SelectorStereo : public ISelector {
 public:
-  SelectorStereo(const SelectorStereoSettings& settings);
-
   void set_image_width(uint32_t width) override;
   void reset_selector() override;
-  bool select(const TracksVector& cur_frame_tracks) override;
+  // Uses sof_settings.feature_selection_settings of the current frame.
+  bool select(const TracksVector& cur_frame_tracks, const Settings& sof_settings) override;
   void set_tracks(const TracksVector& cur_frame_tracks) override;
 
 private:
-  SelectorStereoSettings settings_;
   bool first_feature_initialization_selected_ = false;
   TracksVector last_feature_initialization_tracks_;
 };

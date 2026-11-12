@@ -332,6 +332,34 @@ class TestTracking(unittest.TestCase):
                 self.assertIn(False, automatic,
                               "near-static Mono scene should produce at least one automatic non-keyframe")
 
+    def _new_track_ids_per_frame(self, feature_survivor_from_last):
+        """Track the zoom sequence through Tracker.track; return how many new track ids each later frame adds."""
+        img = data.ImageGenerator(self.rig.cameras, 10)
+        cfg = vslam.Odometry.Config()
+        cfg.odometry_mode = vslam.Odometry.OdometryMode.Multicamera
+        cfg.async_sba = False
+        cfg.enable_observations_export = True
+        tracker = vslam.Tracker(self.rig, TrackerMode.OdometryOnlyOffline, cfg)
+        internals = vslam.Odometry.Internals()
+        internals.feature_survivor_from_last = feature_survivor_from_last
+
+        seen = set()
+        new_ids = []
+        for i in range(5):
+            images, _ = img.generate_zoomed_images(i)
+            tracker.track((i + 1) * 1_000_000, images, internals=internals)
+            ids = {o.id for o in tracker.odometry.get_last_observations(0)}
+            new_ids.append(len(ids - seen))
+            seen |= ids
+        return new_ids[1:]
+
+    def test_feature_survivor_from_last_controls_redetection(self):
+        # The zoom pushes tracks out of view on every frame.
+        never = self._new_track_ids_per_frame(0.0)  # the survivor share never drops below 0 %
+        always = self._new_track_ids_per_frame(100.0)  # any lost track triggers detection
+        self.assertEqual(never, [0] * len(never))
+        self.assertTrue(all(always), f"every frame should detect new features, got {always}")
+
     def test_get_observations_and_landmarks(self):
         img = data.ImageGenerator(self.rig.cameras, 10)
 

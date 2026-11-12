@@ -779,6 +779,8 @@ NB_MODULE(_cuvslam, m) {
       .def_rw("border_right", &cuvslam::internal::Internals::border_right, "Right border to ignore in pixels")
       .def_rw("box3_prefilter", &cuvslam::internal::Internals::box3_prefilter, "Enable box filter preprocessing")
       .def_rw("ransac_filter", &cuvslam::internal::Internals::ransac_filter, "Enable RANSAC filtering")
+      .def_rw("feature_survivor_from_last", &cuvslam::internal::Internals::feature_survivor_from_last,
+              "Feature detection threshold (all modes but Mono): survivor tracks percentage (0-100)")
       // Keyframe Settings
       .def_rw("kf_survivor_from_last", &cuvslam::internal::Internals::kf_survivor_from_last,
               "Keyframe selection threshold: survivor tracks percentage (0-100)")
@@ -1521,7 +1523,8 @@ NB_MODULE(_cuvslam, m) {
           "track",
           [](Tracker& self, int64_t timestamp, const std::vector<nb::ndarray<nb::ro>>& images,
              const std::optional<std::vector<nb::ndarray<nb::ro>>>& masks,
-             const std::optional<std::vector<nb::ndarray<nb::ro>>>& depths)
+             const std::optional<std::vector<nb::ndarray<nb::ro>>>& depths,
+             const std::optional<cuvslam::internal::Internals>& internals)
               -> std::tuple<PoseEstimate, std::optional<Pose>> {
             if (masks.has_value()) {
               THROW_INVALID_ARG_IF(masks->size() != images.size() && !masks->empty(),
@@ -1536,10 +1539,11 @@ NB_MODULE(_cuvslam, m) {
                 masks.has_value() ? ImageSetFromNDArrays(*masks, timestamp, ArrayType::Mask) : Odometry::ImageSet();
             const auto depth_set =
                 depths.has_value() ? ImageSetFromNDArrays(*depths, timestamp, ArrayType::Depth) : Odometry::ImageSet();
-            auto result = self.Track(image_set, mask_set, depth_set);
+            auto result = self.Track(image_set, mask_set, depth_set, internals.has_value() ? &*internals : nullptr);
             return {result.odometry, result.slam};
           },
           nb::arg("timestamp"), nb::arg("images"), nb::arg("masks") = nb::none(), nb::arg("depths") = nb::none(),
+          nb::arg("internals") = nb::none(),
           "Track a rig pose using current image frame.\n\n"
           "This method combines odometry and SLAM processing in a single call.\n\n"
           "In inertial mode, if visual odometry tracker fails to compute a pose, the function returns the position "
@@ -1568,7 +1572,9 @@ NB_MODULE(_cuvslam, m) {
           "    images: List of numpy arrays or tensors containing the camera images\n"
           "    masks: Optional list of 2D uint8 numpy arrays or tensors containing masks for the images. Non-zero\n"
           "        pixels are excluded, see :meth:`Odometry.track`.\n"
-          "    depths: Optional list of numpy arrays or tensors containing depth images\n\n"
+          "    depths: Optional list of numpy arrays or tensors containing depth images\n"
+          "    internals: Optional :class:`Odometry.Internals` overrides for this call only, see "
+          ":meth:`Odometry.track`\n\n"
           "Returns:\n"
           "    PoseEstimate: The computed pose estimate from Odometry. On failure `world_from_rig` will be `None`.\n"
           "    Pose: If SLAM is enabled, the computed pose estimate from SLAM, otherwise `None`.\n\n"
