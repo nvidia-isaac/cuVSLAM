@@ -55,4 +55,6 @@ std::optional<pipelines::SolverSfMInertial::ImuState> StereoInertialOdometry::Ge
   return solver_.GetImuState();
 }
 
+bool StereoInertialOdometry::can_track_visual_blackout() const { return solver_.get_gravity().has_value(); }
+
 }  // namespace cuvslam::odom
