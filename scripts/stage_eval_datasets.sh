@@ -61,8 +61,17 @@ cache_is_current() {
   if $have_aws; then
     # ETag and size come from one request so the staging profile can report
     # throughput without stat(2) on a local copy.
-    head_output="$(aws s3api head-object --bucket "$S3_BUCKET" --key "$s3_key" \
-      --query '[ETag,ContentLength]' --output text 2>/dev/null || true)"
+    local head_error
+    head_error="$(mktemp)"
+    if ! head_output="$(aws s3api head-object --bucket "$S3_BUCKET" --key "$s3_key" \
+      --query '[ETag,ContentLength]' --output text 2>"$head_error")"; then
+      head_output=""
+      # The caller only sees an unknown size, so the AWS error is the one place
+      # that tells a rejected credential (403) from a missing object (404).
+      echo "Warning: head-object s3://$S3_BUCKET/$s3_key failed:" \
+        "$(sed '/^[[:space:]]*$/d' "$head_error" | paste -sd ' ' -)" >&2
+    fi
+    rm -f "$head_error"
     if [ -n "$head_output" ]; then
       remote_etag="$(printf '%s' "$head_output" | cut -f1)"
       remote_bytes="$(printf '%s' "$head_output" | cut -f2)"
