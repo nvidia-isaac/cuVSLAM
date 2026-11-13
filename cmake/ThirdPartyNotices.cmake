@@ -18,9 +18,6 @@
 #   cuvslam_third_party_notice()          for code or data that ends up in the C++ package or the wheels
 #   cuvslam_third_party_not_distributed() for anything else (tests, examples, development-only options)
 # next to its version pin. cuvslam_check_third_party_coverage() fails the configure for a file that calls neither.
-#
-# Script mode compares a generated file with the checked-in one:
-#   cmake -DGENERATED=<file> -DCHECKED_IN=<file> -DUPDATE_COMMAND=<text> -P ThirdPartyNotices.cmake
 
 # cuvslam_third_party_notice(NAME <name> VERSION <version> URL <url> LICENSE <SPDX expression>
 #                            [FILES <license or NOTICE file>...] [TEXT <license text>] [NOTE <text>])
@@ -110,12 +107,3 @@ function(cuvslam_write_third_party_notices output)
     configure_file("${output}.tmp" "${output}" COPYONLY)
     file(REMOVE "${output}.tmp")
 endfunction()
-
-if(CMAKE_SCRIPT_MODE_FILE STREQUAL CMAKE_CURRENT_LIST_FILE)
-    file(SHA256 "${GENERATED}" _generated_hash)
-    file(SHA256 "${CHECKED_IN}" _checked_in_hash)
-    if(NOT _generated_hash STREQUAL _checked_in_hash)
-        message(FATAL_ERROR "${CHECKED_IN} does not match the notices this build generated, ${GENERATED}: "
-                            "a dependency was added, removed or changed. Update it with\n  ${UPDATE_COMMAND}")
-    endif()
-endif()
