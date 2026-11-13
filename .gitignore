@@ -5,6 +5,7 @@
 .idea/
 .env
 .venv/
+.venv-trajectory/
 .cache/
 __pycache__/
 *.egg-info

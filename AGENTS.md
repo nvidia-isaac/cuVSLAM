@@ -22,7 +22,7 @@ Before making code changes or designing new features, read **[DESIGN_CONCEPTS.md
 
 ## CI/CD pipelines
 
-The GitHub Actions CI/CD (build, test, lint, dataset evaluation, nightly release, and dataset provisioning) is documented in the `cuvslam-ci` skill at [cuvslam-skills/cuvslam-ci/SKILL.md](cuvslam-skills/cuvslam-ci/SKILL.md). Read it before changing any `.github/workflows/**`, CI script under `scripts/`, dataset preparation code under `tools/python_tools/cuvslam_tools/dataset_preparation/`, or the test matrix.
+The GitHub Actions CI/CD (build, test, lint, dataset evaluation, nightly release, and dataset provisioning) is documented in the `cuvslam-ci` skill at [.agents/contributor-skills/cuvslam-ci/SKILL.md](.agents/contributor-skills/cuvslam-ci/SKILL.md). Read it before changing any `.github/workflows/**`, CI script under `scripts/`, dataset preparation code under `tools/python_tools/cuvslam_tools/dataset_preparation/`, or the test matrix.
 
 Load-bearing rules:
 
@@ -89,9 +89,14 @@ When creating a git branch, use `<user-name>/<branch-name>`, with `<branch-name>
 - Deleting or overwriting build artifacts or test data
 - Changing versions of FetchContent dependencies in `cmake/ext/`
 
-## Claude Code Skills
+## Agent Skills
 
-Project-specific skills in `cuvslam-skills/` — see `cuvslam-skills/README.md` for descriptions and install steps.
+Customer-facing skills live in `skills/` and are discovered automatically by Codex through the `.agents/skills`
+symlink. See [skills/README.md](skills/README.md) for descriptions, discovery, and installation instructions.
+
+For CI/CD, dataset provisioning, evaluation pipelines, or repository infrastructure work, read
+[.agents/contributor-skills/cuvslam-ci/SKILL.md](.agents/contributor-skills/cuvslam-ci/SKILL.md) directly.
+That contributor skill is outside Codex's customer-skill discovery directory.
 
 ## AGENTS.md Convention
 

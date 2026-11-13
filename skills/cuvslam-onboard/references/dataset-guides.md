@@ -101,7 +101,7 @@ With Rerun: `cmake -S . -B build -DUSE_RERUN=ON`
 cd examples/tum
 mkdir -p dataset
 wget https://cvg.cit.tum.de/rgbd/dataset/freiburg3/rgbd_dataset_freiburg3_long_office_household.tgz -O dataset/fr3.tgz
-tar -xzf dataset/fr3.tgz -C dataset && rm dataset/fr3.tgz
+tar -xzf dataset/fr3.tgz -C dataset
 cp freiburg3_rig.yaml dataset/rgbd_dataset_freiburg3_long_office_household/
 ```
 
@@ -226,7 +226,7 @@ Minimal stereo example:
 **bag2edex** (offline, frame-by-frame):
 ```bash
 cd tools/ros/bag2edex
-python3 -m venv .env && source .env/bin/activate
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 python3 bag_to_edex.py <rosbag_path> <output_edex_path>
 ```
