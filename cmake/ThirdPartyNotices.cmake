@@ -22,7 +22,7 @@
 # cuvslam_third_party_notice(NAME <name> VERSION <version> URL <url> LICENSE <SPDX expression>
 #                            [FILES <license or NOTICE file>...] [TEXT <license text>] [NOTE <text>])
 function(cuvslam_third_party_notice)
-    cmake_parse_arguments(ARG "" "NAME;VERSION;URL;LICENSE;TEXT;NOTE" "FILES" ${ARGN})
+    cmake_parse_arguments(PARSE_ARGV 0 ARG "" "NAME;VERSION;URL;LICENSE;TEXT;NOTE" "FILES")
     foreach(_required NAME VERSION URL LICENSE)
         if(NOT ARG_${_required})
             message(FATAL_ERROR "cuvslam_third_party_notice(${ARG_NAME}): ${_required} is required")
