@@ -1,28 +1,45 @@
 [build-system]
-requires = ["scikit-build-core>=0.10", "nanobind>=2.10.2"]
+requires = ["scikit-build-core>=0.11", "nanobind>=2.10.2"]
 build-backend = "scikit_build_core.build"
 
 [project]
+# Release builds rename this to cuvslam-cu<CUDA major> (scripts/build_pycuvslam_in_docker.sh)
 name = "cuvslam"
 dynamic = ["version"]
 description = "Python bindings for cuVSLAM library"
+readme = "README.md"
 authors = [
     {name = "NVIDIA Corporation"}
 ]
-license = {text = "Other/Proprietary License"}
-requires-python = ">=3.9"
-urls = {Homepage = "https://github.com/nvidia-isaac/cuVSLAM"}
+license = "LicenseRef-NVIDIA-Community-License"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+urls = {Homepage = "https://github.com/nvidia-isaac/cuVSLAM", Documentation = "https://nvidia-isaac.github.io/cuVSLAM/python/"}
 classifiers = [
     "Operating System :: POSIX :: Linux",
     "Programming Language :: C++",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Environment :: GPU :: NVIDIA CUDA",
 ]
 dependencies = ["pyyaml>=5.3.1"]
+
+[project.optional-dependencies]
+# CUDA libraries from PyPI instead of a system CUDA Toolkit, for release wheels; release builds swap in the wheel's
+# CUDA major. Source builds use the CUDA Toolkit they were built with and should not install this extra.
+# On aarch64, CUDA 12 means Jetson Orin, which cannot use these SBSA wheels.
+cuda = [
+    'cuda-toolkit[cublas,cusolver,cusparse]==12.*; platform_machine != "aarch64"',
+    "cuda-pathfinder",
+]
+# TensorRT runtime for visual place recognition (use_vpr), at least the version scripts/install_tensorrt.sh builds
+# against. Release builds swap in the wheel's CUDA major.
+tensorrt = [
+    'tensorrt-cu12-libs>=10.16.1,<11; platform_machine != "aarch64"',
+]
 
 [tool.scikit-build]
 minimum-version = "build-system.requires"
@@ -37,7 +54,7 @@ wheel.py-api = "cp312"
 
 cmake.source-dir = "."
 
-wheel.install-dir = "cuvslam"
+wheel.packages = ["src/cuvslam"]
 
 # For distribution mode: include prebuilt binaries and headers in source tarball
 # sdist.include = ["../include/**", "../bin/**"]

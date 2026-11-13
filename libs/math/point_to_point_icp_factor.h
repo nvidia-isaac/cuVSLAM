@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include <algorithm>
+
 #include <cunls/factor/sized_factor_batch.h>
 
 #include "cuda_modules/cuda_helper.h"
@@ -25,13 +27,17 @@ namespace cuvslam::math {
 
 // Point-to-point ICP cost: residual dim = 1, single SE(3) state block (tangent dim 6).
 //
-// Projective formulation: the state is rig_from_world. cam_from_rig is always provided;
-// the kernel composes cam_from_world = cam_from_rig * rig_from_world. Each reference
+// Projective formulation: the state is world_from_rig (the cuNLS pose convention). cam_from_rig is
+// always provided; the kernel composes cam_from_world = cam_from_rig * world_from_rig^-1. Each reference
 // landmark is transformed into the current camera, projected to a single pixel, and
 // compared against the depth sample there. The residual is the signed depth difference
 // r = p_cam.z - d. The kernel also applies a fixed relative-depth gate to robustly
 // discard occlusion-edge and wrong-surface matches; the threshold lives alongside
 // the kernel (see kMaxRelDepth in point_to_point_icp_kernel.cu).
+//
+// The batch always reports num_factors active factors. Only the first num_valid_factors landmarks are
+// evaluated; the rest get zero residuals and Jacobians, so a persistent batch keeps a fixed size (and the
+// solver can reuse the problem structure) while the number of landmarks changes between solves.
 class PointToPointICPBatch : public cunls::SizedFactorBatch<1, 6> {
 public:
   PointToPointICPBatch(const float3* d_landmarks, const float* d_cam_from_rig, cudaTextureObject_t depth_tex,
@@ -42,16 +48,41 @@ public:
         focal_(focal),
         principal_(principal),
         image_size_(image_size),
-        num_factors_(num_factors) {}
+        num_factors_(num_factors),
+        num_valid_factors_(num_factors) {}
 
-  bool Evaluate(float* residuals, float* jacobians, float const* const* state_pointers,
-                cudaStream_t stream) const final {
+  // Rebinds the depth image and the number of valid landmarks (at most num_factors) for the next solve.
+  void SetFrame(cudaTextureObject_t depth_tex, float2 focal, float2 principal, int2 image_size,
+                size_t num_valid_factors) {
+    depth_tex_ = depth_tex;
+    focal_ = focal;
+    principal_ = principal;
+    image_size_ = image_size;
+    num_valid_factors_ = std::min(num_valid_factors, num_factors_);
+  }
+
+  bool Evaluate(float* residuals, float* jacobians, float const* const* state_pointers, cudaStream_t stream,
+                const int* factor_ids, size_t num_factor_ids) const final {
+    // cuNLS passes the resolved item count; only plain evaluation (item t is factor t) is supported.
+    if (factor_ids != nullptr || (num_factor_ids != 0 && num_factor_ids != num_factors_)) {
+      return false;
+    }
     CUDA_CHECK(cuda::point_to_point_icp_evaluate(d_landmarks_, state_pointers, d_cam_from_rig_, depth_tex_, focal_,
-                                                 principal_, image_size_, residuals, jacobians, num_factors_, stream));
+                                                 principal_, image_size_, residuals, jacobians, num_valid_factors_,
+                                                 stream));
+    const size_t num_padding = num_factors_ - num_valid_factors_;
+    if (num_padding > 0) {
+      if (residuals != nullptr) {
+        CUDA_CHECK(cudaMemsetAsync(residuals + num_valid_factors_, 0, num_padding * sizeof(float), stream));
+      }
+      if (jacobians != nullptr) {
+        CUDA_CHECK(cudaMemsetAsync(jacobians + num_valid_factors_ * 6, 0, num_padding * 6 * sizeof(float), stream));
+      }
+    }
     return true;
   }
 
-  size_t NumFactors() const final { return num_factors_; }
+  size_t NumActiveFactors() const final { return num_factors_; }
 
 private:
   const float3* d_landmarks_;
@@ -61,6 +92,7 @@ private:
   float2 principal_;
   int2 image_size_;
   size_t num_factors_;
+  size_t num_valid_factors_;
 };
 
 }  // namespace cuvslam::math

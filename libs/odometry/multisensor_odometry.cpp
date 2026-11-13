@@ -19,6 +19,8 @@
 
 #include <algorithm>
 
+#include "camera/camera.h"
+#include "common/log.h"
 #include "cuda_modules/cuda_helper.h"
 #include "pipelines/feature_predictor.h"
 #include "sof/sof_create.h"
@@ -27,7 +29,20 @@ namespace cuvslam::odom {
 
 namespace {
 
-pipelines::SolverSfMMultisensor make_solver(map::UnifiedMap& map, const camera::Rig& rig, const Settings& settings) {
+// Depth lifting, ICP and point-to-plane factors project into depth images with pinhole intrinsics only.
+// Cameras without depth only feed normalized (undistorted) observations to the solver, so any model works.
+void WarnIfNonPinholeDepthCamera(const camera::Rig& rig, const std::vector<int32_t>& depth_camera_ids) {
+  for (int32_t cam_id : depth_camera_ids) {
+    if (dynamic_cast<const camera::PinholeCameraModel*>(rig.intrinsics[cam_id]) == nullptr) {
+      TraceWarning(
+          "Multisensor depth cameras support only the pinhole model. Depth camera %d uses a different model; "
+          "its depth measurements will be misaligned.",
+          cam_id);
+    }
+  }
+}
+
+pipelines::SolverSfMMultisensor MakeSolver(map::UnifiedMap& map, const camera::Rig& rig, const Settings& settings) {
   if (settings.multisensor_settings.with_imu) {
     return pipelines::SolverSfMMultisensor(map, rig, settings.sba_settings, settings.imu_calibration);
   }
@@ -43,7 +58,8 @@ MultisensorOdometry::MultisensorOdometry(const camera::Rig& rig, const camera::F
       settings_(settings),
       map_(20),
       feature_predictor_(std::make_shared<pipelines::FeaturePredictor>(map_, rig)),
-      solver_(make_solver(map_, rig, settings)) {
+      solver_(MakeSolver(map_, rig, settings)) {
+  WarnIfNonPinholeDepthCamera(rig, settings.multisensor_settings.depth_camera_ids);
   observations_.resize(rig.num_cameras);
   depth_cam_ids_.reserve(rig.num_cameras);
   depth_info_storage_.reserve(rig.num_cameras);

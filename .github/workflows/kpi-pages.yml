@@ -1,0 +1,132 @@
+name: Publish KPI site
+
+# Publishes GitHub Pages: the gh-pages docs tree unchanged, plus kpi/ with the
+# nightly KPI trends built from the runner KPI history. Nothing is committed;
+# each deployment replaces the previous one.
+
+on:
+  workflow_run:
+    workflows: ["Nightly Build & Test"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+  # Temporary: runs the workflow before it reaches main. Remove before merging.
+  push:
+    branches:
+      - vikuznetsov/kpi-pages-deploy
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kpi-pages
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  collect-history:
+    name: Collect KPI history
+    if: >-
+      github.repository == 'nvidia-isaac/cuVSLAM' &&
+      (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion != 'cancelled')
+    runs-on: [gpu]
+    timeout-minutes: 15
+    steps:
+      - name: Copy KPI history
+        env:
+          RUNNER_STORAGE_ROOT: ${{ vars.RUNNER_STORAGE_ROOT }}
+        run: |
+          history="${RUNNER_STORAGE_ROOT:?RUNNER_STORAGE_ROOT must be set}/cuvslam-ci/kpi-history"
+          # Runner storage is mounted asynchronously after a fresh runner boots, and this job
+          # reaches it seconds after start, unlike eval which reads it after the build.
+          waited=0
+          while [ ! -d "$history" ] && [ "$waited" -lt 300 ]; do
+            sleep 5
+            waited=$((waited + 5))
+          done
+          if [ ! -d "$history" ]; then
+            echo "::error::No KPI history at $history after waiting ${waited}s"
+            findmnt -T "$RUNNER_STORAGE_ROOT" || true
+            ls -la "$RUNNER_STORAGE_ROOT" "$RUNNER_STORAGE_ROOT/cuvslam-ci" || true
+            exit 1
+          fi
+          echo "KPI history available after ${waited}s at $history"
+          findmnt -T "$history" || true
+          rm -rf kpi-history
+          mkdir kpi-history
+          for dir in "$history"/*/; do
+            slug=$(basename "$dir")
+            files=$(find "$dir" -maxdepth 1 -name 'kpi_[0-9]*.json' ! -name '*.report.json')
+            if [ -z "$files" ]; then
+              echo "$slug: no runs, skipped"
+              continue
+            fi
+            mkdir "kpi-history/$slug"
+            xargs -d '\n' cp -t "kpi-history/$slug" <<< "$files"
+            echo "$slug: $(wc -l <<< "$files") runs"
+          done
+
+      - name: Upload KPI history
+        uses: actions/upload-artifact@v7
+        with:
+          name: kpi-history
+          path: kpi-history/
+          retention-days: 1
+          if-no-files-found: error
+
+  build:
+    name: Build site
+    needs: collect-history
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Check out docs
+        uses: actions/checkout@v5
+        with:
+          ref: gh-pages
+          path: gh-pages
+          lfs: true
+          persist-credentials: false
+
+      - name: Download KPI history
+        uses: actions/download-artifact@v8
+        with:
+          name: kpi-history
+          path: kpi-history
+
+      - name: Build site
+        run: |
+          args=()
+          for dir in kpi-history/*/; do
+            args+=(--config "$(basename "$dir")=$dir")
+          done
+          python3 scripts/cuvslam_kpi_site.py --kpi-config scripts/kpi_baseline_ranges.json \
+            --docs-dir gh-pages --output site "${args[@]}"
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}kpi/
+    steps:
+      - name: Deploy
+        id: deploy
+        uses: actions/deploy-pages@v4

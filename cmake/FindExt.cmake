@@ -54,10 +54,6 @@ if(USE_CERES)
     # include(cmake/ext/ceres.cmake)
 endif()
 
-if(USE_CUNLS AND NOT USE_CUDA)
-    message(FATAL_ERROR "USE_CUNLS requires USE_CUDA")
-endif()
-
 if (MSVC)
     # TODO: move to cuVSLAMUtils.cmake?
     set(CMAKE_CONFIGURATION_TYPES "Debug;Release" CACHE INTERNAL "hardcoded. do not change it. hide from user" FORCE)
@@ -79,4 +75,11 @@ if(USE_CUDA)
     # Print CUDA information
     message(STATUS "Found CUDA version: ${CUDAToolkit_VERSION}")
     message(STATUS "CUDA Toolkit target architecture directory: ${CUDAToolkit_TARGET_DIR}")
+endif()
+
+if(USE_TENSORRT)
+    include(${CMAKE_CURRENT_LIST_DIR}/ext/tensorrt.cmake)
+endif()
+if(CUVSLAM_BUILD_ANYLOC_ENGINE)
+    include(${CMAKE_CURRENT_LIST_DIR}/ext/dinov2.cmake)
 endif()

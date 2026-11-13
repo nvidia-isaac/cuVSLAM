@@ -14,16 +14,30 @@
  * of the software or derivative works thereof, you agree to be bound by this License.
  */
 
+#include <chrono>
+#include <csignal>
 #include <cstdint>
+#include <cstdlib>
+#include <filesystem>
+#include <future>
 #include <limits>
+#include <memory>
+#include <optional>
 #include <stdexcept>
+#include <string>
 #include <string_view>
+#include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
 #include "common/include_gtest.h"
 #include "cuvslam/cuvslam2.h"
+#include "cuvslam/vpr_vocabulary_builder2.h"
+
+#ifdef USE_CUDA
+#include "cuda_modules/cuda_helper.h"
+#endif
 
 namespace {
 
@@ -31,10 +45,16 @@ using cuvslam::Odometry;
 using cuvslam::Rig;
 using cuvslam::Slam;
 using cuvslam::Tracker;
+using cuvslam::VprVocabularyBuilder;
 using Mode = Tracker::Mode;
 
 static_assert(std::is_same_v<decltype(std::declval<Tracker&>().GetOdometry()), const Odometry&>);
 static_assert(std::is_same_v<decltype(std::declval<Tracker&>().GetSlam()), Slam&>);
+// The folder goes by value and the guess pose as a nullable pointer, like Slam::Track's gt_pose.
+static_assert(std::is_same_v<decltype(&Slam::LocalizeInMap),
+                             void (Slam::*)(std::string_view, int64_t, const cuvslam::Pose*, const Slam::ImageSet&,
+                                            const Slam::LocalizationSettings&, Slam::LocalizeStartCB,
+                                            Slam::LocalizeFinishCB, bool)>);
 
 constexpr int32_t kWidth = 640;
 constexpr int32_t kHeight = 480;
@@ -98,6 +118,17 @@ OfflineConfig MakeOfflineConfig() {
   cfg.slam.sync_mode = true;
   cfg.slam.enable_reading_internals = true;
   return cfg;
+}
+
+/// A small search grid; zero steps never finish building the localization probes.
+Slam::LocalizationSettings MakeLocalizationSettings() {
+  Slam::LocalizationSettings settings{};
+  settings.horizontal_search_radius = 1.5f;
+  settings.vertical_search_radius = 0.5f;
+  settings.horizontal_step = 0.5f;
+  settings.vertical_step = 0.25f;
+  settings.angular_step_rads = 0.1f;
+  return settings;
 }
 
 class TrackerTest : public testing::Test {
@@ -252,6 +283,32 @@ TEST_F(TrackerTest, StandaloneSlamChecksTheWholeRig) {
   EXPECT_THROW(Slam(mismatched_resolutions, {0}), std::invalid_argument);
 }
 
+// Primary camera ids index fixed-size arrays inside SLAM, and only Tracker derives them from Odometry.
+TEST_F(TrackerTest, StandaloneSlamChecksPrimaryCameras) {
+  Slam::Config cpu;
+  cpu.use_gpu = false;
+  EXPECT_THROW(Slam(rig, {}, cpu), std::invalid_argument);
+  EXPECT_THROW(Slam(rig, {2}, cpu), std::invalid_argument);
+  EXPECT_THROW(Slam(rig, {255}, cpu), std::invalid_argument);
+  EXPECT_THROW(Slam(rig, {1, 1}, cpu), std::invalid_argument);
+  EXPECT_NO_THROW(Slam(rig, {1}, cpu));
+  EXPECT_NO_THROW(Slam(rig, {0, 1}, cpu));
+}
+
+TEST_F(TrackerTest, StandaloneSlamChecksCameraCount) {
+  Slam::Config cpu;
+  cpu.use_gpu = false;
+  Rig full;
+  for (int32_t k = 0; k < 33; ++k) {
+    full.cameras.push_back(rig.cameras[0]);
+    full.cameras.back().rig_from_camera.translation = {kBaseline * static_cast<float>(k), 0.f, 0.f};
+  }
+  EXPECT_THROW(Slam(full, {0}, cpu), std::invalid_argument);
+
+  full.cameras.pop_back();
+  EXPECT_NO_THROW(Slam(full, {0, 31}, cpu));
+}
+
 TEST_F(TrackerTest, TrackReturnsSlamPoseWhenEnabled) {
   OfflineConfig cfg = MakeOfflineConfig();
   Tracker tracker{rig, Mode::OdometryWithSlamOffline, cfg.odometry, &cfg.slam};
@@ -329,9 +386,172 @@ TEST_F(TrackerTest, MoveKeepsComponentsUsable) {
   EXPECT_NO_THROW(moved.Track(NextFrame()));
 }
 
+// A null guess pose asks the map's place recognition for candidates, which needs use_vpr.
+TEST_F(TrackerTest, LocalizeInMapWithoutGuessPoseNeedsVpr) {
+  OfflineConfig cfg = MakeOfflineConfig();
+  Slam slam{rig, {0}, cfg.slam};
+
+  try {
+    slam.LocalizeInMap("/nonexistent/map", 0, nullptr, NextFrame(), MakeLocalizationSettings(), nullptr, nullptr);
+    FAIL() << "LocalizeInMap without a guess pose was accepted without use_vpr";
+  } catch (const std::invalid_argument& e) {
+    EXPECT_NE(std::string_view{e.what()}.find("use_vpr"), std::string_view::npos) << e.what();
+  }
+}
+
+// A guess pose needs no place recognition, so the call reaches the map and reports it missing.
+TEST_F(TrackerTest, LocalizeInMapWithGuessPoseReportsAMissingMap) {
+  OfflineConfig cfg = MakeOfflineConfig();
+  Slam slam{rig, {0}, cfg.slam};
+  const cuvslam::Pose guess;
+  std::optional<std::string> error;
+
+  slam.LocalizeInMap("/nonexistent/map", 0, &guess, NextFrame(), MakeLocalizationSettings(), nullptr,
+                     [&error](const cuvslam::Result<cuvslam::Pose>& result) {
+                       EXPECT_FALSE(result.data.has_value());
+                       error = std::string{result.error_message};
+                     });
+
+  ASSERT_TRUE(error.has_value());  // sync_mode localizes before returning
+  EXPECT_NE(error->find("database"), std::string::npos) << *error;
+}
+
+TEST_F(TrackerTest, SlamRejectsVprVocabularySettingsWithoutUseVpr) {
+  Slam::Config path = MakeOfflineConfig().slam;
+  path.vpr_settings.vocabulary_path = "/nonexistent/test.vocabulary";
+  EXPECT_THROW(Slam(rig, {0}, path), std::invalid_argument);
+
+  Slam::Config min_keyframes = MakeOfflineConfig().slam;
+  min_keyframes.vpr_settings.vocabulary_min_keyframes = 3;
+  EXPECT_THROW(Slam(rig, {0}, min_keyframes), std::invalid_argument);
+
+  Slam::Config max_keyframes = MakeOfflineConfig().slam;
+  max_keyframes.vpr_settings.vocabulary_max_keyframes = 200;
+  EXPECT_THROW(Slam(rig, {0}, max_keyframes), std::invalid_argument);
+}
+
+// The engine does not exist, so each std::invalid_argument comes from a check that runs before it loads.
+TEST_F(TrackerTest, SlamRejectsOnlineFitSettingsBesideAVocabularyFile) {
+  if (!cuvslam::IsCudaBuild()) {
+    GTEST_SKIP() << "use_vpr needs use_gpu, which needs a CUDA build";
+  }
+  Slam::Config cfg = MakeOfflineConfig().slam;
+  cfg.use_vpr = true;
+  cfg.vpr_settings.model_path = "/nonexistent/anyloc.engine";
+  cfg.vpr_settings.vocabulary_path = "/nonexistent/test.vocabulary";
+  EXPECT_THROW(Slam(rig, {0}, cfg), std::runtime_error);
+
+  Slam::Config min_keyframes = cfg;
+  min_keyframes.vpr_settings.vocabulary_min_keyframes = 3;
+  EXPECT_THROW(Slam(rig, {0}, min_keyframes), std::invalid_argument);
+
+  Slam::Config max_keyframes = cfg;
+  max_keyframes.vpr_settings.vocabulary_max_keyframes = 200;
+  EXPECT_THROW(Slam(rig, {0}, max_keyframes), std::invalid_argument);
+}
+
+TEST_F(TrackerTest, SlamRejectsOnlineFitSettingsOutOfOrder) {
+  if (!cuvslam::IsCudaBuild()) {
+    GTEST_SKIP() << "use_vpr needs use_gpu, which needs a CUDA build";
+  }
+  Slam::Config cfg = MakeOfflineConfig().slam;
+  cfg.use_vpr = true;
+  cfg.vpr_settings.model_path = "/nonexistent/anyloc.engine";
+
+  Slam::Config min_keyframes = cfg;
+  min_keyframes.vpr_settings.vocabulary_min_keyframes = 0;
+  EXPECT_THROW(Slam(rig, {0}, min_keyframes), std::invalid_argument);
+
+  Slam::Config max_keyframes = cfg;
+  max_keyframes.vpr_settings.vocabulary_max_keyframes = cfg.vpr_settings.vocabulary_min_keyframes - 1;
+  EXPECT_THROW(Slam(rig, {0}, max_keyframes), std::invalid_argument);
+}
+
+TEST_F(TrackerTest, VprVocabularyBuilderRejectsFitSettingsOutOfOrderBeforeLoadingAnEngine) {
+  Slam::VprSettings settings;
+  settings.model_path = "/nonexistent/anyloc.engine";
+
+  Slam::VprSettings min_images = settings;
+  min_images.vocabulary_min_keyframes = 0;
+  EXPECT_THROW(VprVocabularyBuilder{min_images}, std::invalid_argument);
+
+  Slam::VprSettings max_images = settings;
+  max_images.vocabulary_max_keyframes = settings.vocabulary_min_keyframes - 1;
+  EXPECT_THROW(VprVocabularyBuilder{max_images}, std::invalid_argument);
+}
+
+// Also what a build without TensorRT reports.
+TEST_F(TrackerTest, VprVocabularyBuilderNeedsAnEngine) {
+  Slam::VprSettings settings;
+  settings.model_path = "/nonexistent/anyloc.engine";
+  EXPECT_THROW(VprVocabularyBuilder{settings}, std::runtime_error);
+}
+
+#ifdef USE_CUDA
+// A vertically flipped GPU array has a negative pitch; place recognition refuses it rather than read past it.
+TEST_F(TrackerTest, VprVocabularyBuilderRefusesANegativePitch) {
+  const char* engine = std::getenv("CUVSLAM_TEST_ANYLOC_ENGINE");
+  if (engine == nullptr || !std::filesystem::is_regular_file(engine)) {
+    GTEST_SKIP() << "no AnyLoc engine: set CUVSLAM_TEST_ANYLOC_ENGINE";
+  }
+  Slam::VprSettings settings;
+  settings.model_path = engine;
+  VprVocabularyBuilder builder{settings};
+
+  constexpr int32_t kWidth = 32;
+  constexpr int32_t kHeight = 16;
+  cuvslam::cuda::GPUOnlyArray<uint8_t> pixels(kWidth * kHeight);
+  cuvslam::ImageData image{};
+  image.pixels = pixels.ptr() + (kHeight - 1) * kWidth;  // a flipped array starts at its last row
+  image.width = kWidth;
+  image.height = kHeight;
+  image.pitch = -kWidth;
+  image.encoding = cuvslam::ImageData::Encoding::MONO;
+  image.data_type = cuvslam::ImageData::DataType::UINT8;
+  image.is_gpu_mem = true;
+  EXPECT_THROW(builder.AddImage(image), std::invalid_argument);
+}
+#endif
+
+// The SLAM thread releases a callback after running it, so a callback that holds the last reference to its Slam
+// destroys the Slam on that thread, which cannot join itself.
+TEST(SlamDeathTest, CallbackThatOwnsItsSlamTerminates) {
+  // Runs the child from a fresh process, which initializes CUDA itself
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  EXPECT_EXIT(
+      {
+        Slam::Config config;
+        config.sync_mode = false;
+        auto slam = std::make_shared<Slam>(MakeStereoRig(), std::vector<uint8_t>{0}, config);
+        std::promise<void> release;
+        std::shared_future<void> released = release.get_future().share();
+        Slam& session = *slam;
+        // Without a map file, flushing fails, but the callbacks still run on the SLAM thread.
+        // The first holds that thread until the second is the only owner.
+        session.FlushMap([released](bool) { released.wait(); });
+        session.FlushMap([owner = std::move(slam)](bool) {});
+        release.set_value();
+        std::this_thread::sleep_for(std::chrono::seconds(30));
+        std::_Exit(0);
+      },
+      ::testing::KilledBySignal(SIGABRT), "");
+}
+
 }  // namespace
 
 #ifndef USE_CUDA
+TEST_F(TrackerTest, UseGpuRequiresCudaBuild) {
+  EXPECT_FALSE(cuvslam::IsCudaBuild());
+  EXPECT_NO_THROW(Tracker(rig, Mode::OdometryWithSlamRealtime));  // use_gpu defaults to false
+
+  Odometry::Config odometry;
+  odometry.use_gpu = true;
+  EXPECT_THROW(Tracker(rig, Mode::OdometryOnlyRealtime, odometry), std::invalid_argument);
+  Slam::Config slam;
+  slam.use_gpu = true;
+  EXPECT_THROW(Slam(rig, {0}, slam), std::invalid_argument);
+}
+
 TEST_F(TrackerTest, RgbdModeRequiresCudaBuild) {
   // RGBDOdometry is only compiled under USE_CUDA, so the mode has to be reported as unavailable
   // rather than silently constructing a tracker that cannot run it.
@@ -362,3 +582,12 @@ TEST_F(TrackerTest, MultisensorModeRequiresCunlsBuild) {
   }
 }
 #endif
+
+TEST(ResultTest, ErrorOwnsMessageFromStringView) {
+  std::string message = "map not found";
+  const auto result = cuvslam::Result<cuvslam::Pose>::Error(std::string_view{message});
+  message.assign(message.size(), 'x');
+
+  EXPECT_FALSE(result.data.has_value());
+  EXPECT_EQ(result.error_message, "map not found");
+}

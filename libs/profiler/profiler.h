@@ -19,6 +19,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 
 #if defined(__cplusplus) && __cplusplus >= 201703L
 #define PROFILER_UNUSED [[maybe_unused]]
@@ -34,6 +35,11 @@
 #define TRACE_EVENT PROFILER_UNUSED auto
 
 namespace cuvslam::profiler {
+
+// Names the calling thread for the OS (gdb, top, perf) and, with USE_NVTX, for Nsight Systems.
+// Call once from the thread itself: Nsight Systems rejects traces where one thread names another.
+// Linux truncates names to 15 characters.
+void NameCurrentThread(std::string_view name);
 
 struct Disable {
   using RangeId_t = size_t;

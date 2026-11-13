@@ -15,89 +15,32 @@
  * of the software or derivative works thereof, you agree to be bound by this License.
  */
 
-#include <chrono>
+#include <string>
+#include <string_view>
 #include <thread>
 
-#include "profiler/profiler_enable.h"
+#include "common/include_gtest.h"
+#include "profiler/profiler.h"
 
-auto incapsulation_domain_helper = cuvslam::profiler::DefaultProfiler::DomainHelper("CheckTraceIncapsulationTest");
+#ifdef __linux__
+#include <pthread.h>
 
-void checkTraceIncapsulation() {
-  TRACE_EVENT main_event = incapsulation_domain_helper.trace_event("checkTraceIncapsulation()");
-  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+namespace test::profiler {
 
-  TRACE_EVENT loop_event = incapsulation_domain_helper.trace_event("Loop 3");
-  for (int i = 0; i < 3; i++) {
-    TRACE_EVENT ev = incapsulation_domain_helper.trace_event("InternalTraceEvent 1");
-    {
-      TRACE_EVENT ev1 = incapsulation_domain_helper.trace_event("SubTraceEvent 0000FF", 0x0000FF);
-      std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    }
-    {
-      TRACE_EVENT ev1 = incapsulation_domain_helper.trace_event("SubTraceEvent 00FF00", 0x00FF00);
-      std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    }
-  }
-  loop_event.Pop();
-
-  TRACE_EVENT no_loop_event = incapsulation_domain_helper.trace_event("No Loop");
-  {
-    TRACE_EVENT ev = incapsulation_domain_helper.trace_event("InternalTraceEvent 2");
-    {
-      TRACE_EVENT ev2 = incapsulation_domain_helper.trace_event("InternalTraceEvent FF0000", 0xFF0000);
-      std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    }
-    {
-      TRACE_EVENT ev2 = incapsulation_domain_helper.trace_event("InternalTraceEvent RANDOM");
-      std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    }
-  }
-  no_loop_event.Pop();
-
-  main_event.Pop();
+std::string NameInNewThread(std::string_view name) {
+  std::string result;
+  std::thread([&] {
+    cuvslam::profiler::NameCurrentThread(name);
+    char buffer[16] = {};
+    pthread_getname_np(pthread_self(), buffer, sizeof(buffer));
+    result = buffer;
+  }).join();
+  return result;
 }
 
-int main() {
-  using namespace cuvslam;
-  std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  checkTraceIncapsulation();
+TEST(NameCurrentThread, SetsOsThreadName) { EXPECT_EQ(NameInNewThread("cuvslam:sba"), "cuvslam:sba"); }
 
-  auto domain_helper = profiler::DefaultProfiler::DomainHelper("DomainHelperTest");
+TEST(NameCurrentThread, TruncatesToLinuxLimit) { EXPECT_EQ(NameInNewThread("cuvslam:0123456789"), "cuvslam:0123456"); }
 
-  TRACE_EVENT id3 = domain_helper.trace_event_start("HelperTraceEventStart/End Test1");
-  std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  domain_helper.trace_event_end(id3);
-
-  {
-    TRACE_EVENT ev = domain_helper.trace_event("HelperTraceEventTest");
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  }
-  domain_helper.mark("DomainMarkTest");
-
-  TRACE_EVENT id1 = profiler::DefaultProfiler::TraceEventStart("TraceEventStart/End Test");
-  std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  profiler::DefaultProfiler::TraceEventEnd(id1);
-
-  {
-    TRACE_EVENT ev = profiler::DefaultProfiler::TraceEvent("TraceEventTest");
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  }
-
-  profiler::DefaultProfiler::Mark("MarkTest");
-  std::this_thread::sleep_for(std::chrono::milliseconds(50));
-
-  auto domain = profiler::DefaultProfiler::Domain("DomainTest");
-
-  TRACE_EVENT id2 =
-      profiler::DefaultProfiler::DomainTraceEventStart(domain.get_handle(), "DomainTraceEventStart/End Test1");
-  std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  profiler::DefaultProfiler::DomainTraceEventEnd(domain.get_handle(), id2);
-
-  {
-    TRACE_EVENT ev = profiler::DefaultProfiler::DomainTraceEvent(domain.get_handle(), "DomainTraceEventTest");
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  }
-
-  profiler::DefaultProfiler::DomainMark(domain.get_handle(), "DomainMarkTest");
-  std::this_thread::sleep_for(std::chrono::milliseconds(50));
-}
+}  // namespace test::profiler
+#endif

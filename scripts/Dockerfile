@@ -13,6 +13,8 @@ RUN echo "Base image: ${BASE_IMAGE:-default}" && \
 ARG DEBIAN_FRONTEND=noninteractive
 ARG UBUNTU_PORTS_MIRROR=""
 
+COPY scripts/apt-get-update-retry.sh /usr/local/bin/apt-get-update-retry
+
 COPY scripts/ubuntu-ports-mirror.conf /tmp/ubuntu-ports-mirror.conf
 
 RUN if [ -n "${UBUNTU_PORTS_MIRROR}" ]; then \
@@ -23,7 +25,7 @@ RUN if [ -n "${UBUNTU_PORTS_MIRROR}" ]; then \
     fi && \
     rm -f /tmp/ubuntu-ports-mirror.conf
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get-update-retry && apt-get install -y --no-install-recommends \
        g++ gcc git git-lfs cmake ccache patch patchelf curl \
        ca-certificates \
        python3 python3-pip python3-dev python3-venv \
@@ -31,14 +33,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && git lfs install --system \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get-update-retry && apt-get install -y --no-install-recommends \
        libgl1 \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get-update-retry && apt-get install -y --no-install-recommends \
        libpango-1.0-0 libpangocairo-1.0-0 libpangoft2-1.0-0 \
        libgdk-pixbuf-2.0-0 libffi8 shared-mime-info fonts-dejavu-core \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+COPY scripts/install_tensorrt.sh /tmp/install_tensorrt.sh
+RUN /tmp/install_tensorrt.sh && rm /tmp/install_tensorrt.sh
 
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
@@ -49,7 +54,7 @@ COPY scripts/requirements.txt /tmp/ci-requirements.txt
 RUN pip install --no-cache-dir -r /tmp/ci-requirements.txt && \
     rm /tmp/ci-requirements.txt
 
-COPY python/test/requirements.txt /tmp/test-requirements.txt
+COPY python/tests/requirements.txt /tmp/test-requirements.txt
 RUN pip install --no-cache-dir -r /tmp/test-requirements.txt && \
     rm /tmp/test-requirements.txt
 

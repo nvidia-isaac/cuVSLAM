@@ -225,7 +225,7 @@ If any topic prints a frame_id belonging to a different camera, set `camera_opti
 
 **Wrong intrinsics** — intrinsics are read from `camera_info` messages in the bag. Verify the published `camera_info` matches the actual camera before converting.
 
-**Mismatched frame counts** — only synchronized frame pairs (within `sync_threshold_ns`) are saved. Increase `sync_threshold_ns` in the config if too many frames are dropped.
+**Mismatched frame counts** — a frame set is saved only if its image timestamps differ by less than `sync_threshold_ns` (default 1 ms); a difference equal to or greater than the threshold is rejected. Don't raise it to keep more frames: images 1 ms or more apart are not one capture instant.
 
 **No synchronized frames found** — the tool exits with an error listing per-topic frame counts. Check that image topics are correct and timestamps overlap within `sync_threshold_ns`.
 

@@ -127,6 +127,9 @@ public:
     return true;
   }
 
+  // Bytes left to read; bound a count read from the blob by this before allocating for it.
+  size_t remaining() const { return size_ - feed_offset_; }
+
   const uint8_t* feed_forward(size_t size) const {
     if (size_ - feed_offset_ < size) {
       return nullptr;

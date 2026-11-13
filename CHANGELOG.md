@@ -10,16 +10,42 @@
   The mode has to agree with `Odometry::Config::async_sba` and `Slam::Config::sync_mode`: `Tracker`
   checks them and throws `std::invalid_argument` on a mismatch rather than overwriting them. A
   `slam_config` is now rejected in the odometry-only modes
+- Python wheels are now named `cuvslam-cu12` and `cuvslam-cu13` instead of `cuvslam` with a `+cu12`/`+cu13` local
+  version. Uninstall an existing `cuvslam` before installing them; `import cuvslam` warns when several cuVSLAM
+  distributions are installed
+- The compiled Python module is now the private `cuvslam._cuvslam` (was `cuvslam.pycuvslam`); import from `cuvslam`
+- The Python package requires Python 3.10 or newer, and its wheels include the license (NVIDIA Community License,
+  previously described as "Other/Proprietary") and a project description
+- A `Slam` destroyed on its own SLAM thread, because a callback held the last reference to it or to the `Tracker`
+  that holds it, now calls `std::terminate`. Its teardown used to run on a detached thread, which could crash the
+  process at exit
+- Python `Slam.save_map`, `flush_map`, `localize_in_map` and `recognize_place_by_frame` take no callbacks and return
+  a request instead (`Slam.MapWriteRequest`, `Slam.LocalizationRequest`, `Slam.PlaceRecognitionRequest`), with
+  `done()`, `wait(timeout)` and `result(timeout)`; the latter two wait without holding the GIL. `localize_in_map`
+  loses its `start_cb` and `finish_cb` arguments, and its request has `started()`. No Python code runs on the SLAM
+  thread anymore, and a request does not keep its `Slam` alive
 
 ### Added
 
+- `IsCudaBuild()` (`cuvslam.is_cuda_build()` in Python): whether the library is built with CUDA support
+- `cuda` extra for the Python wheels (x86_64 and Jetson Thor): `pip install "<wheel>[cuda]"` installs the cuBLAS,
+  cuSOLVER and cuSPARSE wheels from PyPI, so no system CUDA Toolkit is needed
+- `tensorrt` extra for the Python wheels (x86_64 and Jetson Thor): installs NVIDIA's TensorRT wheel of the version the
+  cuVSLAM wheels are built against, for visual place recognition (`use_vpr`)
+- Python wheels for Python 3.10, 3.11 and 3.12+ (`cp312-abi3`) on every target. x86_64 wheels are built on
+  Ubuntu 22.04 and also install on newer releases, replacing the separate Ubuntu 24.04 wheels
 - `Slam::Config::delay_warning_queue_size`: warns in verbose mode when more than the configured number of commands
   are queued to the SLAM thread, meaning SLAM falls behind odometry
 
 ### Fixed
 
+- Python `cp312-abi3` wheels now use the stable ABI. They were plain CPython 3.12 builds, which installed on
+  Python 3.13 and newer but could not be imported there
 - Unsynchronized reads of the SLAM engine during map localization (`LocalizeInMapCmd::Execute`)
 - Unnecessary mutex contention in `AsyncSlam::GetSlamPose()`
+- CPU Mono odometry could throw `std::length_error` after forced keyframes (`Internals::kf_override_frame_selection`)
+- In builds without CUDA, `use_gpu` defaults to false and `true` throws `std::invalid_argument`. Map localization
+  never succeeded there with the old default of `true`
 
 ### Security
 
@@ -28,6 +54,10 @@
   CVE-2021-41496), SciPy 1.15.3 (CVE-2023-25399, CVE-2023-29824), fonttools 4.60.2
   (CVE-2025-66034), and optional WeasyPrint 70.0 (CVE-2025-68616, CVE-2026-49452,
   CVE-2026-55073)
+- Updated auxiliary Python dependencies on Python 3.11 and newer to Pillow 13.0.0 (38 Black Duck
+  advisories, BDSA-2026-37840 to BDSA-2026-38134) and, in the AnyLoc export venv, filelock 4.2.7
+  (11 advisories, BDSA-2026-38098 to BDSA-2026-38635). Neither has a fixed release for Python 3.10,
+  which stays on Pillow 12.3.0 and filelock 4.0.12
 
 ## [17.0.0] - 2026-07-21
 

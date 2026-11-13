@@ -18,6 +18,9 @@ Main classes
 .. autoclass:: Slam
    :members:
 
+.. autoclass:: VprVocabularyBuilder
+   :members:
+
 Data Structures
 ---------------
 
@@ -56,6 +59,8 @@ Data Structures
 
 Functions
 ---------
+
+.. autofunction:: build_anyloc_engine
 
 .. autofunction:: get_version
 

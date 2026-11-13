@@ -59,7 +59,8 @@ DEFINE_double(slam_cell_size, 0, "SLAM: cell size of the LSI");
 DEFINE_int32(slam_max_landmarks_in_cell, 100, "SLAM: limit of landmarks in the spatial index cell");
 DEFINE_double(slam_max_landmarks_distance, 100., "SLAM: limit of distance from camera to landmark");
 DEFINE_string(slam_copy_to_database, "",
-              "SLAM: do copy to this database finally or on frame. See 'slam_copy_on_frame'");
+              "SLAM: do copy to this database finally or on frame. See 'slam_copy_on_frame'. Fails with "
+              "'slam_map_path', which is written in place");
 DEFINE_int32(slam_copy_on_frame, -1, "SLAM: do copy to database on this frame");
 DEFINE_bool(use_gpu, true, "Use GPU");
 DEFINE_int32(start_frame, 0, "Start frame index in sequence");
@@ -69,7 +70,7 @@ DEFINE_double(slam_load_and_localize_timestamp, -1, "Load and localize timestamp
 DEFINE_bool(slam_planar_constraints, false, "SLAM: planar constraints");
 DEFINE_bool(enable_ground_integrator, false, "Enable postprocessing ground aligner");
 DEFINE_bool(slam_disable_pgo, false, "SLAM: disable pose graph optimization");
-DEFINE_string(slam_map_cache_path, "",
+DEFINE_string(slam_map_path, "",
               "SLAM: if empty (default), map is kept in memory only,"
               "else, map is synced to disk (LMDB) at this path");
 DEFINE_bool(print_memory_usage, false, "Print memory usage on runtime");
@@ -123,6 +124,13 @@ BaseLauncher::BaseLauncher(ICameraRig& cameraRig, const odom::Settings& svo_sett
     rig.camera_from_rig[i] = cameraRig_.getExtrinsic(i).inverse();
     rig.intrinsics[i] = &(cameraRig_.getIntrinsic(i));
   }
+  RERUN(pipelines::logCameraPinhole, *rig.intrinsics[0], pipelines::kCamera0ImageEntity);
+#ifdef USE_RERUN
+  const std::vector<CameraId> depth_cameras = cameraRig_.getCamerasWithDepth();
+  if (std::find(depth_cameras.begin(), depth_cameras.end(), CameraId{0}) != depth_cameras.end()) {
+    pipelines::logCameraPinhole(*rig.intrinsics[0], pipelines::kCamera0DepthEntity);
+  }
+#endif
 }
 
 void BaseLauncher::SetupSlam() {
@@ -140,7 +148,7 @@ void BaseLauncher::SetupSlam() {
   }
 
   slam::AsyncSlamOptions options;
-  options.map_cache_path = FLAGS_slam_map_cache_path;
+  options.map_path = FLAGS_slam_map_path;
   options.use_gpu = FLAGS_use_gpu;
   options.reproduce_mode = FLAGS_slam_reproduce_mode;
   options.pose_for_frame_required = true;
@@ -229,7 +237,7 @@ ErrorCode BaseLauncher::launch() {
       const ErrorCode err = cameraRig_.getFrame(curr_sources, curr_meta, masks_sources, depth_sources);
       if (err != ErrorCode::S_True) {
         if (err != ErrorCode::E_Bounds) {
-          TraceError("getFrame fails with %d error code", err);
+          TraceError("getFrame fails with %d error code", static_cast<int>(err));
           return ErrorCode::E_FileNotFound;
         } else {
           // successfully reached last frame
@@ -312,7 +320,7 @@ ErrorCode BaseLauncher::launch() {
       if (FLAGS_print_memory_usage && frameId % 1000 == 0) {
         int rss_mb = -1, cached_mb = -1;
         if (GetProcessMemoryUsage(rss_mb, cached_mb)) {
-          TraceMessage("frame %d, resident %d mb, file_cache %d mb. Used (resident-file_cache) = %d mb", frameId,
+          TraceMessage("frame %zu, resident %d mb, file_cache %d mb. Used (resident-file_cache) = %d mb", frameId,
                        rss_mb, cached_mb, rss_mb - cached_mb);
         }
       }
@@ -324,29 +332,31 @@ ErrorCode BaseLauncher::launch() {
       Matrix6T pose_info;
       const odom::IVisualOdometry::VOFrameStat& stat = last_vo_stat();
 
-      TRACE_EVENT ev_track = profiler_domain_.trace_event("tracker->track()", profiler_color_);
-      StopwatchScope sws_track_proc(sw_track_proc_);
-
-      Isometry3T delta;  // doesn't need to be initialized
-      const bool solutionFound = launch_vo(delta, pose_info, per_frame_settings_);
-      if (!solutionFound) {
-        TraceError("Failed to solveNextFrame in frame %d. Set pose delta to identity.", frameId);
-        delta = Isometry3T::Identity();
-      }
-
       RERUN(setupFrameTimeline, curr_meta);
       // log camera 0 images
-      RERUN(logCameraImages, curr_meta, curr_sources, {0}, {"world/camera_0/images"});
+      RERUN(logCameraImages, curr_meta, curr_sources, {0}, {pipelines::kCamera0ImageEntity});
       // log depth image as separate 2D view
       if (!depth_sources.empty() && depth_sources[0].data != nullptr) {
-        RERUN(logDepthImage, depth_sources[0], curr_meta[0], "world/camera_0/depth", 1.0f, 0.0f, 5.0f);
+        RERUN(logDepthImage, depth_sources[0], curr_meta[0], pipelines::kCamera0DepthEntity, 1.0f, 0.0f, 5.0f);
       }
       if (gt_poses_.size() > static_cast<size_t>(frameId)) {
         RERUN(pipelines::logTrajectory, gt_poses_[frameId].inverse(), "world/trajectories/gt_trajectory",
               Color(0, 0, 255), TrajectoryType::GT);
       }
 
+      TRACE_EVENT ev_track = profiler_domain_.trace_event("tracker->track()", profiler_color_);
+      StopwatchScope sws_track_proc(sw_track_proc_);
+
+      Isometry3T delta;  // doesn't need to be initialized
+      const bool solutionFound = launch_vo(delta, pose_info, per_frame_settings_);
+      if (!solutionFound) {
+        TraceError("Failed to solveNextFrame in frame %zu. Set pose delta to identity.", frameId);
+        delta = Isometry3T::Identity();
+      }
+
       prev_abs_world_from_rig = odom::increment_pose(prev_abs_world_from_rig, delta);
+      RERUN(pipelines::logCameraPose, prev_abs_world_from_rig * rig.camera_from_rig[0].inverse(),
+            pipelines::kCamera0Entity);
       Isometry3T abs_world_from_rig = prev_abs_world_from_rig;
       if (FLAGS_enable_ground_integrator) {
         ground_integrator.AddNextPose(abs_world_from_rig);

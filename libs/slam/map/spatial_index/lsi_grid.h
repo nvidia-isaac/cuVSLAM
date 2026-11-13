@@ -82,6 +82,12 @@ public:
 
   void SyncDatabaseReverse();
 
+  // Writes the in-memory state to the attached database or a copy of it, leaving the index as it is.
+  bool SaveToDatabase(ISlamDatabase& database, const PoseGraphHypothesis& pose_graph_hypothesis) const;
+
+  // SaveToDatabase() into the attached database, which then also loses what was removed while it was read-only.
+  bool FlushToDatabase(const PoseGraphHypothesis& pose_graph_hypothesis);
+
   // add landmark
   LandmarkId AddLandmark(const FeatureDescriptor& fd, int64_t timestamp_ns);
   // add landmark relation
@@ -96,6 +102,9 @@ public:
   void AddLandmarkProbeStatistic(LandmarkId landmark_id, LandmarkProbe landmark_probe);
 
   Vector3T GetLandmarkOrStagedCoords(LandmarkId id, const PoseGraphHypothesis& pg_hypo) const;
+
+  // Like GetLandmarkOrStagedCoords(), but a landmark read from the database is not kept in memory.
+  bool PeekLandmarkOrStagedCoords(LandmarkId id, const PoseGraphHypothesis& pg_hypo, Vector3T& xyz) const;
 
   FeatureDescriptor GetLandmarkFeatureDescriptor(LandmarkId id) const;
 
@@ -181,6 +190,8 @@ protected:
   float cell_size_;
   size_t cell_landmarks_limit_ = 0;         // default=0: limit is off
   std::vector<LandmarkId> dead_landmarks_;  // landmarks to remove
+  // removed while the database was read-only: hidden from reads, deleted by SaveToDatabase()
+  std::unordered_set<LandmarkId> read_only_removals_;
 
   std::unordered_map<HashCellId, Cell> cells_;
 
@@ -319,7 +330,8 @@ inline const LSIGrid::GridLandmark* LSIGrid::GetLandmarkOrStaged(LandmarkId land
   return &it->second;
 }
 inline LSIGrid::GridLandmark* LSIGrid::TryToReadLandmark(LandmarkId landmark_id) const {
-  if (!database_) {
+  // FlushMap writes staged landmarks too, and a read-only database keeps the removed ones.
+  if (!database_ || staged_landmarks_.count(landmark_id) != 0 || read_only_removals_.count(landmark_id) != 0) {
     return nullptr;
   }
   StopwatchScope ssw(sw_read_landmark_);

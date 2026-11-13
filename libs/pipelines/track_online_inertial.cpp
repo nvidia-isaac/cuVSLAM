@@ -46,7 +46,7 @@ using Vector15T = Eigen::Matrix<float, 15, 1>;
 // and biases (including acc_bias) using visual reprojection + IMU residuals.
 static void RunImuSbaInit(const map::UnifiedMap::SubMap& recent_map, const Vector3T& gravity, const camera::Rig& rig,
                           const imu::ImuCalibration& calib, std::vector<sba_imu::Pose>& gravity_cache,
-                          sba_imu::IMUBundlerCpuFixedVel& bundler,
+                          sba_imu::IMUBundler& bundler,
                           const std::vector<std::vector<camera::Observation>>& observations_per_kf) {
   const size_t n = recent_map.consecutive_keyframes.size();
   if (gravity_cache.size() != n || observations_per_kf.size() != n) return;
@@ -232,14 +232,14 @@ SolverSfMInertial::SolverSfMInertial(map::UnifiedMap& map, const camera::Rig& ri
       disable_fusion_except_gravity_(disable_fusion_except_gravity),
       map_(map),
       optimizer_(10),
-      imu_init_bundler_(calib),
+      imu_init_bundler_(calib, sba_settings.mode == sba::InertialGPU),
       stereo_pnp_(rig),
       triangulator(rig) {
   sba::Mode sba_mode;
   if (disable_fusion_except_gravity_ && rig_.num_cameras > 2) {
-    sba_mode = sba::OriginalGPU;
+    sba_mode = (sba_settings.mode == sba::InertialGPU) ? sba::OriginalGPU : sba::OriginalCPU;
   } else {
-    sba_mode = sba_settings.mode;  // InertialCPU
+    sba_mode = sba_settings.mode;
   }
   if (sba_mode != sba::InertialCPU && sba_mode != sba::InertialGPU && sba_mode != sba::Disabled) {  // Add GPU version
     TraceDebug("Cant launch fusion with regular SBA");
@@ -275,7 +275,7 @@ SolverSfMInertial::SolverSfMInertial(map::UnifiedMap& map, const camera::Rig& ri
     auto recent_map = map_.get_recent_submap(map_.capacity());
 
     if (recent_map.consecutive_keyframes.size() < num_kfs) {
-      TraceDebug("Not enough keyframes in map, (%d, %d)", map_.size(), num_kfs);
+      TraceDebug("Not enough keyframes in map, (%zu, %zu)", map_.size(), num_kfs);
       return false;
     }
     const Isometry3T& rig_from_imu = calib_.rig_from_imu();
@@ -489,7 +489,7 @@ bool check_imu_drops(sba_imu::IMUPreintegration& preint, const imu::ImuCalibrati
   const float missing = std::max(0.f, expected - actual - effective_jitter);
   const float drop_ratio = missing / expected;
   if (drop_ratio > 0.1f) {
-    TraceWarning("Lost IMU msgs: %d, Frame time delta = %f [s], drop ratio = %f [%]", static_cast<int>(missing + 0.5f),
+    TraceWarning("Lost IMU msgs: %d, Frame time delta = %f [s], drop ratio = %f [%%]", static_cast<int>(missing + 0.5f),
                  dT_s, drop_ratio * 100);
     return false;
   }

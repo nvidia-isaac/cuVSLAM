@@ -21,7 +21,8 @@ pair, with an optional IMU, and requires a cuNLS-enabled build. It is configured
 `cuvslam::Odometry::MultisensorSettings`. A high-level mode chooser table lives in the top-level
 README's "Tracking modes" section.
 
-For saving maps and relocalizing with `LocalizeInMap`, see [load_map.md](load_map.md).
+For saving maps and relocalizing with `LocalizeInMap`, see [load_map.md](load_map.md). For recognizing a place
+from a single frame, and closing loops from it, see [place_recognition.md](place_recognition.md).
 
 ---
 

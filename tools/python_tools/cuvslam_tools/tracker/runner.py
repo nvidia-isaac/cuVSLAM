@@ -72,8 +72,12 @@ class Stat:
     gt_av_rotation_error: float = 0
     gt_n_error_segments: int = 0
     gt_simple_error: float = 0
+    gt_simple_rotation_error: float = 0
     num_tracking_losts: int = 0
     odometry_mode: str = ""
+    # Set by SLAM runs only.
+    num_loop_closures: int = 0
+    loop_closure_mode: str = ""
     # per-instance list of dicts {length, t_pct, r_deg_per_m}, populated by
     # metrics.calculate_sequence_errors in the segment branch.
     seg_err_points: list = field(default_factory=list)
@@ -122,6 +126,12 @@ class Tracker:
             self.slam_cfg = vslam.Slam.Config()
             self.slam_cfg.use_gpu = self.odom_cfg.use_gpu
             self.slam_cfg.sync_mode = args.sync_slam
+            self.slam_cfg.use_vpr = getattr(args, 'use_vpr', False)
+            self.slam_cfg.vpr_settings.model_path = getattr(args, 'vpr_model_path', '')
+            self.slam_cfg.vpr_settings.vocabulary_path = getattr(args, 'vpr_vocabulary_path', '')
+            self.slam_cfg.loop_closure_mode = getattr(args, 'loop_closure_mode', vslam.Slam.LoopClosureMode.LSI)
+            if getattr(args, 'max_map_size', None) is not None:
+                self.slam_cfg.max_map_size = args.max_map_size
             if args.visualize_rerun:
                 self.slam_cfg.enable_reading_internals = True
 
@@ -375,6 +385,9 @@ class Tracker:
                 for pose in slam_poses:
                     frame_id = self.frame_id_from_ts[pose.timestamp_ns]
                     self.world_from_rig[frame_id] = pose.pose
+            self.stat.loop_closure_mode = self.slam_cfg.loop_closure_mode.name.lower()
+            # Keyed by timestamp, so repeated reports count once.
+            self.stat.num_loop_closures = len(self.loop_closures)
 
         self.stat.n_frames = self.processed_frame_count
         self.stat.average_fps = get_fps(self.stat.tracking_time, self.stat.n_frames)
@@ -503,6 +516,8 @@ def track(args: argparse.Namespace,
         args.multicam_mode = conv.str2multicam_mode(args.multicam_mode)
     if isinstance(args.odometry_mode, str):
         args.odometry_mode = conv.str2odometry_mode(args.odometry_mode)
+    if isinstance(getattr(args, 'loop_closure_mode', None), str):
+        args.loop_closure_mode = conv.str2loop_closure_mode(args.loop_closure_mode)
 
     # Normalize and apply backward-compat default: bare --num_loops without
     # --repeat_type now means Repeat; implicit Shuttle is deprecated.
@@ -584,7 +599,8 @@ def track(args: argparse.Namespace,
     if dataset.gt_transforms:
         calculate_sequence_errors(tracker.world_from_rig, dataset.gt_transforms, tracker.stat,
                                   tracker.frame_metadata, args.use_segments, args.segment_lengths,
-                                  args.num_loops, args.repeat_type)
+                                  args.num_loops, args.repeat_type,
+                                  with_scale=args.odometry_mode == vslam.Odometry.OdometryMode.Mono)
 
     suffix = "_refined" if refined_focal is not None and refined_principal is not None else ""
     plot_trajectory_path = None

@@ -120,7 +120,7 @@ bool LoadPngImpl(PngImpl& impl, K* data, SizeT rows, SizeT cols) {
     TraceError(
         "Buffer dimensions must match the image dimensions."
         "Expected %d x %d, received buffer with %d x %d",
-        height, width, rows, cols);
+        height, width, static_cast<int>(rows), static_cast<int>(cols));
     return false;
   }
 
@@ -168,7 +168,7 @@ bool LoadPngImpl(PngImpl& impl, K* data, SizeT rows, SizeT cols) {
   const size_t png_row_bytes = png_get_rowbytes(impl.png, impl.info);
   const size_t image_row_bytes = width * N * sizeof(K);
   if (png_row_bytes != image_row_bytes) {
-    TraceError("Dimensions mismatch %d != %d", png_row_bytes, image_row_bytes);
+    TraceError("Dimensions mismatch %zu != %zu", png_row_bytes, image_row_bytes);
     return false;
   }
 
@@ -286,8 +286,9 @@ bool LoadJpegImpl(std::unique_ptr<JpegImpl>& impl, uint8_t* data, const std::arr
       static_cast<int>(impl->cinfo.image_width) != dimensions[1]) {
     TraceError(
         "Buffer dimensions must match the image dimensions."
-        "Expected %d x %d, received buffer with %d x %d",
-        impl->cinfo.image_height, impl->cinfo.image_width, dimensions[0], dimensions[1]);
+        "Expected %u x %u, received buffer with %d x %d",
+        impl->cinfo.image_height, impl->cinfo.image_width, static_cast<int>(dimensions[0]),
+        static_cast<int>(dimensions[1]));
     return false;
   }
 

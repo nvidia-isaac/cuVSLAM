@@ -435,7 +435,7 @@ bool RunSlamLoadAndLocalizeOnMatchingFrame(Slam& slam, const Slam::ImageSet& ima
     }
   };
 
-  slam.LocalizeInMap(FLAGS_slam_input_database, timestamp_ns, guess_pose, localize_images, loc_settings, start_cb,
+  slam.LocalizeInMap(FLAGS_slam_input_database, timestamp_ns, &guess_pose, localize_images, loc_settings, start_cb,
                      nullptr);
   return true;
 }
@@ -654,7 +654,7 @@ bool trackEdexDataSet(const std::string& edex_name, const Odometry::Config& odom
           settings.angular_step_rads = 2 * PI / 36;
 
           slam->LocalizeInMap(
-              input_map_name, timestamp_ns, guess_pose, images, settings, nullptr,
+              input_map_name, timestamp_ns, &guess_pose, images, settings, nullptr,
               [&loc_context](const Result<Pose>& result) { localize_in_exist_db_response(result, &loc_context); });
 
           while (FLAGS_localize_wait && loc_context.status == LocalizeInMapStatus::IN_PROGRESS) {

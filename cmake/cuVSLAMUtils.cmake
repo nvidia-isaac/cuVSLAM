@@ -14,6 +14,37 @@
 
 include(CMakeParseArguments)
 
+# Declare an option that needs <dependency>: AUTO (the default) follows it, and ON without it is an error.
+# A cached ON is thus always the user's choice. AUTO counts as true in if(), so <name> is set to ON or OFF
+# in the caller's scope, over the cached value.
+function(cuvslam_dependent_option name description dependency)
+    set(doc "${description}: AUTO (follow ${dependency}), ON or OFF")
+    get_property(type CACHE ${name} PROPERTY TYPE)
+    if(type STREQUAL "BOOL")
+        # A typed -D<name>:BOOL=..., or the option() of older versions: keep the value, switch to the dropdown
+        set_property(CACHE ${name} PROPERTY TYPE STRING)
+        set_property(CACHE ${name} PROPERTY HELPSTRING "${doc}")
+    else()
+        set(${name} AUTO CACHE STRING "${doc}")
+    endif()
+    set_property(CACHE ${name} PROPERTY STRINGS AUTO ON OFF)
+    string(TOUPPER "${${name}}" value)
+    if(NOT value MATCHES "^(AUTO|ON|OFF|TRUE|FALSE|YES|NO|Y|N|1|0)$")
+        message(FATAL_ERROR "${name} must be AUTO, ON or OFF, not '${${name}}'")
+    endif()
+    if(value STREQUAL "AUTO")
+        set(value "${${dependency}}")
+    elseif("${value}" AND NOT ${dependency})
+        message(FATAL_ERROR
+            "${name}=ON requires ${dependency}=ON. Set ${name} to AUTO or OFF, or ${dependency} to ON")
+    endif()
+    if("${value}")
+        set(${name} ON PARENT_SCOPE)
+    else()
+        set(${name} OFF PARENT_SCOPE)
+    endif()
+endfunction()
+
 # Create an INTERFACE library target with common cuVSLAM settings that all targets should link to.
 # This target includes compile definitions, compiler flags, and linker options.
 macro(setup_cuvslam_settings)
@@ -51,6 +82,7 @@ macro(setup_cuvslam_settings)
         $<$<BOOL:${USE_CUDA}>:USE_CUDA>
         $<$<BOOL:${USE_RERUN}>:USE_RERUN>
         $<$<BOOL:${USE_CUNLS}>:USE_CUNLS>
+        $<$<BOOL:${USE_TENSORRT}>:USE_TENSORRT>
     )
 
     # Add 'libs/' as the root directory for all cuvslam includes
@@ -85,6 +117,8 @@ macro(setup_cuvslam_settings)
             -Wextra
             -Wno-unknown-pragmas
             -Wno-deprecated-copy
+            # printf-style logging must take a literal format; pass runtime text such as file paths as "%s" data
+            $<$<COMPILE_LANGUAGE:CXX>:-Wformat-security>
         )
 
         # Architecture-specific flags

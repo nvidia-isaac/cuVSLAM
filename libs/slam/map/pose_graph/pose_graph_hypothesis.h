@@ -42,7 +42,7 @@ public:
   // make copy
   [[nodiscard]] std::shared_ptr<PoseGraphHypothesis> MakeCopy() const;
 
-  void PutToDatabase(ISlamDatabase* database) const;
+  bool PutToDatabase(ISlamDatabase* database) const;
   bool GetFromDatabase(ISlamDatabase* database);
 
   void CopyTo(PoseGraphHypothesis& pose_graph_hypothesis_dst) const;

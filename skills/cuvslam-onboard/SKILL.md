@@ -47,25 +47,28 @@ For a request for instructions only, explain the commands without starting downl
 - Ubuntu 22+ (x86_64 or aarch64/Jetson)
 - CUDA Toolkit 12 or 13 (https://developer.nvidia.com/cuda/toolkit)
 - System packages: `apt update && apt install g++ cmake git git-lfs python3-dev`
-- CMake 3.19+, Python 3.9+
+- CMake 3.19+, Python 3.10+
 
 ## 2. Install PyCuVSLAM (Quickest Path)
 
 Pre-built wheels from https://github.com/nvidia-isaac/cuVSLAM/releases/latest:
 
-| Target | Ubuntu | Python wheel tag | CUDA wheel tag | Arch |
-|--------|--------|------------------|----------------|------|
-| Desktop/server | 22.04 | `cp310` (Python 3.10) | `cu12`, `cu13` | x86_64 |
-| Desktop/server | 24.04 | `cp312-abi3` (Python 3.12+) | `cu12`, `cu13` | x86_64 |
-| Jetson Orin | 22.04 (JetPack 6.x) | `cp310` (Python 3.10) | `cu12` | aarch64 |
-| Jetson Thor | 24.04 (JetPack 7.x) | `cp312-abi3` (Python 3.12+) | `cu13` | aarch64 |
+| Target | Ubuntu | Python | Package | Arch |
+|--------|--------|--------|---------|------|
+| Desktop/server | 22.04 or newer | 3.10, 3.11, 3.12+ | `cuvslam-cu12`, `cuvslam-cu13` | x86_64 |
+| Jetson Orin | 22.04 (JetPack 6.x) | 3.10, 3.11, 3.12+ | `cuvslam-cu12` | aarch64 |
+| Jetson Thor | 24.04 (JetPack 7.x) | 3.10, 3.11, 3.12+ | `cuvslam-cu13` | aarch64 |
 
-Only these combinations are provided. The installed CUDA major must match the wheel's `cu12` or `cu13` tag; use a
-source build for other combinations.
+Only these combinations are provided; use a source build for others. Pick the wheel for the user's Python: `cp310`,
+`cp311`, or `cp312-abi3` for 3.12 and later. The CUDA Toolkit major must match the package's
+`cu12` or `cu13` suffix. Without a system CUDA Toolkit, install the wheel with the `cuda` extra
+(`pip install "./<wheel>.whl[cuda]"`; not on Jetson Orin). Install only one cuVSLAM package per environment.
+Visual place recognition (`use_vpr`, AnyLoc) also needs TensorRT 10 (`libnvinfer10`): install it separately or with the
+`tensorrt` extra (not on Jetson Orin). The rest of cuVSLAM runs without it.
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install cuvslam-<version>.whl
+pip install cuvslam_cu12-<version>-<tags>.whl   # or cuvslam_cu13-...
 pip install -r examples/requirements.txt   # rerun-sdk, numpy, etc.
 ```
 
@@ -272,33 +275,18 @@ tracker = cuvslam.Tracker(cuvslam.Rig(...), cuvslam.Tracker.Mode.OdometryWithSla
 odom_pose, slam_pose = tracker.track(...)
 slam = tracker.slam
 
-# Save map
-def map_saved(success):
-    print(f"Map save {'succeeded' if success else 'failed'}")
-
-slam.save_map("map/", map_saved)
+# Save map: returns a request; result() waits for it (sync mode has finished it already)
+saved = slam.save_map("map/").result()
+print(f"Map save {'succeeded' if saved else 'failed'}")
 
 # Later: localize
 loc_settings = cuvslam.Slam.LocalizationSettings()
-
-def localization_started():
-    print("Localization started")
-
-def localization_finished(pose, error_message):
-    if pose is not None:
-        print(f"Localized pose: {pose}")
-    else:
-        print(f"Localization failed: {error_message}")
-
-slam.localize_in_map(
-    "map/",
-    timestamp,
-    pose_hint,
-    images,
-    loc_settings,
-    localization_started,
-    localization_finished,
-)
+localization = slam.localize_in_map("map/", timestamp, pose_hint, images, loc_settings)
+pose = localization.result()  # in async mode, keep calling track() while waiting: see examples/kitti
+if pose is not None:
+    print(f"Localized pose: {pose}")
+else:
+    print(f"Localization failed: {localization.error_message}")
 ```
 
 See `examples/kitti/track_kitti_slam.py` for the complete workflow.

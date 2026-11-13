@@ -42,9 +42,6 @@ void clearViewport(const std::string& viewport_name) {
 void logLandmarks(const std::vector<std::reference_wrapper<const Vector3T>>& landmarks,
                   const Isometry3T& camera_from_world, const camera::ICameraModel* camera_model,
                   const std::string& viewport_name, const Color& color) {
-  if (landmarks.empty()) {
-    return;
-  }
   if (camera_model == nullptr) {
     TraceWarning("RerunVisualizer: Camera intrinsics unavailable for viewport %s", viewport_name.c_str());
     return;
@@ -71,22 +68,25 @@ void logLandmarks(const std::vector<std::reference_wrapper<const Vector3T>>& lan
     // Convert normalized coordinates to pixel UV coordinates using camera intrinsics
     Vector2T uv_coords;
     if (camera_model->denormalizePoint(normalized_coords, uv_coords)) {
-      // Add the 2D UV position
-      points.emplace_back(uv_coords.x(), uv_coords.y());
+      const Vector2T res = camera_model->getResolution();
+      // Points outside the image would stretch the 2D view's bounds past the image.
+      if (uv_coords.x() >= 0.f && uv_coords.y() >= 0.f && uv_coords.x() < res.x() && uv_coords.y() < res.y()) {
+        points.emplace_back(uv_coords.x(), uv_coords.y());
+      }
     } else {
       TraceWarning("RerunVisualizer: Failed to project landmark to UV coordinates");
     }
   }
 
   // Log the 2D landmark projections to Rerun
-  if (!points.empty()) {
-    auto& visualizer = visualizer::RerunVisualizer::getInstance();
-    visualizer.getRecordingStream().log(viewport_name,
-                                        rerun::Points2D(points).with_colors(color).with_radii(3.0f).with_draw_order(
-                                            10.0f));  // Slightly larger radius for 2D points
-  } else {
-    TraceWarning("RerunVisualizer: No landmarks to log for viewport %s", viewport_name.c_str());
+  auto& visualizer = visualizer::RerunVisualizer::getInstance();
+  if (points.empty()) {
+    visualizer.getRecordingStream().log(viewport_name, rerun::Points2D::clear_fields());
+    return;
   }
+  visualizer.getRecordingStream().log(viewport_name,
+                                      rerun::Points2D(points).with_colors(color).with_radii(3.0f).with_draw_order(
+                                          10.0f));  // Slightly larger radius for 2D points
 }
 
 void logObservations(const std::vector<std::reference_wrapper<const camera::Observation>>& observations,
@@ -98,6 +98,9 @@ void logObservations(const std::vector<std::reference_wrapper<const camera::Obse
   points.reserve(observations.size());
 
   for (const auto& obs : observations) {
+    if (obs.get().cam_id != 0) {
+      continue;
+    }
     // Convert from normalized xy coordinates to pixel uv coordinates
     Vector2T uv;
     if (obs.get().cam_id < rig.num_cameras && rig.intrinsics[obs.get().cam_id]) {
@@ -113,13 +116,13 @@ void logObservations(const std::vector<std::reference_wrapper<const camera::Obse
     }
   }
 
-  if (!points.empty()) {
-    auto& visualizer = visualizer::RerunVisualizer::getInstance();
-    visualizer.getRecordingStream().log(viewport_name,
-                                        rerun::Points2D(points).with_colors(color).with_radii(2.0f).with_draw_order(
-                                            100.0f));  // High draw order to render on top
-  } else {
-    TraceWarning("RerunVisualizer: No observations to log for viewport %s", viewport_name.c_str());
+  auto& visualizer = visualizer::RerunVisualizer::getInstance();
+  if (points.empty()) {
+    visualizer.getRecordingStream().log(viewport_name, rerun::Points2D::clear_fields());
+    return;
   }
+  visualizer.getRecordingStream().log(viewport_name,
+                                      rerun::Points2D(points).with_colors(color).with_radii(2.0f).with_draw_order(
+                                          100.0f));  // High draw order to render on top
 }
 }  // namespace cuvslam::pnp

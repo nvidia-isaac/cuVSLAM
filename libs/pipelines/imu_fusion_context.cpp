@@ -57,7 +57,7 @@ bool check_imu_drops(sba_imu::IMUPreintegration& preint, const imu::ImuCalibrati
   const float missing = std::max(0.f, expected - actual - effective_jitter);
   const float drop_ratio = missing / expected;
   if (drop_ratio > 0.1f) {
-    TraceWarning("Lost IMU msgs: %d, Frame time delta = %f [s], drop ratio = %f [%]", static_cast<int>(missing + 0.5f),
+    TraceWarning("Lost IMU msgs: %d, Frame time delta = %f [s], drop ratio = %f [%%]", static_cast<int>(missing + 0.5f),
                  dT_s, drop_ratio * 100);
     return false;
   }
@@ -110,14 +110,14 @@ bool run_rgbd_inertial_solve(const pnp::MultisensorPoseEstimator& estimator, con
 }  // namespace
 
 ImuFusionContext::ImuFusionContext(map::UnifiedMap& map, const camera::Rig& rig, const imu::ImuCalibration& calib,
-                                   const pnp::MultisensorPoseEstimator& pose_estimator)
+                                   const pnp::MultisensorPoseEstimator& pose_estimator, bool use_gpu_bundler)
     : map_(map),
       rig_(rig),
       calib_(calib),
       pose_estimator_(pose_estimator),
       imu_storage_(1e5),
       optimizer_(10),
-      init_bundler_(calib),
+      init_bundler_(calib, use_gpu_bundler),
       sm_() {
   prev_pose_.w_from_imu = calib_.rig_from_imu();
 }

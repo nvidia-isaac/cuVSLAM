@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstddef>
+#include <exception>
 #include <limits>
 #include <mutex>
 #include <stdexcept>
@@ -30,13 +31,17 @@
 #include "common/error.h"
 #include "common/isometry.h"
 #include "common/parse_utils.h"
+#include "common/rerun.h"
 #include "math/twist_to_angle.h"
 #include "odometry/increment_pose.h"
 #include "odometry/mono_visual_odometry.h"
 #include "odometry/multi_visual_odometry.h"
 #include "odometry/stereo_inertial_odometry.h"
 #include "odometry/svo_config.h"
+#include "pipelines/visualizer.h"
 #include "slam/async_slam/async_slam.h"
+#include "slam/vpr/vpr_image.h"
+#include "visualizer/visualizer.hpp"
 #ifdef USE_CUDA
 #include "odometry/rgbd_odometry.h"
 #endif
@@ -68,6 +73,63 @@ int32_t RequireNonNegative(int32_t value, std::string_view expression) {
 }
 
 #define REQUIRE_NON_NEGATIVE(x) RequireNonNegative((x), #x)
+
+#ifdef USE_RERUN
+bool Camera0ProvidesDepth(Odometry::OdometryMode mode, const Odometry::RGBDSettings& rgbd_settings,
+                          const Odometry::MultisensorSettings& multisensor_settings) {
+  if (mode == Odometry::OdometryMode::RGBD) {
+    return rgbd_settings.depth_camera_id == 0;
+  }
+  if (mode == Odometry::OdometryMode::Multisensor) {
+    const auto& ids = multisensor_settings.depth_camera_ids;
+    return std::find(ids.begin(), ids.end(), 0) != ids.end();
+  }
+  return false;
+}
+
+// Only 8-bit CPU images are logged; GPU buffers would need a device-to-host copy.
+// A frame without a loggable camera 0 image clears the previous one (the static pinhole stays).
+void LogCamera0Image(const std::vector<Image>& images) {
+  auto& recording = visualizer::RerunVisualizer::getInstance().getRecordingStream();
+  for (const auto& image : images) {
+    if (image.camera_index != 0 || image.is_gpu_mem || image.data_type != ImageData::DataType::UINT8) {
+      continue;
+    }
+    const auto color_model = image.encoding == ImageData::Encoding::RGB ? rerun::datatypes::ColorModel::RGB
+                                                                        : rerun::datatypes::ColorModel::L;
+    recording.log(pipelines::kCamera0ImageEntity,
+                  rerun::Image(static_cast<const uint8_t*>(image.pixels),
+                               {static_cast<uint32_t>(image.width), static_cast<uint32_t>(image.height)}, color_model));
+    return;
+  }
+  recording.log(pipelines::kCamera0ImageEntity, rerun::Image::clear_fields());
+}
+
+// Only CPU depth images are logged; GPU buffers would need a device-to-host copy.
+// A frame without a loggable camera 0 depth clears the previous one, which would otherwise be drawn at the new pose.
+void LogCamera0Depth(const std::vector<Image>& depths, float depth_scale_factor) {
+  auto& recording = visualizer::RerunVisualizer::getInstance().getRecordingStream();
+  for (const auto& depth : depths) {
+    if (depth.camera_index != 0 || depth.is_gpu_mem) {
+      continue;
+    }
+    const rerun::WidthHeight resolution{static_cast<uint32_t>(depth.width), static_cast<uint32_t>(depth.height)};
+    if (depth.data_type == ImageData::DataType::UINT16) {
+      recording.log(
+          pipelines::kCamera0DepthEntity,
+          rerun::DepthImage(static_cast<const uint16_t*>(depth.pixels), resolution).with_meter(depth_scale_factor));
+      return;
+    }
+    if (depth.data_type == ImageData::DataType::FLOAT32) {
+      recording.log(
+          pipelines::kCamera0DepthEntity,
+          rerun::DepthImage(static_cast<const float*>(depth.pixels), resolution).with_meter(depth_scale_factor));
+      return;
+    }
+  }
+  recording.log(pipelines::kCamera0DepthEntity, rerun::DepthImage::clear_fields());
+}
+#endif
 
 // Builds a TrackPerFrameSettings from per-frame options. Internals always carries concrete
 // values; pass Internals{} to use all defaults. Add new per-frame categories to
@@ -211,6 +273,18 @@ void CheckCameras(const cuvslam::Rig& rig) {
   }
 }
 
+// Primary camera ids index the fixed-size internal rig, so they must name distinct cameras of the rig.
+void CheckPrimaryCameras(const std::vector<uint8_t>& primary_cameras, size_t num_cameras) {
+  THROW_INVALID_ARG_IF(primary_cameras.empty(), "No primary cameras");
+  std::vector<bool> seen(num_cameras, false);
+  for (const uint8_t cam_id : primary_cameras) {
+    THROW_INVALID_ARG_IF(cam_id >= num_cameras,
+                         "Primary camera " + std::to_string(cam_id) + " is not a camera of the rig");
+    THROW_INVALID_ARG_IF(seen[cam_id], "Primary camera " + std::to_string(cam_id) + " is listed twice");
+    seen[cam_id] = true;
+  }
+}
+
 void CheckRectifiedStereoCamera(const cuvslam::Rig& rig) {
   THROW_INVALID_ARG_IF(rig.cameras.size() % 2 != 0,
                        "Rectified stereo camera mode only works with 1+ stereo cameras. "
@@ -345,6 +419,18 @@ void FillImageSourceAndShape(const Image& image, ImageSource& source, ImageShape
   shape.height = image.height;
 }
 
+// First image from a primary camera (the only cameras SLAM maps with), or nullptr if there is none.
+const Image* SelectVprImage(const Slam::ImageSet& images, const std::vector<uint8_t>& primary_cameras) {
+  for (const auto& image : images) {
+    for (const uint8_t cam_id : primary_cameras) {
+      if (image.camera_index == cam_id) {
+        return &image;
+      }
+    }
+  }
+  return nullptr;
+}
+
 // Validates depth images for the RGBD path: exactly one depth image is required.
 void CheckDepths(const Odometry::ImageSet& depths, bool use_gpu,
                  const std::vector<std::unique_ptr<camera::ICameraModel>>& cameras_models) {
@@ -414,6 +500,56 @@ void CheckMultisensorDepths(const Odometry::ImageSet& depths, bool use_gpu,
 
 }  // anonymous namespace
 
+// The vocabulary fit's limits, the same for a session and VprVocabularyBuilder.
+void CheckVocabularyFit(const Slam::VprSettings& settings) {
+  THROW_INVALID_ARG_IF(settings.vocabulary_min_keyframes == 0, "vocabulary_min_keyframes must be at least 1.");
+  THROW_INVALID_ARG_IF(settings.vocabulary_max_keyframes < settings.vocabulary_min_keyframes,
+                       "vocabulary_max_keyframes must be at least vocabulary_min_keyframes.");
+}
+
+// Copy a user image into a grayscale host VprImage, which VPR may keep after the call returns.
+slam::vpr::VprImage MakeVprImage(const ImageData& image, const bool use_gpu) {
+  if (image.pixels == nullptr || image.width <= 0 || image.height <= 0) {
+    return slam::vpr::VprImage{};
+  }
+  THROW_INVALID_ARG_IF(image.data_type != ImageData::DataType::UINT8,
+                       "Place recognition images must use ImageData::DataType::UINT8");
+
+#ifdef USE_CUDA
+  THROW_INVALID_ARG_IF(image.is_gpu_mem != cuda::IsGpuPointer(image.pixels),
+                       "is_gpu_mem flag mismatch for the place recognition image");
+#else
+  THROW_INVALID_ARG_IF(image.is_gpu_mem,
+                       "GPU memory requires a build with CUDA support (USE_CUDA=ON) for the place recognition image");
+#endif
+
+  const int channels = image.encoding == ImageData::Encoding::RGB ? 3 : 1;
+  const auto format =
+      image.encoding == ImageData::Encoding::RGB ? slam::vpr::VprPixelFormat::kRgb8 : slam::vpr::VprPixelFormat::kMono8;
+
+  if (!image.is_gpu_mem) {
+    // Host images are tightly packed; pitch applies to GPU memory only.
+    return slam::vpr::MakeVprImage(image.pixels, image.width, image.height, 0, format);
+  }
+
+#ifdef USE_CUDA
+  CheckImageMemory(image, use_gpu, "place recognition image");
+  // A vertically flipped array has a negative pitch; copying forward from its first row would leave the buffer.
+  THROW_INVALID_ARG_IF(image.pitch < 0, "Place recognition images in GPU memory need a non-negative pitch.");
+  const size_t row_bytes = static_cast<size_t>(image.width) * channels;
+  const size_t pitch = image.pitch > 0 ? static_cast<size_t>(image.pitch) : row_bytes;
+  std::vector<uint8_t> host(row_bytes * static_cast<size_t>(image.height));
+  CUDA_CHECK(cudaMemcpy2D(host.data(), row_bytes, image.pixels, pitch, row_bytes, static_cast<size_t>(image.height),
+                          cudaMemcpyDeviceToHost));
+  return slam::vpr::MakeVprImage(host.data(), image.width, image.height, 0, format);
+#else
+  (void)use_gpu;
+  (void)channels;
+  THROW_INVALID_ARG_IF(true, "GPU memory requires a build with CUDA support (USE_CUDA=ON)");
+  return slam::vpr::VprImage{};
+#endif
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Public API
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -429,6 +565,14 @@ void SetVerbosity(int verbosity) {
 }
 
 void WarmUpGPU() { WarmUpGpuImpl(); }
+
+bool IsCudaBuild() {
+#ifdef USE_CUDA
+  return true;
+#else
+  return false;
+#endif
+}
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Odometry class implementation
@@ -510,6 +654,7 @@ Odometry::Odometry(Odometry&&) noexcept = default;
 Odometry::~Odometry() = default;
 
 Odometry::Odometry(const Rig& rig, const Config& cfg) {
+  THROW_INVALID_ARG_IF(cfg.use_gpu && !IsCudaBuild(), "use_gpu requires a build with CUDA support (USE_CUDA=ON)");
   std::string message;
   TracePrintIf(cfg.use_gpu && !CheckCudaCompatibility(message), "[WARNING] %s\n", message.c_str());
   CheckCameras(rig);
@@ -518,18 +663,16 @@ Odometry::Odometry(const Rig& rig, const Config& cfg) {
                        "IMU fusion is enabled, but IMU calibration is not provided");
   THROW_INVALID_ARG_IF(rig.imus.size() > 1, "Only one IMU sensor is supported");
 
-  // For Multisensor mode, IMU presence is auto-detected from the rig (same convention as Inertial).
-  const bool multisensor_with_imu = cfg.odometry_mode == OdometryMode::Multisensor && !rig.imus.empty();
+  // Inertial mode requires an IMU; Multisensor mode fuses one whenever the rig has it.
+  const bool imu_fusion_enabled = !rig.imus.empty() && (cfg.odometry_mode == OdometryMode::Inertial ||
+                                                        cfg.odometry_mode == OdometryMode::Multisensor);
 
   odom::Settings svo_settings;
   svo_settings.verbose = Trace::GetVerbosity() > Trace::Verbosity::None;
 
   svo_settings.sba_settings.async = cfg.async_sba;
-  // Auto-pick SBA mode: inertial-CPU when IMU fusion is on (Inertial mode, or Multisensor with IMU),
-  // otherwise the standard GPU bundler.
-  svo_settings.sba_settings.mode = (cfg.odometry_mode == OdometryMode::Inertial || multisensor_with_imu)
-                                       ? sba::Mode::InertialCPU
-                                       : sba::Mode::OriginalGPU;
+  // Inertial bundler with IMU fusion, visual otherwise; on the GPU only with use_gpu in CUDA builds.
+  svo_settings.sba_settings.mode = sba::SelectMode(imu_fusion_enabled, cfg.use_gpu);
 
   // Use only first camera border settings. Other camera border settings are ignored now.
   svo_settings.sof_settings.multicam_mode = ToMulticamMode(cfg.multicam_mode);
@@ -590,6 +733,16 @@ Odometry::Odometry(const Rig& rig, const Config& cfg) {
         "Bad calibration. cuVSLAM needs at least one stereo pair for Multicamera or Inertial mode."};
   }
 
+  if (imu_fusion_enabled) {
+    const auto& imu_calibration = rig.imus[0];
+    CheckImuCalibration(imu_calibration);
+    const Isometry3T rig_from_imu = ConvertPoseToIsometry(imu_calibration.rig_from_imu);
+    svo_settings.imu_calibration =
+        imu::ImuCalibration(rig_from_imu, imu_calibration.gyroscope_noise_density,
+                            imu_calibration.gyroscope_random_walk, imu_calibration.accelerometer_noise_density,
+                            imu_calibration.accelerometer_random_walk, imu_calibration.frequency);
+  }
+
   switch (cfg.odometry_mode) {
     case OdometryMode::Multicamera: {
       svo_settings.use_prediction = cfg.use_motion_model;
@@ -598,13 +751,6 @@ Odometry::Odometry(const Rig& rig, const Config& cfg) {
       break;
     }
     case OdometryMode::Inertial: {
-      const auto& imu_calibration = rig.imus[0];
-      CheckImuCalibration(imu_calibration);
-      const Isometry3T rig_from_imu = ConvertPoseToIsometry(imu_calibration.rig_from_imu);
-      svo_settings.imu_calibration =
-          imu::ImuCalibration(rig_from_imu, imu_calibration.gyroscope_noise_density,
-                              imu_calibration.gyroscope_random_walk, imu_calibration.accelerometer_noise_density,
-                              imu_calibration.accelerometer_random_walk, imu_calibration.frequency);
       svo_settings.use_prediction = cfg.use_motion_model;
       tracker->visual_odometry = std::make_unique<odom::StereoInertialOdometry>(
           tracker->rig, tracker->fig, svo_settings, cfg.use_gpu, cfg.debug_imu_mode,
@@ -634,20 +780,11 @@ Odometry::Odometry(const Rig& rig, const Config& cfg) {
     case OdometryMode::Multisensor: {
 #ifdef USE_CUNLS
       tracker->multisensor_settings = cfg.multisensor_settings;
-      svo_settings.multisensor_settings.with_imu = multisensor_with_imu;
+      svo_settings.multisensor_settings.with_imu = imu_fusion_enabled;
       svo_settings.multisensor_settings.depth_camera_ids = cfg.multisensor_settings.depth_camera_ids;
       svo_settings.multisensor_settings.depth_scale_factor = cfg.multisensor_settings.depth_scale_factor;
       svo_settings.multisensor_settings.enable_depth_stereo_tracking =
           cfg.multisensor_settings.enable_depth_stereo_tracking;
-      if (multisensor_with_imu) {
-        const auto& imu_calibration = rig.imus[0];
-        CheckImuCalibration(imu_calibration);
-        const Isometry3T rig_from_imu = ConvertPoseToIsometry(imu_calibration.rig_from_imu);
-        svo_settings.imu_calibration =
-            imu::ImuCalibration(rig_from_imu, imu_calibration.gyroscope_noise_density,
-                                imu_calibration.gyroscope_random_walk, imu_calibration.accelerometer_noise_density,
-                                imu_calibration.accelerometer_random_walk, imu_calibration.frequency);
-      }
       svo_settings.use_prediction = cfg.use_motion_model;
       tracker->visual_odometry =
           std::make_unique<odom::MultisensorOdometry>(tracker->rig, tracker->fig, svo_settings, cfg.use_gpu);
@@ -666,10 +803,16 @@ Odometry::Odometry(const Rig& rig, const Config& cfg) {
 
   tracker->svo_settings = svo_settings;
   tracker->use_gpu = cfg.use_gpu;
-  tracker->imu_fusion_enabled = cfg.odometry_mode == OdometryMode::Inertial || multisensor_with_imu;
+  tracker->imu_fusion_enabled = imu_fusion_enabled;
   tracker->debug_dump_directory = cfg.debug_dump_directory;
   tracker->max_frame_delta_ns = static_cast<int64_t>(cfg.max_frame_delta_s * 1e9);
   tracker->odometry_mode = cfg.odometry_mode;
+  RERUN(pipelines::logCameraPinhole, *tracker->rig.intrinsics[0], pipelines::kCamera0ImageEntity);
+#ifdef USE_RERUN
+  if (Camera0ProvidesDepth(cfg.odometry_mode, cfg.rgbd_settings, cfg.multisensor_settings)) {
+    pipelines::logCameraPinhole(*tracker->rig.intrinsics[0], pipelines::kCamera0DepthEntity);
+  }
+#endif
 
   // Each depth-providing camera draws from the depth-capable pool, every other camera from the
   // no-depth pool. Both pools must hold cache_size contexts per camera so the pipeline can keep
@@ -760,12 +903,21 @@ PoseEstimate Odometry::Track(const ImageSet& images, const ImageSet& masks, cons
                          "Frame timestamps must be strictly increasing");
     auto current_frame_delta_ns = current_time_ns - impl->last_frame_timestamp_ns;
     TraceWarningIf(current_frame_delta_ns > impl->max_frame_delta_ns,
-                   "Delta between frames at frame %d is %.0f ms that is longer than desired %.0f ms. Check camera fps "
+                   "Delta between frames at frame %zu is %.0f ms that is longer than desired %.0f ms. Check camera fps "
                    "and sync settings.",
                    frame_id, current_frame_delta_ns / 1e6, impl->max_frame_delta_ns / 1e6);
   }
   impl->last_timestamp_ns = current_time_ns;
   impl->last_frame_timestamp_ns = current_time_ns;
+  // Rerun timelines are thread-local: set them on the caller's thread so VO logs land on frame_id/timestamp.
+  RERUN(visualizer::RerunVisualizer::getInstance().setupTimeline, frame_id, current_time_ns);
+  RERUN(LogCamera0Image, images);
+#ifdef USE_RERUN
+  if (Camera0ProvidesDepth(impl->odometry_mode, impl->rgbd_settings, impl->multisensor_settings)) {
+    LogCamera0Depth(depths, impl->odometry_mode == OdometryMode::RGBD ? impl->rgbd_settings.depth_scale_factor
+                                                                      : impl->multisensor_settings.depth_scale_factor);
+  }
+#endif
 
   for (const auto& image : images) {
     bool is_rgbd = false;
@@ -826,9 +978,17 @@ PoseEstimate Odometry::Track(const ImageSet& images, const ImageSet& masks, cons
   if (result) {
     impl->prev_abs_pose = odom::increment_pose(impl->prev_abs_pose, impl->last_delta);
   } else {
+#ifdef USE_RERUN
+    // No new camera pose is logged, so this frame's depth would be drawn at the previous pose.
+    if (Camera0ProvidesDepth(impl->odometry_mode, impl->rgbd_settings, impl->multisensor_settings)) {
+      visualizer::RerunVisualizer::getInstance().getRecordingStream().log(pipelines::kCamera0DepthEntity,
+                                                                          rerun::DepthImage::clear_fields());
+    }
+#endif
     return PoseEstimate{};
   }
   const Isometry3T internal_pose = impl->prev_abs_pose;
+  RERUN(pipelines::logCameraPose, internal_pose * impl->rig.camera_from_rig[0].inverse(), pipelines::kCamera0Entity);
 
   // static pose covariance in exponential mapping form in WCS
   const Matrix6T static_pose_covariance_exp = static_info_exp.ldlt().solve(Matrix6T::Identity());
@@ -1029,16 +1189,18 @@ public:
 
   Impl(const Rig& rig, const std::vector<uint8_t>& primary_cameras, const Config& config)
       : primary_cameras_(primary_cameras) {
+    THROW_INVALID_ARG_IF(config.use_gpu && !IsCudaBuild(), "use_gpu requires a build with CUDA support (USE_CUDA=ON)");
     std::string message;
     TracePrintIf(!CheckCudaCompatibility(message), "[WARNING] %s\n", message.c_str());
 
     // Slam can be constructed on its own, so it cannot rely on Odometry having vetted the rig
     CheckCameras(rig);
+    CheckPrimaryCameras(primary_cameras, rig.cameras.size());
 
     SetTrackerRigAndIntrinsics(cameras_models_, rig_, rig.cameras);
 
     slam::AsyncSlamOptions options;
-    options.map_cache_path = config.map_cache_path;
+    options.map_path = config.map_path;
     options.use_gpu = config.use_gpu;
     options.reproduce_mode = config.sync_mode;
     options.pose_for_frame_required = true;  // required for localization
@@ -1048,11 +1210,38 @@ public:
     options.throttling_time_ms = config.throttling_time_ms;
     options.retention_time_ms = config.retention_time_ms;
     options.delay_warning_queue_size = config.delay_warning_queue_size;
+    THROW_INVALID_ARG_IF(config.use_vpr && !config.use_gpu,
+                         "use_vpr runs AnyLoc as a TensorRT engine on the GPU, so it needs use_gpu.");
+    const VprSettings& vpr_settings = config.vpr_settings;
+    options.vpr_options.enabled = config.use_vpr;
+    options.vpr_options.model_path = vpr_settings.model_path;
+    THROW_INVALID_ARG_IF(!(vpr_settings.score_threshold >= 0.f && vpr_settings.score_threshold <= 1.f),
+                         "vpr_settings.score_threshold must be in [0, 1].");
+    options.vpr_options.score_threshold = vpr_settings.score_threshold;
+    const VprSettings defaults;
+    const bool fit_changed = vpr_settings.vocabulary_min_keyframes != defaults.vocabulary_min_keyframes ||
+                             vpr_settings.vocabulary_max_keyframes != defaults.vocabulary_max_keyframes;
+    THROW_INVALID_ARG_IF(!config.use_vpr && (!vpr_settings.vocabulary_path.empty() || fit_changed),
+                         "vpr_settings.vocabulary_path, vocabulary_min_keyframes and vocabulary_max_keyframes "
+                         "configure place recognition, so they need use_vpr.");
+    THROW_INVALID_ARG_IF(!vpr_settings.vocabulary_path.empty() && fit_changed,
+                         "vpr_settings.vocabulary_path replaces the per-session vocabulary fit of "
+                         "vocabulary_min_keyframes and vocabulary_max_keyframes; leave them at their defaults.");
+    CheckVocabularyFit(vpr_settings);
+    options.vpr_options.vocabulary_path = vpr_settings.vocabulary_path;
+    options.vpr_options.min_training_keyframes = vpr_settings.vocabulary_min_keyframes;
+    options.vpr_options.max_training_keyframes = vpr_settings.vocabulary_max_keyframes;
+    if (config.loop_closure_mode == LoopClosureMode::VPR) {
+      THROW_INVALID_ARG_IF(!config.use_vpr, "loop_closure_mode is VPR but use_vpr is false.");
+      options.loop_closure_solver_type = slam::LoopClosureSolverType::kVpr;
+    }
     use_gpu_ = config.use_gpu;
     gt_align_mode_ = config.gt_align_mode;
     if (config.gt_align_mode) {
       THROW_INVALID_ARG_IF(!config.sync_mode, "sync_mode should be enabled for gt_align_mode.");
       THROW_INVALID_ARG_IF(config.planar_constraints, "planar_constraints should be disabled for gt_align_mode.");
+      THROW_INVALID_ARG_IF(config.loop_closure_mode != LoopClosureMode::LSI,
+                           "loop_closure_mode should be LSI for gt_align_mode.");
       options.loop_closure_solver_type = slam::LoopClosureSolverType::kDummy;
       options.pgo_options.type = slam::PoseGraphOptimizerType::Dummy;
     } else {
@@ -1098,7 +1287,14 @@ Slam::Slam(const Rig& rig, const std::vector<uint8_t>& primary_cameras, const Co
 
 Slam::Slam(Slam&& other) noexcept = default;
 
-Slam::~Slam() = default;
+Slam::~Slam() {
+  // The SLAM thread releases callbacks after running them, so one that held the last owner lands here. That thread
+  // cannot join itself, and a teardown left running elsewhere can outlive the process and crash its exit.
+  if (impl && impl->async_slam_->IsWorkerThread()) {
+    TraceError("Slam destroyed on its own SLAM thread: a callback held the last reference to it");
+    std::terminate();
+  }
+}
 
 void Slam::Track(const Odometry::State& state, const Pose* gt_pose) {
   // Convert from public API types to internal types
@@ -1187,9 +1383,11 @@ void Slam::GetAllSlamPoses(std::vector<PoseStamped>& poses, uint32_t max_poses_c
   }
 }
 
-void Slam::SaveMap(const std::string_view& folder_name, std::function<void(bool success)> callback) const {
+void Slam::SaveMap(std::string_view folder_name, std::function<void(bool success)> callback) const {
   impl->async_slam_->CopyToDatabase(std::string{folder_name}, callback);
 }
+
+void Slam::FlushMap(std::function<void(bool success)> callback) const { impl->async_slam_->FlushMap(callback); }
 
 #define CALLBACK_AND_RETURN_IF(condition, callback, type, message) \
   if (condition) {                                                 \
@@ -1198,9 +1396,9 @@ void Slam::SaveMap(const std::string_view& folder_name, std::function<void(bool 
   }
 
 // timestamp_ns - localization timestamp
-void Slam::LocalizeInMap(const std::string_view& folder_name, int64_t timestamp_ns, const Pose& guess_pose,
+void Slam::LocalizeInMap(std::string_view folder_name, int64_t timestamp_ns, const Pose* guess_pose,
                          const ImageSet& images, const LocalizationSettings& settings, LocalizeStartCB start_cb,
-                         LocalizeFinishCB finish_cb) {
+                         LocalizeFinishCB finish_cb, bool attach) {
   slam::LocalizerOptions localizer_options;
   localizer_options.use_gpu = impl->use_gpu_;
 
@@ -1215,7 +1413,16 @@ void Slam::LocalizeInMap(const std::string_view& folder_name, int64_t timestamp_
     CheckImageMemory(images[i], impl->use_gpu_, "image " + std::to_string(i));
   }
 
-  const Isometry3T isometry_guess_pose = ConvertPoseToIsometry(guess_pose);
+  THROW_INVALID_ARG_IF(guess_pose == nullptr && !impl->async_slam_->IsVprEnabled(),
+                       "LocalizeInMap without a guess pose searches the map by appearance, which needs "
+                       "Slam::Config::use_vpr and a map saved with it.");
+  THROW_INVALID_ARG_IF(guess_pose == nullptr && settings.vpr_candidates == 0,
+                       "LocalizeInMap without a guess pose needs settings.vpr_candidates > 0.");
+
+  std::optional<Isometry3T> isometry_guess_pose;
+  if (guess_pose != nullptr) {
+    isometry_guess_pose = ConvertPoseToIsometry(*guess_pose);
+  }
 
   // copy user images
   Sources image_sources(impl->rig_.num_cameras);
@@ -1271,8 +1478,31 @@ void Slam::LocalizeInMap(const std::string_view& folder_name, int64_t timestamp_
       std::any_of(images_ptrs.begin(), images_ptrs.end(), [](const auto& image) { return image != nullptr; });
   THROW_INVALID_ARG_IF(!has_images, "No valid images to localize");
 
-  impl->async_slam_->LocalizeInMap(folder_name, timestamp_ns, isometry_guess_pose, images_ptrs, settings, start_cb,
-                                   finish_cb);
+  impl->async_slam_->LocalizeInMap(folder_name, timestamp_ns, isometry_guess_pose, images_ptrs, settings, attach,
+                                   start_cb, finish_cb);
+}
+
+void Slam::RecognizePlaceByFrame(const ImageSet& images, RecognizePlaceFinishCB finish_cb) {
+  if (!finish_cb) {
+    return;
+  }
+  if (!impl->async_slam_->IsVprEnabled()) {
+    finish_cb(Result<PlaceRecognition>::Error("Place recognition is off: Slam::Config::use_vpr is false."));
+    return;
+  }
+
+  const Image* image = images.empty() ? nullptr : SelectVprImage(images, impl->primary_cameras_);
+  if (image == nullptr) {
+    finish_cb(Result<PlaceRecognition>::Error("No image from a primary camera was provided."));
+    return;
+  }
+  slam::vpr::VprImage vpr_image = MakeVprImage(*image, impl->use_gpu_);
+  if (vpr_image.Empty()) {
+    finish_cb(Result<PlaceRecognition>::Error("The provided image could not be read."));
+    return;
+  }
+
+  impl->async_slam_->RecognizePlace(std::move(vpr_image), std::move(finish_cb));
 }
 
 void Slam::GetSlamMetrics(Metrics& metrics) const {

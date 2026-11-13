@@ -14,12 +14,15 @@
 
 # Separate pycuvslam CMakeLists.txt to use with pip install -e .
 
-cmake_minimum_required(VERSION 3.19)
+# 3.26 for FindPython's Development.SABIModule; scikit-build-core fetches a newer CMake when the system one is older
+cmake_minimum_required(VERSION 3.26)
 project(pycuvslam LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 
-find_package(Python 3.9 REQUIRED COMPONENTS Interpreter Development.Module)
+# Without SKBUILD_SABI_COMPONENT (Development.SABIModule), nanobind silently drops STABLE_ABI while scikit-build-core
+# still tags the wheel abi3.
+find_package(Python 3.10 REQUIRED COMPONENTS Interpreter Development.Module ${SKBUILD_SABI_COMPONENT})
 find_package(nanobind CONFIG REQUIRED)
 
 set(CUVSLAM_BUILD_DIR_HELP "Use absolute path or shell expansion:\n"
@@ -53,37 +56,37 @@ if(NOT EXISTS "${CUVSLAM_LIBRARY}")
         ${CUVSLAM_BUILD_DIR_HELP})
 endif()
 
-nanobind_add_module(pycuvslam STABLE_ABI NB_STATIC cuvslam2.cpp)
-target_link_libraries(pycuvslam PRIVATE ${CUVSLAM_LIBRARY})
-target_include_directories(pycuvslam PRIVATE ${CUVSLAM_INCLUDE_DIR})
+nanobind_add_module(_cuvslam STABLE_ABI NB_STATIC src/cuvslam2.cpp)
+target_link_libraries(_cuvslam PRIVATE ${CUVSLAM_LIBRARY})
+target_include_directories(_cuvslam PRIVATE ${CUVSLAM_INCLUDE_DIR})
 
-# Set RPATH so pycuvslam.so can find libcuvslam.so in the same directory
-set_target_properties(pycuvslam PROPERTIES
+# Set RPATH so _cuvslam.so can find libcuvslam.so in the same directory
+set_target_properties(_cuvslam PROPERTIES
     BUILD_RPATH "$ORIGIN"
     INSTALL_RPATH "$ORIGIN"
 )
 
-install(TARGETS pycuvslam LIBRARY DESTINATION .)
-install(FILES ${CUVSLAM_LIBRARY} DESTINATION .)
+install(TARGETS _cuvslam LIBRARY DESTINATION cuvslam)
+install(FILES ${CUVSLAM_LIBRARY} DESTINATION cuvslam)
 
-install(FILES
-    ${CMAKE_CURRENT_SOURCE_DIR}/__init__.py
-    ${CMAKE_CURRENT_SOURCE_DIR}/utils.py
-    DESTINATION .
+# The AnyLoc engine builder and model for build_anyloc_engine(), when the build made them
+set(ANYLOC_DIR "${CUVSLAM_BUILD_DIR_PATH}/anyloc")
+if(EXISTS "${CUVSLAM_BUILD_DIR_PATH}/bin/anyloc_engine_builder")
+    install(PROGRAMS "${CUVSLAM_BUILD_DIR_PATH}/bin/anyloc_engine_builder" DESTINATION cuvslam/anyloc)
+    # The build's RPATH would outrank the LD_LIBRARY_PATH that build_anyloc_engine() sets
+    install(CODE "file(RPATH_REMOVE FILE \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/cuvslam/anyloc/anyloc_engine_builder\")")
+    install(FILES "${ANYLOC_DIR}/anyloc_vits14_l9_value_322.onnx"
+                  "${ANYLOC_DIR}/anyloc_vits14_l9_value_322_reference_input.npy"
+                  "${ANYLOC_DIR}/anyloc_vits14_l9_value_322_reference_output.npy"
+                  "${ANYLOC_DIR}/LICENSE.dinov2"
+            DESTINATION cuvslam/anyloc)
+endif()
+
+nanobind_add_stub(_cuvslam_stub
+    MODULE _cuvslam
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/_cuvslam.pyi
+    PYTHON_PATH $<TARGET_FILE_DIR:_cuvslam>
+    DEPENDS _cuvslam
 )
 
-nanobind_add_stub(pycuvslam_stub
-    MODULE pycuvslam
-    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/pycuvslam.pyi
-    MARKER_FILE ${CMAKE_CURRENT_BINARY_DIR}/py.typed
-    PYTHON_PATH $<TARGET_FILE_DIR:pycuvslam>
-    DEPENDS pycuvslam
-)
-
-install(FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/pycuvslam.pyi
-    ${CMAKE_CURRENT_BINARY_DIR}/py.typed
-    DESTINATION .
-)
-
-add_subdirectory(test)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/_cuvslam.pyi DESTINATION cuvslam)

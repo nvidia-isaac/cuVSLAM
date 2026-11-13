@@ -50,21 +50,11 @@ void flatten_observations(const MulticamObservations& multicam_obs, std::vector<
   }
 }
 
-void warn_if_non_pinhole(const camera::Rig& rig) {
-  for (int32_t i = 0; i < rig.num_cameras; ++i) {
-    if (dynamic_cast<const camera::PinholeCameraModel*>(rig.intrinsics[i]) == nullptr) {
-      TraceWarning("SolverSfMMultisensor supports only pinhole cameras. Camera %d uses a different model.", i);
-    }
-  }
-}
-
 }  // namespace
 
 SolverSfMMultisensor::SolverSfMMultisensor(map::UnifiedMap& map, const camera::Rig& rig,
                                            const sba::Settings& sba_settings)
     : rig_(rig), map_(map), pose_estimator_(rig), depth_maps_(rig_), with_imu_(false) {
-  warn_if_non_pinhole(rig_);
-
   const auto& sba_mode = sba_settings.mode;
   if (sba_mode != sba::OriginalCPU && sba_mode != sba::OriginalGPU && sba_mode != sba::Disabled) {
     TraceError("Original VO cant run with inertial SBA");
@@ -88,8 +78,6 @@ SolverSfMMultisensor::SolverSfMMultisensor(map::UnifiedMap& map, const camera::R
 SolverSfMMultisensor::SolverSfMMultisensor(map::UnifiedMap& map, const camera::Rig& rig,
                                            const sba::Settings& sba_settings, const cuvslam::imu::ImuCalibration& calib)
     : rig_(rig), map_(map), pose_estimator_(rig), depth_maps_(rig_), with_imu_(true) {
-  warn_if_non_pinhole(rig_);
-
   const auto& sba_mode = sba_settings.mode;
   switch (sba_mode) {
     case sba::InertialCPU:
@@ -105,7 +93,7 @@ SolverSfMMultisensor::SolverSfMMultisensor(map::UnifiedMap& map, const camera::R
       break;
   }
 
-  imu_ = std::make_unique<ImuFusionContext>(map_, rig_, calib, pose_estimator_);
+  imu_ = std::make_unique<ImuFusionContext>(map_, rig_, calib, pose_estimator_, sba_mode == sba::InertialGPU);
   imu_->register_gravity_callback();
 }
 
