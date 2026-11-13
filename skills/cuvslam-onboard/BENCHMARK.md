@@ -10,7 +10,7 @@ Recommended for publication based on the completed evaluation evidence in this r
 
 - Skill: `cuvslam-onboard`
 - Validation status: `passed`
-- Evaluation date: 2026-11-10
+- Evaluation date: 2026-11-13
 - Evaluator version: `1.6.9`
 - Agents: Claude Code (`aws/anthropic/bedrock-claude-opus-5-5`), Codex (`openai/openai/gpt-6.1-sol`)
 - Tasks: 6 evaluation tasks (4 positive, 2 negative)
@@ -50,12 +50,12 @@ The three-tier evaluation checks whether the skill:
 
 | Measure | Claude Code (Baseline → Skill Uplift) | Codex (Baseline → Skill Uplift) |
 |---|---:|---:|
-| Overall | 97.3% — baseline ran, but no comparable score was available; uplift unavailable | 86.3% — baseline ran, but no comparable score was available; uplift unavailable |
-| Security | 100.0% → 100.0% (±0.0 points) | 100.0% → 91.7% (-8.3 points) |
-| Correctness | 63.3% → 96.7% (+33.4 points) | 86.7% → 93.3% (+6.6 points) |
+| Overall | 98.2% — baseline ran, but no comparable score was available; uplift unavailable | 88.7% — baseline ran, but no comparable score was available; uplift unavailable |
+| Security | 100.0% → 100.0% (±0.0 points) | 100.0% → 100.0% (±0.0 points) |
+| Correctness | 53.3% → 96.7% (+43.4 points) | 83.3% → 93.3% (+10.0 points) |
 | Discoverability | 100.0% — baseline ran, but no comparable score was available; uplift unavailable | 95.0% — baseline ran, but no comparable score was available; uplift unavailable |
-| Effectiveness | 55.6% → 91.7% (+36.1 points) | 86.1% → 91.7% (+5.6 points) |
-| Efficiency | 98.0% — baseline ran, but no comparable score was available; uplift unavailable | 59.8% — baseline ran, but no comparable score was available; uplift unavailable |
+| Effectiveness | 41.7% → 95.8% (+54.1 points) | 88.9% → 97.2% (+8.3 points) |
+| Efficiency | 98.4% — baseline ran, but no comparable score was available; uplift unavailable | 57.7% — baseline ran, but no comparable score was available; uplift unavailable |
 
 **How to read this table:** baseline is the same task attempted without the target skill. Scores are rounded to one decimal; threshold-adjacent values use additional precision so their displayed band matches the verdict. Uplift is derived from those displayed scores and shown in percentage points.
 
@@ -70,9 +70,9 @@ Shared-source comparisons use the same signals and weights on both conditions. T
 | Agent | Dimension | Basis | Baseline → With skill (uplift) | Explanation |
 | --- | --- | --- | --- | --- |
 | claude-code | Discoverability | Dimension comparison | N/A | Discoverability is not applicable to the no-skill baseline; there is no installed skill to discover. |
-| claude-code | Efficiency | Token-only comparison | 97.9% → 96.0% (-1.9 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
+| claude-code | Efficiency | Token-only comparison | 98.5% → 96.8% (-1.7 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
 | codex | Discoverability | Dimension comparison | N/A | Discoverability is not applicable to the no-skill baseline; there is no installed skill to discover. |
-| codex | Efficiency | Token-only comparison | 86.9% → 86.9% (±0.0 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
+| codex | Efficiency | Token-only comparison | 86.9% → 88.3% (+1.4 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
 
 ## Token Usage
 
@@ -80,21 +80,21 @@ Actual Tier 3 execution usage is reported for every observed agent/case pair and
 
 | Agent | Dataset case | With skill | Without skill | Delta | Change | Coverage |
 |---|---|---:|---:|---:|---:|---|
-| claude-code | All cases | 644,495 | 723,333 | -78,838 | -10.90% | skill 6/6; base 6/6 |
-| claude-code | onboard-multisensor | 76,559 | 71,339 | +5,220 | +7.32% | skill 1/1; base 1/1 |
-| claude-code | onboard-negative-drift | 149,414 | 145,370 | +4,044 | +2.78% | skill 1/1; base 1/1 |
-| claude-code | onboard-negative-replay | 188,154 | 144,149 | +44,005 | +30.53% | skill 1/1; base 1/1 |
-| claude-code | onboard-offline-slam | 76,849 | 72,152 | +4,697 | +6.51% | skill 1/1; base 1/1 |
-| claude-code | onboard-source-reinstall | 76,955 | 107,957 | -31,002 | -28.72% | skill 1/1; base 1/1 |
-| claude-code | onboard-wheel | 76,564 | 182,366 | -105,802 | -58.02% | skill 1/1; base 1/1 |
-| codex | All cases | 326,642 | 316,897 | +9,745 | +3.08% | skill 6/6; base 6/6 |
-| codex | onboard-multisensor | 33,960 | 30,127 | +3,833 | +12.72% | skill 1/1; base 1/1 |
-| codex | onboard-negative-drift | 67,237 | 75,029 | -7,792 | -10.39% | skill 1/1; base 1/1 |
-| codex | onboard-negative-replay | 41,926 | 42,008 | -82 | -0.20% | skill 1/1; base 1/1 |
-| codex | onboard-offline-slam | 91,792 | 43,929 | +47,863 | +108.96% | skill 1/1; base 1/1 |
-| codex | onboard-source-reinstall | 51,023 | 49,255 | +1,768 | +3.59% | skill 1/1; base 1/1 |
-| codex | onboard-wheel | 40,704 | 76,549 | -35,845 | -46.83% | skill 1/1; base 1/1 |
-| ALL AGENTS | Dataset aggregate | 971,137 | 1,040,230 | -69,093 | -6.64% | skill 12/12; base 12/12 |
+| claude-code | All cases | 567,553 | 615,797 | -48,244 | -7.83% | skill 6/6; base 6/6 |
+| claude-code | onboard-multisensor | 76,724 | 71,634 | +5,090 | +7.11% | skill 1/1; base 1/1 |
+| claude-code | onboard-negative-drift | 150,156 | 109,547 | +40,609 | +37.07% | skill 1/1; base 1/1 |
+| claude-code | onboard-negative-replay | 109,727 | 182,683 | -72,956 | -39.94% | skill 1/1; base 1/1 |
+| claude-code | onboard-offline-slam | 77,045 | 72,082 | +4,963 | +6.89% | skill 1/1; base 1/1 |
+| claude-code | onboard-source-reinstall | 76,900 | 108,007 | -31,107 | -28.80% | skill 1/1; base 1/1 |
+| claude-code | onboard-wheel | 77,001 | 71,844 | +5,157 | +7.18% | skill 1/1; base 1/1 |
+| codex | All cases | 286,986 | 277,845 | +9,141 | +3.29% | skill 6/6; base 6/6 |
+| codex | onboard-multisensor | 43,126 | 28,653 | +14,473 | +50.51% | skill 1/1; base 1/1 |
+| codex | onboard-negative-drift | 52,853 | 61,003 | -8,150 | -13.36% | skill 1/1; base 1/1 |
+| codex | onboard-negative-replay | 41,842 | 42,715 | -873 | -2.04% | skill 1/1; base 1/1 |
+| codex | onboard-offline-slam | 41,517 | 57,063 | -15,546 | -27.24% | skill 1/1; base 1/1 |
+| codex | onboard-source-reinstall | 68,405 | 21,810 | +46,595 | +213.64% | skill 1/1; base 1/1 |
+| codex | onboard-wheel | 39,243 | 66,601 | -27,358 | -41.08% | skill 1/1; base 1/1 |
+| ALL AGENTS | Dataset aggregate | 854,539 | 893,642 | -39,103 | -4.38% | skill 12/12; base 12/12 |
 
 Prompt tokens include cached reads, so total tokens are `prompt + completion` (cached is not added twice). The Efficiency score uses `(prompt - cached) + completion`. Change is `100 * (with - without) / without`; negative means fewer tokens. N/A comparisons include their reason in the coverage column; coverage is never estimated.
 
@@ -103,7 +103,7 @@ Prompt tokens include cached reads, so total tokens are `prompt + completion` (c
 | Tier | Purpose | Status | Evidence |
 |---|---|---|---|
 | Tier 1 | Static validation | **PASSED WITH OBSERVATIONS** | 11 validator(s); 9 finding(s) |
-| Tier 2 | Semantic deduplication | **PASSED WITH OBSERVATIONS** | 2 validator(s); 2 finding(s) |
+| Tier 2 | Semantic deduplication | **PASSED WITH OBSERVATIONS** | 2 validator(s); 3 finding(s) |
 | Tier 3 | Live agent evaluation | **PASS** | 2 agent(s); 6 task(s) |
 
 ## Findings and Observations
@@ -112,15 +112,17 @@ Prompt tokens include cached reads, so total tokens are `prompt + completion` (c
 <summary>Show detailed findings and successful checks</summary>
 
 - **HIGH** DUPLICATE/duplicate: Duplicate content found across SKILL.md and references/dataset-guides.md:
-  "### EuRoC C++ example" in SKILL.md (lines 225-234)
-  vs "# From repo root" in references/dataset-guides.md (lines 86-94) (`SKILL.md:225`)
+  "### Multi-Camera (Tartan Ground, 6 stereo pairs)" in SKILL.md (lines 192-200)
+  vs "### Tartan Ground (6 stereo pairs)" in references/dataset-guides.md (lines 133-142) (`SKILL.md:192`)
 - **HIGH** DUPLICATE/duplicate: Duplicate content found across SKILL.md and references/dataset-guides.md:
-  "### Multi-Camera (Tartan Ground, 6 stereo pairs)" in SKILL.md (lines 189-197)
-  vs "### Tartan Ground (6 stereo pairs)" in references/dataset-guides.md (lines 133-142) (`SKILL.md:189`)
+  "### Multisensor (Tartan Ground, RGB-D + optional IMU)" in SKILL.md (lines 201-212)
+  vs "## Multisensor" in references/dataset-guides.md (lines 159-175) (`SKILL.md:201`)
+- **HIGH** DUPLICATE/duplicate: Duplicate content found across SKILL.md and references/dataset-guides.md:
+  "### EuRoC C++ example" in SKILL.md (lines 228-237)
+  vs "# From repo root" in references/dataset-guides.md (lines 86-94) (`SKILL.md:228`)
 - **MEDIUM** QUALITY/quality_correctness: SKILL_SPEC recommended field missing: 'metadata.tags' (`skills/cuvslam-onboard/SKILL.md`)
 - **MEDIUM** SCHEMA/body_recommended_section: Missing recommended section: '## Instructions' (`skills/cuvslam-onboard/SKILL.md`)
-- **MEDIUM** SCHEMA/body_recommended_section: Missing recommended section: '## Examples' (`skills/cuvslam-onboard/SKILL.md`)
-- 6 additional finding(s) are available in the full evaluation artifacts.
+- 7 additional finding(s) are available in the full evaluation artifacts.
 
 </details>
 

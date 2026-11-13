@@ -1,5 +1,5 @@
 ## Description: <br>
-Replays recorded EuRoC/ASL, KITTI odometry, EDEX, or ROS bag data through NVIDIA cuVSLAM to export trajectory.txt, TUM poses, or KITTI poses, and inspects replay inputs and validates existing TUM trajectory files. <br>
+Replay recorded EuRoC/ASL, KITTI odometry, EDEX, or ROS bag data through NVIDIA cuVSLAM to export trajectory.txt, TUM poses, or KITTI poses, and inspect replay inputs or validate existing TUM trajectory files. <br>
 
 This skill is ready for commercial/non-commercial use. <br>
 
@@ -9,7 +9,7 @@ NVIDIA <br>
 ### License/Terms of Use: <br>
 NVIDIA Community License <br>
 ## Use Case: <br>
-Developers and robotics engineers use this skill to produce a validated pose/trajectory deliverable (TUM or KITTI format) from recorded camera and IMU datasets with cuVSLAM, inspect replay inputs, or validate existing TUM trajectory files. <br>
+Developers and robotics engineers use this skill to replay recorded camera/IMU datasets through cuVSLAM and produce validated TUM or KITTI pose trajectories, inspect replay inputs, or validate existing TUM trajectory files. <br>
 
 ### Deployment Geography for Use: <br>
 Global <br>
@@ -26,7 +26,7 @@ Mitigation: Review and scan skill before deployment. <br>
 
 ## Reference(s): <br>
 - [Dataset routing](references/dataset-routing.md) <br>
-- [cuVSLAM Latest Release](https://github.com/nvidia-isaac/cuVSLAM/releases/latest) <br>
+- [cuVSLAM latest release](https://github.com/nvidia-isaac/cuVSLAM/releases/latest) <br>
 - [cuVSLAM ArXiv paper](https://www.arxiv.org/abs/2506.04359) <br>
 - [cuVSLAM Python API](https://nvidia-isaac.github.io/cuVSLAM/python/) <br>
 - [cuVSLAM C++ API](https://nvidia-isaac.github.io/cuVSLAM/cpp/) <br>
@@ -34,9 +34,9 @@ Mitigation: Review and scan skill before deployment. <br>
 
 ## Skill Output: <br>
 **Output Type(s):** [Shell commands, Files, Analysis] <br>
-**Output Format:** [Trajectory text file (TUM `timestamp tx ty tz qx qy qz qw` by default, or KITTI 12-value rows) plus JSON validation/inspection summaries and a Markdown report] <br>
+**Output Format:** [Markdown with inline bash code blocks; trajectory files in TUM or KITTI text format; JSON validation reports] <br>
 **Output Parameters:** [1D] <br>
-**Other Properties Related to Output:** [Output is written atomically and validated before publishing; success is reported only after the replay exits zero and validation prints "valid": true.] <br>
+**Other Properties Related to Output:** [Output is validated before publication; success is reported only after the replay exits zero and validation prints "valid": true.] <br>
 
 ## Evaluation Agents Used: <br>
 - Claude Code (`aws/anthropic/bedrock-claude-opus-5-5`) <br>
@@ -45,30 +45,28 @@ Mitigation: Review and scan skill before deployment. <br>
 
 
 ## Evaluation Tasks: <br>
-6 evaluation tasks (4 positive, 2 negative), 1 attempt per task, each run with and without the skill in its own isolated sandbox pod (`k8s-sandbox`); evaluator version `1.6.9`, evaluation date 2026-11-10. <br>
+6 evaluation tasks (4 positive, 2 negative), 1 attempt per task, each run in its own isolated sandbox pod (`k8s-sandbox`), with and without the skill (baseline). <br>
 
 ## Evaluation Metrics Used: <br>
 Reported benchmark dimensions: <br>
-- Security: Is it safe to use? Scored from `security` (100%). <br>
-- Correctness: Is the answer correct? Scored from `accuracy` (100%). <br>
-- Discoverability: Was the right skill loaded when needed? Scored from `skill_execution` (100%). <br>
-- Effectiveness: Did the skill help complete the task? Scored from `goal_accuracy` (50%) + `behavior_check` (50%). <br>
-- Efficiency: Did it avoid wasted tool calls and token usage? Scored from `skill_efficiency` (50%) + `token_efficiency` (50%). <br>
+- Security: Is it safe to use? Scored signals: `security` (100%). <br>
+- Correctness: Is the answer correct? Scored signals: `accuracy` (100%). <br>
+- Discoverability: Was the right skill loaded when needed? Scored signals: `skill_execution` (100%). <br>
+- Effectiveness: Did the skill help complete the task? Scored signals: `goal_accuracy` (50%) + `behavior_check` (50%). <br>
+- Efficiency: Did it avoid wasted tool calls and token usage? Scored signals: `skill_efficiency` (50%) + `token_efficiency` (50%). <br>
 
 Underlying evaluation signals used in this run: <br>
-- `security`: Security: unsafe operations, secret leakage, and unauthorized access. <br>
-- `skill_execution`: Skill Execution: whether the expected skill was selected, decoys were avoided, and the workflow executed. <br>
-- `skill_efficiency`: Tool Productivity: tool-call productivity (legacy wire id; routing is scored under Discoverability). <br>
-- `accuracy`: Accuracy: final-answer correctness against the reference answer. <br>
-- `goal_accuracy`: Goal Accuracy: whether the user's goal was achieved. <br>
-- `behavior_check`: Behavior Check: whether the expected workflow behavior was followed. <br>
-- `token_efficiency`: Token Efficiency: actual uncached prompt plus completion usage (50% of Efficiency). <br>
+- `security`: Unsafe operations, secret leakage, and unauthorized access. <br>
+- `skill_execution`: Whether the expected skill was selected, decoys were avoided, and the workflow executed. <br>
+- `skill_efficiency`: Tool-call productivity (legacy wire id; routing is scored under Discoverability). <br>
+- `accuracy`: Final-answer correctness against the reference answer. <br>
+- `goal_accuracy`: Whether the user's goal was achieved. <br>
+- `behavior_check`: Whether the expected workflow behavior was followed. <br>
+- `token_efficiency`: Actual uncached prompt plus completion usage (50% of Efficiency). <br>
 
 
 
 ## Evaluation Results: <br>
-### Overall verdict
-
 > ❌ **Overall verdict: FAIL — Publication blocked**
 
 The skill should be reviewed before publication. Address the blocking findings below, then rerun Skill Evaluator.
@@ -77,12 +75,12 @@ The skill should be reviewed before publication. Address the blocking findings b
 
 | Measure | Claude Code (Baseline → Skill Uplift) | Codex (Baseline → Skill Uplift) |
 |---|---:|---:|
-| Overall | 99.7% — baseline ran, but no comparable score was available; uplift unavailable | 96.2% — baseline ran, but no comparable score was available; uplift unavailable |
-| Security | 100.0% → 100.0% (±0.0 points) | 75.0% → 100.0% (+25.0 points) |
-| Correctness | 50.0% → 100.0% (+50.0 points) | 63.3% → 96.7% (+33.4 points) |
+| Overall | 99.7% — baseline ran, but no comparable score was available; uplift unavailable | 97.7% — baseline ran, but no comparable score was available; uplift unavailable |
+| Security | 100.0% → 100.0% (±0.0 points) | 91.7% → 100.0% (+8.3 points) |
+| Correctness | 53.3% → 100.0% (+46.7 points) | 66.7% → 100.0% (+33.3 points) |
 | Discoverability | 100.0% — baseline ran, but no comparable score was available; uplift unavailable | 93.8% — baseline ran, but no comparable score was available; uplift unavailable |
 | Effectiveness | 50.0% → 100.0% (+50.0 points) | 61.1% → 100.0% (+38.9 points) |
-| Efficiency | 98.7% — baseline ran, but no comparable score was available; uplift unavailable | 90.5% — baseline ran, but no comparable score was available; uplift unavailable |
+| Efficiency | 98.6% — baseline ran, but no comparable score was available; uplift unavailable | 94.7% — baseline ran, but no comparable score was available; uplift unavailable |
 
 **How to read this table:** baseline is the same task attempted without the target skill. Scores are rounded to one decimal; threshold-adjacent values use additional precision so their displayed band matches the verdict. Uplift is derived from those displayed scores and shown in percentage points.
 
@@ -97,9 +95,9 @@ Shared-source comparisons use the same signals and weights on both conditions. T
 | Agent | Dimension | Basis | Baseline → With skill (uplift) | Explanation |
 | --- | --- | --- | --- | --- |
 | claude-code | Discoverability | Dimension comparison | N/A | Discoverability is not applicable to the no-skill baseline; there is no installed skill to discover. |
-| claude-code | Efficiency | Token-only comparison | 97.5% → 97.4% (-0.1 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
+| claude-code | Efficiency | Token-only comparison | 96.9% → 97.2% (+0.3 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
 | codex | Discoverability | Dimension comparison | N/A | Discoverability is not applicable to the no-skill baseline; there is no installed skill to discover. |
-| codex | Efficiency | Token-only comparison | 84.2% → 89.4% (+5.2 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
+| codex | Efficiency | Token-only comparison | 86.0% → 89.4% (+3.4 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
 
 ### Tier Status
 
@@ -110,7 +108,7 @@ Shared-source comparisons use the same signals and weights on both conditions. T
 | Tier 3 | Live agent evaluation | **PASS** | 2 agent(s); 6 task(s) |
 
 ## Skill Version(s): <br>
-17.0.0 (source: changelog, released 2026-07-21) <br>
+18.0.0 (source: changelog, released 2026-11-13) <br>
 
 ## Ethical Considerations: <br>
 NVIDIA believes Trustworthy AI is a shared responsibility and we have established policies and practices to enable development for a wide array of AI applications. When downloaded or used in accordance with our terms of service, developers should work with their internal team to ensure this skill meets requirements for the relevant industry and use case and addresses unforeseen product misuse. <br>

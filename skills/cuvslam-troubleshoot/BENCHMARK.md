@@ -8,7 +8,7 @@ The skill should be reviewed before publication. Address the blocking findings b
 
 - Skill: `cuvslam-troubleshoot`
 - Validation status: `failed`
-- Evaluation date: 2026-11-10
+- Evaluation date: 2026-11-13
 - Evaluator version: `1.6.9`
 - Agents: Claude Code (`aws/anthropic/bedrock-claude-opus-5-5`), Codex (`openai/openai/gpt-6.1-sol`)
 - Tasks: 6 evaluation tasks (4 positive, 2 negative)
@@ -48,12 +48,12 @@ The three-tier evaluation checks whether the skill:
 
 | Measure | Claude Code (Baseline → Skill Uplift) | Codex (Baseline → Skill Uplift) |
 |---|---:|---:|
-| Overall | 99.0% — baseline ran, but no comparable score was available; uplift unavailable | 89.7% — baseline ran, but no comparable score was available; uplift unavailable |
+| Overall | 96.8% — baseline ran, but no comparable score was available; uplift unavailable | 90.3% — baseline ran, but no comparable score was available; uplift unavailable |
 | Security | 100.0% → 100.0% (±0.0 points) | 100.0% → 100.0% (±0.0 points) |
-| Correctness | 83.3% → 100.0% (+16.7 points) | 90.0% → 93.3% (+3.3 points) |
+| Correctness | 90.0% → 90.0% (±0.0 points) | 86.7% → 96.7% (+10.0 points) |
 | Discoverability | 100.0% — baseline ran, but no comparable score was available; uplift unavailable | 95.0% — baseline ran, but no comparable score was available; uplift unavailable |
-| Effectiveness | 88.9% → 100.0% (+11.1 points) | 88.9% → 97.2% (+8.3 points) |
-| Efficiency | 94.8% — baseline ran, but no comparable score was available; uplift unavailable | 63.2% — baseline ran, but no comparable score was available; uplift unavailable |
+| Effectiveness | 88.9% → 100.0% (+11.1 points) | 88.9% → 100.0% (+11.1 points) |
+| Efficiency | 94.2% — baseline ran, but no comparable score was available; uplift unavailable | 59.8% — baseline ran, but no comparable score was available; uplift unavailable |
 
 **How to read this table:** baseline is the same task attempted without the target skill. Scores are rounded to one decimal; threshold-adjacent values use additional precision so their displayed band matches the verdict. Uplift is derived from those displayed scores and shown in percentage points.
 
@@ -68,9 +68,9 @@ Shared-source comparisons use the same signals and weights on both conditions. T
 | Agent | Dimension | Basis | Baseline → With skill (uplift) | Explanation |
 | --- | --- | --- | --- | --- |
 | claude-code | Discoverability | Dimension comparison | N/A | Discoverability is not applicable to the no-skill baseline; there is no installed skill to discover. |
-| claude-code | Efficiency | Token-only comparison | 98.5% → 94.5% (-4.0 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
+| claude-code | Efficiency | Token-only comparison | 98.5% → 94.7% (-3.8 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
 | codex | Discoverability | Dimension comparison | N/A | Discoverability is not applicable to the no-skill baseline; there is no installed skill to discover. |
-| codex | Efficiency | Token-only comparison | 86.1% → 87.2% (+1.1 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
+| codex | Efficiency | Token-only comparison | 84.4% → 86.7% (+2.3 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
 
 ## Token Usage
 
@@ -78,21 +78,21 @@ Actual Tier 3 execution usage is reported for every observed agent/case pair and
 
 | Agent | Dataset case | With skill | Without skill | Delta | Change | Coverage |
 |---|---|---:|---:|---:|---:|---|
-| claude-code | All cases | 765,771 | 326,509 | +439,262 | +134.53% | skill 6/6; base 6/6 |
-| claude-code | troubleshoot-cuda-mismatch | 79,785 | 36,043 | +43,742 | +121.36% | skill 1/1; base 1/1 |
-| claude-code | troubleshoot-imu-isolation | 179,688 | 37,562 | +142,126 | +378.38% | skill 1/1; base 1/1 |
-| claude-code | troubleshoot-negative-export | 191,061 | 107,825 | +83,236 | +77.20% | skill 1/1; base 1/1 |
-| claude-code | troubleshoot-negative-setup | 110,527 | 71,940 | +38,587 | +53.64% | skill 1/1; base 1/1 |
-| claude-code | troubleshoot-ros-rate | 79,840 | 36,908 | +42,932 | +116.32% | skill 1/1; base 1/1 |
-| claude-code | troubleshoot-stereo-calibration | 124,870 | 36,231 | +88,639 | +244.65% | skill 1/1; base 1/1 |
-| codex | All cases | 304,262 | 249,118 | +55,144 | +22.14% | skill 6/6; base 6/6 |
-| codex | troubleshoot-cuda-mismatch | 38,734 | 50,040 | -11,306 | -22.59% | skill 1/1; base 1/1 |
-| codex | troubleshoot-imu-isolation | 61,354 | 43,760 | +17,594 | +40.21% | skill 1/1; base 1/1 |
-| codex | troubleshoot-negative-export | 64,534 | 52,665 | +11,869 | +22.54% | skill 1/1; base 1/1 |
-| codex | troubleshoot-negative-setup | 38,892 | 44,937 | -6,045 | -13.45% | skill 1/1; base 1/1 |
-| codex | troubleshoot-ros-rate | 62,514 | 35,899 | +26,615 | +74.14% | skill 1/1; base 1/1 |
-| codex | troubleshoot-stereo-calibration | 38,234 | 21,817 | +16,417 | +75.25% | skill 1/1; base 1/1 |
-| ALL AGENTS | Dataset aggregate | 1,070,033 | 575,627 | +494,406 | +85.89% | skill 12/12; base 12/12 |
+| claude-code | All cases | 785,052 | 482,972 | +302,080 | +62.55% | skill 6/6; base 6/6 |
+| claude-code | troubleshoot-cuda-mismatch | 80,021 | 36,030 | +43,991 | +122.10% | skill 1/1; base 1/1 |
+| claude-code | troubleshoot-imu-isolation | 187,087 | 37,117 | +149,970 | +404.05% | skill 1/1; base 1/1 |
+| claude-code | troubleshoot-negative-export | 240,526 | 229,501 | +11,025 | +4.80% | skill 1/1; base 1/1 |
+| claude-code | troubleshoot-negative-setup | 72,369 | 107,466 | -35,097 | -32.66% | skill 1/1; base 1/1 |
+| claude-code | troubleshoot-ros-rate | 79,950 | 36,677 | +43,273 | +117.98% | skill 1/1; base 1/1 |
+| claude-code | troubleshoot-stereo-calibration | 125,099 | 36,181 | +88,918 | +245.76% | skill 1/1; base 1/1 |
+| codex | All cases | 298,668 | 251,338 | +47,330 | +18.83% | skill 6/6; base 6/6 |
+| codex | troubleshoot-cuda-mismatch | 42,784 | 30,571 | +12,213 | +39.95% | skill 1/1; base 1/1 |
+| codex | troubleshoot-imu-isolation | 69,931 | 43,609 | +26,322 | +60.36% | skill 1/1; base 1/1 |
+| codex | troubleshoot-negative-export | 45,568 | 74,575 | -29,007 | -38.90% | skill 1/1; base 1/1 |
+| codex | troubleshoot-negative-setup | 39,021 | 45,220 | -6,199 | -13.71% | skill 1/1; base 1/1 |
+| codex | troubleshoot-ros-rate | 63,043 | 35,405 | +27,638 | +78.06% | skill 1/1; base 1/1 |
+| codex | troubleshoot-stereo-calibration | 38,321 | 21,958 | +16,363 | +74.52% | skill 1/1; base 1/1 |
+| ALL AGENTS | Dataset aggregate | 1,083,720 | 734,310 | +349,410 | +47.58% | skill 12/12; base 12/12 |
 
 Prompt tokens include cached reads, so total tokens are `prompt + completion` (cached is not added twice). The Efficiency score uses `(prompt - cached) + completion`. Change is `100 * (with - without) / without`; negative means fewer tokens. N/A comparisons include their reason in the coverage column; coverage is never estimated.
 
@@ -100,7 +100,7 @@ Prompt tokens include cached reads, so total tokens are `prompt + completion` (c
 
 | Tier | Purpose | Status | Evidence |
 |---|---|---|---|
-| Tier 1 | Static validation | **FAILED** | 11 validator(s); 35 finding(s) |
+| Tier 1 | Static validation | **FAILED** | 11 validator(s); 36 finding(s) |
 | Tier 2 | Semantic deduplication | **PASSED WITH OBSERVATIONS** | 2 validator(s); 2 finding(s) |
 | Tier 3 | Live agent evaluation | **PASS** | 2 agent(s); 6 task(s) |
 
@@ -115,15 +115,15 @@ Prompt tokens include cached reads, so total tokens are `prompt + completion` (c
 <summary>Show detailed findings and successful checks</summary>
 
 - **HIGH** DUPLICATE/duplicate: Duplicate content found across SKILL.md and commands/stereo-image-throttle.md:
-  "#### Dataset path into the diagnostic workflow" in SKILL.md (lines 227-227)
-  vs "## VIO and frame rate interaction" in commands/stereo-image-throttle.md (lines 9-33) (`SKILL.md:227`)
+  "#### Dataset path into the diagnostic workflow" in SKILL.md (lines 230-230)
+  vs "## VIO and frame rate interaction" in commands/stereo-image-throttle.md (lines 9-33) (`SKILL.md:230`)
 - **HIGH** DUPLICATE/duplicate: Duplicate content found within SKILL.md:
-  "#### Dataset path into the diagnostic workflow" in SKILL.md (lines 183-198)
-  vs "#### Dataset path into the diagnostic workflow" in SKILL.md (lines 209-210) (`SKILL.md:183`)
+  "#### Dataset path into the diagnostic workflow" in SKILL.md (lines 186-201)
+  vs "#### Dataset path into the diagnostic workflow" in SKILL.md (lines 212-213) (`SKILL.md:186`)
 - **MEDIUM** BANDIT/B108:hardcoded_tmp_directory: Probable insecure usage of temp file/directory. (CWE-377) (`skills/cuvslam-troubleshoot/scripts/isaac_ros_visual_slam_realsense_bag.launch.py:66`)
 - **MEDIUM** BANDIT/B108:hardcoded_tmp_directory: Probable insecure usage of temp file/directory. (CWE-377) (`skills/cuvslam-troubleshoot/scripts/vo_pose_diff_recorder.py:97`)
 - **MEDIUM** QUALITY/quality_correctness: No documented scripts in table format (`skills/cuvslam-troubleshoot/SKILL.md`)
-- 32 additional finding(s) are available in the full evaluation artifacts.
+- 33 additional finding(s) are available in the full evaluation artifacts.
 
 </details>
 
