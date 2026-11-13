@@ -38,7 +38,7 @@ Load-bearing rules:
 - Keep each library in `libs/` self-contained with its own `CMakeLists.txt` and `test/` subdirectory
 - Use `spdlog` (via `libs/log/`) for all logging — no `printf` or `std::cout` in library code
 - Use the `Pose` type from `cuvslam2.h` for all SE(3) transforms (quaternion + translation)
-- Add new external dependencies as FetchContent entries in `cmake/ext/`
+- Add new external dependencies as FetchContent entries in `cmake/ext/`, each with a `cuvslam_third_party_notice()` or `cuvslam_third_party_not_distributed()` call (`cmake/ThirdPartyNotices.cmake`); a new shipped dependency also needs OSRB approval
 - When generating C++ code, always include `{}` braces for `if` statements, even for single-line bodies. This prevents accidental behavior changes when new statements are added later and keeps control flow explicit and consistent.
 
 **Don't:**

@@ -46,5 +46,10 @@ FetchContent_MakeAvailable(cunls)
 if(NOT TARGET cunls::cunls)
     message(FATAL_ERROR "cuNLS source build did not define the 'cunls::cunls' target")
 endif()
+# Apache-2.0 section 4(d): redistributions carry the NOTICE file
+cuvslam_third_party_notice(NAME cuNLS VERSION ${CUNLS_VERSION}
+    URL https://github.com/nvidia-isaac/cuNLS LICENSE Apache-2.0
+    NOTE "cuVSLAM builds cuNLS without its optional cuDSS backend."
+    FILES ${cunls_SOURCE_DIR}/LICENSE ${cunls_SOURCE_DIR}/NOTICE)
 
 message(STATUS "cuNLS: building from source (${CUNLS_VERSION})")

@@ -79,6 +79,7 @@ cuvslam_dependent_option(CUVSLAM_BUILD_ANYLOC_ENGINE
 
 setup_cuvslam_settings()
 
+include(cmake/ThirdPartyNotices.cmake)
 include(cmake/FindExt.cmake)
 include(cmake/AnyLocModel.cmake)
 
@@ -114,4 +115,22 @@ file(WRITE ${SET_ENV_BAT}   "#!/bin/bash\n"
                             "export CUVSLAM_OUTPUT=${CUVSLAM_OUTPUT}/\n")
 if(CUVSLAM_ANYLOC_ENGINE)
     file(APPEND ${SET_ENV_BAT} "export CUVSLAM_ANYLOC_ENGINE=${CUVSLAM_ANYLOC_ENGINE}\n")
+endif()
+
+# Packaged with the C++ package and, extended by python/CMakeLists.txt, with the wheels
+cuvslam_check_third_party_coverage(${CMAKE_SOURCE_DIR}/cmake/ext)
+cuvslam_write_third_party_notices(${CMAKE_BINARY_DIR}/THIRD_PARTY_NOTICES.txt)
+# The checked-in copy is this file for the options release builds use
+if(CUVSLAM_BUILD_ANYLOC_ENGINE AND USE_CUNLS AND USE_LMDB AND NOT USE_NVTX AND NOT USE_RERUN)
+    set(_update_notices "cmake --build ${CMAKE_BINARY_DIR} --target update_third_party_notices")
+    add_custom_target(update_third_party_notices
+        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/THIRD_PARTY_NOTICES.txt
+                ${CMAKE_SOURCE_DIR}/THIRD_PARTY_NOTICES.txt
+        VERBATIM
+    )
+    add_test(NAME third_party_notices_test
+        COMMAND ${CMAKE_COMMAND} -DGENERATED=${CMAKE_BINARY_DIR}/THIRD_PARTY_NOTICES.txt
+                -DCHECKED_IN=${CMAKE_SOURCE_DIR}/THIRD_PARTY_NOTICES.txt "-DUPDATE_COMMAND=${_update_notices}"
+                -P ${CMAKE_SOURCE_DIR}/cmake/ThirdPartyNotices.cmake
+    )
 endif()

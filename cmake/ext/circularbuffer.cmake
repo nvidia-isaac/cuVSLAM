@@ -29,6 +29,9 @@ if(NOT circularbuffer_POPULATED)
     # Don't call add_subdirectory - we don't want their CMakeLists.txt
     # which tries to build tests with ExternalProject_Add
 endif()
+cuvslam_third_party_notice(NAME circularbuffer VERSION ${CIRCULARBUFFER_COMMIT}
+    URL https://github.com/vinitjames/circularbuffer LICENSE MIT
+    FILES ${circularbuffer_SOURCE_DIR}/LICENSE)
 
 # Create interface target for the header-only library
 if(NOT TARGET circularbuffer::circularbuffer)

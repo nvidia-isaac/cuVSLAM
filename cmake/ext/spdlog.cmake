@@ -31,6 +31,10 @@ FetchContent_Declare(
 )
 
 FetchContent_MakeAvailable(spdlog)
+cuvslam_third_party_notice(NAME spdlog VERSION ${SPDLOG_VERSION}
+    URL https://github.com/gabime/spdlog LICENSE MIT
+    NOTE "Built with its bundled copy of {fmt} (SPDLOG_FMT_EXTERNAL=OFF), whose license follows spdlog's."
+    FILES ${spdlog_SOURCE_DIR}/LICENSE ${spdlog_SOURCE_DIR}/include/spdlog/fmt/bundled/fmt.license.rst)
 
 # spdlog provides these targets automatically:
 # - spdlog::spdlog (modern CMake target)
