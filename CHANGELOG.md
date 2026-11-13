@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [18.0.0] - 2026-11-13
 
 ### Changed
 
@@ -58,6 +58,16 @@
   advisories, BDSA-2026-37840 to BDSA-2026-38134) and, in the AnyLoc export venv, filelock 4.2.7
   (11 advisories, BDSA-2026-38098 to BDSA-2026-38635). Neither has a fixed release for Python 3.10,
   which stays on Pillow 12.3.0 and filelock 4.0.12
+
+## [17.0.1] - 2026-10-08
+
+### Fixed
+
+- Process abort (`std::out_of_range` on the bundle adjustment thread) in Multisensor and Inertial odometry with an IMU and asynchronous SBA
+- Untriangulated landmarks receiving invalid positions from bundle adjustment before gravity is initialized
+- Track masks: invalid masks are rejected, an all-excluding mask no longer throws `cudaErrorInvalidValue` in
+  Multisensor mode, GPU masks apply to the current frame, and masks of another resolution are resized before masking
+  depth
 
 ## [17.0.0] - 2026-07-21
 
