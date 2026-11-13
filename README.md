@@ -363,6 +363,8 @@ Are you having problems running cuVSLAM or PyCuVSLAM? Do you have any suggestion
 # License
 
 This project is licensed under the NVIDIA Community License, for details refer to the [LICENSE](LICENSE) file.
+The third-party software included in the binary packages is listed in their `THIRD_PARTY_NOTICES.txt`, at the top
+of the C++ package and in the `cuvslam` directory of the Python wheels; a build writes it to its build directory.
 
 # Citation
 

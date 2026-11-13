@@ -34,6 +34,9 @@ FetchContent_Declare(
 )
 
 FetchContent_MakeAvailable(gflags)
+cuvslam_third_party_notice(NAME gflags VERSION ${GFLAGS_VERSION}
+    URL https://github.com/gflags/gflags LICENSE BSD-3-Clause
+    FILES ${gflags_SOURCE_DIR}/COPYING.txt)
 
 # gflags provides these targets automatically:
 # - gflags::gflags

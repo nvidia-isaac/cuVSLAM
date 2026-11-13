@@ -34,6 +34,17 @@ endif()
 
 set(DINOV2_CHECKPOINT_URL "https://dl.fbaipublicfiles.com/dinov2/dinov2_vits14/dinov2_vits14_pretrain.pth")
 set(DINOV2_CHECKPOINT_SHA256 "b938bf1bc15cd2ec0feacfe3a1bb553fe8ea9ca46a7e1d8d00217f29aef60cd9")
+
+# Apache-2.0 section 4(b): the shipped model is a modified work and says so
+cuvslam_third_party_notice(NAME DINOv2 VERSION ${DINOV2_COMMIT}
+    URL https://github.com/facebookresearch/dinov2 LICENSE Apache-2.0
+    NOTE "The AnyLoc model in the packages, anyloc_vits14_l*_value_*.onnx, is a work derived from the\n\
+DINOv2 ViT-S/14 weights, ${DINOV2_CHECKPOINT_URL}\n(SHA256 ${DINOV2_CHECKPOINT_SHA256}).\n\
+NVIDIA modified them: the model keeps only the weights that the AnyLoc read-out of one intermediate\n\
+block needs (the patch embedding, the blocks before it, and that block's first layer norm and value\n\
+projection), folds the interpolated position embedding into the patch embedding bias, and is\n\
+exported to ONNX. See models/anyloc/README.md."
+    FILES ${dinov2_SOURCE_DIR}/LICENSE)
 set(CUVSLAM_DINOV2_CHECKPOINT "" CACHE FILEPATH
     "Local copy of dinov2_vits14_pretrain.pth, checked against its SHA256; empty downloads it into the build tree")
 

@@ -28,6 +28,9 @@ FetchContent_Declare(
 
 # Make available (download and build)
 FetchContent_MakeAvailable(zlib)
+cuvslam_third_party_notice(NAME zlib VERSION ${ZLIB_VERSION}
+    URL https://github.com/madler/zlib LICENSE Zlib
+    FILES ${zlib_SOURCE_DIR}/LICENSE)
 
 # zlib provides these targets:
 # - zlib (shared library)

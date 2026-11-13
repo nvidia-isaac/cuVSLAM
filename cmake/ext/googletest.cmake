@@ -28,6 +28,7 @@ FetchContent_Declare(
 )
 
 FetchContent_MakeAvailable(googletest)
+cuvslam_third_party_not_distributed(googletest "tests only")
 
 # GoogleTest provides these targets automatically:
 # - GTest::gtest

@@ -28,6 +28,10 @@ FetchContent_GetProperties(libjpeg)
 if(NOT libjpeg_POPULATED)
     FetchContent_Populate(libjpeg)
 endif()
+cuvslam_third_party_notice(NAME libjpeg-turbo VERSION ${LIBJPEG_VERSION}
+    URL https://github.com/libjpeg-turbo/libjpeg-turbo LICENSE "IJG AND BSD-3-Clause AND Zlib"
+    NOTE "This software is based in part on the work of the Independent JPEG Group."
+    FILES ${libjpeg_SOURCE_DIR}/LICENSE.md ${libjpeg_SOURCE_DIR}/README.ijg)
 
 # Pre-create directories so CMake does not reject imported target include paths at configure time.
 file(MAKE_DIRECTORY ${LIBJPEG_INSTALL_DIR}/include)

@@ -67,6 +67,12 @@ if(USE_CUDA)
     #     message(FATAL_ERROR "Please set CUDAToolkit_ROOT as cmake variable")
     # endif()
     find_package(CUDAToolkit REQUIRED)
+    # No version: the checked-in notices must not depend on the toolkit a build happens to use
+    cuvslam_third_party_notice(NAME "NVIDIA CUDA Runtime" VERSION "the CUDA version in the package name"
+        URL https://developer.nvidia.com/cuda-toolkit LICENSE LicenseRef-NVIDIA-CUDA-EULA
+        TEXT "cuVSLAM binaries link the CUDA Runtime, and the Python wheels carry its shared library.\n\
+It is NVIDIA software distributed under the NVIDIA CUDA Toolkit End User License Agreement,\n\
+https://docs.nvidia.com/cuda/eula/index.html")
 
     if(USE_CUNLS)
         include(${CMAKE_CURRENT_LIST_DIR}/ext/cunls.cmake)

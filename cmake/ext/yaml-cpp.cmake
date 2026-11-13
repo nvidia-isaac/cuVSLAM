@@ -29,6 +29,7 @@ FetchContent_Declare(
 )
 
 FetchContent_MakeAvailable(yaml-cpp)
+cuvslam_third_party_not_distributed(yaml-cpp "examples only")
 
 # yaml-cpp provides these targets:
 # - yaml-cpp::yaml-cpp (namespaced alias, CMake 3.18+)

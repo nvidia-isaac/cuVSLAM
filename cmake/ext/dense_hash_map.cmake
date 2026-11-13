@@ -30,6 +30,9 @@ if(NOT dense_hash_map_POPULATED)
     # Don't call add_subdirectory - we don't want their CMakeLists.txt
     # which tries to build tests and benchmarks
 endif()
+cuvslam_third_party_notice(NAME dense_hash_map VERSION ${DENSE_HASH_MAP_COMMIT}
+    URL https://github.com/Jiwan/dense_hash_map LICENSE MIT
+    FILES ${dense_hash_map_SOURCE_DIR}/LICENSE.md)
 
 # Create interface target for the header-only library
 if(NOT TARGET dense_hash_map::dense_hash_map)
