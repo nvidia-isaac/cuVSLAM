@@ -28,7 +28,7 @@ from cuvslam_tools.dataset_preparation.common import (
     run_preparation,
 )
 
-from . import convert_kitti
+from . import convert_kitti, recalibration
 
 DATASET_NAME = "kitti"
 DOWNLOAD_SCRIPT = "download_kitti.sh"
@@ -39,10 +39,12 @@ def prepare(
     output_dir: Optional[Path] = None,
     force_download: bool = False,
     download_only: bool = False,
+    recalibrated: bool = False,
 ) -> Path:
     """Download the KITTI odometry archives, convert them, and return the prepared root.
 
     Returns the raw directory when ``download_only`` is set, otherwise the converted root.
+    ``recalibrated`` re-rectifies the images with the Cvišić et al. (ECMR 2021) calibration, see README.md.
     """
     raw_dir = resolve_raw_dir(raw_dir, DATASET_NAME)
     output_dir = resolve_output_dir(output_dir)
@@ -54,6 +56,8 @@ def prepare(
     download_arguments = [str(raw_dir)]
     if force_download:
         download_arguments.append("--force")
+    if recalibrated:
+        download_arguments.append("--recalibrated")
     run_download_script(dataset_file(__file__, DOWNLOAD_SCRIPT), download_arguments)
 
     if download_only:
@@ -64,6 +68,9 @@ def prepare(
         convert_kitti.convert(raw_dir, output_dir)
     except convert_kitti.ConversionError as exc:
         raise PreparationError(str(exc)) from exc
+    if recalibrated:
+        print("\nRecalibrating …")
+        recalibration.recalibrate(output_dir, raw_dir)
     return output_dir
 
 
@@ -74,6 +81,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         description="Download KITTI odometry archives and convert them to cuVSLAM format.",
     )
     add_common_arguments(parser, DATASET_NAME, label="KITTI")
+    parser.add_argument("--recalibrated", action="store_true",
+                        help="Re-rectify the images with the Cvišić et al. (ECMR 2021) calibration.")
     args = parser.parse_args(argv)
 
     return run_preparation(
@@ -82,6 +91,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             output_dir=args.output_dir,
             force_download=args.force_download,
             download_only=args.download_only,
+            recalibrated=args.recalibrated,
         )
     )
 
