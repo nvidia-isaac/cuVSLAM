@@ -619,6 +619,16 @@ class TestBindings(unittest.TestCase):
         self.assertEqual(odom_cfg.debug_dump_directory, "/tmp/dump")
         self.assertEqual(slam_cfg.map_path, "/tmp/map")
 
+    def test_load_feature_survivor_from_last_from_yaml(self):
+        self.assertEqual(vslam.Odometry.Internals().feature_survivor_from_last, 48.0)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "config.yaml")
+            with open(path, "w") as f:
+                f.write("internals:\n  feature_survivor_from_last: 60\n")
+            internals = vslam.utils.load_internals_from_file(path)
+
+        self.assertEqual(internals.feature_survivor_from_last, 60.0)
+
     def test_load_empty_path_strings_from_yaml(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "config.yaml")

@@ -74,7 +74,7 @@ static void DoMonoTrack(const std::string& edexFile, std::string outputFolder, s
   CameraId left_cam = 0;
   const auto& intrinsicsL = rig.getIntrinsic(0);
 
-  auto selector = std::make_unique<sof::SelectorStereo>(sof_settings.feature_selection_settings);
+  auto selector = std::make_unique<sof::SelectorStereo>();
   std::unique_ptr<sof::IMonoSOF> sof =
       CreateMonoSOF(sof::Implementation::kCPU, left_cam, intrinsicsL, std::move(selector), nullptr, sof_settings);
   sof::ImageManager image_manager;

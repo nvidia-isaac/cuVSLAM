@@ -31,7 +31,7 @@ MultiSOFCPU::MultiSOFCPU(const camera::Rig& rig, const camera::FrustumIntersecti
 
   for (CameraId primary_cam_id : primary_cams) {
     const camera::ICameraModel& intrinsics = *rig_.intrinsics[primary_cam_id];
-    auto selector = std::make_unique<SelectorStereo>(sof_settings.feature_selection_settings);
+    auto selector = std::make_unique<SelectorStereo>();
     mono_sof_.emplace_back(CreateMonoSOF(Implementation::kCPU, primary_cam_id, intrinsics, std::move(selector),
                                          feature_predictor, sof_settings));
 

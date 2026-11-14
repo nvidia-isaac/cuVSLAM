@@ -213,6 +213,12 @@ def add_tracker_arguments(parser: argparse.ArgumentParser) -> None:
         default=False,
         help="Enable IMU debug mode.",
     )
+    parser.add_argument("--num_desired_tracks", type=int, default=None,
+                        help="Odometry.Internals.num_desired_tracks; by default the Internals default.")
+    parser.add_argument("--kf_survivor_from_last", type=float, default=None,
+                        help="Odometry.Internals.kf_survivor_from_last; by default the Internals default.")
+    parser.add_argument("--feature_survivor_from_last", type=float, default=None,
+                        help="Odometry.Internals.feature_survivor_from_last; by default the Internals default.")
     parser.add_argument("--use_slam", type=_str2bool, default=False, help="Enable SLAM mode.")
     parser.add_argument("--sync_slam", type=_str2bool, default=True,
                         help="Run SLAM in the calling thread. Must be the opposite of --async_sba.")
