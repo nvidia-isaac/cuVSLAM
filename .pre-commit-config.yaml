@@ -5,6 +5,8 @@ repos:
     hooks:
       - id: fix-byte-order-marker  # <--- Removes <U+FEFF>
       - id: end-of-file-fixer      # Ensures file ends with a newline
+        # NVSkills emits signature bundles without a terminal newline.
+        exclude: ^skills/[^/]+/skill\.oms\.sig$
       - id: trailing-whitespace
       - id: check-yaml
       - id: check-toml
