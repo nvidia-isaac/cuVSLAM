@@ -2,6 +2,10 @@
 
 ## [18.0.0] - 2026-11-13
 
+Adds visual global localization: SLAM finds the rig in a saved map without a guess pose, using AnyLoc visual place
+recognition on TensorRT. `Tracker` now takes an explicit mode, and the Python wheels are renamed `cuvslam-cu12` and
+`cuvslam-cu13`.
+
 ### Changed
 
 - `Tracker` now takes a required `Tracker::Mode` (`cuvslam.Tracker.Mode` in Python) as its second
@@ -24,9 +28,26 @@
   `done()`, `wait(timeout)` and `result(timeout)`; the latter two wait without holding the GIL. `localize_in_map`
   loses its `start_cb` and `finish_cb` arguments, and its request has `started()`. No Python code runs on the SLAM
   thread anymore, and a request does not keep its `Slam` alive
+- `Slam::LocalizeInMap` takes `const Pose* guess_pose` (nullptr: place recognition) instead of `const Pose&`, and an
+  optional `attach` that makes the session write its map into the loaded folder
+- `Slam::Config::map_cache_path` is now `map_path`, a `std::string` (`map_path` in Python). With it set, the new
+  `FlushMap` (`flush_map`) saves the map there and `SaveMap` fails
+- CUDA builds need TensorRT 8.6+ and build the AnyLoc engine, which needs a GPU and network access; configure with
+  `-DUSE_TENSORRT=OFF` or `-DCUVSLAM_BUILD_ANYLOC_ENGINE=OFF` to skip them
 
 ### Added
 
+- Visual global localization: with `Slam::Config::use_vpr` and an AnyLoc engine (`VprSettings::model_path`),
+  `LocalizeInMap` finds the rig in a saved map without a guess pose, verifying up to
+  `LocalizationSettings::vpr_candidates` places that visual place recognition (DINOv2 and VLAD on TensorRT) proposes
+- `Slam::RecognizePlaceByFrame` (`recognize_place_by_frame`), and `LoopClosureMode::VPR`, which looks for loop
+  closures at recognized places
+- `VprVocabularyBuilder` and `VprSettings::vocabulary_path`: one place recognition vocabulary for all sessions of an
+  operating domain
+- AnyLoc engine builder: `anyloc_engine_builder` with its model in the C++ archives, `cuvslam.build_anyloc_engine` in
+  the wheels
+- `cuvslam_vpr_reporter` and `cuvslam_vpr_vocabulary` tools, and `--use_vpr` and `--loop_closure_mode` in
+  `cuvslam_tracker` and `cuvslam_reporter`
 - `IsCudaBuild()` (`cuvslam.is_cuda_build()` in Python): whether the library is built with CUDA support
 - `cuda` extra for the Python wheels (x86_64 and Jetson Thor): `pip install "<wheel>[cuda]"` installs the cuBLAS,
   cuSOLVER and cuSPARSE wheels from PyPI, so no system CUDA Toolkit is needed

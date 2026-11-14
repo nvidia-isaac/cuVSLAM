@@ -102,8 +102,10 @@ void LocalizeInMap(std::string_view folder_name, int64_t timestamp_ns, const Pos
 
 Current functionality is minimal, solid, bug-free, and well-tested:
 
-* No external GlobalLocalizer (no GPS, no `slam.SetPose`).
-* No tracking-lost recovery support.
+* No external global localizer (no GPS, no `slam.SetPose`); the built-in one is place recognition: `LocalizeInMap`
+  without a prior (`Config::use_vpr`).
+* No automatic recovery after tracking loss: reinitialize cuVSLAM, then `LocalizeInMap`, without a prior if there is
+  none.
 * No user-provided tracking-lost detection.
 * Sensor fusion is limited to visual SBA only.
 
@@ -118,9 +120,9 @@ interrupting real-time processing.
    runs LC search and map building.
 3. At some point the user calls `SaveMap` (possibly from another thread). The map is written to disk by the background
    path; `Track` is not blocked by that work.
-4. At some point the user calls `LocalizeInMap` with image(s), timestamp, and prior. The background thread matches the
-   images to the on-disk map. On success it drops the current map and replaces it with the loaded one. After that, the
-   first `GetPose` following the next `Track` reports a pose in the new map.
+4. At some point the user calls `LocalizeInMap` with image(s), timestamp, and prior, if any. The background thread
+   matches the images to the on-disk map. On success it drops the current map and replaces it with the loaded one.
+   After that, the first `GetPose` following the next `Track` reports a pose in the new map.
 
 **Camera moves during startup, then a map load is requested — what behavior do we support?**
 
@@ -129,14 +131,14 @@ map is applied, the first `GetPose` following the next `Track` returns the real 
 
 **Example: car at 80 km/h, cuVSLAM starts, then 3 minutes / ~4 km later a map load is requested — what is expected?**
 
-The user supplies a localization image + timestamp + prior for the “current” moment (e.g. timestamp = 3 min). Even if
-loading takes time (e.g. 10 s), poses over that interval are reconciled to the localized pose at that timestamp. History
-before that timestamp is dropped.
+The user supplies a localization image + timestamp + prior (if any) for the “current” moment (e.g. timestamp =
+3 min). Even if loading takes time (e.g. 10 s), poses over that interval are reconciled to the localized pose at that
+timestamp. History before that timestamp is dropped.
 
 **Ten minutes later another map load — what is expected?**
 
-Same pattern: timestamp = 13 min (for example), current image and prior. As in step 3, previous history is replaced when
-localization succeeds.
+Same pattern: timestamp = 13 min (for example), current image and prior, if any. As in step 3, previous history is
+replaced when localization succeeds.
 
 **What if the map has nothing around the location?**
 

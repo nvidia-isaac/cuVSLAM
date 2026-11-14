@@ -4,7 +4,8 @@ description: >
   Build, install, and run NVIDIA cuVSLAM and PyCuVSLAM from source or wheels.
   Covers environment setup, dataset preparation, and running examples for all
   tracking modes (stereo, mono, mono-depth, stereo-inertial, multi-camera, and
-  Multisensor) and SLAM (mapping, localization, loop closure). Use when asked to: build cuVSLAM,
+  Multisensor) and SLAM (mapping, localization, global localization without a pose hint, loop closure).
+  Use when asked to: build cuVSLAM,
   install PyCuVSLAM, set up cuVSLAM environment, run cuVSLAM examples, prepare
   KITTI/EuRoC/TUM datasets, run visual odometry, set up live camera tracking
   (RealSense/ZED/OAK-D/Orbbec), run cuVSLAM in Docker, or use cuVSLAM C++ tools.
@@ -256,7 +257,8 @@ With Rerun: `cmake -S . -B build -DUSE_RERUN=ON && cmake --build build --target 
 
 1. **Map:** Run tracker with SLAM config to collect map
 2. **Save:** Map stored as `map/data.mdb` (LMDB)
-3. **Localize:** Load saved map, provide initial pose hint, call `tracker.slam.localize_in_map()`
+3. **Localize:** Load saved map, provide initial pose hint, or `None` with `use_vpr` in both sessions (global
+   localization, see `doc/place_recognition.md`), call `tracker.slam.localize_in_map()`
 
 ```python
 odom_cfg = cuvslam.Odometry.Config(async_sba=False)  # blocking SBA for reproducibility
@@ -272,8 +274,9 @@ slam = tracker.slam
 saved = slam.save_map("map/").result()
 print(f"Map save {'succeeded' if saved else 'failed'}")
 
-# Later: localize
-loc_settings = cuvslam.Slam.LocalizationSettings()
+# Later: localize; pose_hint may be None with use_vpr in both sessions
+loc_settings = cuvslam.Slam.LocalizationSettings(horizontal_search_radius=8., vertical_search_radius=2.,
+                                                 horizontal_step=0.5, vertical_step=0.2, angular_step_rads=0.03)
 localization = slam.localize_in_map("map/", timestamp, pose_hint, images, loc_settings)
 pose = localization.result()  # in async mode, keep calling track() while waiting: see examples/kitti
 if pose is not None:
