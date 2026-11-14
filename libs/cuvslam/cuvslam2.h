@@ -1230,13 +1230,15 @@ public:
    * @param[in]  images     synchronized images, no more than the number of cameras in the rig
    * @param[in]  masks      (Optional) corresponding masks, non-zero pixels are excluded, see Odometry::Track()
    * @param[in]  depths     (Optional) depth images, see Odometry::Track()
+   * @param[in]  internals  (Optional) internal per-frame development parameters, see Odometry::Track()
    *
    * @return odometry pose estimate and, when available, the SLAM pose
    * @throws std::invalid_argument if image parameters are invalid
    * @throws std::runtime_error in case of unexpected errors
    * @see Odometry::Track, Slam::Track
    */
-  TrackResult Track(const ImageSet& images, const ImageSet& masks = {}, const ImageSet& depths = {});
+  TrackResult Track(const ImageSet& images, const ImageSet& masks = {}, const ImageSet& depths = {},
+                    const cuvslam::internal::Internals* internals = nullptr);
 
   /**
    * @brief Register IMU measurement

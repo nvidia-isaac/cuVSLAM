@@ -26,6 +26,7 @@ set(SOURCES
     kf_selector_test.cpp
     lk_tracker_test.cpp
     selection_test.cpp
+    selector_stereo_test.cpp
     sof_l2r_test.cpp
     st_tracker_test.cpp
 )

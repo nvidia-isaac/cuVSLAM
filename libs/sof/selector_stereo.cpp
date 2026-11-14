@@ -17,6 +17,8 @@
 
 #include "sof/selector_stereo.h"
 
+#include "sof/sof_config.h"
+
 namespace {
 using namespace cuvslam::sof;
 
@@ -72,8 +74,6 @@ float CalcSurvivorTracksPercentage(const TracksVector& frame1, uint32_t n_surviv
 }  // namespace
 
 namespace cuvslam::sof {
-SelectorStereo::SelectorStereo(const SelectorStereoSettings& settings) : settings_(settings) {}
-
 void SelectorStereo::set_image_width(uint32_t /* width */) {}
 
 void SelectorStereo::reset_selector() {
@@ -81,7 +81,7 @@ void SelectorStereo::reset_selector() {
   last_feature_initialization_tracks_.reset();
 }
 
-bool SelectorStereo::select(const TracksVector& cur_frame_tracks) {
+bool SelectorStereo::select(const TracksVector& cur_frame_tracks, const Settings& sof_settings) {
   if (!first_feature_initialization_selected_) {
     first_feature_initialization_selected_ = true;
     return true;
@@ -95,7 +95,7 @@ bool SelectorStereo::select(const TracksVector& cur_frame_tracks) {
   assert(CalcNSurvivors(last_feature_initialization_tracks_, cur_frame_tracks) == n_survivors_from_last);
 
   if (CalcSurvivorTracksPercentage(last_feature_initialization_tracks_, n_survivors_from_last) <
-      settings_.survivor_from_last) {
+      sof_settings.feature_selection_settings.survivor_from_last) {
     return true;
   }
 
