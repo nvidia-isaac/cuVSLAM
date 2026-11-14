@@ -105,9 +105,10 @@ Tracker::Tracker(const Rig& rig, Mode mode, const Odometry::Config& odometry_con
   }
 }
 
-Tracker::TrackResult Tracker::Track(const ImageSet& images, const ImageSet& masks, const ImageSet& depths) {
+Tracker::TrackResult Tracker::Track(const ImageSet& images, const ImageSet& masks, const ImageSet& depths,
+                                    const cuvslam::internal::Internals* internals) {
   TrackResult result;
-  result.odometry = odometry_.Track(images, masks, depths);
+  result.odometry = odometry_.Track(images, masks, depths, internals);
 
   // Odometry state is only meaningful once odometry has produced a pose, so SLAM stays untouched
   // on a lost frame and keeps its previous pose.

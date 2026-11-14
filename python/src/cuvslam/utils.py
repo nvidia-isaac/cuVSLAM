@@ -246,6 +246,8 @@ def _apply_internals_section(options: Odometry.Internals, section: dict) -> None
             options.box3_prefilter = _parse_bool(value)
         elif key == "ransac_filter":
             options.ransac_filter = _parse_bool(value)
+        elif key == "feature_survivor_from_last":
+            options.feature_survivor_from_last = float(value)
         elif key == "kf_survivor_from_last":
             options.kf_survivor_from_last = float(value)
         elif key in ("kf_max_timedelta_between_kfs_s", "kf_max_timedelta_s"):

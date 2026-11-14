@@ -104,7 +104,7 @@ void SelectorMono::set_image_width(uint32_t width) { width_ = width; }
 
 void SelectorMono::reset_selector() { first_feature_initialization_selected_ = false; }
 
-bool SelectorMono::select(const TracksVector& cur_frame_tracks) {
+bool SelectorMono::select(const TracksVector& cur_frame_tracks, [[maybe_unused]] const Settings& sof_settings) {
   assert(IsSorted(cur_frame_tracks));
 
   if (!first_feature_initialization_selected_) {
