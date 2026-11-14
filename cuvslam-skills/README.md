@@ -11,7 +11,7 @@ Build, install, and run cuVSLAM / PyCuVSLAM. Covers:
 - Environment setup and build (source + wheel + Docker)
 - Dataset preparation (KITTI, EuRoC, TUM RGB-D, multi-camera)
 - Running all tracking modes (stereo, mono, mono-depth, stereo-inertial, multi-camera, Multisensor)
-- SLAM workflow (mapping, localization, loop closure)
+- SLAM workflow (mapping, localization, global localization, loop closure)
 - Live camera setup (RealSense, ZED, OAK-D, Orbbec)
 - C++ tools and ROS 2 integration
 

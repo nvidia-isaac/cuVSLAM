@@ -293,7 +293,7 @@ Run tracker forward and backward over the same sequence. Consistent trajectory =
 
 See `references/isaac-ros-visual-slam-usage.md` for the full guide: installation, launch commands, key parameters, topic remappings, debug dump setup, verification steps, and RealSense-specific notes.
 
-**Global localization** — Isaac ROS cuVSLAM does not support global localization without an external pose hint. Use [Isaac ROS Visual Global Localization](https://github.com/NVIDIA-ISAAC-ROS/isaac_ros_mapping_and_localization/blob/release-4.3/isaac_ros_visual_global_localization) for this.
+**Global localization** — Isaac ROS cuVSLAM does not support global localization without an external pose hint. Use [Isaac ROS Visual Global Localization](https://github.com/NVIDIA-ISAAC-ROS/isaac_ros_mapping_and_localization/blob/release-4.3/isaac_ros_visual_global_localization) for this. The cuVSLAM library itself localizes without a pose hint since 18.0: `LocalizeInMap` with `use_vpr` (see `doc/place_recognition.md`).
 
 ### Python API (PyCuVSLAM)
 - Docs: https://nvidia-isaac.github.io/cuVSLAM/python/

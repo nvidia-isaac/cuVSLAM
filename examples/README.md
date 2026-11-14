@@ -74,6 +74,7 @@ Explore various examples to quickly get started with cuVSLAM using [Python API (
 ### SLAM Examples
 
 - [**Visual Mapping, Localization, and Map Saving/Loading**](kitti/README.md#slam-mapping-collecting-storing-loading-and-localization)
+- [**Global Localization without a Guess Pose**](kitti/README.md#global-localization-without-a-guess-pose)
 
 ### Advanced Features and Guides
 

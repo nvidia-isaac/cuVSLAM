@@ -2,7 +2,7 @@
 
 This module answers one question: **which pose graph node saw this frame?** The answer is a node, never a metric
 pose of its own; `Slam::LocalizeInMap` is what turns that hint into a verified pose. What the feature is for is in the
-[root README](../../../README.md#visual-place-recognition), and how a caller drives it in
+[root README](../../../README.md#visual-global-localization), and how a caller drives it in
 [doc/place_recognition.md](../../../doc/place_recognition.md).
 
 ## Shape of the module

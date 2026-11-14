@@ -1,7 +1,8 @@
-# cuVSLAM: Visual Place Recognition
+# cuVSLAM: Global Localization and Place Recognition
 
-Visual place recognition answers "where am I?" from a single frame and no pose. The
-[root README](https://github.com/nvidia-isaac/cuVSLAM/blob/main/README.md#visual-place-recognition) gives the overview; this page shows how to drive it, how it
+Visual place recognition answers "where am I?" from a single frame and no pose, so `LocalizeInMap` can find the rig in
+a saved map without a guess pose: global localization. The
+[root README](https://github.com/nvidia-isaac/cuVSLAM/blob/main/README.md#visual-global-localization) gives the overview; this page shows how to drive it, how it
 closes loops and how to evaluate it. Relocalizing in a saved map with `LocalizeInMap` is covered in
 [load_map.md](load_map.md), and how the module is built, with the measurements behind it, in
 [libs/slam/vpr/README.md](https://github.com/nvidia-isaac/cuVSLAM/blob/main/libs/slam/vpr/README.md).
@@ -12,7 +13,7 @@ closes loops and how to evaluate it. Relocalizing in a saved map with `LocalizeI
 [models/anyloc](https://github.com/nvidia-isaac/cuVSLAM/blob/main/models/anyloc/README.md) describes. With the wheel,
 build it once per machine with `cuvslam.build_anyloc_engine(path)`.
 
-## Mapping and recognizing places
+## Mapping, then localizing without a guess pose
 
 ```python
 import os
@@ -61,9 +62,33 @@ for it, and `request.wait(timeout)` and `request.done()` tell whether it is done
 `Tracker.Mode`'s offline modes require anyway, runs the work before the call returns, so the request is already done
 by the time it does.
 
-In C++ the same calls are `Slam::SaveMap`, `Slam::LocalizeInMap` and
-`Slam::RecognizePlaceByFrame`, with `Slam::Config::use_vpr = true` and the engine in `Slam::VprSettings::model_path`.
-They take callbacks, which run on the SLAM thread, instead of returning a request.
+In C++ the same calls take callbacks instead of returning a request; without `sync_mode` they run on the SLAM thread:
+
+```cpp
+cuvslam::Slam::Config slam_cfg;
+slam_cfg.sync_mode = true;  // with odom_cfg.async_sba = false, as Mode::OdometryWithSlamOffline requires
+slam_cfg.use_vpr = true;
+slam_cfg.vpr_settings.model_path = "/path/to/anyloc.engine";
+
+// Mapping run
+cuvslam::Tracker mapping(rig, cuvslam::Tracker::Mode::OdometryWithSlamOffline, odom_cfg, &slam_cfg);
+for (const cuvslam::Tracker::ImageSet& images : sequence) {
+  mapping.Track(images);
+}
+mapping.GetSlam().SaveMap("/path/to/map", [](bool saved) { std::puts(saved ? "map saved" : "map not saved"); });
+
+// Later run, starting from an unknown pose: nullptr instead of a guess pose
+cuvslam::Tracker tracker(rig, cuvslam::Tracker::Mode::OdometryWithSlamOffline, odom_cfg, &slam_cfg);
+const cuvslam::Slam::LocalizationSettings settings{8.f, 2.f, 0.5f, 0.2f, 0.03f};
+std::optional<cuvslam::Pose> localized;
+for (const cuvslam::Tracker::ImageSet& images : sequence) {
+  tracker.Track(images);
+  if (!localized) {
+    tracker.GetSlam().LocalizeInMap("/path/to/map", images[0].timestamp_ns, nullptr, images, settings, nullptr,
+                                    [&](const cuvslam::Result<cuvslam::Pose>& result) { localized = result.data; });
+  }
+}
+```
 
 ## One vocabulary per operating domain
 
