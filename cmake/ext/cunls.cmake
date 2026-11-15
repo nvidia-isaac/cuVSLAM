@@ -26,7 +26,7 @@ if(CUDAToolkit_VERSION VERSION_LESS "12.6")
                         "Either install CUDA 12.6+ or set -DUSE_CUNLS=OFF.")
 endif()
 
-set(CUNLS_VERSION "nightly-2026-10-06")
+set(CUNLS_VERSION "v0.4.0")
 
 # Keep cuNLS's own tests and Python bindings out of this build.
 set(BUILD_TESTING OFF)
@@ -39,7 +39,7 @@ set(CUNLS_ENABLE_CUDSS OFF CACHE BOOL "cuVSLAM does not use the optional cuDSS s
 FetchContent_Declare(
     cunls
     URL https://github.com/nvidia-isaac/cuNLS/archive/refs/tags/${CUNLS_VERSION}.tar.gz
-    URL_HASH SHA256=434f9a4f9affd96933bcd16591a9b7724e9226436a29381684b06198b8c080d0
+    URL_HASH SHA256=850343079ec104a85b8e2017c0971ab9cceb0bb65f34549818ec4e56cf842057
 )
 FetchContent_MakeAvailable(cunls)
 
