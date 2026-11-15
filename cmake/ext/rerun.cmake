@@ -28,6 +28,8 @@ FetchContent_Declare(
 
 # Rerun automatically downloads and builds Arrow via download_and_build_arrow.cmake
 FetchContent_MakeAvailable(rerun_sdk)
+cuvslam_third_party_not_distributed(rerun_sdk
+    "USE_RERUN development builds only; a package with it would also need Rerun's and Apache Arrow's notices")
 
 # rerun_sdk automatically provides:
 # - rerun_sdk

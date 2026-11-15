@@ -79,6 +79,7 @@ cuvslam_dependent_option(CUVSLAM_BUILD_ANYLOC_ENGINE
 
 setup_cuvslam_settings()
 
+include(cmake/ThirdPartyNotices.cmake)
 include(cmake/FindExt.cmake)
 include(cmake/AnyLocModel.cmake)
 
@@ -115,3 +116,7 @@ file(WRITE ${SET_ENV_BAT}   "#!/bin/bash\n"
 if(CUVSLAM_ANYLOC_ENGINE)
     file(APPEND ${SET_ENV_BAT} "export CUVSLAM_ANYLOC_ENGINE=${CUVSLAM_ANYLOC_ENGINE}\n")
 endif()
+
+# Packaged with the C++ package and, extended by python/CMakeLists.txt, with the wheels
+cuvslam_check_third_party_coverage(${CMAKE_SOURCE_DIR}/cmake/ext)
+cuvslam_write_third_party_notices(${CMAKE_BINARY_DIR}/THIRD_PARTY_NOTICES.txt)

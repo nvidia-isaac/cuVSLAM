@@ -42,6 +42,9 @@ if(NOT lmdb_POPULATED)
     find_package(Threads REQUIRED)
     target_link_libraries(lmdb_build PRIVATE Threads::Threads)
 endif()
+cuvslam_third_party_notice(NAME LMDB VERSION ${LMDB_VERSION}
+    URL https://github.com/LMDB/lmdb LICENSE OLDAP-2.8
+    FILES ${lmdb_SOURCE_DIR}/libraries/liblmdb/COPYRIGHT ${lmdb_SOURCE_DIR}/libraries/liblmdb/LICENSE)
 
 # Create modern namespaced target
 if(NOT TARGET lmdb::lmdb)

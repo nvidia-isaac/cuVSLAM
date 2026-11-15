@@ -19,6 +19,7 @@ declare -a sources=(
   "$REPO_ROOT/libs/cuvslam/ground_constraint2.h"
   "$REPO_ROOT/libs/cuvslam/vpr_vocabulary_builder2.h"
   "$REPO_ROOT/LICENSE"
+  "$BUILD_OUTPUT/build/THIRD_PARTY_NOTICES.txt"
   "$BUILD_OUTPUT/build/bin/anyloc_engine_builder"
   "$BUILD_OUTPUT/build/anyloc/anyloc_vits14_l9_value_322.onnx"
   "$BUILD_OUTPUT/build/anyloc/anyloc_vits14_l9_value_322_reference_input.npy"
@@ -45,14 +46,16 @@ install -m 0644 "${sources[3]}" "$staging_dir/include/cuvslam/cuvslam_gpu.h"
 install -m 0644 "${sources[4]}" "$staging_dir/include/cuvslam/ground_constraint2.h"
 install -m 0644 "${sources[5]}" "$staging_dir/include/cuvslam/vpr_vocabulary_builder2.h"
 install -m 0644 "${sources[6]}" "$staging_dir/LICENSE"
-install -m 0755 "${sources[7]}" "$staging_dir/bin/anyloc_engine_builder"
-install -m 0644 "${sources[@]:8}" "$staging_dir/share/cuvslam/anyloc/"
+install -m 0644 "${sources[7]}" "$staging_dir/THIRD_PARTY_NOTICES.txt"
+install -m 0755 "${sources[8]}" "$staging_dir/bin/anyloc_engine_builder"
+install -m 0644 "${sources[@]:9}" "$staging_dir/share/cuvslam/anyloc/"
 
 tar -czf "$ARCHIVE_PATH" -C "$staging_dir" .
 
 expected_manifest=$(
   printf '%s\n' \
     LICENSE \
+    THIRD_PARTY_NOTICES.txt \
     bin/anyloc_engine_builder \
     bin/cuvslam_api_launcher \
     bin/libcuvslam.so \

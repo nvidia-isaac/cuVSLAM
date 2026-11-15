@@ -39,6 +39,9 @@ FetchContent_Declare(
 )
 
 FetchContent_MakeAvailable(libpng)
+cuvslam_third_party_notice(NAME libpng VERSION ${LIBPNG_VERSION}
+    URL https://github.com/pnggroup/libpng LICENSE libpng-2.0
+    FILES ${libpng_SOURCE_DIR}/LICENSE)
 
 # libpng provides these targets:
 # - png_static

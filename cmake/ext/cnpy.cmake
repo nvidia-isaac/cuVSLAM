@@ -32,6 +32,9 @@ FetchContent_GetProperties(cnpy)
 if(NOT cnpy_POPULATED)
     FetchContent_Populate(cnpy)
 endif()
+cuvslam_third_party_notice(NAME cnpy VERSION ${CNPY_COMMIT}
+    URL https://github.com/rogersce/cnpy LICENSE MIT
+    FILES ${cnpy_SOURCE_DIR}/LICENSE)
 
 # Create our own static library target directly from sources
 # cnpy is just cnpy.h and cnpy.cpp in the root directory
