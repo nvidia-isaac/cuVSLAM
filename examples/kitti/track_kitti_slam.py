@@ -257,6 +257,9 @@ if slam_initial_pose is not None:
         if not (identity_t and identity_r):
             break
         wait_time += 0.5
+elif localize:
+    # The tracker already took frame IDX, so it cannot start over from frame 0
+    raise RuntimeError("Localization failed")
 else:
     print("Warning: slam_initial_pose is None, set initial pose to zero, starting frame to 0, ignore map if exists")
     IDX = 0
