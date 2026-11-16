@@ -183,7 +183,7 @@ timestamps = [
 # Check if map folder and trajectory file exist
 map_path = os.path.join(sequence_path, 'map')
 trajectory_file = os.path.join(sequence_path, 'trajectory_tum.txt')
-localize = os.path.exists(trajectory_file) and os.path.exists(map_path)
+localize = os.path.exists(map_path) and (bool(VPR_ENGINE) or os.path.exists(trajectory_file))
 
 if not os.path.exists(map_path):
     print(f"Map folder not found at {map_path}")
