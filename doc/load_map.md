@@ -133,8 +133,8 @@ map is applied, the first `GetPose` following the next `Track` returns the real 
 
 The user supplies a localization image + timestamp + prior (if any) for the “current” moment (e.g. timestamp =
 3 min). Even if loading takes time (e.g. 10 s), poses over that interval are reconciled to the localized pose at that
-timestamp, as long as `Config::retention_time_ms` (5 s by default) covers the load. History before that timestamp is
-dropped.
+timestamp, as long as `Config::retention_time_ms` (5 s by default) covers the load. Poses before that timestamp are
+not corrected.
 
 **Ten minutes later another map load — what is expected?**
 
