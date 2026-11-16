@@ -34,7 +34,8 @@ slam_cfg = vslam.Slam.Config(use_vpr=True, vpr_settings=vslam.Slam.VprSettings(m
 tracker = vslam.Tracker(rig, vslam.Tracker.Mode.OdometryWithSlamOffline, odom_cfg, slam_cfg)
 for timestamp, images in sequence:
     tracker.track(timestamp, images)
-print('map saved' if tracker.slam.save_map('/path/to/map').result() else 'map not saved')
+if not tracker.slam.save_map('/path/to/map').result():
+    raise RuntimeError('map not saved')
 
 # Later run, starting from an unknown pose: localize in the saved map without a guess pose. On success the
 # session continues in that map, place recognition included.
@@ -75,7 +76,11 @@ cuvslam::Tracker mapping(rig, cuvslam::Tracker::Mode::OdometryWithSlamOffline, o
 for (const cuvslam::Tracker::ImageSet& images : sequence) {
   mapping.Track(images);
 }
-mapping.GetSlam().SaveMap("/path/to/map", [](bool saved) { std::puts(saved ? "map saved" : "map not saved"); });
+bool saved = false;
+mapping.GetSlam().SaveMap("/path/to/map", [&saved](bool success) { saved = success; });  // sync_mode: done on return
+if (!saved) {
+  throw std::runtime_error("map not saved");
+}
 
 // Later run, starting from an unknown pose: nullptr instead of a guess pose
 cuvslam::Tracker tracker(rig, cuvslam::Tracker::Mode::OdometryWithSlamOffline, odom_cfg, &slam_cfg);
