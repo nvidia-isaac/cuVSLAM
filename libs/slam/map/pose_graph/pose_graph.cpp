@@ -25,7 +25,7 @@ using namespace cuvslam;
 
 // Blob format compatibility: same size/layout as previous Gravity
 struct Gravity {
-  [[maybe_unused]] bool unused1 = false;
+  bool unused1 = false;
   Vector3T unused2 = Vector3T::Zero();
 };
 

@@ -84,9 +84,9 @@ private:
     uint64_t trial_id = 0;
     float dist_from_hint = std::numeric_limits<float>::infinity();
     KeyFrameId from_keyframe_id = InvalidKeyFrameId;
-    Isometry3T guess_pose;
-    Isometry3T result_pose;
-    Matrix6T result_pose_covariance;
+    Isometry3T guess_pose = Isometry3T::Identity();
+    Isometry3T result_pose = Isometry3T::Identity();
+    Matrix6T result_pose_covariance = Matrix6T::Constant(std::numeric_limits<float>::infinity());
     uint32_t tracked_landmarks_count = 0;  // Count of Tracked Landmarks in LC
     uint32_t good_landmarks_count = 0;     // Count of good Landmarks in LC
 

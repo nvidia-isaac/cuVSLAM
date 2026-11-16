@@ -70,10 +70,10 @@ void logObservations(const std::vector<camera::Observation>& observations, const
       if (camera.denormalizePoint(obs.xy, uv)) {
         points.emplace_back(uv.x(), uv.y());
       } else {
-        TraceError("RerunVisualizer: Failed to denormalize point for observation %d", obs.id);
+        TraceError("RerunVisualizer: Failed to denormalize point for observation %zu", obs.id);
       }
     } else {
-      TraceWarning("RerunVisualizer: Camera intrinsics not available for observation %d", obs.id);
+      TraceWarning("RerunVisualizer: Camera intrinsics not available for observation %zu", obs.id);
       continue;
     }
   }

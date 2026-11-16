@@ -63,7 +63,7 @@ struct _ImageTransform {
   static ImageMatrix<_PixelType> LinearToLog(const ImageMatrix<_PixelType>& image) {
 #if 1
     ImageMatrix<_PixelType> linArray = (image.array() - _RANGE_MIN).cwiseMax(0) / _PixelType(_RANGE_MAX - _RANGE_MIN);
-    const auto& logArray = linArray.unaryExpr(std::ptr_fun(LINtoSRGB)).array() * _PixelType(255.0f);
+    const auto& logArray = linArray.unaryExpr(&LINtoSRGB).array() * _PixelType(255.0f);
     return logArray;
 #else
     return ((image.array() - _RANGE_MIN).cwiseMax(0) / _PixelType(_RANGE_MAX - _RANGE_MIN) * _PixelType(_Max)).matrix();
