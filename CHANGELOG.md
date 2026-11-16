@@ -32,8 +32,8 @@ recognition on TensorRT. `Tracker` now takes an explicit mode, and the Python wh
   optional `attach` that makes the session write its map into the loaded folder
 - `Slam::Config::map_cache_path` is now `map_path`, a `std::string` (`map_path` in Python). With it set, the new
   `FlushMap` (`flush_map`) saves the map there and `SaveMap` fails
-- CUDA builds need TensorRT 8.6+ and build the AnyLoc engine, which needs a GPU and network access; configure with
-  `-DUSE_TENSORRT=OFF` or `-DCUVSLAM_BUILD_ANYLOC_ENGINE=OFF` to skip them
+- CUDA builds need TensorRT 8.6+ and build the AnyLoc engine, which needs a GPU and network access.
+  `-DUSE_TENSORRT=OFF` skips both; `-DCUVSLAM_BUILD_ANYLOC_ENGINE=OFF` skips only the engine
 
 ### Added
 
