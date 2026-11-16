@@ -19,7 +19,8 @@ Runner-local port of the OSMO osmo_reporter (full_kpis_report.py). KPIs are
 ATE / ARE / Kabsch / KabschRot / Losts / Failed / FPS, per dataset, ODOM + SLAM. ATE and
 ARE are segment drift (%, º/m); Kabsch and KabschRot are absolute errors after
 aligning the whole trajectory to ground truth, shown as ATE RMSE (m) and ARE
-RMSE (º). The OSMO-specific output paths and the Slack webhook notification are removed so the
+RMSE (º). cuvslam_vpr_reporter runs add place recognition rows in their own table. The
+OSMO-specific output paths and the Slack webhook notification are removed so the
 script runs on the GitHub Actions gpu runner with only the standard library.
 
 The ``collect`` command converts cuvslam_app stats into machine-readable raw and
@@ -36,6 +37,11 @@ import re
 from statistics import fmean, median, pstdev
 
 REQUIRED_METRICS = ["ATE", "ARE", "Kabsch", "KabschRot", "TrackingLosts", "Failed", "FPS"]
+# cuvslam_vpr_reporter rates, % of queried frames, on rows <PREFIX>-VPR_SLAM. Keep in step with
+# VPR_KPI_METRICS and VPR_KPI_ROW in tools/python_tools/cuvslam_tools/dataset_registry.py.
+VPR_METRICS = ["Success", "FalsePositive", "Unrecognized"]
+VPR_ROW = "VPR_SLAM"
+VPR_COUNTS = {"Success": "n_true_positives", "FalsePositive": "n_false_positives", "Unrecognized": "n_unrecognized"}
 # Integer counts: shown as min–max across configurations, and never flagged
 # by the rolling baseline for a change of one.
 COUNT_METRICS = {"TrackingLosts", "Failed"}
@@ -70,12 +76,16 @@ MIN_BASELINE_RUNS = 3
 # discrete values, finds its ordinary values on known levels.
 LEVEL_MAD_FACTOR = 2.0
 COUNT_MIN_BAND = 1.0
-HIGHER_IS_BETTER = {"FPS"}
+HIGHER_IS_BETTER = {"FPS", "Success"}
 
 DATASET_DISPLAY_ALIASES = {"TARTAN_FLAKY": "TARTAN_F"}
 METRIC_UNITS = {"ATE": "%", "ARE": "º/m", "Kabsch": "m", "KabschRot": "º", "TrackingLosts": "", "Failed": "",
-                "FPS": "Hz"}
-METRIC_DISPLAY_NAMES = {"Kabsch": "ATE RMSE", "KabschRot": "ARE RMSE", "TrackingLosts": "Losts"}
+                "FPS": "Hz", "Success": "%", "FalsePositive": "%", "Unrecognized": "%"}
+METRIC_DISPLAY_NAMES = {"Kabsch": "ATE RMSE", "KabschRot": "ARE RMSE", "TrackingLosts": "Losts",
+                        "FalsePositive": "False positive"}
+# Decimal places of non-count metrics; 4 if not listed.
+METRIC_DECIMALS = {"FPS": 1, "Success": 2, "FalsePositive": 2, "Unrecognized": 2}
+VPR_NOTE = "Rates are % of the frames cuvslam_vpr_reporter queried over the dataset's map and query pairs."
 
 
 def display_dataset_key(key):
@@ -487,6 +497,26 @@ def summarize_mode(stats, dataset_type, checks):
     return kpis, {"checks": checks, "excluded": excluded, "runs": runs}
 
 
+def summarize_vpr(stats):
+    """Rates over the queried frames per dataset, pooled over its pairs like the VPR report's total row.
+
+    A pair's dataset prefix is the first hyphen-delimited token of its title, as the registry writes them.
+    """
+    groups = {}
+    for stat in stats:
+        groups.setdefault(str(stat.get("title", "")).split("-")[0].upper(), []).append(stat)
+
+    def total(group, field):
+        return sum(safe_float(stat.get(field)) or 0 for stat in group)
+
+    kpis = {}
+    for prefix, group in groups.items():
+        n_frames = total(group, "n_query_frames")
+        for metric, field in VPR_COUNTS.items():
+            kpis[f"{prefix}_{metric}_{VPR_ROW}"] = 100.0 * total(group, field) / n_frames if n_frames else None
+    return kpis
+
+
 def process_dataset_folder(dataset_folder_path, kpi_config=None):
     """Process a dataset folder to extract metrics for ODOM and SLAM.
 
@@ -516,6 +546,14 @@ def process_dataset_folder(dataset_folder_path, kpi_config=None):
         return None
 
     out_dict = {}
+
+    vpr_stats_json = os.path.join(stats_folder, 'all_vpr_stats.json')
+    if os.path.exists(vpr_stats_json):
+        vpr_stats = parse_all_stats_json(vpr_stats_json)
+        if not vpr_stats:
+            print(f'Warning: no VPR stats in {vpr_stats_json}')
+            return None
+        return summarize_vpr(vpr_stats), {}
 
     all_stats_json = os.path.join(stats_folder, 'all_stats.json')
     if not os.path.exists(all_stats_json):
@@ -564,9 +602,20 @@ def parse_kpi_key(key):
     dataset_type = parts[-2]
     metric = parts[-3]
     dataset_name = "_".join(parts[:-3])
-    if metric not in REQUIRED_METRICS:
+    if metric not in REQUIRED_METRICS and metric not in VPR_METRICS:
         return None
     return f"{dataset_name}-{dataset_type}_{mode}", metric
+
+
+def row_metrics(row):
+    """The table columns of one evaluation row."""
+    return VPR_METRICS if row.endswith("-" + VPR_ROW) else REQUIRED_METRICS
+
+
+def split_rows(organized):
+    """(tracking rows, place recognition rows) of organized KPI data, for their two tables."""
+    vpr = {row: metrics for row, metrics in organized.items() if row_metrics(row) is VPR_METRICS}
+    return {row: metrics for row, metrics in organized.items() if row not in vpr}, vpr
 
 
 def format_metric(metric, value):
@@ -575,21 +624,17 @@ def format_metric(metric, value):
         return value
     if metric in COUNT_METRICS:
         return str(int(value))
-    if metric == "FPS":
-        return f"{float(value):.1f}"
-    return f"{float(value):.4f}"
+    return f"{float(value):.{METRIC_DECIMALS.get(metric, 4)}f}"
 
 
 def format_diff(metric, value):
     """Format one configuration's change from the previous run, with its sign."""
     if metric in COUNT_METRICS:
         return f"{int(value):+d}"
-    if metric == "FPS":
-        return f"{float(value):+.1f}"
-    return f"{float(value):+.4f}"
+    return f"{float(value):+.{METRIC_DECIMALS.get(metric, 4)}f}"
 
 
-def organize_data(data, required_metrics=REQUIRED_METRICS, prev_data=None):
+def organize_data(data, prev_data=None):
     """Organize flat KPI dictionaries into dataset rows for a single config."""
     if prev_data is not None and not isinstance(prev_data, dict):
         raise ValueError(f"previous KPI data must be a dictionary, got {type(prev_data).__name__}")
@@ -609,10 +654,8 @@ def organize_data(data, required_metrics=REQUIRED_METRICS, prev_data=None):
 
         if metric in COUNT_METRICS:
             metrics[metric] = int(value)
-        elif metric == "FPS":
-            metrics[metric] = round(value, 1)
         else:
-            metrics[metric] = round(value, 4)
+            metrics[metric] = round(value, METRIC_DECIMALS.get(metric, 4))
 
         if "MONO" in dataset_key and metric == "ATE":
             metrics["diff " + metric] = "NA"
@@ -623,7 +666,7 @@ def organize_data(data, required_metrics=REQUIRED_METRICS, prev_data=None):
             metrics["diff " + metric] = "NA"
 
     for dataset_key, metrics in organized_data.items():
-        for metric in required_metrics:
+        for metric in row_metrics(dataset_key):
             metrics.setdefault(metric, "NA")
             if "MONO" in dataset_key and metric == "ATE":
                 metrics[metric] = "NA"
@@ -968,8 +1011,8 @@ def baseline_results(config_reports):
 
 def apply_baseline_deltas(organized, results):
     """Set each cell's Δ to its change from the baseline median, ⚠ on a regression."""
-    for metrics in organized.values():
-        for metric in REQUIRED_METRICS:
+    for row, metrics in organized.items():
+        for metric in row_metrics(row):
             metrics["diff " + metric] = "NA"
     for result in results:
         row, metric = parse_kpi_key(result["key"])
@@ -1024,13 +1067,22 @@ def baseline_note(config_reports):
             f"worse than all of them{fps}")
 
 
+def render_tables(note, tracking, tracking_note, vpr, tracking_extra=None, **table_args):
+    """The note on both tables, then each table under its title with its own note."""
+    text = (f"_{note}_\n\n**Tracking**\n\n" + create_table(tracking, extra=tracking_extra, **table_args)
+            + f"\n_{tracking_note}_\n")
+    if vpr:
+        text += "\n**Place recognition**\n\n" + create_table(vpr, VPR_METRICS, **table_args) + f"\n_{VPR_NOTE}_\n"
+    return text
+
+
 def render_report(report, config):
     results = baseline_results([(config, report)])
-    organized = apply_baseline_deltas(organize_data(report["current"]), results)
+    tracking, vpr = split_rows(apply_baseline_deltas(organize_data(report["current"]), results))
     classified = classify_sequences([(config, report)])
-    settings_note = baseline_note([(config, report)]) + ", against main's nightly history"
-    note = f"{settings_note}. Failed counts sequences that failed.{sequence_check_note(classified)}"
-    return (create_table(organized, config=config) + f"\n_{note}_\n"
+    note = baseline_note([(config, report)]) + ", against main's nightly history."
+    tracking_note = f"Failed counts sequences that failed.{sequence_check_note(classified)}"
+    return (render_tables(note, tracking, tracking_note, vpr, config=config)
             + render_regressions(results) + render_failed_sequences(classified, 1))
 
 
@@ -1058,11 +1110,8 @@ def format_distribution(metric, values):
     if metric in COUNT_METRICS:
         low, high = int(min(values)), int(max(values))
         return str(low) if low == high else f"{low}–{high}"
-    mean = fmean(values)
-    deviation = pstdev(values)
-    if metric == "FPS":
-        return f"{mean:.1f} ± {deviation:.1f}"
-    return f"{mean:.4f} ± {deviation:.4f}"
+    places = METRIC_DECIMALS.get(metric, 4)
+    return f"{fmean(values):.{places}f} ± {pstdev(values):.{places}f}"
 
 
 def aggregate_reports(config_reports):
@@ -1104,45 +1153,42 @@ def aggregate_reports(config_reports):
         ]
         metrics[metric] = format_distribution(metric, current_values)
 
-    for metrics in organized.values():
-        for metric in REQUIRED_METRICS:
+    for row, metrics in organized.items():
+        for metric in row_metrics(row):
             metrics.setdefault(metric, "NA")
             metrics.setdefault("diff " + metric, "NA")
     return organized
 
 
 def render_aggregate_report(config_reports, *, values_only=False):
-    """Render the cross-configuration table, with its notes below it.
+    """Render the cross-configuration tables with their notes.
 
     values_only drops the Δ lines, the Broken / flaky column, the regression
     list, and the failed-sequence list, for release notes.
     """
     organized = aggregate_reports(config_reports)
+    tracking, vpr = split_rows(organized)
     classified = classify_sequences(config_reports)
     count = len(config_reports)
     configs = ", ".join(f"`{config}`" for config, _ in config_reports)
-    note = (
-        f"Across {count} configuration{'s' if count != 1 else ''}: {configs}. Values are mean ± population σ; "
-        "Losts and Failed are min–max. Failed counts the sequences that failed in a configuration"
-    )
+    note = f"Across {count} configuration{'s' if count != 1 else ''}: {configs}. Values are mean ± population σ."
+    tracking_note = "Losts and Failed are min–max. Failed counts the sequences that failed in a configuration"
     if values_only:
-        note += "." + sequence_check_note(classified)
-        return create_table(organized, aggregate=True, diffs=False) + f"\n_{note}_\n"
+        tracking_note += "." + sequence_check_note(classified)
+        return render_tables(note, tracking, tracking_note, vpr, aggregate=True, diffs=False)
     results = baseline_results(config_reports)
     apply_baseline_deltas(organized, results)
-    settings_note = baseline_note(config_reports)
-    note += (
+    note += f" {baseline_note(config_reports)}."
+    tracking_note += (
         "; of those, a broken sequence failed in every configuration and a flaky one in some. "
-        f"{settings_note}. For Losts and Failed, Δ is of min/max."
-        + sequence_check_note(classified)
+        "For Losts and Failed, Δ is of min/max." + sequence_check_note(classified)
     )
     broken_flaky = (
         "Broken / flaky",
         {row: f"{len(c['broken'])} / {len(c['flaky'])}" for row, c in classified.items()},
     )
-    return (create_table(organized, aggregate=True, extra=broken_flaky) + f"\n_{note}_\n"
-            + render_regressions(results)
-            + render_failed_sequences(classified, count))
+    return (render_tables(note, tracking, tracking_note, vpr, tracking_extra=broken_flaky, aggregate=True)
+            + render_regressions(results) + render_failed_sequences(classified, count))
 
 
 def parse_config_report(value):

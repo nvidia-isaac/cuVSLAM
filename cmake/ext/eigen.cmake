@@ -29,6 +29,12 @@ FetchContent_Declare(
 )
 
 FetchContent_MakeAvailable(eigen)
+# MPL-2.0 section 3.2: binary recipients are told where the source is
+cuvslam_third_party_notice(NAME Eigen VERSION ${EIGEN_VERSION}
+    URL https://gitlab.com/libeigen/eigen LICENSE "MPL-2.0 AND Apache-2.0 AND BSD-3-Clause"
+    NOTE "Used unmodified as header-only C++ templates, built with EIGEN_MPL2_ONLY. The source code of\n\
+this version is available at\nhttps://gitlab.com/libeigen/eigen/-/archive/${EIGEN_VERSION}/eigen-${EIGEN_VERSION}.tar.gz"
+    FILES ${eigen_SOURCE_DIR}/COPYING.MPL2 ${eigen_SOURCE_DIR}/COPYING.APACHE ${eigen_SOURCE_DIR}/COPYING.BSD)
 
 # Eigen automatically provides these targets:
 # - Eigen3::Eigen (modern CMake target, alias to 'eigen')

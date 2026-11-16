@@ -82,6 +82,39 @@ if(EXISTS "${CUVSLAM_BUILD_DIR_PATH}/bin/anyloc_engine_builder")
             DESTINATION cuvslam/anyloc)
 endif()
 
+# The C++ build's notices plus nanobind and its bundled tsl::robin_map, both compiled into _cuvslam (NB_STATIC)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ThirdPartyNotices.cmake)
+set(CUVSLAM_NOTICES "${CUVSLAM_BUILD_DIR_PATH}/THIRD_PARTY_NOTICES.txt")
+if(NOT EXISTS "${CUVSLAM_NOTICES}")
+    message(FATAL_ERROR "${CUVSLAM_NOTICES} not found; configure the cuVSLAM build in ${CUVSLAM_BUILD_DIR_PATH} again.")
+endif()
+# A pip installed nanobind keeps its license in the dist-info, a source checkout at the top
+file(GLOB NANOBIND_LICENSE
+    "${NB_DIR}/LICENSE"
+    "${NB_DIR}/../nanobind-${nanobind_VERSION}.dist-info/licenses/LICENSE"
+    "${NB_DIR}/../nanobind-${nanobind_VERSION}.dist-info/LICENSE")
+if(NOT NANOBIND_LICENSE)
+    message(FATAL_ERROR "Cannot find the license of nanobind ${nanobind_VERSION} in or next to ${NB_DIR}")
+endif()
+list(GET NANOBIND_LICENSE 0 NANOBIND_LICENSE)
+cuvslam_third_party_notice(NAME nanobind VERSION ${nanobind_VERSION}
+    URL https://github.com/wjakob/nanobind LICENSE BSD-3-Clause
+    FILES ${NANOBIND_LICENSE})
+# The nanobind wheel ships robin_map's headers but not its LICENSE file; the license is the first comment of each
+file(READ "${NB_DIR}/ext/robin_map/include/tsl/robin_map.h" ROBIN_MAP_HEADER)
+string(FIND "${ROBIN_MAP_HEADER}" "*/" ROBIN_MAP_LICENSE_END)
+string(SUBSTRING "${ROBIN_MAP_HEADER}" 0 ${ROBIN_MAP_LICENSE_END} ROBIN_MAP_LICENSE)
+string(REGEX REPLACE "^/\\*\\*\n" "" ROBIN_MAP_LICENSE "${ROBIN_MAP_LICENSE}")
+string(REGEX REPLACE "(^|\n) \\* ?" "\\1" ROBIN_MAP_LICENSE "${ROBIN_MAP_LICENSE}")
+if(NOT ROBIN_MAP_LICENSE MATCHES "^MIT License")
+    message(FATAL_ERROR "Unexpected license comment in ${NB_DIR}/ext/robin_map/include/tsl/robin_map.h")
+endif()
+cuvslam_third_party_notice(NAME tsl::robin_map VERSION "bundled with nanobind ${nanobind_VERSION}"
+    URL https://github.com/Tessil/robin-map LICENSE MIT
+    TEXT "${ROBIN_MAP_LICENSE}")
+cuvslam_write_third_party_notices(${CMAKE_CURRENT_BINARY_DIR}/THIRD_PARTY_NOTICES.txt BASE ${CUVSLAM_NOTICES})
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/THIRD_PARTY_NOTICES.txt DESTINATION cuvslam)
+
 nanobind_add_stub(_cuvslam_stub
     MODULE _cuvslam
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/_cuvslam.pyi
