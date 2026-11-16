@@ -7,7 +7,7 @@
 
 ## Overview
 
-cuVSLAM is the library by NVIDIA, providing various Visual Tracking Camera modes and Simultaneous Localization and Mapping (SLAM) capabilities. Leveraging CUDA acceleration and a rich set of features, cuVSLAM delivers highly accurate, computationally efficient, real-time performance.
+cuVSLAM is the library by NVIDIA, providing various Visual Tracking Camera modes and Simultaneous Localization and Mapping (SLAM) capabilities, including [visual global localization](#visual-global-localization) in a saved map without an initial pose. Leveraging CUDA acceleration and a rich set of features, cuVSLAM delivers highly accurate, computationally efficient, real-time performance.
 
 **cuVSLAM works out of the box.** All internal algorithms use carefully engineered defaults or adapt automatically to the environment and motion profile — no parameter tuning is required or expected. To get started, provide two things: accurate camera calibration (intrinsics and extrinsics) and a sensor configuration (which tracking mode matches your rig). Everything else is handled internally.
 
@@ -16,7 +16,7 @@ cuVSLAM is the library by NVIDIA, providing various Visual Tracking Camera modes
 ## Table of Contents
 
 - [Tracking modes](#tracking-modes)
-- [Visual place recognition](#visual-place-recognition)
+- [Visual global localization](#visual-global-localization)
 - [Using cuVSLAM](#using-cuvslam)
 - [Performance](#performance)
 - [Install PyCuVSLAM](#install-pycuvslam)
@@ -57,8 +57,9 @@ Notes:
 Multisensor tracking is experimental: tracking may be inaccurate or fail for some sensor configurations and scenes.
 RGB-D cameras must use the pinhole model; cameras without depth support every distortion model.
 
-# Visual place recognition
+# Visual global localization
 
+Global localization finds the robot in a saved map without an initial pose, using visual place recognition.
 Loop closure answers "have I drifted?" and, by default, needs a pose to search around. Visual place recognition
 answers "where am I?" from a single image and no pose at all. That is what a **kidnapped robot** needs: a robot switched on inside
 a map it has never localized in, or picked up mid-run and put down elsewhere, has no prior to search around.
@@ -70,8 +71,12 @@ kidnapping is `LocalizeInMap`'s job: called without a guess pose, it takes candi
 recognition map and verifies them against that map's landmarks, instead of searching a grid around a guess the robot
 does not have.
 
-Place recognition runs [AnyLoc](https://anyloc.github.io/), a VLAD aggregation of DINOv2 features, on the GPU, from a
-TensorRT engine that [models/anyloc](models/anyloc/README.md) builds.
+Place recognition runs [AnyLoc](https://anyloc.github.io/) on the GPU, from a TensorRT engine that
+[models/anyloc](models/anyloc/README.md) builds: DINOv2 (ViT-S/14) describes each keyframe's image, scaled to 322x322,
+with one feature per 14x14 patch, and VLAD pools them over 32 clusters into one descriptor. A query compares the
+frame's descriptor with every mapped one by cosine similarity, and `LocalizeInMap` verifies up to five of the closest
+places with PnP against the map's landmarks. On an RTX 4090 AnyLoc takes about 0.5 ms per image, and a query of a
+300-frame map 3 to 5 ms; without `sync_mode` both run on the SLAM thread, so tracking does not wait for them.
 Both APIs expose it the same way:
 
 | Task | C++ (`cuvslam::Slam`) | Python (`cuvslam.Slam`) |
@@ -83,8 +88,9 @@ Both APIs expose it the same way:
 | Close loops from it | `Config::loop_closure_mode = LoopClosureMode::VPR` | `Config(loop_closure_mode=LoopClosureMode.VPR)` |
 | Share one vocabulary across sessions | `cuvslam::VprVocabularyBuilder`, `VprSettings::vocabulary_path` | `cuvslam.VprVocabularyBuilder`, `VprSettings(vocabulary_path=...)` |
 
-[doc/place_recognition.md](doc/place_recognition.md) walks through a mapping run and a relocalizing run, explains how
-it closes loops, and how to evaluate it with `cuvslam_vpr_reporter`.
+[doc/place_recognition.md](doc/place_recognition.md) walks through a mapping run and a relocalizing run in Python and
+C++, explains how it closes loops, and how to evaluate it with `cuvslam_vpr_reporter`;
+[examples/kitti](examples/kitti/README.md#global-localization-without-a-guess-pose) runs it on KITTI.
 
 # Using cuVSLAM
 
