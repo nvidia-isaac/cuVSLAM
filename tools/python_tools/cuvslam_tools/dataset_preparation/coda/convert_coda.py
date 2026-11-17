@@ -590,6 +590,8 @@ def convert_sequence(archive_path: Path, sequence: str, output_dir: Path) -> Dic
             (left_dir / left_names[-1]).write_bytes(archive.read(left_images[frame]))
             (right_dir / right_names[-1]).write_bytes(archive.read(right_images[frame]))
 
+        # Drop a gt_global.txt left by an earlier conversion.
+        (sequence_dir / "gt_global.txt").unlink(missing_ok=True)
         if poses is not None:
             on_camera = _camera_poses(poses, frames, lidar_to_camera, sequence)
             (sequence_dir / "gt.txt").write_text("\n".join(_ground_truth_lines(on_camera)) + "\n", encoding="utf-8")

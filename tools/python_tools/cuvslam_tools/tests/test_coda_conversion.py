@@ -270,6 +270,9 @@ class TestCodaGroundTruth(CodaConversionTestCase):
                 self.assertAlmostEqual(actual, value, places=6)
 
     def test_dense_poses_are_used_when_dense_global_is_absent(self):
+        # Reconverts over a dense_global conversion, which wrote gt_global.txt.
+        _write_archive(self.raw_dir, poses=_default_poses())
+        _convert(self.raw_dir, self.output_dir)
         _write_archive(self.raw_dir, poses=_default_poses(), pose_member=f"{convert_coda._GT_FALLBACK}/0.txt")
 
         metadata = _convert(self.raw_dir, self.output_dir)
