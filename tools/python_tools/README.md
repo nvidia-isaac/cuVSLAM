@@ -503,10 +503,10 @@ cuvslam_vpr_reporter \
 ```
 
 `pairs` is the only required key; each pair needs `title`, `map_sequence`, and `query_sequence`, while `edex_file`,
-`map_gt`, and `query_gt` default to `stereo.edex` and `gt.txt`. Two sequences need ground truth in one frame: each CODa
-`gt.txt` starts at its own first frame, `gt_global.txt` does not. Sequence paths are resolved against `--datasets_root`, absolute paths are used as
-is, and ground-truth paths are resolved against their own sequence folder. `success_radius_m` sets the default for the
-run; `--success_radius` on the command line overrides it.
+`map_gt`, and `query_gt` default to `stereo.edex` and `gt.txt`. Two sequences need ground truth in one frame. Each CODa
+`gt.txt` starts at its own first frame, but `gt_global.txt` does not. Sequence paths are resolved against
+`--datasets_root`, absolute paths are used as is, and ground-truth paths are resolved against their own sequence
+folder. `success_radius_m` sets the default for the run; `--success_radius` on the command line overrides it.
 
 Every pair gets one row of the summary table, one section with its plots, and one entry
 in `stats/all_vpr_stats.json`. The plot is a bird's eye view: the map sequence's ground truth as a thin grey line,
@@ -522,10 +522,10 @@ folders on disk.
 
 ### Metrics
 
-Ground truth for both sequences is a KITTI-format `gt.txt` of absolute poses. Both are read in the frame they are
+Ground truth for both sequences is a KITTI-format file of absolute poses. Both are read in the frame they are
 written in and compared directly, with no alignment, so the two sequences must already share a world frame. This
-holds for the prepared CODa sequences, where every CODa-05 pose is within 6.8 m of the CODa-00 trajectory (median
-2.4 m), and trivially for a sequence evaluated against itself.
+holds for the `gt_global.txt` of the prepared CODa sequences, where every CODa-05 pose is within 1.45 m of the
+CODa-00 trajectory (median 0.32 m), and trivially for a sequence evaluated against itself.
 
 A recognition names the mapped frame it matched by timestamp, which is looked up in the map sequence's own
 timestamp-to-frame index; a timestamp that is not in it falls back to the nearest one and is counted. The distance
