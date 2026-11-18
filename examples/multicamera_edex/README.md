@@ -2,7 +2,7 @@
 
 This tutorial demonstrates how to run PyCuVSLAM in multicamera mode on different datasets
 
-Both scripts can also run in the experimental cuNLS-based `Multisensor` odometry mode, which accepts the same
+Both scripts can also run in the cuNLS-based `Multisensor` odometry mode, which accepts the same
 stereo pairs, including unrectified ones: set `USE_MULTISENSOR_MODE = True` at the top of the script. This requires a
 cuNLS-enabled PyCuVSLAM build; official release wheels include cuNLS.
 
