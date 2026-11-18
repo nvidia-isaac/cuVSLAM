@@ -30,6 +30,9 @@ FetchContent_Declare(
 
 # Make available (download and build)
 FetchContent_MakeAvailable(jsoncpp)
+cuvslam_third_party_notice(NAME JsonCpp VERSION ${JSONCPP_VERSION}
+    URL https://github.com/open-source-parsers/jsoncpp LICENSE MIT
+    FILES ${jsoncpp_SOURCE_DIR}/LICENSE)
 
 # jsoncpp provides these targets automatically:
 # - jsoncpp_static

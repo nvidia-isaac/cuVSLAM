@@ -23,6 +23,9 @@ FetchContent_Declare(
 )
 
 FetchContent_MakeAvailable(nvtx)
+cuvslam_third_party_notice(NAME NVTX VERSION ${NVTX_VERSION}
+    URL https://github.com/NVIDIA/NVTX LICENSE "Apache-2.0 WITH LLVM-exception"
+    FILES ${nvtx_SOURCE_DIR}/LICENSE.txt)
 
 # Create interface library (header-only)
 if(NOT TARGET NVTX::nvtx3)

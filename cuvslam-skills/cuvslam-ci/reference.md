@@ -32,7 +32,7 @@ flowchart TD
   end
   subgraph container [cuvslam:local container]
     inner["run_eval.sh (registry eval-records)"]
-    app["cuvslam_app.py per dataset"]
+    app["cuvslam_app.py per dataset\ncuvslam_vpr_reporter once, all VprSpec sequences"]
     kpi["cuvslam_kpi_report.py collect\nraw + report JSON"]
     inner --> app --> kpi
   end
@@ -71,10 +71,11 @@ Repository secrets, split read from write so fork-reachable jobs never hold a ke
 
 - `DATASETS` in `tools/python_tools/cuvslam_tools/dataset_registry.py` is the single source of truth. A `DatasetSpec` holds the ID, the preparation module, and its `EvalSpec` records; an `EvalSpec` holds the reporter config filename, the `cuvslam_app` flags, suite membership, and gating. Provisionable means the dataset is present; eval-enabled means it has at least one `EvalSpec`. KITTI, EuRoC, TUM, ICL-NUIM, M3ED-SPOT and TartanAir V1 are eval-enabled; `tartan` and `coda` are provisionable only. `tartanair_v1` rebuilds the OSMO TartanAir evaluation from the public V1 Hard release: `download_tartanair_v1.sh` fetches left and right images and left depth for 16 environments and accepts each zip only if it matches the size and MD5 pinned in `zipfiles.txt`, and the converter ships three reporter configs: `tartan-vo_slam.cfg` (`TARTAN`) with every trajectory, and the OSMO split into `tartan_stable-vo_slam.cfg` (`TARTAN_STABLE`, OSMO's `TARTAN`) and `tartan_flaky-vo_slam.cfg` (`TARTAN_FLAKY`). All three ship in the tarball, so choosing between them is a registry change; eval runs the full config, with failed sequences excluded from the `TARTAN` accuracy means. Smoke runs KITTI, EuRoC and ICL-NUIM, which covers stereo, stereo-inertial and RGB-D, plus the KITTI, EuRoC and ICL-NUIM `multisensor` records; TUM is full-only because it is the larger RGB-D corpus and ICL-NUIM already covers the modality pre-merge, and M3ED-SPOT is full-only because at 56 GiB and 57k frames in two modes it is the most expensive record in the suite. TartanAir V1 is full-only, as it was on OSMO.
 - One dataset can carry several records. KITTI, EuRoC, TUM and ICL-NUIM each have a second, `informational` record that replays the same reporter config in `multisensor` mode, so the `MSF` KPI rows compare the cuNLS solver against the default one on identical frames. Each follows its default record's suites: KITTI's, EuRoC's and ICL-NUIM's are in smoke, TUM's is full-only. EuRoC's record is the only pre-merge coverage of multi-sensor IMU fusion and of distorted (fisheye) cameras in that mode; those are supported because the cameras carry no depth, and only depth cameras must be pinhole. M3ED-SPOT has none. `multisensor` needs `USE_CUNLS=ON`, which every CI configuration has.
+- A `DatasetSpec` can also hold a `VprSpec`: stereo sequences `run_eval.sh` passes to `cuvslam_vpr_reporter` with the build's AnyLoc engine, the one `build/bin/anyloc_*.engine`. Each sequence is recognized in a map of itself, because every converter writes ground truth relative to the sequence's first frame. KITTI-07 and EuRoC MH_01_easy run in both suites. `vpr-config` writes one reporter config, `vpr.cfg`, with every sequence of the suite at eval time, so the eval makes one report, `report_vpr.pdf`. Each pair title starts with its dataset ID, upper-cased, which names the pair's KPI row.
 - The module is standard library only and imports converters lazily, so shell wrappers call it with `PYTHONPATH=tools/python_tools` inside `cuvslam-ci:local` before anything is installed. `datasets_config.sh` wraps it as `dataset_registry`; `run_eval.sh` defines its own shim because the S3 variables `datasets_config.sh` requires are absent in the eval container.
-- Subcommands: `validate [--dataset] [--suite]`, `list [--eval] [--suite]`, `eval-records [--suite]` (tab-separated `id`, KPI prefix, config path, flags), `kpi-keys [--suite]`, `prepare-module`, `prepare --root-file`, `verify-staged --root`.
-- Suites: `EVAL_SUITE` selects records in `stage_eval_datasets.sh`, `check_eval_prerequisites.sh`, and `run_eval.sh`, and `eval_cuvslam_in_docker.sh` forwards it into the container. Unset means every record; validation requires every `EvalSpec` to belong to `full`, so unset and `full` agree. `validate --suite` additionally rejects a suite that would select nothing.
-- `kpi-keys --suite` prints the `<PREFIX>_<METRIC>_<TYPE>_<MODE>` keys a suite can produce, so a consumer can tell a key that is legitimately absent from one that went missing. It lists both `ODOM` and `SLAM` for every record because which of the two a run emits depends on `sequence_title` inside the reporter config, which ships in the tarball. `KPI_METRICS` and `ODOMETRY_MODE_TYPES` in the registry mirror `REQUIRED_METRICS` and `odometry_mode_to_type` in `scripts/cuvslam_kpi_report.py` and have to be edited together. `run_eval.sh` passes the `kpi-keys` output to `cuvslam_kpi_report.py collect -e`, so a mismatch shows up as MISSING rows in the drift check.
+- Subcommands: `validate [--dataset] [--suite]`, `list [--eval] [--suite]`, `eval-records [--suite]` (tab-separated `id`, KPI prefix, config path, flags), `kpi-keys [--suite]`, `vpr-config [--suite] --output`, `prepare-module`, `prepare --root-file`, `verify-staged --root`.
+- Suites: `EVAL_SUITE` selects records in `stage_eval_datasets.sh`, `check_eval_prerequisites.sh`, and `run_eval.sh`, and `eval_cuvslam_in_docker.sh` forwards it into the container. Unset means every record; validation requires every record to belong to `full`, so unset and `full` agree. `validate --suite` additionally rejects a suite that would select nothing.
+- `kpi-keys --suite` prints the `<PREFIX>_<METRIC>_<TYPE>_<MODE>` keys a suite can produce, so a consumer can tell a key that is legitimately absent from one that went missing. It lists both `ODOM` and `SLAM` for every record because which of the two a run emits depends on `sequence_title` inside the reporter config, which ships in the tarball. `KPI_METRICS`, `ODOMETRY_MODE_TYPES` and `VPR_KPI_METRICS` in the registry mirror `REQUIRED_METRICS`, `odometry_mode_to_type` and `VPR_METRICS` in `scripts/cuvslam_kpi_report.py` and have to be edited together. `run_eval.sh` passes the `kpi-keys` output to `cuvslam_kpi_report.py collect -e`, so a mismatch shows up as MISSING rows in the drift check.
 - Derived, never declared: `<id>.tar`, the staged directory, the `/sequences` mount, and the KPI prefix (first hyphen-delimited token of the config filename, upper-cased). Validation rejects two records that derive the same prefix and `--odometry_mode`.
 - The reporter writes to `$CUVSLAM_OUTPUT/<config stem>-<odometry mode>/<timestamp>/`. The mode is part of the directory because the KPI collector reads only the newest run under each directory, so two records sharing one config would otherwise overwrite each other; the prefix is unaffected because it is the first hyphen-delimited token. KPI types are `MCAM`, `MONO`, `VIO`, `RGBD` and `MSF`, one per odometry mode, and an unrecognized mode is rejected rather than filed under another mode's keys.
 - Tarball: uncompressed `<id>.tar` at `<S3_DATASETS_BUCKET>/<id>.tar`, whose root is the directory `prepare()` returned. Staged to `<RUNNER_LOCAL_DATASETS_ROOT>/datasets/vslam/<id>/` and mounted read-only into the eval container at `/datasets`. An ETag file skips re-download when the cache is current. After extraction, `verify-staged` checks the shipped config's `dataset_folder` equals `<id>/`.
@@ -87,7 +88,9 @@ Repository secrets, split read from write so fork-reachable jobs never hold a ke
   and ARE (º/m) are KITTI-style segment drift. Kabsch, shown in tables as ATE RMSE (m), is the absolute position error
   after one Umeyama alignment of the whole trajectory, matching `evo_ape --align` (SE(3)), or
   `evo_ape --align --correct_scale` (Sim(3)) for mono. KabschRot, shown as ARE RMSE (º), is the absolute orientation
-  error after the rotation that best aligns the orientations. During migration, `run_eval.sh` also emits the old
+  error after the rotation that best aligns the orientations. A `VprSpec` adds Success, FalsePositive and Unrecognized:
+  % of the frames `cuvslam_vpr_reporter` queried, pooled over the dataset's sequences, on `<PREFIX>-VPR_SLAM` rows that
+  `render` and `aggregate` put in a second table. During migration, `run_eval.sh` also emits the old
   `.table` and `.drift` files; a follow-up script-only change removes those after CI switches to report JSON.
 - KPI config: `kpi_baseline_ranges.json` has `defaults` and per-prefix `datasets` overrides, each holding the
   sequence checks (`max_ate_pct`, `max_lost_frame_pct`, `exclude_failed`), the rolling-baseline settings, and per-metric drift `tolerances`; a
@@ -117,15 +120,16 @@ Repository secrets, split read from write so fork-reachable jobs never hold a ke
   the mean and population standard deviation across all four x86 configurations, except the counts Losts and Failed,
   which show min–max. Each cell's second line (`<br><sub>Δ …</sub>`) is the change from the rolling-baseline median:
   of the mean, or of min/max. Broken / flaky, next to Failed, counts the failed sequences that failed in every
-  configuration and in some; a collapsed "Failed sequences" section lists them. FPS is the last column, and the notes,
-  naming the configurations, follow the table. `aggregate --values-only` drops the changes, the
-  Broken / flaky column, the regression check, and the failed-sequence list for release notes. Temporary per-config `eval-kpis-staging-<version>-<slug>` and
+  configuration and in some; a collapsed "Failed sequences" section lists them. FPS is the last column. A note naming
+  the configurations precedes the Tracking and Place recognition tables, each with its own note below it.
+  `aggregate --values-only` drops the changes, the Broken / flaky column, the regression check, and the
+  failed-sequence list for release notes. Temporary per-config `eval-kpis-staging-<version>-<slug>` and
   `eval-reports-staging-<version>-<slug>` artifacts, raw per-config JSON, reports, and history remain namespaced by
   `platform-cuda-ubuntu`. `RUN_ID` is the UTC date. After aggregation, staging artifacts are replaced by
   `cuvslam-evaluation-<version>.tar.gz`.
 - Release dispatch: `release/vX.Y[.Z][-suffix]` derives tag `vX.Y[.Z][-suffix]` after validating it against `VERSION`. The draft Release contains the consumer artifacts and `cuvslam-evaluation-<version>.tar.gz` generated by the same run. Existing drafts, published Releases, and tags are never overwritten.
-- PR: `cuvslam_kpi_report.py render` produces a single table labeled with `EVAL_CONFIG`, with the same stacked
-  changes, against `main`'s latest nightly; `RUN_ID=pr-<number>`; the
+- PR: `cuvslam_kpi_report.py render` produces the tables for one configuration, labeled with `EVAL_CONFIG`, with
+  the same stacked changes, against `main`'s latest nightly; `RUN_ID=pr-<number>`; the
   matching config's KPI history is mounted read-only, so PR runs never write the baseline.
 
 ## Jetson benchmark outputs

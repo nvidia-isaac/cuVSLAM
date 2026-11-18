@@ -124,6 +124,24 @@ for record in "${DATASETS[@]}"; do
     --pdf
 done
 
+VPR_CONFIG=$(dataset_registry vpr-config "${EVAL_SUITE_ARGS[@]}" --output "$(mktemp -d)/vpr.cfg")
+if [ -n "$VPR_CONFIG" ]; then
+  shopt -s nullglob
+  engines=("$OUTPUT_DIR"/build/bin/anyloc_*.engine)
+  shopt -u nullglob
+  if [ "${#engines[@]}" -ne 1 ]; then
+    echo "Error: place recognition needs one AnyLoc engine in $OUTPUT_DIR/build/bin, found ${#engines[@]}." >&2
+    exit 1
+  fi
+  echo "=== Running cuVSLAM place recognition eval ==="
+  # From the source tree, like cuvslam_app.py, so the report names the commit.
+  PYTHONPATH="/cuvslam/tools/python_tools${PYTHONPATH:+:$PYTHONPATH}" python3 -m cuvslam_tools.vpr_reporter.cli \
+    --test_config "$VPR_CONFIG" \
+    --datasets_root "$DATASETS_ROOT" \
+    --vpr_model_path "${engines[0]}" \
+    --pdf
+fi
+
 PREV_KPI=""
 if [ -d "$KPI_HISTORY" ]; then
   PREV_KPI=$(ls -1 "$KPI_HISTORY"/kpi_[0-9]*.json 2>/dev/null | sort | tail -1 || true)

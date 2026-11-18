@@ -58,6 +58,7 @@ if(TensorRT_VERSION VERSION_LESS 8.6)
         "TensorRT ${TensorRT_VERSION} in ${TensorRT_INCLUDE_DIR} is too old, cuVSLAM needs 8.6 or newer")
 endif()
 message(STATUS "Found TensorRT ${TensorRT_VERSION}: ${TensorRT_nvinfer_LIBRARY}")
+cuvslam_third_party_not_distributed(TensorRT "found on the system or installed with the wheels' tensorrt extra")
 
 get_filename_component(_tensorrt_library_dir "${TensorRT_nvinfer_LIBRARY}" DIRECTORY)
 
