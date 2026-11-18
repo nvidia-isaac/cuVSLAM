@@ -86,6 +86,7 @@ blueprint_path = os.path.join(os.path.dirname(__file__), "cpp", "euroc_blueprint
 # 1: Inertial - Visual-inertial tracking using stereo camera + IMU
 # 2: RGBD - Visual tracking using monocular camera + depth (supports grayscale input)
 # 3: Mono - Visual tracking using monocular camera (without scale, accurate rotation only)
+# 4: Multisensor - Unified cuNLS-based tracking; here the stereo pair + IMU (requires a cuNLS-enabled build)
 
 euroc_tracking_mode = cuvslam.Odometry.OdometryMode.Inertial
 
@@ -96,6 +97,13 @@ odom_cfg = cuvslam.Odometry.Config(
     enable_final_landmarks_export=True,
     rectified_stereo_camera=False,
     odometry_mode=euroc_tracking_mode
+)
+if euroc_tracking_mode == cuvslam.Odometry.OdometryMode.Multisensor:
+    # No depth ids are needed because the rig contains an overlapping stereo pair; the IMU is fused automatically.
+    odom_cfg.multisensor_settings = cuvslam.Odometry.MultisensorSettings(depth_camera_ids=[])
+
+uses_imu = euroc_tracking_mode in (
+    cuvslam.Odometry.OdometryMode.Inertial, cuvslam.Odometry.OdometryMode.Multisensor
 )
 
 # Get camera rig
@@ -135,8 +143,7 @@ for frame_metadata in frames_metadata:
     images = [load_frame(image_path) for image_path in frame_metadata['images_paths']]
 
     # Check IMU measurements before tracking
-    if (odom_cfg.odometry_mode == cuvslam.Odometry.OdometryMode.Inertial
-            and last_camera_timestamp is not None):
+    if uses_imu and last_camera_timestamp is not None:
         if imu_count_since_last_camera == 0:
             print(
                 f"Warning: No IMU measurements between timestamps "
@@ -161,7 +168,7 @@ for frame_metadata in frames_metadata:
     odom_trajectory.append([timestamp] + list(odom_pose.translation) + list(odom_pose.rotation))
 
     gravity = None
-    if odom_cfg.odometry_mode == cuvslam.Odometry.OdometryMode.Inertial:
+    if uses_imu:
         # Gravity estimation requires collecting sufficient number of keyframes with motion diversity
         gravity = tracker.odometry.get_last_gravity()
 
