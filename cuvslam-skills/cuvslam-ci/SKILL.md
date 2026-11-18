@@ -39,7 +39,8 @@ CI scripts (`scripts/`):
   KPI Markdown rendering. `collect` writes raw and report JSON; `render` and `aggregate` produce publication Markdown.
 - `kpi_baseline_ranges.json` - committed KPI config: defaults and per-dataset overrides for sequence failure checks, drift tolerances, and calibrated expected values.
 - `package_cpp_dist.sh` - creates and validates the curated, versioned C++ SDK archive used by Actions and Releases.
-- `Dockerfile` / `build_cuvslam_in_docker.sh` - product build image and wrapper; preserve Git/LFS metadata used by
+- `Dockerfile` / `build_cuvslam_image.sh` / `build_cuvslam_in_docker.sh` - product build image, its standalone
+  builder (lets CI build the image before other disk-heavy work), and the build wrapper; preserve Git/LFS metadata used by
   `get_version()`.
 
 Dataset tooling: `tools/python_tools/cuvslam_tools/dataset_preparation/<name>/` (`prepare.py`, plus `download_<name>.sh` where `curl` resume and checksum behaviour is needed), `tools/cuvslam_app/` (eval runner and `edex_reader.py`).
