@@ -296,8 +296,19 @@ jobs:
             -w /cuvslam \
             cuvslam-ci:local ./scripts/check_eval_prerequisites.sh
 
-      # Staging is network- and disk-bound and the build is CPU-bound, so staging
-      # runs detached through the build and tests; "Wait for eval datasets" joins it.
+      # Built before staging starts: each image layer commit stalls behind staging's
+      # disk writes. "Build C++ libraries" rebuilds it from the layer cache.
+      - name: Build product image
+        timeout-minutes: 30
+        run: |
+          CUDA_VERSION=${{ matrix.cuda }} \
+          UBUNTU_VERSION=${{ matrix.ubuntu }} \
+          BASE_IMAGE="${{ matrix.base_image }}" \
+          UBUNTU_PORTS_MIRROR="${{ matrix.ports_mirror }}" \
+          ./scripts/build_cuvslam_image.sh
+
+      # Staging is network- and disk-bound and the compile is CPU-bound, so staging
+      # runs detached through the compile and tests; "Wait for eval datasets" joins it.
       # The container is kept (no --rm) so its exit code survives until then.
       - name: Start eval dataset staging
         if: matrix.eval
