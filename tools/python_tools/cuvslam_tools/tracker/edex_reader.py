@@ -516,7 +516,7 @@ class EdexReader(DatasetReader):
 
         Returns:
             Odometry.MultisensorSettings object, whose depth_camera_ids is empty for
-            a rig of plain RGB cameras, which Multisensor also accepts
+            a rig without depth cameras, which Multisensor accepts if a camera pair overlaps
 
         Raises:
             ValueError: If config_data structure is invalid

@@ -208,8 +208,6 @@ python3 track_multicamera_tartan.py
 
 ### Multisensor (Tartan Ground, RGB-D + optional IMU)
 
-Multisensor tracking is experimental and may be inaccurate or fail for some sensor configurations and scenes.
-
 ```bash
 cd examples/multisensor
 pip install tartanair     # x86_64 only

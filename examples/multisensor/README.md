@@ -1,18 +1,17 @@
 # Tutorial: PyCuVSLAM Multisensor Odometry (multi RGB-D + IMU)
 
-> **Experimental:** Tracking may be inaccurate or fail for some sensor configurations and scenes.
-
 This tutorial demonstrates how to run PyCuVSLAM in **Multisensor** odometry
-mode, which solves a single tightly-coupled cuNLS step over any mix of plain
-RGB cameras, RGB-D cameras, and one optional IMU. The example uses two
+mode, which solves a single tightly-coupled cuNLS step over cameras (grayscale
+or RGB) with or without depth, plus one optional IMU. The example uses two
 RGB-D cameras (`lcam_front`, `lcam_back`) plus a synthetic IMU from the
 [TartanGround dataset](https://tartanair.org/tartanground/).
 
 ## Requirements
 
 - Use an official release wheel, which includes cuNLS, or build from source with `USE_CUNLS=ON`.
-- Configure at least one RGB-D camera in `depth_camera_ids`, or provide at least one camera pair with overlapping
-  frustums. A single RGB-D camera is valid, with or without an IMU.
+- Configure at least one RGB-D camera in `depth_camera_ids`, or provide at least one camera pair whose fields of view
+  overlap according to the rig calibration. A single RGB-D camera is valid, with or without an IMU; a single camera
+  without depth is not.
 - Use the pinhole model for RGB-D cameras. Cameras without depth can use any distortion model.
 - Align each depth image pixel-for-pixel with the RGB image at the same camera index. PyCuVSLAM accepts 2D `uint16`
   depth; the C++ API accepts `UINT16` or `FLOAT32`.
@@ -98,7 +97,7 @@ After running the script, a Rerun visualization window opens with:
   and the cameras block in `tartan_ground.edex` (the multicamera example at
   `../multicamera_edex/tartan_ground.edex` has all 12 TartanGround
   cameras to copy from).
-- **Add plain RGB cameras** — Multisensor mode accepts any subset of
+- **Add cameras without depth** — Multisensor mode accepts any subset of
   cameras as depth-providers. Drop a camera index from `depth_camera_ids`
   and pass an empty `np.empty(0)` for that camera's slot in `depths`.
 - **IMU file names** — if your TartanGround download produced different

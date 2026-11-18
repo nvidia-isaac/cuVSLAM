@@ -394,19 +394,20 @@ public:
     Mono,  ///< Uses a single camera, tracking is accurate up to scale. Camera 0 is tracked as the rig, so its
            ///< rig_from_camera must be identity.
 
-    /// @warning Experimental: tracking may be inaccurate or fail for some sensor configurations and scenes.
-    ///
-    /// Unified multi-sensor mode (cuNLS-based). Supports any mix of plain RGB cameras,
-    /// RGB-D cameras (any subset of the rig), with or without a single IMU. IMU fusion
-    /// is enabled automatically when the rig contains an IMU; sba_mode is forced to the
-    /// inertial bundler in that case. Per-camera depth presence is configured through
-    /// MultisensorSettings::depth_camera_ids.
+    /// Unified multi-sensor mode (cuNLS-based). Tracks any number of cameras, grayscale or RGB,
+    /// each with or without an aligned depth image, plus an optional single IMU. Metric scale
+    /// must come from at least one depth camera or from at least one camera pair whose fields
+    /// of view overlap according to the rig calibration. IMU fusion is enabled automatically
+    /// when the rig contains an IMU; sba_mode is forced to the inertial bundler in that case.
+    /// Per-camera depth presence is configured through MultisensorSettings::depth_camera_ids.
     ///
     /// @note Requirements (construction throws `std::invalid_argument` otherwise):
     ///  - Build must have cuNLS enabled (`-DUSE_CUNLS=ON`).
-    ///  - The rig must provide at least one RGB-D camera through
+    ///  - The rig must provide at least one depth camera through
     ///    MultisensorSettings::depth_camera_ids, or at least one camera pair with
-    ///    overlapping frustums. A single RGB-D camera is valid, with or without an IMU.
+    ///    overlapping fields of view, computed from the camera intrinsics and extrinsics.
+    ///    A single depth camera is valid, with or without an IMU. A single camera without
+    ///    depth, or cameras without depth that do not overlap, are rejected.
     ///  - Cameras listed in MultisensorSettings::depth_camera_ids must use the pinhole model;
     ///    other models emit a warning and their depth is misaligned. Cameras without depth
     ///    support every Distortion::Model.
@@ -419,14 +420,11 @@ public:
   /**
    * @brief Multisensor odometry settings
    *
-   * @warning Experimental: tracking may be inaccurate or fail for some sensor configurations and scenes.
-   *
    * Used only when Config::odometry_mode == OdometryMode::Multisensor.
    *
-   * Multisensor mode supports any mix of:
-   *   - one or more plain RGB cameras
-   *   - one or more RGB-D cameras (any subset of the rig)
-   *   - a single optional IMU (configured through Rig::imus)
+   * Multisensor mode tracks cameras (grayscale or RGB) with or without depth, plus an
+   * optional single IMU configured through Rig::imus. The rig needs at least one depth camera
+   * or one camera pair with overlapping fields of view; see OdometryMode::Multisensor.
    *
    * The rig's IMU presence drives IMU fusion automatically — there is no separate
    * `with_imu` flag. The only fields here describe depth handling.
@@ -434,9 +432,9 @@ public:
   struct MultisensorSettings {
     /// @brief Camera ids (matching Rig::cameras indices) that supply depth images at Track() time.
     ///
-    /// Empty means: no depth (pure multi-camera-RGB). Cameras not listed here are treated as
-    /// RGB-only. Mixed rigs (some RGB, some RGB-D) are supported by listing only the depth-capable
-    /// cameras.
+    /// Empty means no depth; the rig then needs a camera pair with overlapping fields of view.
+    /// Cameras not listed here are tracked from their images only. Mixed rigs (some cameras with
+    /// depth, some without) are supported by listing only the cameras that provide depth.
     std::vector<int32_t> depth_camera_ids;
 
     /// @brief Scale factor for depth measurements (denominator: raw depth divided by this is meters).

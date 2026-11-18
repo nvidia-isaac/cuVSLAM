@@ -88,7 +88,7 @@ DEFINE_bool(localize_forever, false, "Run localization continuously (each time p
 // cuvslam configuration
 DEFINE_string(debug_dump, "", "Path to debug dump");
 DEFINE_int32(cfg_odom_mode, static_cast<int>(kDefaultOdomCfg.odometry_mode),
-             "Odometry mode: Multicamera (0), Inertial (1), RGBD (2), Mono (3), Multisensor (4, experimental)");
+             "Odometry mode: Multicamera (0), Inertial (1), RGBD (2), Mono (3), Multisensor (4)");
 DEFINE_int32(cfg_multicam_mode, static_cast<int>(kDefaultOdomCfg.multicam_mode),
              "Multicamera mode: performance (0), precision (1), or moderate (2)");
 DEFINE_bool(cfg_async_sba, false, "Enable asynchronous sparse bundle adjustment");

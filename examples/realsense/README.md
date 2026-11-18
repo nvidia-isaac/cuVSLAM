@@ -101,8 +101,6 @@ You should see the following rerun visualization, displaying the camera trajecto
 
 ## Running Multisensor Odometry
 
-> **Experimental:** Tracking may be inaccurate or fail for some sensor configurations and scenes.
-
 Multisensor odometry uses the cuNLS-based `OdometryMode.Multisensor` pipeline. It requires at least one RGB-D camera or
 one overlapping camera pair and currently supports pinhole cameras only. With a RealSense D455, the simplest live setup
 is RGB-D + IMU: the RGB stream provides visual features, the aligned depth stream provides metric depth, and the

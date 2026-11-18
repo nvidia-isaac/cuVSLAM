@@ -633,14 +633,16 @@ NB_MODULE(_cuvslam, m) {
              "Uses a single camera, tracking is accurate up to scale. Camera 0 is tracked as the rig, so its "
              "rig_from_camera must be identity.")
       .value("Multisensor", Odometry::OdometryMode::Multisensor,
-             "EXPERIMENTAL unified multi-sensor mode. Tracking may be inaccurate or fail for some sensor "
-             "configurations and scenes. Supports any mix of plain RGB cameras, RGB-D cameras (any subset of the rig), "
-             "and a single optional IMU. IMU fusion turns on automatically when the rig contains an IMU.\n\n"
+             "Unified multi-sensor mode. Tracks any number of cameras, grayscale or RGB, each with or without an "
+             "aligned depth image, plus an optional single IMU. Metric scale must come from at least one depth camera "
+             "or from at least one camera pair whose fields of view overlap according to the rig calibration. IMU "
+             "fusion turns on automatically when the rig contains an IMU.\n\n"
              "Requirements (constructor raises ValueError otherwise):\n"
              " - Build must have cuNLS enabled (-DUSE_CUNLS=ON).\n"
-             " - The rig must contain at least one RGB-D camera listed in MultisensorSettings.depth_camera_ids, or at "
-             "least one camera pair with overlapping frustums. A single RGB-D camera is valid, with or without an "
-             "IMU.\n"
+             " - The rig must contain at least one depth camera listed in MultisensorSettings.depth_camera_ids, or at "
+             "least one camera pair with overlapping fields of view, computed from the camera intrinsics and "
+             "extrinsics. A single depth camera is valid, with or without an IMU. A single camera without depth, or "
+             "cameras without depth that do not overlap, are rejected.\n"
              " - Cameras listed in MultisensorSettings.depth_camera_ids must use the pinhole model; other models emit "
              "a warning and their depth is misaligned. Cameras without depth support every distortion model.\n"
              " - Depth images passed to track() must be 2D uint16 ndarrays (cuVSLAM's C++ contract also accepts "
@@ -650,16 +652,17 @@ NB_MODULE(_cuvslam, m) {
   // Multisensor Settings class — describes available sensors at construction time for OdometryMode::Multisensor.
   nb::class_<Odometry::MultisensorSettings>(
       odom_cls, "MultisensorSettings",
-      "Settings for the EXPERIMENTAL unified Multisensor odometry mode. Tracking may be inaccurate or fail for some "
-      "sensor configurations and scenes.\n\n"
-      "Multisensor supports any mix of plain RGB cameras, RGB-D cameras (any subset of the rig), and a single optional "
-      "IMU. The fields here describe depth handling; IMU presence is auto-detected from `Rig.imus`.")
+      "Settings for the unified Multisensor odometry mode.\n\n"
+      "Multisensor tracks cameras (grayscale or RGB) with or without depth, plus an optional single IMU. The rig needs "
+      "at least one depth camera or one camera pair with overlapping fields of view; see OdometryMode.Multisensor. "
+      "The fields here describe depth handling; IMU presence is auto-detected from `Rig.imus`.")
       .def(nb::init<std::vector<int32_t>, float, bool>(), nb::kw_only(),
            nb::arg("depth_camera_ids") = Odometry::MultisensorSettings{}.depth_camera_ids,
            nb::arg("depth_scale_factor") = Odometry::MultisensorSettings{}.depth_scale_factor,
            nb::arg("enable_depth_stereo_tracking") = Odometry::MultisensorSettings{}.enable_depth_stereo_tracking)
       .def_rw("depth_camera_ids", &Odometry::MultisensorSettings::depth_camera_ids,
-              "Camera indices that supply depth images. Empty list = no depth (multi-RGB only).")
+              "Camera indices that supply depth images. Empty list = no depth; the rig then needs a camera pair with "
+              "overlapping fields of view.")
       .def_rw("depth_scale_factor", &Odometry::MultisensorSettings::depth_scale_factor,
               "Scale factor for depth measurements (applied uniformly to every depth camera).")
       .def_rw("enable_depth_stereo_tracking", &Odometry::MultisensorSettings::enable_depth_stereo_tracking,

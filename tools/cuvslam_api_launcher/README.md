@@ -20,7 +20,7 @@ To enable SLAM and save both odometry and SLAM poses:
 - `--cfg_enable_slam` - enables SLAM tracking
 - `--cfg_enable_export` - enables observation/landmark export (required for SLAM to get odometry state)
 
-### Multisensor (experimental)
+### Multisensor
 
 Multisensor mode needs a cuNLS build (`-DUSE_CUNLS=ON`). List the cameras that supply depth; IMU fusion turns on
 automatically when the edex has an IMU:

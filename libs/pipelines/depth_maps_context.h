@@ -41,7 +41,7 @@ namespace cuvslam::pipelines {
 //   * map::DepthPointMap     -- sparse map-frame depth points for the point-to-point ICP factor
 //   * map::PlaneMap          -- planes detected at keyframes for the point-to-plane factor
 //
-// All operations are no-ops on a depth-less rig (multi-RGB-only): plane and depth-point updates
+// All operations are no-ops on a rig without depth cameras: plane and depth-point updates
 // gracefully short-circuit when `depth_infos` is empty, and `build_keyframe_landmarks` falls back
 // to multi-camera triangulation alone.
 class DepthMapsContext {

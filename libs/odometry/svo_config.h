@@ -62,12 +62,10 @@ struct TrackPerFrameSettings {
 
 // Configuration of the available sensor set for MultisensorOdometry.
 //
-// MultisensorOdometry supports any mix of:
-//   * one or more plain RGB cameras
-//   * one or more RGB-D cameras (depth available per camera)
-//   * a single optional IMU
-// The minimum rig has at least one RGB-D camera or one overlapping camera pair. Any
-// valid visual configuration may additionally include one IMU.
+// MultisensorOdometry tracks cameras (grayscale or RGB), each with or without depth, plus a
+// single optional IMU. The minimum rig has at least one depth camera or one camera pair with
+// overlapping fields of view; a single camera without depth, or cameras without depth that
+// do not overlap, are rejected. Any valid visual configuration may additionally include one IMU.
 // Construction-time fields here describe which inputs the solver should expect.
 struct MultisensorSettings {
   // True if a single IMU is part of the rig and IMU measurements will be supplied via
@@ -75,10 +73,10 @@ struct MultisensorSettings {
   // InertialGPU; the launcher and public API enforce this automatically. Default: false.
   bool with_imu = false;
 
-  // Camera ids that provide depth measurements. Empty = no depth (pure multi-camera-RGB).
-  // Each listed camera will deliver a depth image alongside its RGB frame at track() time;
-  // any camera not in this list is treated as RGB-only. Mixed rigs (some RGB, some RGB-D)
-  // are supported by listing only the depth-capable cameras here.
+  // Camera ids that provide depth measurements. Empty = no depth (needs an overlapping camera pair).
+  // Each listed camera will deliver a depth image alongside its image at track() time; any
+  // camera not in this list is tracked from its image only. Mixed rigs (some cameras with depth,
+  // some without) are supported by listing only the depth-capable cameras here.
   std::vector<int32_t> depth_camera_ids;
 
   // Scale factor for depth measurements (denominator to convert raw depth values to meters).

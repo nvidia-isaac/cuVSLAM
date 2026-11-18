@@ -168,8 +168,8 @@ python3 track_multisensor_tartan.py
 python3 track_multisensor_tartan.py --no-imu
 ```
 
-Multisensor requires `USE_CUNLS=ON`, pinhole cameras, and at least one RGB-D camera or one overlapping camera pair.
-Multisensor tracking is experimental and may be inaccurate or fail for some sensor configurations and scenes.
+Multisensor requires `USE_CUNLS=ON` and at least one RGB-D camera or one overlapping camera pair. RGB-D cameras must
+use the pinhole model; cameras without depth support every distortion model.
 
 ---
 
