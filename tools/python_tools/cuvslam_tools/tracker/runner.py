@@ -253,8 +253,8 @@ class Tracker:
 
         multisensor_settings = vslam.Odometry.MultisensorSettings()
 
-        # An empty list is valid: Multisensor also takes a rig of plain RGB cameras
-        # as long as one camera pair has overlapping frustums.
+        # An empty list is valid: Multisensor also takes a rig without depth cameras
+        # as long as one camera pair has overlapping fields of view.
         multisensor_settings.depth_camera_ids = list(getattr(args, 'depth_camera_ids', None) or [])
         multisensor_settings.depth_scale_factor = getattr(args, 'depth_scale_factor', 1.0)
         # enable_depth_stereo_tracking is left at its default of True, matching

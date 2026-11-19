@@ -480,9 +480,8 @@ Mono → RGBD → Stereo Inertial → Stereo → Multicamera; Multisensor depend
 
 Multisensor (see [examples/multisensor/](examples/multisensor/README.md)) does not slot at a fixed
 position — its accuracy scales with the sensor set it is given. It requires at least one RGB-D
-camera or one overlapping camera pair, a cuNLS-enabled build, and currently supports pinhole cameras only. Official
-release wheels include cuNLS. Multisensor is experimental and may be inaccurate or fail for some sensor configurations
-and scenes. A single RGB-D + IMU rig is roughly RGBD-class. A multi-stereo + RGB-D + IMU rig may approach or exceed
+camera or one overlapping camera pair and a cuNLS-enabled build; RGB-D cameras currently must use the pinhole model,
+while cameras without depth support every distortion model. Official release wheels include cuNLS. A single RGB-D + IMU rig is roughly RGBD-class. A multi-stereo + RGB-D + IMU rig may approach or exceed
 Multicamera under favorable conditions, but this is an empirical expectation rather than a guarantee; benchmark the
 actual rig and environment. Use Multisensor when you have a mixed-camera-type rig or want IMU fusion on a non-stereo
 configuration; otherwise prefer the mode that exactly matches your rig.

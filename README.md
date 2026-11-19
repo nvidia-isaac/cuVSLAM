@@ -40,7 +40,7 @@ informative sensor set on your rig:
 | `RGBD` | 1 RGB-D camera (aligned RGB + depth) | — | `RGBDSettings` | Single depth-aligned camera (e.g. RealSense, TUM RGB-D). |
 | `Multicamera` | ≥2 cameras with at least one overlapping pair (a stereo pair) | up to 32 cameras total | — | Stereo or multi-stereo rigs. Most accurate purely-visual mode. |
 | `Inertial` | 1 stereo pair + 1 IMU | — | — | Stereo VIO. Adds robustness to brief visual failures. |
-| `Multisensor` | ≥1 RGB-D camera **or** ≥1 overlapping camera pair; cuNLS-enabled build | Additional RGB/RGB-D cameras, 0 or 1 IMU | `MultisensorSettings` | Any-mix RGB / RGB-D rigs with optional IMU, including one RGB-D camera with IMU. |
+| `Multisensor` | ≥1 RGB-D camera **or** ≥1 overlapping camera pair; cuNLS-enabled build | Additional cameras with or without depth, 0 or 1 IMU | `MultisensorSettings` | Mixed rigs of cameras with and without depth (grayscale or RGB), with optional IMU, including one RGB-D camera with IMU. |
 
 Notes:
 - `Multisensor` is the only mode that requires a cuNLS-enabled build — see
@@ -54,7 +54,9 @@ Notes:
 
 ## Multisensor mode
 
-Multisensor tracking is experimental: tracking may be inaccurate or fail for some sensor configurations and scenes.
+Cameras can provide grayscale or RGB images, each with or without an aligned depth image. Metric scale must come
+from at least one depth camera or from a camera pair whose fields of view overlap according to the rig calibration,
+so a single camera without depth, or cameras without depth that do not overlap, are rejected at construction.
 RGB-D cameras must use the pinhole model; cameras without depth support every distortion model.
 
 # Visual global localization

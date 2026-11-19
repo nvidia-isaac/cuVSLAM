@@ -52,7 +52,7 @@ namespace cuvslam::pipelines {
 //   * The gravity-estimation callback (NEC + SBA-init refinement of map keyframes)
 //
 // The same code path serves both:
-//   * pure multi-RGB rigs (depth_infos is empty -> IMU SE3 prior tethers the cuNLS solve)
+//   * rigs without depth cameras (depth_infos is empty -> IMU SE3 prior tethers the cuNLS solve)
 //   * mono / multi-camera RGBD rigs (depth/plane factors + IMU SE3 prior together)
 class ImuFusionContext {
 public:
