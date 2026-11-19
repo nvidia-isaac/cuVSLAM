@@ -138,6 +138,9 @@ prepare_kitti \
 
 The converted dataset layout is suitable for tracker and reporter workflows. Pass one of the generated KITTI config files to `cuvslam_reporter --test_config`.
 
+`--recalibrated` re-rectifies the images with the Cvišić et al. (ECMR 2021) stereo calibration, see
+[kitti/README.md](cuvslam_tools/dataset_preparation/kitti/README.md).
+
 Without `--raw-dir` and `--output-dir`, the command uses `./datasets/kitti/raw` and `./datasets/converted`, relative to
 the current directory. The same workflow is importable, so scripts can prepare a dataset without going through the CLI:
 
