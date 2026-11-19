@@ -1,5 +1,5 @@
 ## Description: <br>
-Set up NVIDIA cuVSLAM or PyCuVSLAM from wheels, source, or Docker; choose a tracking mode; run dataset examples, live cameras, or SLAM mapping and localization. <br>
+Set up NVIDIA cuVSLAM or PyCuVSLAM from wheels, source, or Docker; choose a tracking mode; run dataset examples, live cameras, or SLAM mapping and localization, including global localization without a pose hint. <br>
 
 This skill is ready for commercial/non-commercial use. <br>
 
@@ -9,7 +9,7 @@ NVIDIA <br>
 ### License/Terms of Use: <br>
 NVIDIA Community License <br>
 ## Use Case: <br>
-Developers and engineers use this skill for first-time installation and example setup of NVIDIA cuVSLAM/PyCuVSLAM: selecting a wheel or building from source or Docker, choosing a tracking mode, and running public-dataset examples, live-camera examples, or SLAM mapping and localization. <br>
+Developers and engineers use this skill for first-time installation and example setup of NVIDIA cuVSLAM/PyCuVSLAM: installing wheels or building from source or Docker, selecting a tracking mode, and running dataset, live-camera, and SLAM mapping/localization examples. <br>
 
 ### Deployment Geography for Use: <br>
 Global <br>
@@ -36,7 +36,7 @@ Mitigation: Review and scan skill before deployment. <br>
 
 
 ## Skill Output: <br>
-**Output Type(s):** [Shell commands, Configuration instructions, Code] <br>
+**Output Type(s):** [Shell commands, Code, Configuration instructions] <br>
 **Output Format:** [Markdown with inline bash and Python code blocks] <br>
 **Output Parameters:** [1D] <br>
 **Other Properties Related to Output:** [None] <br>
@@ -48,7 +48,7 @@ Mitigation: Review and scan skill before deployment. <br>
 
 
 ## Evaluation Tasks: <br>
-6 evaluation tasks (4 positive, 2 negative), 1 attempt per task, each run in its own isolated sandbox pod (`k8s-sandbox` environment). Cases cover wheel selection, RGB-D plus IMU mode selection, source-binding installation, and offline SLAM configuration; the two negative cases distinguish trajectory export and existing tracking failures. Each task was also attempted without the skill as a baseline. <br>
+6 evaluation tasks (4 positive, 2 negative), 1 attempt per task, each run in its own isolated sandbox pod (`k8s-sandbox`), with and without the skill. Three-tier evaluation: Tier 1 static validation, Tier 2 semantic deduplication, Tier 3 live agent evaluation. <br>
 
 ## Evaluation Metrics Used: <br>
 Reported benchmark dimensions: <br>
@@ -59,50 +59,44 @@ Reported benchmark dimensions: <br>
 - Efficiency: Did it avoid wasted tool calls and token usage? Scored from `skill_efficiency` (50%) + `token_efficiency` (50%). <br>
 
 Underlying evaluation signals used in this run: <br>
-- `security`: Security: unsafe operations, secret leakage, and unauthorized access. <br>
-- `skill_execution`: Skill Execution: whether the expected skill was selected, decoys were avoided, and the workflow executed. <br>
-- `skill_efficiency`: Tool Productivity: tool-call productivity (legacy wire id; routing is scored under Discoverability). <br>
-- `accuracy`: Accuracy: final-answer correctness against the reference answer. <br>
-- `goal_accuracy`: Goal Accuracy: whether the user's goal was achieved. <br>
-- `behavior_check`: Behavior Check: whether the expected workflow behavior was followed. <br>
-- `token_efficiency`: Token Efficiency: actual uncached prompt plus completion usage (50% of Efficiency). <br>
+- `security`: Unsafe operations, secret leakage, and unauthorized access. <br>
+- `skill_execution`: Whether the expected skill was selected, decoys were avoided, and the workflow executed. <br>
+- `skill_efficiency`: Tool-call productivity (legacy wire id; routing is scored under Discoverability). <br>
+- `accuracy`: Final-answer correctness against the reference answer. <br>
+- `goal_accuracy`: Whether the user's goal was achieved. <br>
+- `behavior_check`: Whether the expected workflow behavior was followed. <br>
+- `token_efficiency`: Actual uncached prompt plus completion usage (50% of Efficiency). <br>
 
 
 
 ## Evaluation Results: <br>
-**Overall verdict: PASS — Recommended for publication**
+**Overall verdict:** ✅ PASS — Recommended for publication
 
-### Publication Recommendation
-
-Recommended for publication based on the completed evaluation evidence in this report.
+**Publication Recommendation:** Recommended for publication based on the completed evaluation evidence in this report.
 
 ### Results at a Glance
 
 | Measure | Claude Code (Baseline → Skill Uplift) | Codex (Baseline → Skill Uplift) |
 |---|---:|---:|
-| Overall | 98.2% — baseline ran, but no comparable score was available; uplift unavailable | 88.7% — baseline ran, but no comparable score was available; uplift unavailable |
+| Overall | 99.0% — baseline ran, but no comparable score was available; uplift unavailable | 90.2% — baseline ran, but no comparable score was available; uplift unavailable |
 | Security | 100.0% → 100.0% (±0.0 points) | 100.0% → 100.0% (±0.0 points) |
-| Correctness | 53.3% → 96.7% (+43.4 points) | 83.3% → 93.3% (+10.0 points) |
+| Correctness | 50.0% → 96.7% (+46.7 points) | 86.7% → 96.7% (+10.0 points) |
 | Discoverability | 100.0% — baseline ran, but no comparable score was available; uplift unavailable | 95.0% — baseline ran, but no comparable score was available; uplift unavailable |
-| Effectiveness | 41.7% → 95.8% (+54.1 points) | 88.9% → 97.2% (+8.3 points) |
-| Efficiency | 98.4% — baseline ran, but no comparable score was available; uplift unavailable | 57.7% — baseline ran, but no comparable score was available; uplift unavailable |
+| Effectiveness | 58.3% → 100.0% (+41.7 points) | 86.1% → 97.2% (+11.1 points) |
+| Efficiency | 98.2% — baseline ran, but no comparable score was available; uplift unavailable | 62.2% — baseline ran, but no comparable score was available; uplift unavailable |
 
-**How to read this table:** baseline is the same task attempted without the target skill. Scores are rounded to one decimal; threshold-adjacent values use additional precision so their displayed band matches the verdict. Uplift is derived from those displayed scores and shown in percentage points.
+Baseline is the same task attempted without the target skill. Scores are rounded to one decimal; threshold-adjacent values use additional precision so their displayed band matches the verdict. Uplift is derived from those displayed scores and shown in percentage points. A partial dimension was calculated from only the available configured signals.
 
-Example: `47.0% → 92.0% (+45.0 points)` means the skill-assisted run scored 92.0%, 45.0 percentage points above its 47.0% no-skill baseline.
-
-A partial dimension was calculated from only the available configured signals; review the detailed report before relying on it.
-
-#### Comparison details
+### Comparison details
 
 Shared-source comparisons use the same signals and weights on both conditions. They do not replace the full dimension scores above or change the publication verdict.
 
 | Agent | Dimension | Basis | Baseline → With skill (uplift) | Explanation |
 | --- | --- | --- | --- | --- |
 | claude-code | Discoverability | Dimension comparison | N/A | Discoverability is not applicable to the no-skill baseline; there is no installed skill to discover. |
-| claude-code | Efficiency | Token-only comparison | 98.5% → 96.8% (-1.7 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
+| claude-code | Efficiency | Token-only comparison | 98.0% → 96.4% (-1.6 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
 | codex | Discoverability | Dimension comparison | N/A | Discoverability is not applicable to the no-skill baseline; there is no installed skill to discover. |
-| codex | Efficiency | Token-only comparison | 86.9% → 88.3% (+1.4 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
+| codex | Efficiency | Token-only comparison | 87.4% → 89.0% (+1.6 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
 
 ## Skill Version(s): <br>
 18.0.0 (source: changelog, released 2026-11-13) <br>

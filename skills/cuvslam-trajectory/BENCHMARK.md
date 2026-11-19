@@ -8,8 +8,8 @@ The skill should be reviewed before publication. Address the blocking findings b
 
 - Skill: `cuvslam-trajectory`
 - Validation status: `failed`
-- Evaluation date: 2026-11-13
-- Evaluator version: `1.6.9`
+- Evaluation date: 2026-11-19
+- Evaluator version: `1.6.10`
 - Agents: Claude Code (`aws/anthropic/bedrock-claude-opus-5-5`), Codex (`openai/openai/gpt-6.1-sol`)
 - Tasks: 6 evaluation tasks (4 positive, 2 negative)
 - Dataset digest: `sha256:6d9da6c9a3a712cba89f902239f0302dfd90e4ce4f3c4d6a00c3fde32c60a834` (skill-evaluator-dataset-snapshot/1)
@@ -26,11 +26,11 @@ SkillSpector provider, model, analyzer revision, and determinism evidence retain
 
 | Skill | Provider | Adapter | Analyzer | Model | Revision | Determinism |
 | --- | --- | --- | --- | --- | --- | --- |
-| cuvslam-trajectory | nv_inference | openai | mcp_tool_poisoning | `aws/anthropic/bedrock-claude-opus-5-5` | `2.13.4` | nondeterministic / provider_defaults |
-| cuvslam-trajectory | nv_inference | openai | semantic_developer_intent | `aws/anthropic/bedrock-claude-opus-5-5` | `2.13.4` | nondeterministic / provider_defaults |
-| cuvslam-trajectory | nv_inference | openai | semantic_quality_policy | `aws/anthropic/bedrock-claude-opus-5-5` | `2.13.4` | nondeterministic / provider_defaults |
-| cuvslam-trajectory | nv_inference | openai | semantic_security_discovery | `aws/anthropic/bedrock-claude-opus-5-5` | `2.13.4` | nondeterministic / provider_defaults |
-| cuvslam-trajectory | nv_inference | openai | meta_analyzer | `aws/anthropic/bedrock-claude-opus-5-5` | `2.13.4` | nondeterministic / provider_defaults |
+| cuvslam-trajectory | nv_inference | openai | mcp_tool_poisoning | `aws/anthropic/bedrock-claude-opus-5-5` | `2.13.5` | nondeterministic / provider_defaults |
+| cuvslam-trajectory | nv_inference | openai | semantic_developer_intent | `aws/anthropic/bedrock-claude-opus-5-5` | `2.13.5` | nondeterministic / provider_defaults |
+| cuvslam-trajectory | nv_inference | openai | semantic_quality_policy | `aws/anthropic/bedrock-claude-opus-5-5` | `2.13.5` | nondeterministic / provider_defaults |
+| cuvslam-trajectory | nv_inference | openai | semantic_security_discovery | `aws/anthropic/bedrock-claude-opus-5-5` | `2.13.5` | nondeterministic / provider_defaults |
+| cuvslam-trajectory | nv_inference | openai | meta_analyzer | `aws/anthropic/bedrock-claude-opus-5-5` | `2.13.5` | nondeterministic / provider_defaults |
 
 - Controls for `cuvslam-trajectory`: temperature=not set (source=provider_default, forwarded=no); seed=not set (source=unset, forwarded=no); reasoning_effort=not set (source=provider_default, forwarded=no)
 
@@ -48,12 +48,12 @@ The three-tier evaluation checks whether the skill:
 
 | Measure | Claude Code (Baseline → Skill Uplift) | Codex (Baseline → Skill Uplift) |
 |---|---:|---:|
-| Overall | 99.7% — baseline ran, but no comparable score was available; uplift unavailable | 97.7% — baseline ran, but no comparable score was available; uplift unavailable |
-| Security | 100.0% → 100.0% (±0.0 points) | 91.7% → 100.0% (+8.3 points) |
-| Correctness | 53.3% → 100.0% (+46.7 points) | 66.7% → 100.0% (+33.3 points) |
-| Discoverability | 100.0% — baseline ran, but no comparable score was available; uplift unavailable | 93.8% — baseline ran, but no comparable score was available; uplift unavailable |
-| Effectiveness | 50.0% → 100.0% (+50.0 points) | 61.1% → 100.0% (+38.9 points) |
-| Efficiency | 98.6% — baseline ran, but no comparable score was available; uplift unavailable | 94.7% — baseline ran, but no comparable score was available; uplift unavailable |
+| Overall | 95.1% — baseline ran, but no comparable score was available; uplift unavailable | 97.3% — baseline ran, but no comparable score was available; uplift unavailable |
+| Security | 100.0% → 100.0% (±0.0 points) | 75.0% → 100.0% (+25.0 points) |
+| Correctness | 56.7% → 90.0% (+33.3 points) | 70.0% → 96.7% (+26.7 points) |
+| Discoverability | 100.0% — baseline ran, but no comparable score was available; uplift unavailable | 95.0% — baseline ran, but no comparable score was available; uplift unavailable |
+| Effectiveness | 61.1% → 87.5% (+26.4 points) | 69.4% → 100.0% (+30.6 points) |
+| Efficiency | 98.0% — baseline ran, but no comparable score was available; uplift unavailable | 95.0% — baseline ran, but no comparable score was available; uplift unavailable |
 
 **How to read this table:** baseline is the same task attempted without the target skill. Scores are rounded to one decimal; threshold-adjacent values use additional precision so their displayed band matches the verdict. Uplift is derived from those displayed scores and shown in percentage points.
 
@@ -68,9 +68,9 @@ Shared-source comparisons use the same signals and weights on both conditions. T
 | Agent | Dimension | Basis | Baseline → With skill (uplift) | Explanation |
 | --- | --- | --- | --- | --- |
 | claude-code | Discoverability | Dimension comparison | N/A | Discoverability is not applicable to the no-skill baseline; there is no installed skill to discover. |
-| claude-code | Efficiency | Token-only comparison | 96.9% → 97.2% (+0.3 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
+| claude-code | Efficiency | Token-only comparison | 97.5% → 96.0% (-1.5 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
 | codex | Discoverability | Dimension comparison | N/A | Discoverability is not applicable to the no-skill baseline; there is no installed skill to discover. |
-| codex | Efficiency | Token-only comparison | 86.0% → 89.4% (+3.4 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
+| codex | Efficiency | Token-only comparison | 86.7% → 90.0% (+3.3 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
 
 ## Token Usage
 
@@ -78,21 +78,21 @@ Actual Tier 3 execution usage is reported for every observed agent/case pair and
 
 | Agent | Dataset case | With skill | Without skill | Delta | Change | Coverage |
 |---|---|---:|---:|---:|---:|---|
-| claude-code | All cases | 783,014 | 902,441 | -119,427 | -13.23% | skill 6/6; base 6/6 |
-| claude-code | trajectory-bag-missing-mapping | 113,678 | 37,185 | +76,493 | +205.71% | skill 1/1; base 1/1 |
-| claude-code | trajectory-inspect-edex | 190,158 | 144,375 | +45,783 | +31.71% | skill 1/1; base 1/1 |
-| claude-code | trajectory-negative-drift | 109,815 | 111,477 | -1,662 | -1.49% | skill 1/1; base 1/1 |
-| claude-code | trajectory-negative-live | 147,674 | 321,191 | -173,517 | -54.02% | skill 1/1; base 1/1 |
-| claude-code | trajectory-reject-duplicate-time | 111,057 | 70,587 | +40,470 | +57.33% | skill 1/1; base 1/1 |
-| claude-code | trajectory-valid-tum | 110,632 | 217,626 | -106,994 | -49.16% | skill 1/1; base 1/1 |
-| codex | All cases | 399,839 | 701,732 | -301,893 | -43.02% | skill 6/6; base 6/6 |
-| codex | trajectory-bag-missing-mapping | 44,417 | 30,702 | +13,715 | +44.67% | skill 1/1; base 1/1 |
-| codex | trajectory-inspect-edex | 123,298 | 79,625 | +43,673 | +54.85% | skill 1/1; base 1/1 |
-| codex | trajectory-negative-drift | 69,259 | 53,269 | +15,990 | +30.02% | skill 1/1; base 1/1 |
-| codex | trajectory-negative-live | 59,695 | 402,497 | -342,802 | -85.17% | skill 1/1; base 1/1 |
-| codex | trajectory-reject-duplicate-time | 59,889 | 64,130 | -4,241 | -6.61% | skill 1/1; base 1/1 |
-| codex | trajectory-valid-tum | 43,281 | 71,509 | -28,228 | -39.47% | skill 1/1; base 1/1 |
-| ALL AGENTS | Dataset aggregate | 1,182,853 | 1,604,173 | -421,320 | -26.26% | skill 12/12; base 12/12 |
+| claude-code | All cases | 936,716 | 804,890 | +131,826 | +16.38% | skill 6/6; base 6/6 |
+| claude-code | trajectory-bag-missing-mapping | 113,495 | 108,313 | +5,182 | +4.78% | skill 1/1; base 1/1 |
+| claude-code | trajectory-inspect-edex | 189,730 | 144,894 | +44,836 | +30.94% | skill 1/1; base 1/1 |
+| claude-code | trajectory-negative-drift | 110,672 | 109,317 | +1,355 | +1.24% | skill 1/1; base 1/1 |
+| claude-code | trajectory-negative-live | 301,135 | 227,344 | +73,791 | +32.46% | skill 1/1; base 1/1 |
+| claude-code | trajectory-reject-duplicate-time | 111,075 | 70,726 | +40,349 | +57.05% | skill 1/1; base 1/1 |
+| claude-code | trajectory-valid-tum | 110,609 | 144,296 | -33,687 | -23.35% | skill 1/1; base 1/1 |
+| codex | All cases | 360,343 | 822,872 | -462,529 | -56.21% | skill 6/6; base 6/6 |
+| codex | trajectory-bag-missing-mapping | 44,421 | 30,419 | +14,002 | +46.03% | skill 1/1; base 1/1 |
+| codex | trajectory-inspect-edex | 103,939 | 111,382 | -7,443 | -6.68% | skill 1/1; base 1/1 |
+| codex | trajectory-negative-drift | 33,210 | 48,504 | -15,294 | -31.53% | skill 1/1; base 1/1 |
+| codex | trajectory-negative-live | 75,596 | 463,514 | -387,918 | -83.69% | skill 1/1; base 1/1 |
+| codex | trajectory-reject-duplicate-time | 59,903 | 60,062 | -159 | -0.26% | skill 1/1; base 1/1 |
+| codex | trajectory-valid-tum | 43,274 | 108,991 | -65,717 | -60.30% | skill 1/1; base 1/1 |
+| ALL AGENTS | Dataset aggregate | 1,297,059 | 1,627,762 | -330,703 | -20.32% | skill 12/12; base 12/12 |
 
 Prompt tokens include cached reads, so total tokens are `prompt + completion` (cached is not added twice). The Efficiency score uses `(prompt - cached) + completion`. Change is `100 * (with - without) / without`; negative means fewer tokens. N/A comparisons include their reason in the coverage column; coverage is never estimated.
 

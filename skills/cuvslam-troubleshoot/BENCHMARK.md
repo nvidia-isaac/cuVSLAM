@@ -8,8 +8,8 @@ The skill should be reviewed before publication. Address the blocking findings b
 
 - Skill: `cuvslam-troubleshoot`
 - Validation status: `failed`
-- Evaluation date: 2026-11-13
-- Evaluator version: `1.6.9`
+- Evaluation date: 2026-11-19
+- Evaluator version: `1.6.10`
 - Agents: Claude Code (`aws/anthropic/bedrock-claude-opus-5-5`), Codex (`openai/openai/gpt-6.1-sol`)
 - Tasks: 6 evaluation tasks (4 positive, 2 negative)
 - Dataset digest: `sha256:6e702aceaab5398726bc6fa5063aea5550140e3640dfa5f42cecb5b653d6682d` (skill-evaluator-dataset-snapshot/1)
@@ -26,11 +26,11 @@ SkillSpector provider, model, analyzer revision, and determinism evidence retain
 
 | Skill | Provider | Adapter | Analyzer | Model | Revision | Determinism |
 | --- | --- | --- | --- | --- | --- | --- |
-| cuvslam-troubleshoot | nv_inference | openai | mcp_tool_poisoning | `aws/anthropic/bedrock-claude-opus-5-5` | `2.13.4` | nondeterministic / provider_defaults |
-| cuvslam-troubleshoot | nv_inference | openai | semantic_developer_intent | `aws/anthropic/bedrock-claude-opus-5-5` | `2.13.4` | nondeterministic / provider_defaults |
-| cuvslam-troubleshoot | nv_inference | openai | semantic_quality_policy | `aws/anthropic/bedrock-claude-opus-5-5` | `2.13.4` | nondeterministic / provider_defaults |
-| cuvslam-troubleshoot | nv_inference | openai | semantic_security_discovery | `aws/anthropic/bedrock-claude-opus-5-5` | `2.13.4` | nondeterministic / provider_defaults |
-| cuvslam-troubleshoot | nv_inference | openai | meta_analyzer | `aws/anthropic/bedrock-claude-opus-5-5` | `2.13.4` | nondeterministic / provider_defaults |
+| cuvslam-troubleshoot | nv_inference | openai | mcp_tool_poisoning | `aws/anthropic/bedrock-claude-opus-5-5` | `2.13.5` | nondeterministic / provider_defaults |
+| cuvslam-troubleshoot | nv_inference | openai | semantic_developer_intent | `aws/anthropic/bedrock-claude-opus-5-5` | `2.13.5` | nondeterministic / provider_defaults |
+| cuvslam-troubleshoot | nv_inference | openai | semantic_quality_policy | `aws/anthropic/bedrock-claude-opus-5-5` | `2.13.5` | nondeterministic / provider_defaults |
+| cuvslam-troubleshoot | nv_inference | openai | semantic_security_discovery | `aws/anthropic/bedrock-claude-opus-5-5` | `2.13.5` | nondeterministic / provider_defaults |
+| cuvslam-troubleshoot | nv_inference | openai | meta_analyzer | `aws/anthropic/bedrock-claude-opus-5-5` | `2.13.5` | nondeterministic / provider_defaults |
 
 - Controls for `cuvslam-troubleshoot`: temperature=not set (source=provider_default, forwarded=no); seed=not set (source=unset, forwarded=no); reasoning_effort=not set (source=provider_default, forwarded=no)
 
@@ -48,12 +48,12 @@ The three-tier evaluation checks whether the skill:
 
 | Measure | Claude Code (Baseline → Skill Uplift) | Codex (Baseline → Skill Uplift) |
 |---|---:|---:|
-| Overall | 96.8% — baseline ran, but no comparable score was available; uplift unavailable | 90.3% — baseline ran, but no comparable score was available; uplift unavailable |
-| Security | 100.0% → 100.0% (±0.0 points) | 100.0% → 100.0% (±0.0 points) |
-| Correctness | 90.0% → 90.0% (±0.0 points) | 86.7% → 96.7% (+10.0 points) |
+| Overall | 94.6% — baseline ran, but no comparable score was available; uplift unavailable | 90.3% — baseline ran, but no comparable score was available; uplift unavailable |
+| Security | 100.0% → 83.3% (-16.7 points) | 100.0% → 100.0% (±0.0 points) |
+| Correctness | 83.3% → 96.7% (+13.4 points) | 83.3% → 93.3% (+10.0 points) |
 | Discoverability | 100.0% — baseline ran, but no comparable score was available; uplift unavailable | 95.0% — baseline ran, but no comparable score was available; uplift unavailable |
-| Effectiveness | 88.9% → 100.0% (+11.1 points) | 88.9% → 100.0% (+11.1 points) |
-| Efficiency | 94.2% — baseline ran, but no comparable score was available; uplift unavailable | 59.8% — baseline ran, but no comparable score was available; uplift unavailable |
+| Effectiveness | 88.9% → 100.0% (+11.1 points) | 86.1% → 100.0% (+13.9 points) |
+| Efficiency | 92.9% — baseline ran, but no comparable score was available; uplift unavailable | 63.1% — baseline ran, but no comparable score was available; uplift unavailable |
 
 **How to read this table:** baseline is the same task attempted without the target skill. Scores are rounded to one decimal; threshold-adjacent values use additional precision so their displayed band matches the verdict. Uplift is derived from those displayed scores and shown in percentage points.
 
@@ -68,9 +68,9 @@ Shared-source comparisons use the same signals and weights on both conditions. T
 | Agent | Dimension | Basis | Baseline → With skill (uplift) | Explanation |
 | --- | --- | --- | --- | --- |
 | claude-code | Discoverability | Dimension comparison | N/A | Discoverability is not applicable to the no-skill baseline; there is no installed skill to discover. |
-| claude-code | Efficiency | Token-only comparison | 98.5% → 94.7% (-3.8 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
+| claude-code | Efficiency | Token-only comparison | 97.9% → 94.2% (-3.7 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
 | codex | Discoverability | Dimension comparison | N/A | Discoverability is not applicable to the no-skill baseline; there is no installed skill to discover. |
-| codex | Efficiency | Token-only comparison | 84.4% → 86.7% (+2.3 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
+| codex | Efficiency | Token-only comparison | 85.3% → 87.1% (+1.8 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
 
 ## Token Usage
 
@@ -78,21 +78,21 @@ Actual Tier 3 execution usage is reported for every observed agent/case pair and
 
 | Agent | Dataset case | With skill | Without skill | Delta | Change | Coverage |
 |---|---|---:|---:|---:|---:|---|
-| claude-code | All cases | 785,052 | 482,972 | +302,080 | +62.55% | skill 6/6; base 6/6 |
-| claude-code | troubleshoot-cuda-mismatch | 80,021 | 36,030 | +43,991 | +122.10% | skill 1/1; base 1/1 |
-| claude-code | troubleshoot-imu-isolation | 187,087 | 37,117 | +149,970 | +404.05% | skill 1/1; base 1/1 |
-| claude-code | troubleshoot-negative-export | 240,526 | 229,501 | +11,025 | +4.80% | skill 1/1; base 1/1 |
-| claude-code | troubleshoot-negative-setup | 72,369 | 107,466 | -35,097 | -32.66% | skill 1/1; base 1/1 |
-| claude-code | troubleshoot-ros-rate | 79,950 | 36,677 | +43,273 | +117.98% | skill 1/1; base 1/1 |
-| claude-code | troubleshoot-stereo-calibration | 125,099 | 36,181 | +88,918 | +245.76% | skill 1/1; base 1/1 |
-| codex | All cases | 298,668 | 251,338 | +47,330 | +18.83% | skill 6/6; base 6/6 |
-| codex | troubleshoot-cuda-mismatch | 42,784 | 30,571 | +12,213 | +39.95% | skill 1/1; base 1/1 |
-| codex | troubleshoot-imu-isolation | 69,931 | 43,609 | +26,322 | +60.36% | skill 1/1; base 1/1 |
-| codex | troubleshoot-negative-export | 45,568 | 74,575 | -29,007 | -38.90% | skill 1/1; base 1/1 |
-| codex | troubleshoot-negative-setup | 39,021 | 45,220 | -6,199 | -13.71% | skill 1/1; base 1/1 |
-| codex | troubleshoot-ros-rate | 63,043 | 35,405 | +27,638 | +78.06% | skill 1/1; base 1/1 |
-| codex | troubleshoot-stereo-calibration | 38,321 | 21,958 | +16,363 | +74.52% | skill 1/1; base 1/1 |
-| ALL AGENTS | Dataset aggregate | 1,083,720 | 734,310 | +349,410 | +47.58% | skill 12/12; base 12/12 |
+| claude-code | All cases | 775,306 | 481,388 | +293,918 | +61.06% | skill 6/6; base 6/6 |
+| claude-code | troubleshoot-cuda-mismatch | 79,968 | 71,528 | +8,440 | +11.80% | skill 1/1; base 1/1 |
+| claude-code | troubleshoot-imu-isolation | 183,330 | 37,635 | +145,695 | +387.13% | skill 1/1; base 1/1 |
+| claude-code | troubleshoot-negative-export | 233,652 | 227,213 | +6,439 | +2.83% | skill 1/1; base 1/1 |
+| claude-code | troubleshoot-negative-setup | 72,770 | 72,153 | +617 | +0.86% | skill 1/1; base 1/1 |
+| claude-code | troubleshoot-ros-rate | 80,107 | 36,969 | +43,138 | +116.69% | skill 1/1; base 1/1 |
+| claude-code | troubleshoot-stereo-calibration | 125,479 | 35,890 | +89,589 | +249.62% | skill 1/1; base 1/1 |
+| codex | All cases | 305,627 | 274,415 | +31,212 | +11.37% | skill 6/6; base 6/6 |
+| codex | troubleshoot-cuda-mismatch | 34,223 | 56,691 | -22,468 | -39.63% | skill 1/1; base 1/1 |
+| codex | troubleshoot-imu-isolation | 73,855 | 43,360 | +30,495 | +70.33% | skill 1/1; base 1/1 |
+| codex | troubleshoot-negative-export | 63,605 | 79,465 | -15,860 | -19.96% | skill 1/1; base 1/1 |
+| codex | troubleshoot-negative-setup | 38,458 | 38,503 | -45 | -0.12% | skill 1/1; base 1/1 |
+| codex | troubleshoot-ros-rate | 57,245 | 34,740 | +22,505 | +64.78% | skill 1/1; base 1/1 |
+| codex | troubleshoot-stereo-calibration | 38,241 | 21,656 | +16,585 | +76.58% | skill 1/1; base 1/1 |
+| ALL AGENTS | Dataset aggregate | 1,080,933 | 755,803 | +325,130 | +43.02% | skill 12/12; base 12/12 |
 
 Prompt tokens include cached reads, so total tokens are `prompt + completion` (cached is not added twice). The Efficiency score uses `(prompt - cached) + completion`. Change is `100 * (with - without) / without`; negative means fewer tokens. N/A comparisons include their reason in the coverage column; coverage is never estimated.
 
