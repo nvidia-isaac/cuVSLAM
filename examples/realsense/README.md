@@ -102,7 +102,8 @@ You should see the following rerun visualization, displaying the camera trajecto
 ## Running Multisensor Odometry
 
 Multisensor odometry uses the cuNLS-based `OdometryMode.Multisensor` pipeline. It requires at least one RGB-D camera or
-one overlapping camera pair and currently supports pinhole cameras only. With a RealSense D455, the simplest live setup
+one overlapping camera pair; RGB-D cameras currently must use the pinhole model, while cameras without depth can use
+any distortion model. With a RealSense D455, the simplest live setup
 is RGB-D + IMU: the RGB stream provides visual features, the aligned depth stream provides metric depth, and the
 integrated IMU is registered through the same serialized tracker call path as the stereo inertial example.
 
@@ -118,6 +119,9 @@ For a stereo + IMU multisensor smoke test using the same IR streams as the stere
 ```bash
 python3 run_vio.py
 ```
+
+The multi-camera example offers the same switch: set `USE_MULTISENSOR_MODE = True` in `run_multicamera.py` to track
+all stereo pairs in Multisensor mode.
 
 > **Note:** Multisensor mode requires a cuNLS-enabled PyCuVSLAM build. Official release wheels include cuNLS, and the
 > default source build enables it. If cuVSLAM was configured with `-DUSE_CUNLS=OFF`, these multisensor examples are

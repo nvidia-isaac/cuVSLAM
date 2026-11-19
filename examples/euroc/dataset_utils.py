@@ -256,8 +256,8 @@ def prepare_frame_metadata_euroc(euroc_path: str,
         ],
     } for left_cam, right_cam in zip(left_cam_data, right_cam_data)]
 
-    # Add IMU data if in inertial mode
-    if odometry_mode == cuvslam.Odometry.OdometryMode.Inertial:
+    # Add IMU data in the modes that fuse it
+    if odometry_mode in (cuvslam.Odometry.OdometryMode.Inertial, cuvslam.Odometry.OdometryMode.Multisensor):
         imu_csv = os.path.join(euroc_path, 'imu0', 'data.csv')
         if not os.path.exists(imu_csv):
             raise ValueError(f"IMU data CSV file not found in {imu_csv}")

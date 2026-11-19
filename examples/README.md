@@ -70,6 +70,8 @@ Explore various examples to quickly get started with cuVSLAM using [Python API (
 - **Multisensor Odometry (cameras with and without depth, optional IMU)**
     - [Tartan Ground Dataset](multisensor/README.md)
     - [RealSense Live Camera](realsense/README.md#running-multisensor-odometry)
+    - As an alternative mode in the [EuRoC](euroc/README.md#visual-tracking-modes) and
+      [multi-camera](multicamera_edex/README.md) examples
 
 ### SLAM Examples
 

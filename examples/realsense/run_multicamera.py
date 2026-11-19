@@ -33,6 +33,8 @@ CONFIG_FILE = "frame_agx_rig.yaml"
 WARMUP_FRAMES = 500
 SYNC_MATCHING_THRESHOLD_MS = 5 * 1e6  # 5ms in nanoseconds
 IMAGE_JITTER_THRESHOLD_NS = 35 * 1e6  # 35ms in nanoseconds
+# Alternative mode: the stereo pairs satisfy Multisensor's overlapping-camera minimum.
+USE_MULTISENSOR_MODE = False
 
 
 def load_camera_configuration() -> Dict:
@@ -216,6 +218,12 @@ def main() -> None:
         enable_final_landmarks_export=True,
         rectified_stereo_camera=True
     )
+    if USE_MULTISENSOR_MODE:
+        # No depth ids are needed because this rig contains overlapping stereo pairs.
+        odom_cfg.odometry_mode = vslam.Odometry.OdometryMode.Multisensor
+        odom_cfg.multisensor_settings = vslam.Odometry.MultisensorSettings(
+            depth_camera_ids=[]
+        )
     tracker = vslam.Tracker(rig, vslam.Tracker.Mode.OdometryOnlyOffline, odom_cfg)
 
     # Configure all devices
