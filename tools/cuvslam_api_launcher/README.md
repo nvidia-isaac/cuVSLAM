@@ -42,7 +42,7 @@ To save a SLAM map:
 
 To localize in map:
 ```bash
-./bin/cuvslam_api_launcher -edex=<edex file> -loc_input_map=<map dir> -loc_input_hints=<hint file> -print_loc_poses=<path>
+./bin/cuvslam_api_launcher -edex=<edex file> -loc_input_map=<map dir> -loc_input_hints=<hint file> -print_loc_poses=<path> --cfg_enable_slam --cfg_enable_export
 ```
 
 Additional flags with default values:
