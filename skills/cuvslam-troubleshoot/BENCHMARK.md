@@ -48,12 +48,12 @@ The three-tier evaluation checks whether the skill:
 
 | Measure | Claude Code (Baseline → Skill Uplift) | Codex (Baseline → Skill Uplift) |
 |---|---:|---:|
-| Overall | 94.6% — baseline ran, but no comparable score was available; uplift unavailable | 90.3% — baseline ran, but no comparable score was available; uplift unavailable |
-| Security | 100.0% → 83.3% (-16.7 points) | 100.0% → 100.0% (±0.0 points) |
-| Correctness | 83.3% → 96.7% (+13.4 points) | 83.3% → 93.3% (+10.0 points) |
+| Overall | 98.2% — baseline ran, but no comparable score was available; uplift unavailable | 90.8% — baseline ran, but no comparable score was available; uplift unavailable |
+| Security | 100.0% → 100.0% (±0.0 points) | 100.0% → 100.0% (±0.0 points) |
+| Correctness | 80.0% → 93.3% (+13.3 points) | 90.0% → 93.3% (+3.3 points) |
 | Discoverability | 100.0% — baseline ran, but no comparable score was available; uplift unavailable | 95.0% — baseline ran, but no comparable score was available; uplift unavailable |
-| Effectiveness | 88.9% → 100.0% (+11.1 points) | 86.1% → 100.0% (+13.9 points) |
-| Efficiency | 92.9% — baseline ran, but no comparable score was available; uplift unavailable | 63.1% — baseline ran, but no comparable score was available; uplift unavailable |
+| Effectiveness | 88.9% → 100.0% (+11.1 points) | 88.9% → 100.0% (+11.1 points) |
+| Efficiency | 97.4% — baseline ran, but no comparable score was available; uplift unavailable | 65.4% — baseline ran, but no comparable score was available; uplift unavailable |
 
 **How to read this table:** baseline is the same task attempted without the target skill. Scores are rounded to one decimal; threshold-adjacent values use additional precision so their displayed band matches the verdict. Uplift is derived from those displayed scores and shown in percentage points.
 
@@ -68,9 +68,9 @@ Shared-source comparisons use the same signals and weights on both conditions. T
 | Agent | Dimension | Basis | Baseline → With skill (uplift) | Explanation |
 | --- | --- | --- | --- | --- |
 | claude-code | Discoverability | Dimension comparison | N/A | Discoverability is not applicable to the no-skill baseline; there is no installed skill to discover. |
-| claude-code | Efficiency | Token-only comparison | 97.9% → 94.2% (-3.7 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
+| claude-code | Efficiency | Token-only comparison | 97.8% → 94.9% (-2.9 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
 | codex | Discoverability | Dimension comparison | N/A | Discoverability is not applicable to the no-skill baseline; there is no installed skill to discover. |
-| codex | Efficiency | Token-only comparison | 85.3% → 87.1% (+1.8 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
+| codex | Efficiency | Token-only comparison | 87.7% → 87.5% (-0.2 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
 
 ## Token Usage
 
@@ -78,21 +78,21 @@ Actual Tier 3 execution usage is reported for every observed agent/case pair and
 
 | Agent | Dataset case | With skill | Without skill | Delta | Change | Coverage |
 |---|---|---:|---:|---:|---:|---|
-| claude-code | All cases | 775,306 | 481,388 | +293,918 | +61.06% | skill 6/6; base 6/6 |
-| claude-code | troubleshoot-cuda-mismatch | 79,968 | 71,528 | +8,440 | +11.80% | skill 1/1; base 1/1 |
-| claude-code | troubleshoot-imu-isolation | 183,330 | 37,635 | +145,695 | +387.13% | skill 1/1; base 1/1 |
-| claude-code | troubleshoot-negative-export | 233,652 | 227,213 | +6,439 | +2.83% | skill 1/1; base 1/1 |
-| claude-code | troubleshoot-negative-setup | 72,770 | 72,153 | +617 | +0.86% | skill 1/1; base 1/1 |
-| claude-code | troubleshoot-ros-rate | 80,107 | 36,969 | +43,138 | +116.69% | skill 1/1; base 1/1 |
-| claude-code | troubleshoot-stereo-calibration | 125,479 | 35,890 | +89,589 | +249.62% | skill 1/1; base 1/1 |
-| codex | All cases | 305,627 | 274,415 | +31,212 | +11.37% | skill 6/6; base 6/6 |
-| codex | troubleshoot-cuda-mismatch | 34,223 | 56,691 | -22,468 | -39.63% | skill 1/1; base 1/1 |
-| codex | troubleshoot-imu-isolation | 73,855 | 43,360 | +30,495 | +70.33% | skill 1/1; base 1/1 |
-| codex | troubleshoot-negative-export | 63,605 | 79,465 | -15,860 | -19.96% | skill 1/1; base 1/1 |
-| codex | troubleshoot-negative-setup | 38,458 | 38,503 | -45 | -0.12% | skill 1/1; base 1/1 |
-| codex | troubleshoot-ros-rate | 57,245 | 34,740 | +22,505 | +64.78% | skill 1/1; base 1/1 |
-| codex | troubleshoot-stereo-calibration | 38,241 | 21,656 | +16,585 | +76.58% | skill 1/1; base 1/1 |
-| ALL AGENTS | Dataset aggregate | 1,080,933 | 755,803 | +325,130 | +43.02% | skill 12/12; base 12/12 |
+| claude-code | All cases | 678,862 | 410,287 | +268,575 | +65.46% | skill 6/6; base 6/6 |
+| claude-code | troubleshoot-cuda-mismatch | 80,100 | 36,314 | +43,786 | +120.58% | skill 1/1; base 1/1 |
+| claude-code | troubleshoot-imu-isolation | 127,131 | 37,422 | +89,709 | +239.72% | skill 1/1; base 1/1 |
+| claude-code | troubleshoot-negative-export | 194,104 | 191,759 | +2,345 | +1.22% | skill 1/1; base 1/1 |
+| claude-code | troubleshoot-negative-setup | 72,495 | 72,056 | +439 | +0.61% | skill 1/1; base 1/1 |
+| claude-code | troubleshoot-ros-rate | 79,903 | 36,922 | +42,981 | +116.41% | skill 1/1; base 1/1 |
+| claude-code | troubleshoot-stereo-calibration | 125,129 | 35,814 | +89,315 | +249.39% | skill 1/1; base 1/1 |
+| codex | All cases | 298,224 | 194,891 | +103,333 | +53.02% | skill 6/6; base 6/6 |
+| codex | troubleshoot-cuda-mismatch | 34,463 | 25,791 | +8,672 | +33.62% | skill 1/1; base 1/1 |
+| codex | troubleshoot-imu-isolation | 65,459 | 34,963 | +30,496 | +87.22% | skill 1/1; base 1/1 |
+| codex | troubleshoot-negative-export | 73,013 | 49,020 | +23,993 | +48.95% | skill 1/1; base 1/1 |
+| codex | troubleshoot-negative-setup | 30,124 | 29,808 | +316 | +1.06% | skill 1/1; base 1/1 |
+| codex | troubleshoot-ros-rate | 56,951 | 33,764 | +23,187 | +68.67% | skill 1/1; base 1/1 |
+| codex | troubleshoot-stereo-calibration | 38,214 | 21,545 | +16,669 | +77.37% | skill 1/1; base 1/1 |
+| ALL AGENTS | Dataset aggregate | 977,086 | 605,178 | +371,908 | +61.45% | skill 12/12; base 12/12 |
 
 Prompt tokens include cached reads, so total tokens are `prompt + completion` (cached is not added twice). The Efficiency score uses `(prompt - cached) + completion`. Change is `100 * (with - without) / without`; negative means fewer tokens. N/A comparisons include their reason in the coverage column; coverage is never estimated.
 
@@ -100,7 +100,7 @@ Prompt tokens include cached reads, so total tokens are `prompt + completion` (c
 
 | Tier | Purpose | Status | Evidence |
 |---|---|---|---|
-| Tier 1 | Static validation | **FAILED** | 11 validator(s); 36 finding(s) |
+| Tier 1 | Static validation | **FAILED** | 11 validator(s); 35 finding(s) |
 | Tier 2 | Semantic deduplication | **PASSED WITH OBSERVATIONS** | 2 validator(s); 2 finding(s) |
 | Tier 3 | Live agent evaluation | **PASS** | 2 agent(s); 6 task(s) |
 
@@ -123,7 +123,7 @@ Prompt tokens include cached reads, so total tokens are `prompt + completion` (c
 - **MEDIUM** BANDIT/B108:hardcoded_tmp_directory: Probable insecure usage of temp file/directory. (CWE-377) (`skills/cuvslam-troubleshoot/scripts/isaac_ros_visual_slam_realsense_bag.launch.py:66`)
 - **MEDIUM** BANDIT/B108:hardcoded_tmp_directory: Probable insecure usage of temp file/directory. (CWE-377) (`skills/cuvslam-troubleshoot/scripts/vo_pose_diff_recorder.py:97`)
 - **MEDIUM** QUALITY/quality_correctness: No documented scripts in table format (`skills/cuvslam-troubleshoot/SKILL.md`)
-- 33 additional finding(s) are available in the full evaluation artifacts.
+- 32 additional finding(s) are available in the full evaluation artifacts.
 
 </details>
 

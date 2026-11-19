@@ -1,5 +1,5 @@
 ## Description: <br>
-Diagnose an existing NVIDIA cuVSLAM, PyCuVSLAM, or Isaac ROS visual_slam failure — pose drift, lost tracking, calibration or synchronization errors, IMU fusion, loop closure, build errors, and runtime integration — when behavior is failing or inaccurate. <br>
+Diagnose an existing NVIDIA cuVSLAM, PyCuVSLAM, or Isaac ROS visual_slam failure: pose drift, lost tracking, calibration or synchronization errors, IMU fusion, loop closure, build errors, and runtime integration. <br>
 
 This skill is ready for commercial/non-commercial use. <br>
 
@@ -9,7 +9,7 @@ NVIDIA <br>
 ### License/Terms of Use: <br>
 NVIDIA Community License <br>
 ## Use Case: <br>
-Developers and robotics engineers use this skill to triage and root-cause cuVSLAM build, tracking, and integration problems (C++ API, Python API, or Isaac ROS), following a phased workflow of config and dataset inspection, calibration prerequisite checks, and tracker-based reproduction and diagnosis. <br>
+Developers and robotics engineers use this skill to diagnose and fix failing or inaccurate cuVSLAM, PyCuVSLAM, or Isaac ROS visual_slam deployments, covering build/install errors, tracking and calibration problems, IMU fusion, loop closure, and runtime integration issues. <br>
 
 ### Deployment Geography for Use: <br>
 Global <br>
@@ -25,21 +25,21 @@ Risk: Review before execution as proposals could introduce incorrect or misleadi
 Mitigation: Review and scan skill before deployment. <br>
 
 ## Reference(s): <br>
-- [cuvslam-limitations.md](references/cuvslam-limitations.md) <br>
-- [edex-calibration-pitfalls.md](references/edex-calibration-pitfalls.md) <br>
-- [isaac-ros-visual-slam-usage.md](references/isaac-ros-visual-slam-usage.md) <br>
+- [cuVSLAM Known Limitations](references/cuvslam-limitations.md) <br>
+- [EDEX Calibration Pitfalls](references/edex-calibration-pitfalls.md) <br>
+- [Running Isaac ROS Visual SLAM](references/isaac-ros-visual-slam-usage.md) <br>
 - [cuVSLAM source repository](https://github.com/nvidia-isaac/cuVSLAM) <br>
 - [cuVSLAM Troubleshooting Guide](https://github.com/nvidia-isaac/cuVSLAM/blob/main/TROUBLESHOOTING.md) <br>
-- [PyCuVSLAM Python API documentation](https://nvidia-isaac.github.io/cuVSLAM/python/) <br>
-- [cuVSLAM C++ API documentation](https://nvidia-isaac.github.io/cuVSLAM/cpp/) <br>
+- [PyCuVSLAM Python API docs](https://nvidia-isaac.github.io/cuVSLAM/python/) <br>
+- [cuVSLAM C++ API docs](https://nvidia-isaac.github.io/cuVSLAM/cpp/) <br>
 - [Isaac ROS Visual SLAM](https://github.com/NVIDIA-ISAAC-ROS/isaac_ros_visual_slam) <br>
 - [Isaac ROS Visual Global Localization](https://github.com/NVIDIA-ISAAC-ROS/isaac_ros_mapping_and_localization/blob/release-4.3/isaac_ros_visual_global_localization) <br>
-- [cuVSLAM paper (arXiv:2506.04359)](https://www.arxiv.org/abs/2506.04359) <br>
+- [cuVSLAM paper (arXiv)](https://www.arxiv.org/abs/2506.04359) <br>
 
 
 ## Skill Output: <br>
-**Output Type(s):** [Analysis, Shell commands, Configuration instructions, Files] <br>
-**Output Format:** [Markdown with inline bash, Python, C++, and YAML code blocks] <br>
+**Output Type(s):** [Analysis, Shell commands, Configuration instructions, Code] <br>
+**Output Format:** [Markdown with inline bash code blocks] <br>
 **Output Parameters:** [1D] <br>
 **Other Properties Related to Output:** [None] <br>
 
@@ -50,15 +50,15 @@ Mitigation: Review and scan skill before deployment. <br>
 
 
 ## Evaluation Tasks: <br>
-6 evaluation tasks (4 positive, 2 negative), 1 attempt per task, each attempt in its own isolated sandbox pod (`k8s-sandbox`); evaluator version `1.6.10`, evaluated 2026-11-19. Each task was also attempted without the skill as a baseline. <br>
+6 evaluation tasks (4 positive, 2 negative), 1 attempt per task, each in an isolated sandbox pod (`k8s-sandbox`), evaluated with Skill Evaluator `1.6.10` on 2026-11-19. <br>
 
 ## Evaluation Metrics Used: <br>
 Reported benchmark dimensions: <br>
-- Security: Is it safe to use? Scored from `security` (100%). <br>
-- Correctness: Is the answer correct? Scored from `accuracy` (100%). <br>
-- Discoverability: Was the right skill loaded when needed? Scored from `skill_execution` (100%). <br>
-- Effectiveness: Did the skill help complete the task? Scored from `goal_accuracy` (50%) + `behavior_check` (50%). <br>
-- Efficiency: Did it avoid wasted tool calls and token usage? Scored from `skill_efficiency` (50%) + `token_efficiency` (50%). <br>
+- Security: Is it safe to use? Scored by `security` (100%). <br>
+- Correctness: Is the answer correct? Scored by `accuracy` (100%). <br>
+- Discoverability: Was the right skill loaded when needed? Scored by `skill_execution` (100%). <br>
+- Effectiveness: Did the skill help complete the task? Scored by `goal_accuracy` (50%) + `behavior_check` (50%). <br>
+- Efficiency: Did it avoid wasted tool calls and token usage? Scored by `skill_efficiency` (50%) + `token_efficiency` (50%). <br>
 
 Underlying evaluation signals used in this run: <br>
 - `security`: Security: unsafe operations, secret leakage, and unauthorized access. <br>
@@ -80,12 +80,12 @@ The skill should be reviewed before publication. Address the blocking findings b
 
 | Measure | Claude Code (Baseline → Skill Uplift) | Codex (Baseline → Skill Uplift) |
 |---|---:|---:|
-| Overall | 94.6% — baseline ran, but no comparable score was available; uplift unavailable | 90.3% — baseline ran, but no comparable score was available; uplift unavailable |
-| Security | 100.0% → 83.3% (-16.7 points) | 100.0% → 100.0% (±0.0 points) |
-| Correctness | 83.3% → 96.7% (+13.4 points) | 83.3% → 93.3% (+10.0 points) |
+| Overall | 98.2% — baseline ran, but no comparable score was available; uplift unavailable | 90.8% — baseline ran, but no comparable score was available; uplift unavailable |
+| Security | 100.0% → 100.0% (±0.0 points) | 100.0% → 100.0% (±0.0 points) |
+| Correctness | 80.0% → 93.3% (+13.3 points) | 90.0% → 93.3% (+3.3 points) |
 | Discoverability | 100.0% — baseline ran, but no comparable score was available; uplift unavailable | 95.0% — baseline ran, but no comparable score was available; uplift unavailable |
-| Effectiveness | 88.9% → 100.0% (+11.1 points) | 86.1% → 100.0% (+13.9 points) |
-| Efficiency | 92.9% — baseline ran, but no comparable score was available; uplift unavailable | 63.1% — baseline ran, but no comparable score was available; uplift unavailable |
+| Effectiveness | 88.9% → 100.0% (+11.1 points) | 88.9% → 100.0% (+11.1 points) |
+| Efficiency | 97.4% — baseline ran, but no comparable score was available; uplift unavailable | 65.4% — baseline ran, but no comparable score was available; uplift unavailable |
 
 **How to read this table:** baseline is the same task attempted without the target skill. Scores are rounded to one decimal; threshold-adjacent values use additional precision so their displayed band matches the verdict. Uplift is derived from those displayed scores and shown in percentage points.
 
@@ -100,17 +100,9 @@ Shared-source comparisons use the same signals and weights on both conditions. T
 | Agent | Dimension | Basis | Baseline → With skill (uplift) | Explanation |
 | --- | --- | --- | --- | --- |
 | claude-code | Discoverability | Dimension comparison | N/A | Discoverability is not applicable to the no-skill baseline; there is no installed skill to discover. |
-| claude-code | Efficiency | Token-only comparison | 97.9% → 94.2% (-3.7 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
+| claude-code | Efficiency | Token-only comparison | 97.8% → 94.9% (-2.9 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
 | codex | Discoverability | Dimension comparison | N/A | Discoverability is not applicable to the no-skill baseline; there is no installed skill to discover. |
-| codex | Efficiency | Token-only comparison | 85.3% → 87.1% (+1.8 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
-
-### Tier Status
-
-| Tier | Purpose | Status | Evidence |
-|---|---|---|---|
-| Tier 1 | Static validation | **FAILED** | 11 validator(s); 36 finding(s) |
-| Tier 2 | Semantic deduplication | **PASSED WITH OBSERVATIONS** | 2 validator(s); 2 finding(s) |
-| Tier 3 | Live agent evaluation | **PASS** | 2 agent(s); 6 task(s) |
+| codex | Efficiency | Token-only comparison | 87.7% → 87.5% (-0.2 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
 
 ## Skill Version(s): <br>
 18.0.0 (source: changelog, released 2026-11-13) <br>

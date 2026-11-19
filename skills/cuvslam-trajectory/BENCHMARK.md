@@ -48,12 +48,12 @@ The three-tier evaluation checks whether the skill:
 
 | Measure | Claude Code (Baseline → Skill Uplift) | Codex (Baseline → Skill Uplift) |
 |---|---:|---:|
-| Overall | 95.1% — baseline ran, but no comparable score was available; uplift unavailable | 97.3% — baseline ran, but no comparable score was available; uplift unavailable |
-| Security | 100.0% → 100.0% (±0.0 points) | 75.0% → 100.0% (+25.0 points) |
-| Correctness | 56.7% → 90.0% (+33.3 points) | 70.0% → 96.7% (+26.7 points) |
-| Discoverability | 100.0% — baseline ran, but no comparable score was available; uplift unavailable | 95.0% — baseline ran, but no comparable score was available; uplift unavailable |
-| Effectiveness | 61.1% → 87.5% (+26.4 points) | 69.4% → 100.0% (+30.6 points) |
-| Efficiency | 98.0% — baseline ran, but no comparable score was available; uplift unavailable | 95.0% — baseline ran, but no comparable score was available; uplift unavailable |
+| Overall | 98.9% — baseline ran, but no comparable score was available; uplift unavailable | 95.5% — baseline ran, but no comparable score was available; uplift unavailable |
+| Security | 100.0% → 100.0% (±0.0 points) | 91.7% → 100.0% (+8.3 points) |
+| Correctness | 56.7% → 100.0% (+43.3 points) | 66.7% → 93.3% (+26.6 points) |
+| Discoverability | 100.0% — baseline ran, but no comparable score was available; uplift unavailable | 93.8% — baseline ran, but no comparable score was available; uplift unavailable |
+| Effectiveness | 52.8% → 100.0% (+47.2 points) | 61.1% → 100.0% (+38.9 points) |
+| Efficiency | 94.6% — baseline ran, but no comparable score was available; uplift unavailable | 90.6% — baseline ran, but no comparable score was available; uplift unavailable |
 
 **How to read this table:** baseline is the same task attempted without the target skill. Scores are rounded to one decimal; threshold-adjacent values use additional precision so their displayed band matches the verdict. Uplift is derived from those displayed scores and shown in percentage points.
 
@@ -68,9 +68,9 @@ Shared-source comparisons use the same signals and weights on both conditions. T
 | Agent | Dimension | Basis | Baseline → With skill (uplift) | Explanation |
 | --- | --- | --- | --- | --- |
 | claude-code | Discoverability | Dimension comparison | N/A | Discoverability is not applicable to the no-skill baseline; there is no installed skill to discover. |
-| claude-code | Efficiency | Token-only comparison | 97.5% → 96.0% (-1.5 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
+| claude-code | Efficiency | Token-only comparison | 97.4% → 97.4% (±0.0 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
 | codex | Discoverability | Dimension comparison | N/A | Discoverability is not applicable to the no-skill baseline; there is no installed skill to discover. |
-| codex | Efficiency | Token-only comparison | 86.7% → 90.0% (+3.3 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
+| codex | Efficiency | Token-only comparison | 88.1% → 89.5% (+1.4 points) | Only Token Efficiency is comparable; the full dimension scores use different evaluator sources. |
 
 ## Token Usage
 
@@ -78,21 +78,21 @@ Actual Tier 3 execution usage is reported for every observed agent/case pair and
 
 | Agent | Dataset case | With skill | Without skill | Delta | Change | Coverage |
 |---|---|---:|---:|---:|---:|---|
-| claude-code | All cases | 936,716 | 804,890 | +131,826 | +16.38% | skill 6/6; base 6/6 |
-| claude-code | trajectory-bag-missing-mapping | 113,495 | 108,313 | +5,182 | +4.78% | skill 1/1; base 1/1 |
-| claude-code | trajectory-inspect-edex | 189,730 | 144,894 | +44,836 | +30.94% | skill 1/1; base 1/1 |
-| claude-code | trajectory-negative-drift | 110,672 | 109,317 | +1,355 | +1.24% | skill 1/1; base 1/1 |
-| claude-code | trajectory-negative-live | 301,135 | 227,344 | +73,791 | +32.46% | skill 1/1; base 1/1 |
-| claude-code | trajectory-reject-duplicate-time | 111,075 | 70,726 | +40,349 | +57.05% | skill 1/1; base 1/1 |
-| claude-code | trajectory-valid-tum | 110,609 | 144,296 | -33,687 | -23.35% | skill 1/1; base 1/1 |
-| codex | All cases | 360,343 | 822,872 | -462,529 | -56.21% | skill 6/6; base 6/6 |
-| codex | trajectory-bag-missing-mapping | 44,421 | 30,419 | +14,002 | +46.03% | skill 1/1; base 1/1 |
-| codex | trajectory-inspect-edex | 103,939 | 111,382 | -7,443 | -6.68% | skill 1/1; base 1/1 |
-| codex | trajectory-negative-drift | 33,210 | 48,504 | -15,294 | -31.53% | skill 1/1; base 1/1 |
-| codex | trajectory-negative-live | 75,596 | 463,514 | -387,918 | -83.69% | skill 1/1; base 1/1 |
-| codex | trajectory-reject-duplicate-time | 59,903 | 60,062 | -159 | -0.26% | skill 1/1; base 1/1 |
-| codex | trajectory-valid-tum | 43,274 | 108,991 | -65,717 | -60.30% | skill 1/1; base 1/1 |
-| ALL AGENTS | Dataset aggregate | 1,297,059 | 1,627,762 | -330,703 | -20.32% | skill 12/12; base 12/12 |
+| claude-code | All cases | 743,310 | 778,024 | -34,714 | -4.46% | skill 6/6; base 6/6 |
+| claude-code | trajectory-bag-missing-mapping | 153,018 | 36,792 | +116,226 | +315.90% | skill 1/1; base 1/1 |
+| claude-code | trajectory-inspect-edex | 150,095 | 182,659 | -32,564 | -17.83% | skill 1/1; base 1/1 |
+| claude-code | trajectory-negative-drift | 109,401 | 109,934 | -533 | -0.48% | skill 1/1; base 1/1 |
+| claude-code | trajectory-negative-live | 109,168 | 233,656 | -124,488 | -53.28% | skill 1/1; base 1/1 |
+| claude-code | trajectory-reject-duplicate-time | 111,029 | 70,714 | +40,315 | +57.01% | skill 1/1; base 1/1 |
+| claude-code | trajectory-valid-tum | 110,599 | 144,269 | -33,670 | -23.34% | skill 1/1; base 1/1 |
+| codex | All cases | 381,834 | 405,017 | -23,183 | -5.72% | skill 6/6; base 6/6 |
+| codex | trajectory-bag-missing-mapping | 48,489 | 21,878 | +26,611 | +121.63% | skill 1/1; base 1/1 |
+| codex | trajectory-inspect-edex | 106,226 | 62,278 | +43,948 | +70.57% | skill 1/1; base 1/1 |
+| codex | trajectory-negative-drift | 39,271 | 74,865 | -35,594 | -47.54% | skill 1/1; base 1/1 |
+| codex | trajectory-negative-live | 84,660 | 143,304 | -58,644 | -40.92% | skill 1/1; base 1/1 |
+| codex | trajectory-reject-duplicate-time | 59,924 | 30,998 | +28,926 | +93.32% | skill 1/1; base 1/1 |
+| codex | trajectory-valid-tum | 43,264 | 71,694 | -28,430 | -39.65% | skill 1/1; base 1/1 |
+| ALL AGENTS | Dataset aggregate | 1,125,144 | 1,183,041 | -57,897 | -4.89% | skill 12/12; base 12/12 |
 
 Prompt tokens include cached reads, so total tokens are `prompt + completion` (cached is not added twice). The Efficiency score uses `(prompt - cached) + completion`. Change is `100 * (with - without) / without`; negative means fewer tokens. N/A comparisons include their reason in the coverage column; coverage is never estimated.
 
