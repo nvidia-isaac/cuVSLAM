@@ -28,7 +28,7 @@ CI scripts (`scripts/`):
 - `Dockerfile.ci` - the shared `cuvslam-ci:local` image (git, python3, pre-commit, GPG-verified AWS CLI, jq).
 - `datasets_config.sh` - S3 location plus the `dataset_registry` shell shim; dataset names and evaluation records live in `tools/python_tools/cuvslam_tools/dataset_registry.py`.
 - `provision_dataset.sh` - runs `dataset_registry prepare`, tars the directory `prepare()` returned (uncompressed `.tar`), uploads to S3.
-- `stage_eval_datasets.sh` - validates the registry, downloads each eval dataset's `<id>.tar` from S3, streams it into the local cache, and checks the staged reporter config against the registry.
+- `stage_eval_datasets.sh` - validates the registry, downloads each eval dataset's `<id>.tar` from S3, streams it into the local cache, and checks the staged dataset against the registry.
 - `check_eval_prerequisites.sh` - verifies credentials/cache and `RUNNER_STORAGE_ROOT`.
 - `benchmark_cuvslam_in_docker.sh` - runs the active `cuda_modules_test` speed benchmarks in the product container and captures runner metadata, raw output, and GoogleTest XML.
 - `cuvslam_benchmark_report.py` - validates benchmark XML properties and renders per-Jetson JSON and Markdown reports.

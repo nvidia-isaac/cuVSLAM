@@ -360,7 +360,20 @@ class TestVerifyStaged(unittest.TestCase):
         spec = dataset_registry.dataset("kitti")
         with tempfile.TemporaryDirectory() as root:
             self._stage(root, "kitti-vio_slam_gt.cfg", "kitti/")
+            (Path(root) / "07").mkdir()
+            (Path(root) / "07" / "gt.txt").touch()
             dataset_registry.verify_staged(spec, Path(root))
+
+    def test_missing_vpr_ground_truth_fails(self):
+        # A CODa tarball converted before gt_global.txt existed.
+        spec = dataset_registry.dataset("coda")
+        with tempfile.TemporaryDirectory() as root:
+            for sequence in ("0", "5"):
+                (Path(root) / sequence).mkdir()
+                (Path(root) / sequence / "gt.txt").touch()
+            missing = re.escape(str(Path(root) / "0" / "gt_global.txt"))
+            with self.assertRaisesRegex(RegistryError, f"staged VPR ground truth not found: {missing}"):
+                dataset_registry.verify_staged(spec, Path(root))
 
     def test_mismatched_dataset_folder_fails(self):
         spec = dataset_registry.dataset("kitti")

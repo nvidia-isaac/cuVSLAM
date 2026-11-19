@@ -490,11 +490,12 @@ def validate(dataset_ids: Iterable[str] | None = None, suite: str | None = None)
 
 
 def verify_staged(spec: DatasetSpec, root: Path) -> None:
-    """Check that a staged dataset matches the registry's mount name.
+    """Check that a staged dataset matches the registry's mount name and VPR pairs.
 
     Each reporter config declares the directory it expects under
     CUVSLAM_DATASETS. If that disagrees with the dataset ID, the reporter looks
-    for sequences in a directory staging never created.
+    for sequences in a directory staging never created. A VPR sequence without
+    its ground truth file would fail cuvslam_vpr_reporter only after tracking.
     """
     expected = f"{spec.mount_name}/"
     for record in spec.evals:
@@ -515,6 +516,11 @@ def verify_staged(spec: DatasetSpec, root: Path) -> None:
                 f"{spec.dataset_id}: {record.config} declares dataset_folder {declared!r}, "
                 f"expected {expected!r}. Regenerate the dataset or rename it in the registry."
             )
+    if spec.vpr is not None:
+        for sequence in sorted({name for pair in spec.vpr.pairs for name in pair}):
+            ground_truth = root / sequence / (spec.vpr.ground_truth or "gt.txt")
+            if not ground_truth.is_file():
+                raise RegistryError(f"{spec.dataset_id}: staged VPR ground truth not found: {ground_truth}")
 
 
 def suite_kpi_keys(suite: str | None = None) -> list[str]:
