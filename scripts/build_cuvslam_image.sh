@@ -17,10 +17,10 @@ if [ "$#" -ne 0 ]; then
 fi
 
 DOCKERFILE=$(dirname "$(realpath "$0")")/Dockerfile
-DOCKER_BUILD_ARGS=""
-[ -n "${CUDA_VERSION:-}" ] && DOCKER_BUILD_ARGS="$DOCKER_BUILD_ARGS --build-arg CUDA_VERSION=$CUDA_VERSION"
-[ -n "${UBUNTU_VERSION:-}" ] && DOCKER_BUILD_ARGS="$DOCKER_BUILD_ARGS --build-arg UBUNTU_VERSION=$UBUNTU_VERSION"
-[ -n "${BASE_IMAGE:-}" ] && DOCKER_BUILD_ARGS="$DOCKER_BUILD_ARGS --build-arg BASE_IMAGE=$BASE_IMAGE"
-[ -n "${UBUNTU_PORTS_MIRROR:-}" ] \
-  && DOCKER_BUILD_ARGS="$DOCKER_BUILD_ARGS --build-arg UBUNTU_PORTS_MIRROR=$UBUNTU_PORTS_MIRROR"
-docker build -f "$DOCKERFILE" . --network host $DOCKER_BUILD_ARGS --tag cuvslam:local
+DOCKER_BUILD_ARGS=()
+for name in CUDA_VERSION UBUNTU_VERSION BASE_IMAGE UBUNTU_PORTS_MIRROR; do
+  if [ -n "${!name:-}" ]; then
+    DOCKER_BUILD_ARGS+=( --build-arg "$name=${!name}" )
+  fi
+done
+docker build -f "$DOCKERFILE" . --network host "${DOCKER_BUILD_ARGS[@]}" --tag cuvslam:local
