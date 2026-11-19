@@ -48,8 +48,8 @@ struct Internals {
   // Feature Selection Settings (from sof::Settings)
   // ============================================================
 
-  /// Number of desired feature tracks. Default: 450
-  int32_t num_desired_tracks = 450;
+  /// Number of desired feature tracks. Default: 550
+  int32_t num_desired_tracks = 550;
 
   /// Image border regions to ignore (in pixels). Default: 0
   int32_t border_top = 0;
@@ -63,13 +63,17 @@ struct Internals {
   /// Enable RANSAC filtering for this frame. Default: false
   bool ransac_filter = false;
 
+  /// All modes but Mono: new features are detected if the percent of tracks surviving
+  /// from the last detection falls below this value (0-100). Default: 48.f
+  float feature_survivor_from_last = 48.f;
+
   // ============================================================
   // Keyframe Settings (from KeyFrameSettings)
   // ============================================================
 
   /// Keyframe selection threshold: frame becomes keyframe if survivor tracks
-  /// from last keyframe falls below this percentage (0-100). Default: 41.f
-  float kf_survivor_from_last = 41.f;
+  /// from last keyframe falls below this percentage (0-100). Default: 48.f
+  float kf_survivor_from_last = 48.f;
 
   /// Maximum time delta between consecutive keyframes (in seconds). Default: 60
   int64_t kf_max_timedelta_between_kfs_s = 60;
