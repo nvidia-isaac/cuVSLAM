@@ -22,6 +22,9 @@ import rerun.blueprint as rrb
 from dataset_utils import read_stereo_edex
 from PIL import Image
 
+# Alternative mode: the stereo pairs satisfy Multisensor's overlapping-camera minimum (requires a cuNLS-enabled build).
+USE_MULTISENSOR_MODE = False
+
 # generate pseudo-random colour from integer identifier for visualization
 def color_from_id(identifier): return [(identifier * 17) % 256, (identifier * 31) % 256, (identifier * 47) % 256]
 
@@ -92,6 +95,10 @@ rig = vslam.Rig()
 rig.cameras = cameras
 
 odom_cfg = vslam.Odometry.Config(enable_final_landmarks_export = True, rectified_stereo_camera=True)
+if USE_MULTISENSOR_MODE:
+    # No depth ids are needed because this rig contains overlapping stereo pairs.
+    odom_cfg.odometry_mode = vslam.Odometry.OdometryMode.Multisensor
+    odom_cfg.multisensor_settings = vslam.Odometry.MultisensorSettings(depth_camera_ids=[])
 
 tracker = vslam.Tracker(rig, vslam.Tracker.Mode.OdometryOnlyRealtime, odom_cfg)
 
