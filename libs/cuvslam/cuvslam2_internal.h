@@ -63,6 +63,10 @@ struct Internals {
   /// Enable RANSAC filtering for this frame. Default: false
   bool ransac_filter = false;
 
+  /// All modes but Mono: new features are detected if the percent of tracks surviving
+  /// from the last detection falls below this value (0-100). Default: 41.f
+  float feature_survivor_from_last = 41.f;
+
   // ============================================================
   // Keyframe Settings (from KeyFrameSettings)
   // ============================================================

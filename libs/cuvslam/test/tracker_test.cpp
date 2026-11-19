@@ -33,6 +33,7 @@
 
 #include "common/include_gtest.h"
 #include "cuvslam/cuvslam2.h"
+#include "cuvslam/cuvslam2_internal.h"
 #include "cuvslam/vpr_vocabulary_builder2.h"
 
 #ifdef USE_CUDA
@@ -322,6 +323,21 @@ TEST_F(TrackerTest, TrackReturnsSlamPoseWhenEnabled) {
 
   Slam::Metrics metrics;
   EXPECT_NO_THROW(tracker.GetSlam().GetSlamMetrics(metrics));
+}
+
+// Track hands Internals to Odometry::Track, which rejects the invalid value.
+TEST_F(TrackerTest, TrackForwardsInternals) {
+  Tracker tracker{rig, Mode::OdometryOnlyOffline, MakeOfflineConfig().odometry};
+  cuvslam::internal::Internals internals;
+  internals.vo_pnp_max_iteration = -1;
+
+  try {
+    tracker.Track(NextFrame(), {}, {}, &internals);
+    ADD_FAILURE() << "a negative vo_pnp_max_iteration was accepted";
+  } catch (const std::invalid_argument& e) {
+    EXPECT_NE(std::string_view{e.what()}.find("vo_pnp_max_iteration"), std::string_view::npos) << e.what();
+  }
+  EXPECT_TRUE(tracker.Track(NextFrame()).odometry.world_from_rig.has_value());
 }
 
 // A SLAM mode must turn on the exports SLAM depends on, whatever the odometry config said. The

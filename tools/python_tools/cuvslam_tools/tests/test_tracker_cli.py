@@ -71,6 +71,16 @@ class TestTrackerCli(unittest.TestCase):
         self.assertEqual(args.vpr_model_path, "")
         self.assertEqual(args.vpr_vocabulary_path, "", "no flag leaves each session fitting its own")
         self.assertIsNone(args.max_map_size, "no flag leaves the SLAM default in place")
+        for name in ("num_desired_tracks", "kf_survivor_from_last", "feature_survivor_from_last"):
+            self.assertIsNone(getattr(args, name), f"no --{name} leaves the Internals default in place")
+
+    def test_internals_flags_are_settable(self):
+        args = _tracker_parser().parse_args(["--num_desired_tracks", "550", "--kf_survivor_from_last", "48",
+                                             "--feature_survivor_from_last", "48.5"])
+
+        self.assertEqual(args.num_desired_tracks, 550)
+        self.assertEqual(args.kf_survivor_from_last, 48.0)
+        self.assertEqual(args.feature_survivor_from_last, 48.5)
 
     def test_loop_closure_and_vpr_flags_are_settable(self):
         parser = _tracker_parser()

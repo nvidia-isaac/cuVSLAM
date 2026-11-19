@@ -51,6 +51,9 @@ _IMU_FUSING_MODES = (
     vslam.Odometry.OdometryMode.Multisensor,
 )
 
+# Tracker flags that override the Odometry.Internals field of the same name on every frame.
+_INTERNALS_FLAGS = ("num_desired_tracks", "kf_survivor_from_last", "feature_survivor_from_last")
+
 
 def get_fps(tracking_time, n_frames):
     """Return frames per second, or -1 when tracking time is not positive."""
@@ -145,6 +148,14 @@ class Tracker:
             )
             if self.slam_cfg:
                 print(f"SLAM config:\n{conv.to_str(self.slam_cfg)}")
+
+        self.internals = None
+        internals_flags = {name: getattr(args, name, None) for name in _INTERNALS_FLAGS}
+        if any(value is not None for value in internals_flags.values()):
+            self.internals = vslam.Odometry.Internals()
+            for name, value in internals_flags.items():
+                if value is not None:
+                    setattr(self.internals, name, value)
 
         self.stat = Stat()
         self.stat.odometry_mode = str(self.odom_cfg.odometry_mode)
@@ -275,7 +286,7 @@ class Tracker:
         timestamp = max(timestamps)
         self.processed_frame_count += 1
         self.start_time = time.perf_counter()
-        odom_pose, slam_pose = self.tracker.track(timestamp, images, masks, depths)
+        odom_pose, slam_pose = self.tracker.track(timestamp, images, masks, depths, self.internals)
         odom_world_from_rig = odom_pose.world_from_rig.pose if odom_pose.world_from_rig else None
         if odom_world_from_rig is None:
             self.stat.num_tracking_losts += 1
