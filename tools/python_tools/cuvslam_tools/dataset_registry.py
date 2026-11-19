@@ -146,10 +146,12 @@ class EvalSpec:
 
 @dataclass(frozen=True)
 class VprSpec:
-    """One cuvslam_vpr_reporter run: each sequence is recognized in its own map."""
+    """One cuvslam_vpr_reporter run: each query sequence is recognized in a map of its map sequence."""
 
-    sequences: tuple[str, ...]
+    pairs: tuple[tuple[str, str], ...]
     suites: frozenset[str]
+    # Ground truth file both sequences of a pair share a frame in; the reporter's gt.txt if None.
+    ground_truth: str | None = None
 
 
 @dataclass(frozen=True)
@@ -231,7 +233,7 @@ DATASETS: dict[str, DatasetSpec] = {
                 gating="informational",
             ),
         ),
-        vpr=VprSpec(sequences=("07",), suites=frozenset(SUITES)),
+        vpr=VprSpec(pairs=(("07", "07"),), suites=frozenset(SUITES)),
     ),
     "euroc": DatasetSpec(
         dataset_id="euroc",
@@ -260,7 +262,7 @@ DATASETS: dict[str, DatasetSpec] = {
                 gating="informational",
             ),
         ),
-        vpr=VprSpec(sequences=("MH_01_easy",), suites=frozenset(SUITES)),
+        vpr=VprSpec(pairs=(("MH_01_easy", "MH_01_easy"),), suites=frozenset(SUITES)),
     ),
     # Kept out of smoke deliberately: ICL-NUIM already covers RGB-D pre-merge for
     # a fraction of the staging cost.
@@ -340,6 +342,8 @@ DATASETS: dict[str, DatasetSpec] = {
     "coda": DatasetSpec(
         dataset_id="coda",
         prepare_module="cuvslam_tools.dataset_preparation.coda.prepare",
+        # Two recordings of one route, the only such pair here. Full only: the two sequences take 59 GiB.
+        vpr=VprSpec(pairs=(("0", "5"),), suites=frozenset({FULL_SUITE}), ground_truth="gt_global.txt"),
     ),
 }
 
@@ -472,8 +476,8 @@ def validate(dataset_ids: Iterable[str] | None = None, suite: str | None = None)
         for record in spec.evals:
             _validate_eval(spec, record)
         if spec.vpr is not None:
-            if not spec.vpr.sequences:
-                raise RegistryError(f"{spec.dataset_id} VPR: must have at least one sequence")
+            if not spec.vpr.pairs:
+                raise RegistryError(f"{spec.dataset_id} VPR: must have at least one pair")
             _validate_suites(f"{spec.dataset_id} VPR", spec.vpr.suites)
 
     _validate_kpi_identities()
@@ -486,11 +490,12 @@ def validate(dataset_ids: Iterable[str] | None = None, suite: str | None = None)
 
 
 def verify_staged(spec: DatasetSpec, root: Path) -> None:
-    """Check that a staged dataset matches the registry's mount name.
+    """Check that a staged dataset matches the registry's mount name and VPR pairs.
 
     Each reporter config declares the directory it expects under
     CUVSLAM_DATASETS. If that disagrees with the dataset ID, the reporter looks
-    for sequences in a directory staging never created.
+    for sequences in a directory staging never created. A VPR sequence without
+    its ground truth file would fail cuvslam_vpr_reporter only after tracking.
     """
     expected = f"{spec.mount_name}/"
     for record in spec.evals:
@@ -511,6 +516,11 @@ def verify_staged(spec: DatasetSpec, root: Path) -> None:
                 f"{spec.dataset_id}: {record.config} declares dataset_folder {declared!r}, "
                 f"expected {expected!r}. Regenerate the dataset or rename it in the registry."
             )
+    if spec.vpr is not None:
+        for sequence in sorted({name for pair in spec.vpr.pairs for name in pair}):
+            ground_truth = root / sequence / (spec.vpr.ground_truth or "gt.txt")
+            if not ground_truth.is_file():
+                raise RegistryError(f"{spec.dataset_id}: staged VPR ground truth not found: {ground_truth}")
 
 
 def suite_kpi_keys(suite: str | None = None) -> list[str]:
@@ -541,12 +551,18 @@ def write_vpr_config(path: Path, suite: str | None = None) -> bool:
             continue
         # The KPI collector names a pair's row after its title's first hyphen-delimited token.
         prefix = spec.dataset_id.upper()
-        for sequence in record.sequences:
-            pairs.append({
-                "title": f"{prefix}-{sequence}",
-                "map_sequence": f"{spec.mount_name}/{sequence}",
-                "query_sequence": f"{spec.mount_name}/{sequence}",
-            })
+        for map_sequence, query_sequence in record.pairs:
+            title = f"{prefix}-{map_sequence}"
+            if query_sequence != map_sequence:
+                title += f" to {prefix}-{query_sequence}"
+            pair = {
+                "title": title,
+                "map_sequence": f"{spec.mount_name}/{map_sequence}",
+                "query_sequence": f"{spec.mount_name}/{query_sequence}",
+            }
+            if record.ground_truth:
+                pair.update(map_gt=record.ground_truth, query_gt=record.ground_truth)
+            pairs.append(pair)
     if not pairs:
         return False
     path.write_text(json.dumps({"pairs": pairs}, indent=2) + "\n", encoding="utf-8")

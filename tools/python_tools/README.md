@@ -306,7 +306,8 @@ prepare_coda \
 The prepared root is `/path/to/datasets/converted/coda`. It contains `dataset_metadata.json` and
 `coda-vio_slam.cfg`, plus `coda-vio_gt.cfg`, `coda-slam_gt.cfg`, and `coda-vio_slam_gt.cfg` covering the sequences
 that shipped poses. Every sequence contains `stereo.edex`, left images under `00/`, right images under `01/`, and
-`gt.txt` when the archive carried poses.
+`gt.txt` when the archive carried poses, plus `gt_global.txt`, in the map frame all sequences share, when those were
+`poses/dense_global`.
 
 Archives are read member by member instead of being extracted, because one sequence unpacks to tens of gigabytes and
 only the rectified stereo pair, the calibration, and the poses are used. Images come from `2d_rect/cam0` and
@@ -469,6 +470,7 @@ cuvslam_vpr_reporter \
     --map_sequence /path/to/datasets/converted/coda/0 \
     --query_sequence /path/to/datasets/converted/coda/5 \
     --pair_title "CODa-00 to CODa-05" \
+    --gt_path gt_global.txt \
     --output_root /tmp/cuvslam-vpr-reports \
     --pdf
 ```
@@ -493,17 +495,18 @@ cuvslam_vpr_reporter \
       "map_sequence": "coda/0",
       "query_sequence": "coda/5",
       "edex_file": "stereo.edex",
-      "map_gt": "gt.txt",
-      "query_gt": "gt.txt"
+      "map_gt": "gt_global.txt",
+      "query_gt": "gt_global.txt"
     }
   ]
 }
 ```
 
-`pairs` is the only required key; each pair needs `title`, `map_sequence`, and `query_sequence`, and the other three
-keys default to the values above. Sequence paths are resolved against `--datasets_root`, absolute paths are used as
-is, and ground-truth paths are resolved against their own sequence folder. `success_radius_m` sets the default for the
-run; `--success_radius` on the command line overrides it.
+`pairs` is the only required key; each pair needs `title`, `map_sequence`, and `query_sequence`, while `edex_file`,
+`map_gt`, and `query_gt` default to `stereo.edex` and `gt.txt`. Two sequences need ground truth in one frame. Each CODa
+`gt.txt` starts at its own first frame, but `gt_global.txt` does not. Sequence paths are resolved against
+`--datasets_root`, absolute paths are used as is, and ground-truth paths are resolved against their own sequence
+folder. `success_radius_m` sets the default for the run; `--success_radius` on the command line overrides it.
 
 Every pair gets one row of the summary table, one section with its plots, and one entry
 in `stats/all_vpr_stats.json`. The plot is a bird's eye view: the map sequence's ground truth as a thin grey line,
@@ -519,10 +522,10 @@ folders on disk.
 
 ### Metrics
 
-Ground truth for both sequences is a KITTI-format `gt.txt` of absolute poses. Both are read in the frame they are
+Ground truth for both sequences is a KITTI-format file of absolute poses. Both are read in the frame they are
 written in and compared directly, with no alignment, so the two sequences must already share a world frame. This
-holds for the prepared CODa sequences, where every CODa-05 pose is within 6.8 m of the CODa-00 trajectory (median
-2.4 m), and trivially for a sequence evaluated against itself.
+holds for the `gt_global.txt` of the prepared CODa sequences, where every CODa-05 pose is within 1.45 m of the
+CODa-00 trajectory (median 0.32 m), and trivially for a sequence evaluated against itself.
 
 A recognition names the mapped frame it matched by timestamp, which is looked up in the map sequence's own
 timestamp-to-frame index; a timestamp that is not in it falls back to the nearest one and is counted. The distance
