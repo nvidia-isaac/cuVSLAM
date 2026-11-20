@@ -77,11 +77,16 @@ python3 make_map.py <datasets>/coda/0   # CODa
 
 The map is saved to `map/`, replacing an earlier one.
 
-## Step 3: Localize without a Guess Pose
+## Step 3: Recognize and Localize without a Guess Pose
 
-Every 5 seconds, `localize.py` takes the current frame, localizes it in the saved map in a new session, and prints the
-rig position in the map, in meters, or why it failed. Nothing is tracked between tries, so each one starts like a robot
-switched on, or picked up and put down, somewhere in the mapped area:
+Every 5 seconds, `localize.py` asks the saved map where the current frame was taken, in two ways, and prints both:
+
+- Place recognition (`recognize_place_by_frame`) names the mapped frame that looks most like it, by its time in the
+  mapping run, and how alike they look. It searches a map in memory, which a session gets from its first successful
+  localization, so it starts with the try after that one.
+- Localization (`localize_in_map`) also verifies the place against the map's landmarks and prints the rig position in
+  the map, in meters, or why it failed. Each try runs in a new session that tracks nothing, so it starts like a robot
+  switched on, or picked up and put down, somewhere in the mapped area.
 
 ```bash
 python3 localize.py                     # RealSense
@@ -91,9 +96,9 @@ python3 localize.py <datasets>/coda/5   # CODa
 On CODa sequence 5 it runs for about 12 minutes and prints lines such as:
 
 ```
-   55.0 s: at -37.73, 3.83, -13.23
-   60.0 s: at -39.06, 4.58, -17.74
-   65.0 s: not localized: Can't localize in map using provided image and guess
-   70.0 s: at -40.28, 6.12, -26.66
-   75.0 s: at -41.05, 6.71, -31.76
+   40.0 s: recognized the place mapped at 45.2 s (score 0.76); localized at -30.52, 1.55, -2.04
+   45.0 s: recognized the place mapped at 52.3 s (score 0.80); localized at -33.99, 2.28, -4.64
+   50.0 s: recognized the place mapped at 57.3 s (score 0.79); not localized: Can't localize in map using provided image and guess
+   55.0 s: recognized the place mapped at 61.0 s (score 0.76); localized at -37.76, 4.01, -13.14
+   60.0 s: recognized the place mapped at 67.4 s (score 0.82); localized at -39.12, 4.74, -17.74
 ```

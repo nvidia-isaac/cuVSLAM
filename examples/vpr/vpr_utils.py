@@ -29,12 +29,16 @@ VOCABULARY_PATH = 'vpr.vocabulary'
 MAP_PATH = 'map'
 IMAGES_DIR = 'images'
 
-# Mapping and localizing must recognize places with the same vocabulary
-VPR_SETTINGS = vslam.Slam.VprSettings(model_path=ENGINE_PATH, vocabulary_path=VOCABULARY_PATH)
-
 REALSENSE_RESOLUTION = (640, 360)
 REALSENSE_FPS = 30
 REALSENSE_WARMUP_FRAMES = 60
+
+
+def slam_config(**kwargs) -> vslam.Slam.Config:
+    """Returns the SLAM configuration of mapping and localizing: place recognition with the vocabulary of step 1."""
+    vpr_settings = vslam.Slam.VprSettings(model_path=ENGINE_PATH, vocabulary_path=VOCABULARY_PATH)
+    # max_map_size=0 keeps every keyframe: merging one away would also drop its place
+    return vslam.Slam.Config(use_vpr=True, vpr_settings=vpr_settings, max_map_size=0, **kwargs)
 
 
 def stereo_rig(size, principal, focal, right_translation) -> vslam.Rig:
@@ -67,11 +71,14 @@ def realsense_frames():
         try:
             for _ in range(REALSENSE_WARMUP_FRAMES):  # auto exposure settles
                 pipeline.wait_for_frames()
+            start = None
             while True:
                 frameset = pipeline.wait_for_frames()
                 left_frame, right_frame = frameset.get_infrared_frame(1), frameset.get_infrared_frame(2)
                 images = [np.asanyarray(frame.get_data()) for frame in (left_frame, right_frame)]
-                yield int(left_frame.timestamp * 1e6), images  # milliseconds to nanoseconds
+                timestamp = int(left_frame.timestamp * 1e6)  # milliseconds to nanoseconds
+                start = timestamp if start is None else start
+                yield timestamp - start, images  # from 0 in every run, as in a recording
         finally:
             pipeline.stop()
 

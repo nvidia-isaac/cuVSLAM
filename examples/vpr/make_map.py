@@ -17,7 +17,7 @@
 import argparse
 
 import cuvslam as vslam
-from vpr_utils import MAP_PATH, VPR_SETTINGS, stereo_frames
+from vpr_utils import MAP_PATH, slam_config, stereo_frames
 
 
 def main() -> None:
@@ -28,8 +28,7 @@ def main() -> None:
 
     rig, frames = stereo_frames(args.coda_sequence)
     tracker = vslam.Tracker(rig, vslam.Tracker.Mode.OdometryWithSlamRealtime,
-                            vslam.Odometry.Config(rectified_stereo_camera=True),
-                            vslam.Slam.Config(use_vpr=True, vpr_settings=VPR_SETTINGS))
+                            vslam.Odometry.Config(rectified_stereo_camera=True), slam_config())
     print('Mapping until Ctrl+C or the end of the recording')
     try:
         for timestamp, images in frames:
