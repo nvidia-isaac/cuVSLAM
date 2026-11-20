@@ -34,7 +34,6 @@ import hashlib
 import json
 import math
 import os
-import threading
 import time
 from pathlib import Path
 
@@ -91,18 +90,12 @@ def apply_settings(config, values):
 
 
 def save_map(slam, destination, timeout_s):
-    """Wait for either a synchronous or asynchronous native save callback."""
-    completed = threading.Event()
-    saved = []
-
-    def on_saved(ok):
-        saved.append(ok)
-        completed.set()
-
-    slam.save_map(str(destination), on_saved)
-    if not completed.wait(timeout_s):
-        raise TimeoutError(f"Map save did not complete within {timeout_s:g} seconds")
-    if saved != [True]:
+    """Wait for the native map save, whether SLAM runs it synchronously or on its own thread."""
+    try:
+        saved = slam.save_map(str(destination)).result(timeout_s)
+    except TimeoutError:
+        raise TimeoutError(f"Map save did not complete within {timeout_s:g} seconds") from None
+    if not saved:
         raise RuntimeError(f"Map save failed: {saved}")
 
 
@@ -116,7 +109,7 @@ def main(argv=None):
     ap.add_argument("--odometry", action="append", metavar="KEY=VALUE", help="Odometry.Config override; repeatable")
     ap.add_argument("--slam", action="append", metavar="KEY=VALUE", help="Slam.Config override; repeatable")
     ap.add_argument("--limit", type=int, default=0)
-    ap.add_argument("--save-timeout", type=float, default=300.0, help="Map save callback timeout in seconds")
+    ap.add_argument("--save-timeout", type=float, default=300.0, help="Map save timeout in seconds")
     ap.add_argument("--source-commit", help="Commit used to build the installed cuVSLAM binding (optional provenance)")
     args = ap.parse_args(argv)
     if not math.isfinite(args.save_timeout) or args.save_timeout <= 0:
