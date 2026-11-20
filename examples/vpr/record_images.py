@@ -15,6 +15,7 @@
 """Step 1 with a RealSense camera: records left infrared images of the area into images/ until Ctrl+C."""
 
 import os
+import time
 
 import cv2
 
@@ -24,15 +25,15 @@ SAVE_EVERY = 10  # frames, so 3 images per second at 30 fps
 
 
 def main() -> None:
-    """Saves every SAVE_EVERY-th left image, named by its timestamp, so later recordings add to earlier ones."""
+    """Saves every SAVE_EVERY-th left image, named by the time it is saved, so later recordings add to earlier ones."""
     _, frames = realsense_frames()
     os.makedirs(IMAGES_DIR, exist_ok=True)
     print(f'Recording into {IMAGES_DIR}/: walk through the area, then press Ctrl+C')
     saved = 0
     try:
-        for index, (timestamp, images) in enumerate(frames):
+        for index, (_, images) in enumerate(frames):
             if index % SAVE_EVERY == 0:
-                cv2.imwrite(os.path.join(IMAGES_DIR, f'{timestamp}.png'), images[0])
+                cv2.imwrite(os.path.join(IMAGES_DIR, f'{time.time_ns()}.png'), images[0])
                 saved += 1
     except KeyboardInterrupt:
         pass

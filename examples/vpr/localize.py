@@ -12,44 +12,58 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
-"""Step 3: every 5 seconds, localizes the current frame in the saved map without a guess pose."""
+"""Step 3: every 5 seconds, recognizes the place of the current frame and localizes it in the saved map, both without
+a guess pose."""
 
 import argparse
 
 import cuvslam as vslam
-from vpr_utils import MAP_PATH, VPR_SETTINGS, stereo_frames
+from vpr_utils import MAP_PATH, slam_config, stereo_frames
 
 PERIOD_NS = 5 * 10**9
 
 
+def recognize(recognizer, timestamp: int, images) -> str:
+    """Returns which mapped frame place recognition finds most like the frame."""
+    if recognizer is None:
+        return 'no map loaded yet'
+    request = recognizer.recognize_place_by_frame(images, timestamp)
+    place = request.result()
+    if place is None:
+        return f'not recognized: {request.error_message}'
+    return f'recognized the place mapped at {place.timestamp_ns / 1e9:.1f} s (score {place.score:.2f})'
+
+
 def main() -> None:
-    """Prints where each try finds the rig in the map, or why it failed, until Ctrl+C or the end of the recording."""
+    """Prints both results of each try until Ctrl+C or the end of the recording."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('coda_sequence', nargs='?', help='converted CODa sequence to localize instead of the camera')
     args = parser.parse_args()
 
     rig, frames = stereo_frames(args.coda_sequence)
-    config = vslam.Slam.Config(use_vpr=True, vpr_settings=VPR_SETTINGS, sync_mode=True)
+    config = slam_config(sync_mode=True)
     # Without a guess pose the radii are unused; the steps refine the pose around each recognized place
     settings = vslam.Slam.LocalizationSettings(horizontal_search_radius=8., vertical_search_radius=2.,
                                                horizontal_step=0.5, vertical_step=0.2, angular_step_rads=0.03)
-    start = next_try = None
+    recognizer = None
+    next_try = 0
     try:
         for timestamp, images in frames:
-            if start is None:
-                start = next_try = timestamp
             if timestamp < next_try:
                 continue
             next_try = timestamp + PERIOD_NS
+            place = recognize(recognizer, timestamp, images)
             # A new session for each try: nothing tracked, no prior pose, nothing kept from the previous try
             slam = vslam.Slam(rig, [0], config)
             request = slam.localize_in_map(MAP_PATH, timestamp, None, images, settings)
             pose = request.result()
-            seconds = (timestamp - start) / 1e9
             if pose is None:
-                print(f'{seconds:7.1f} s: not localized: {request.error_message}')
-            else:
-                print(f'{seconds:7.1f} s: at ' + ', '.join(f'{value:.2f}' for value in pose.translation))
+                print(f'{timestamp / 1e9:7.1f} s: {place}; not localized: {request.error_message}')
+                continue
+            print(f'{timestamp / 1e9:7.1f} s: {place}; localized at ' +
+                  ', '.join(f'{value:.2f}' for value in pose.translation))
+            if recognizer is None:
+                recognizer = slam  # place recognition searches its map: the saved one, loaded by this localization
     except KeyboardInterrupt:
         pass
 
