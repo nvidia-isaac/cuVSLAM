@@ -59,7 +59,7 @@ repos:
       # insert-license only adds a missing header; it never flags a wrong or stale one.
       - id: forbid-other-nvidia-license
         name: Forbid NVIDIA license headers other than license_header.txt
-        entry: NVIDIA software released under the (?!NVIDIA Community License\b)[A-Za-z]
+        entry: NVIDIA software released under the (?!NVIDIA Community License is intended )\w
         language: pygrep
         types: [text]
 
