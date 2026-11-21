@@ -54,10 +54,10 @@ WORKDIR /cuvslam
 COPY scripts/install_tensorrt.sh /tmp/install_tensorrt.sh
 RUN /tmp/install_tensorrt.sh && rm /tmp/install_tensorrt.sh
 
-# Build cuVSLAM, install Python packages, and clean up source
+# Build cuVSLAM and the AnyLoc engine builder and model, install Python packages, and clean up source
 COPY . /tmp/cuvslam_src
 RUN cmake -DCMAKE_BUILD_TYPE=Release -S /tmp/cuvslam_src -B /tmp/cuvslam_build \
-    && make -j$(nproc) -C /tmp/cuvslam_build cuvslam \
+    && make -j$(nproc) -C /tmp/cuvslam_build cuvslam anyloc_engine_builder anyloc_onnx \
     && CUVSLAM_BUILD_DIR=/tmp/cuvslam_build pip3 install /tmp/cuvslam_src/python/ --break-system-packages \
     && pip3 install -r /tmp/cuvslam_src/examples/requirements.txt --break-system-packages \
     && rm -rf /tmp/cuvslam_src /tmp/cuvslam_build
