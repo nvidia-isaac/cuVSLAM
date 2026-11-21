@@ -1,0 +1,22 @@
+[
+  {
+    "cameras": [
+      {
+        "name": "cam0"
+      },
+      {
+        "name": "cam1"
+      }
+    ]
+  },
+  {
+    "sequence": [
+      [
+        "cam0/*.png"
+      ],
+      [
+        "cam1/*.png"
+      ]
+    ]
+  }
+]
