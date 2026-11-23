@@ -65,7 +65,7 @@ repos:
 
       - id: forbid-duplicate-license-header
         name: Forbid duplicate NVIDIA license headers
-        entry: Copyright (?:\(c\)|©)[^\n]*NVIDIA CORPORATION[\s\S]*Copyright (?:\(c\)|©)[^\n]*NVIDIA CORPORATION
+        entry: Copyright (?:\(c\)|©)[^\n]*(?i:NVIDIA CORPORATION)[\s\S]*Copyright (?:\(c\)|©)[^\n]*(?i:NVIDIA CORPORATION)
         language: pygrep
         args: [--multiline]
         types: [text]
