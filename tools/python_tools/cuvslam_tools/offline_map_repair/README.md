@@ -156,7 +156,7 @@ Both default to `OdometryWithSlamOffline`, since the baseline has to save a map.
 The runner pairs cameras by exact timestamp and delivers IMU samples before
 images with the same timestamp for `Inertial` and for `Multisensor` with an IMU
 in the rig. `summary.json` records the number of delivered IMU samples.
-It waits for the map save callback before exporting the trajectory; `--save-timeout`
+It waits for the map save to finish before exporting the trajectory; `--save-timeout`
 sets the wait limit in seconds (default 300), including in realtime tracker mode.
 Each session saves `map/`, `tracking.json`,
 `optimized_trajectory.json`, and `summary.json`. `--source-commit` records the

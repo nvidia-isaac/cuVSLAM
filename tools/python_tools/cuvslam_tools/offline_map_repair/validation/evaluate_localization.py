@@ -140,20 +140,17 @@ def evaluate(map_name, limit, query_file):
         images = [load_frame(p) for p in frames[query["frame"]]["images_paths"]]
         # New instance for every query prevents query-to-query information leakage.
         slam = cuvslam.Slam(rig, [0], cfg)
-        callback = []
         start = time.monotonic()
-        slam.localize_in_map(
+        request = slam.localize_in_map(
             str(HERE / map_name),
             query["timestamp_ns"],
             cuvslam.Pose(**query["guess"]),
             images,
             settings,
-            lambda: None,
-            lambda p, e: callback.append((p, e)),
         )
-        if len(callback) != 1:
+        if not request.done():
             raise RuntimeError("Synchronous localization did not finish")
-        result, error = callback[0]
+        result, error = request.result(), request.error_message
         row = {
             "query_id": query["id"],
             "frame": query["frame"],
