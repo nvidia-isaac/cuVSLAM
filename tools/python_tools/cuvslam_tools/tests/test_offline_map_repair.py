@@ -147,18 +147,39 @@ class TrajectoryCoverageTests(unittest.TestCase):
                 interpolate(np.array(timestamps), np.tile(np.eye(4), (len(timestamps), 1, 1)), [1])
 
 
+class MapWriteRequest:
+    """Stands in for Slam.MapWriteRequest: result(timeout) waits until finish() or raises TimeoutError."""
+
+    def __init__(self, saved=None):
+        self.finished = threading.Event()
+        self.saved = saved
+        if saved is not None:
+            self.finished.set()
+
+    def finish(self, saved):
+        self.saved = saved
+        self.finished.set()
+
+    def result(self, timeout=None):
+        if not self.finished.wait(timeout):
+            raise TimeoutError("The SLAM request did not finish within the timeout.")
+        return self.saved
+
+
 class SequenceRunnerTests(unittest.TestCase):
-    def test_waits_for_save_callback_before_returning(self):
+    def test_waits_for_save_request_before_returning(self):
         from cuvslam_tools.offline_map_repair.sessions.run_sequence import save_map
 
         for delayed in (False, True):
             with self.subTest(delayed=delayed):
-                callbacks = []
+                saves = []
 
-                def native_save(destination, callback):
+                def native_save(destination):
+                    request = MapWriteRequest()
+
                     def finish():
-                        callbacks.append(destination)
-                        callback(True)
+                        saves.append(destination)
+                        request.finish(True)
 
                     if delayed:
                         timer = threading.Timer(0.01, finish)
@@ -166,17 +187,18 @@ class SequenceRunnerTests(unittest.TestCase):
                         timer.start()
                     else:
                         finish()
+                    return request
 
                 save_map(SimpleNamespace(save_map=native_save), Path("saved-map"), 1)
-                self.assertEqual(callbacks, ["saved-map"])
+                self.assertEqual(saves, ["saved-map"])
 
     def test_reports_save_failure_and_timeout(self):
         from cuvslam_tools.offline_map_repair.sessions.run_sequence import save_map
 
         with self.assertRaisesRegex(RuntimeError, "Map save failed"):
-            save_map(SimpleNamespace(save_map=lambda path, callback: callback(False)), Path("map"), 1)
+            save_map(SimpleNamespace(save_map=lambda path: MapWriteRequest(False)), Path("map"), 1)
         with self.assertRaisesRegex(TimeoutError, "did not complete"):
-            save_map(SimpleNamespace(save_map=lambda path, callback: None), Path("map"), 0.01)
+            save_map(SimpleNamespace(save_map=lambda path: MapWriteRequest()), Path("map"), 0.01)
 
     def test_rejects_invalid_save_timeout_before_loading_native_binding(self):
         from cuvslam_tools.offline_map_repair.sessions import run_sequence
@@ -205,10 +227,10 @@ class SequenceRunnerTests(unittest.TestCase):
                         {"type": "stereo", "timestamp": 10, "images_paths": []}
                     ], {}
 
-                def native_save(destination, callback):
+                def native_save(destination):
                     Path(destination).mkdir()
                     (Path(destination) / "data.mdb").write_bytes(b"map")
-                    callback(True)
+                    return MapWriteRequest(True)
 
                 tracker = mock.Mock()
                 tracker.track.return_value = (SimpleNamespace(world_from_rig=None), None)
