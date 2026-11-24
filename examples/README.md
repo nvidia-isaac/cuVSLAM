@@ -13,15 +13,9 @@ Alternatively, you can [build cuVSLAM from source](../README.md#build-cuvslam) a
 
 #### Using Venv
 
-The examples need Python 3.11 or newer. Create a virtual environment:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-```
-
-On Ubuntu 22.04 and Jetson Orin (JetPack 6), whose system Python is 3.10, create it with
-[uv](https://docs.astral.sh/uv/getting-started/installation/) instead and install the `cp312-abi3` PyCuVSLAM wheel:
+The examples need Python 3.11 or newer, which [uv](https://docs.astral.sh/uv/getting-started/installation/) provides
+even where the system Python is older, such as on Ubuntu 22.04 and Jetson Orin (JetPack 6). Create a virtual
+environment, then install the `cp312-abi3` PyCuVSLAM wheel into it:
 
 ```bash
 uv venv --managed-python --seed --python 3.12 .venv

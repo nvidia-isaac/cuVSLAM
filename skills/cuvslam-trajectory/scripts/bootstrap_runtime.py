@@ -185,6 +185,8 @@ def _healthy(python: Path, expected_version: str) -> bool:
             str(python),
             "-c",
             (
+                "import sys; "
+                "assert sys.version_info >= (3, 11), sys.version; "
                 "import cuvslam, cuvslam_tools; "
                 "version = cuvslam.get_version(); "
                 f"assert version[0].split('+', 1)[0] == {expected_version!r}, version; "
@@ -198,6 +200,16 @@ def _healthy(python: Path, expected_version: str) -> bool:
         print(probe.stdout.strip())
         return True
     return False
+
+
+def _below_python_3_11(python: Path) -> bool:
+    if not python.is_file():
+        return False
+    probe = subprocess.run(
+        [str(python), "-c", "import sys; raise SystemExit(sys.version_info < (3, 11))"],
+        capture_output=True,
+    )
+    return probe.returncode == 1
 
 
 def main() -> int:
@@ -255,8 +267,12 @@ def main() -> int:
 
     try:
         # Re-running venv is safe and repairs missing launchers after an interrupted
-        # creation. Pip then repairs partial package installations in place.
-        _run([sys.executable, "-m", "venv", str(venv)])
+        # creation. Pip then repairs partial package installations in place. A venv
+        # of Python 3.10 cannot be upgraded in place, so it is recreated.
+        venv_command = [sys.executable, "-m", "venv", str(venv)]
+        if _below_python_3_11(python):
+            venv_command.append("--clear")
+        _run(venv_command)
         _run([str(python), "-m", "pip", "install", "--upgrade", "pip"])
         _run([str(python), "-m", "pip", "install", "-e", str(repo / "tools" / "python_tools")])
         _run([str(python), "-m", "pip", "install", "--force-reinstall", wheel_source])

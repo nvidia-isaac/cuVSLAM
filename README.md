@@ -202,6 +202,7 @@ provide Python 3.12 for the `cp312-abi3` wheel:
 uv venv --managed-python --seed --python 3.12 .venv
 source .venv/bin/activate
 pip install cuvslam_cu12-<version>-cp312-abi3-<platform>.whl
+git clone https://github.com/nvidia-isaac/cuVSLAM.git && cd cuVSLAM   # the examples live in the repository
 pip install -r examples/requirements.txt
 ```
 
@@ -348,7 +349,7 @@ nvidia-smi --query-gpu=compute_cap --format=csv,noheader   # e.g. 8.7 -> use 87
 
 1. Create virtual environment and install rerun SDK:
    ```bash
-   python3 -m venv .venv
+   uv venv --managed-python --seed --python 3.12 .venv
    source .venv/bin/activate
    pip install rerun-sdk==0.33.1
    ```

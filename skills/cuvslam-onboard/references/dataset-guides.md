@@ -226,7 +226,7 @@ Minimal stereo example:
 **bag2edex** (offline, frame-by-frame):
 ```bash
 cd tools/ros/bag2edex
-python3 -m venv .venv && source .venv/bin/activate
+uv venv --managed-python --seed --python 3.12 .venv && source .venv/bin/activate   # needs Python 3.11+
 pip install -r requirements.txt
 python3 bag_to_edex.py <rosbag_path> <output_edex_path>
 ```
@@ -234,6 +234,7 @@ python3 bag_to_edex.py <rosbag_path> <output_edex_path>
 **edex2bag** (reverse):
 ```bash
 cd tools/ros/edex2bag
+uv venv --managed-python --seed --python 3.12 .venv && source .venv/bin/activate   # needs Python 3.11+
 pip install -r requirements.txt
 python3 edex_to_bag.py <edex_path> <rosbag_path>
 ```

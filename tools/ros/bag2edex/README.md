@@ -1,10 +1,10 @@
 ## Install
-Use the following commands to install the bag2edex tool. It needs Python 3.11 or newer; where the system Python is
-older, such as Ubuntu 22.04, create the venv with `uv venv --managed-python --seed --python 3.12 .env` instead.
+The tool needs Python 3.11 or newer, which [uv](https://docs.astral.sh/uv/getting-started/installation/) provides
+even where the system Python is older, such as on Ubuntu 22.04:
 
 ```bash
 cd tools/ros/bag2edex
-python3 -m venv .env
+uv venv --managed-python --seed --python 3.12 .env
 source .env/bin/activate
 pip install -r requirements.txt
 deactivate

@@ -67,20 +67,17 @@ Only these combinations are provided; use a source build for others. Pick the wh
 Visual place recognition (`use_vpr`, AnyLoc) also needs TensorRT 10 (`libnvinfer10`): install it separately or with the
 `tensorrt` extra (not on Jetson Orin). The rest of cuVSLAM runs without it.
 
-```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install cuvslam_cu12-<version>-<tags>.whl   # or cuvslam_cu13-...
-pip install -r examples/requirements.txt   # rerun-sdk, numpy, etc.
-```
-
-The examples need Python 3.11+. On Ubuntu 22.04 and Jetson Orin (system Python 3.10), create the venv with uv and
-install the `cp312-abi3` wheel:
+The examples need Python 3.11+, so create the venv with uv, which provides Python 3.12 even on Ubuntu 22.04 and
+Jetson Orin (system Python 3.10), and install the `cp312-abi3` wheel:
 
 ```bash
 uv venv --managed-python --seed --python 3.12 .venv && source .venv/bin/activate
-pip install cuvslam_cu12-<version>-cp312-abi3-<platform>.whl
-pip install -r examples/requirements.txt
+pip install cuvslam_cu12-<version>-cp312-abi3-<platform>.whl   # or cuvslam_cu13-...
+pip install -r examples/requirements.txt   # rerun-sdk, numpy, etc.
 ```
+
+To use only the `cuvslam` module from a system Python 3.10 (for example next to ROS 2 Humble), install the `cp310`
+wheel into a `python3 -m venv` environment instead.
 
 ## 3. Build from Source
 
