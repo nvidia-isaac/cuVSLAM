@@ -160,20 +160,29 @@ jobs:
             -w /cuvslam \
             cuvslam-ci:local ./scripts/check_eval_prerequisites.sh
 
-      - name: Stage eval datasets
+      # Built before staging starts: each image layer commit stalls behind staging's
+      # disk writes. "Build" rebuilds it from the layer cache.
+      - name: Build product image
         timeout-minutes: 30
+        run: ./scripts/build_cuvslam_image.sh
+
+      # Staging is network- and disk-bound and the compile is CPU-bound, so staging
+      # runs detached through the compile and tests; "Wait for eval datasets" joins it.
+      # The container is kept (no --rm) so its exit code survives until then.
+      - name: Start eval dataset staging
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_RO_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_RO_SECRET_ACCESS_KEY }}
         run: |
           mkdir -p "$RUNNER_LOCAL_DATASETS_ROOT"
-          docker run --rm --network host --label "cuvslam.runner=$RUNNER_NAME" \
+          container=$(docker run --detach --network host --label "cuvslam.runner=$RUNNER_NAME" \
             -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_DEFAULT_REGION -e S3_DATASETS_BUCKET \
             -e RUNNER_LOCAL_DATASETS_ROOT -e EVAL_SUITE \
             -v "$(pwd):/cuvslam:ro" \
             -v "$RUNNER_LOCAL_DATASETS_ROOT:$RUNNER_LOCAL_DATASETS_ROOT" \
             -w /cuvslam \
-            cuvslam-ci:local ./scripts/stage_eval_datasets.sh
+            cuvslam-ci:local ./scripts/stage_eval_datasets.sh)
+          echo "STAGING_CONTAINER=$container" >> "$GITHUB_ENV"
 
       - name: Build
         timeout-minutes: 45
@@ -194,6 +203,20 @@ jobs:
       - name: Run Python tests
         timeout-minutes: 15
         run: ./scripts/test_pycuvslam_in_docker.sh ./output
+
+      # Container timestamps show when staging actually ran; the step's own
+      # timestamps only show when the buffered log was replayed.
+      - name: Wait for eval datasets
+        timeout-minutes: 30
+        run: |
+          : "${STAGING_CONTAINER:?Eval dataset staging was not started}"
+          docker logs --follow --timestamps "$STAGING_CONTAINER"
+          status=$(docker wait "$STAGING_CONTAINER")
+          docker rm "$STAGING_CONTAINER" > /dev/null
+          if [ "$status" -ne 0 ]; then
+            echo "::error::Eval dataset staging failed with exit code $status"
+            exit 1
+          fi
 
       - name: Run cuVSLAM evaluation
         timeout-minutes: 30
