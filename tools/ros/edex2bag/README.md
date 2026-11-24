@@ -1,4 +1,6 @@
 ## Install
+Needs Python 3.11 or newer.
+
 cd apps/edex2bag
 mkvirtualenv edex2bag
 pip install -r requirements.txt

@@ -30,6 +30,14 @@ EVAL_STATS="$OUTPUT_DIR/eval/stats"
 mkdir -p "$EVAL_STATS"
 [ "$WRITE_HISTORY" = "true" ] && mkdir -p "$KPI_HISTORY"
 
+# cuvslam-tools needs Python 3.11 or newer, which the Ubuntu 22.04 and JetPack 6
+# images do not ship.
+echo "=== Creating the Python 3.12 evaluation environment ==="
+EVAL_VENV=/tmp/eval-venv
+uv venv -q --managed-python --seed --python 3.12 "$EVAL_VENV"
+export VIRTUAL_ENV="$EVAL_VENV"
+export PATH="$EVAL_VENV/bin:$PATH"
+
 echo "=== Installing cuvslam python bindings against $OUTPUT_DIR/build ==="
 CUVSLAM_BUILD_DIR="$OUTPUT_DIR/build" SKBUILD_BUILD_DIR=/tmp/skbuild \
   pip install /cuvslam/python/

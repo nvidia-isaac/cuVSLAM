@@ -1,7 +1,7 @@
+# Python 3.11 or newer: the last Pillow release for Python 3.10 has unfixed vulnerabilities.
 numpy==2.2.6
 opencv-python~=4.11.0
-pillow==12.3.0; python_version < "3.11"
-pillow==13.0.0; python_version >= "3.11"
+pillow==13.0.0
 pyyaml==6.0.2
 rerun-sdk==0.33.1
 scipy==1.15.3

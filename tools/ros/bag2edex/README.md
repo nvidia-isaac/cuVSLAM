@@ -1,5 +1,6 @@
 ## Install
-Use the following commands to install the bag2edex tool
+Use the following commands to install the bag2edex tool. It needs Python 3.11 or newer; where the system Python is
+older, such as Ubuntu 22.04, create the venv with `uv venv --managed-python --seed --python 3.12 .env` instead.
 
 ```bash
 cd tools/ros/bag2edex

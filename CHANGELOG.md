@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- The examples, `cuvslam-tools` and the ROS bag tools (`tools/ros/`) require Python 3.11 or newer, so they always get
+  Pillow 13.0.0; the last Pillow release for Python 3.10 has unfixed vulnerabilities (BDSA-2026-37840 to
+  BDSA-2026-38134). The `cuvslam` wheels, including `cp310`, are unchanged. On Ubuntu 22.04 and Jetson Orin
+  (JetPack 6), whose system Python is 3.10, the README shows how to get Python 3.12 from uv and install the
+  `cp312-abi3` wheel. `docker/Dockerfile.realsense-cu12` installs everything into a uv-managed Python 3.12 venv, and
+  the evaluation runs in one
+
+### Fixed
+
+- `tools/ros/edex2bag` installs on Python 3.11 and newer: its `lz4`, `zstandard` and `ruamel.yaml` pins had no wheels
+  there
+
 ## [18.0.0] - 2026-11-13
 
 Adds visual global localization: SLAM finds the rig in a saved map without a guess pose, using AnyLoc visual place

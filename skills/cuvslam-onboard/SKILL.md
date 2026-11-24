@@ -48,7 +48,7 @@ For a request for instructions only, explain the commands without starting downl
 - Ubuntu 22+ (x86_64 or aarch64/Jetson)
 - CUDA Toolkit 12 or 13 (https://developer.nvidia.com/cuda/toolkit)
 - System packages: `apt update && apt install g++ cmake git git-lfs python3-dev`
-- CMake 3.19+, Python 3.10+
+- CMake 3.19+, Python 3.10+ (3.11+ for the examples and `cuvslam-tools`)
 
 ## 2. Install PyCuVSLAM (Quickest Path)
 
@@ -71,6 +71,15 @@ Visual place recognition (`use_vpr`, AnyLoc) also needs TensorRT 10 (`libnvinfer
 python3 -m venv .venv && source .venv/bin/activate
 pip install cuvslam_cu12-<version>-<tags>.whl   # or cuvslam_cu13-...
 pip install -r examples/requirements.txt   # rerun-sdk, numpy, etc.
+```
+
+The examples need Python 3.11+. On Ubuntu 22.04 and Jetson Orin (system Python 3.10), create the venv with uv and
+install the `cp312-abi3` wheel:
+
+```bash
+uv venv --managed-python --seed --python 3.12 .venv && source .venv/bin/activate
+pip install cuvslam_cu12-<version>-cp312-abi3-<platform>.whl
+pip install -r examples/requirements.txt
 ```
 
 ## 3. Build from Source

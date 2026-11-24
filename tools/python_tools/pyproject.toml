@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "cuvslam-tools"
 version = "0.1.0"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "av",
     "fonttools>=4.60.2",
@@ -16,8 +16,7 @@ dependencies = [
     "scipy>=1.15.3",
     "opencv-python>=4.11.0.86",
     "pandas",
-    "pillow>=12.3.0; python_version < '3.11'",
-    "pillow>=13.0.0; python_version >= '3.11'",
+    "pillow>=13.0.0",
     "pyarrow",
     "pydantic",
     "pytransform3d>=3.8.0",

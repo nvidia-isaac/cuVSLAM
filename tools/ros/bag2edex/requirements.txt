@@ -1,3 +1,4 @@
+# Python 3.11 or newer: the last Pillow release for Python 3.10 has unfixed vulnerabilities.
 lz4==4.4.4                      # required for rosbags
 numpy==2.2.6                    # required for rosbags
 ruamel.yaml==0.18.14            # required for rosbags
@@ -5,5 +6,4 @@ ruamel.yaml.clib==0.2.12        # required for rosbags
 typing_extensions==4.14.0       # required for rosbags
 zstandard==0.23.0               # required for rosbags
 rosbags==0.10.10
-pillow==12.3.0; python_version < "3.11"
-pillow==13.0.0; python_version >= "3.11"
+pillow==13.0.0

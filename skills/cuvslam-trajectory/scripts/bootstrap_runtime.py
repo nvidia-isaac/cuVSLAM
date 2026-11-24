@@ -89,13 +89,14 @@ def _glibc_tag() -> str:
 
 def _python_tag() -> str:
     version = sys.version_info
-    if version[:2] == (3, 10):
-        return "cp310"
+    if version[:2] == (3, 11):
+        return "cp311"
     if version >= (3, 12):
         return "cp312-abi3"
     raise RuntimeError(
-        f"released wheels do not support Python {version.major}.{version.minor}; "
-        "use Python 3.10 on Ubuntu 22.04 or Python 3.12+ on Ubuntu 24.04"
+        f"cuvslam-tools needs Python 3.11 or newer, got {version.major}.{version.minor}; "
+        "on Ubuntu 22.04 or Jetson Orin, run this script with "
+        "`uv run --managed-python --python 3.12 --no-project bootstrap_runtime.py ...`"
     )
 
 
