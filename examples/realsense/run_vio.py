@@ -281,7 +281,7 @@ def main() -> None:
 
     # Configure tracker
     odom_cfg = vslam.Odometry.Config(
-        async_sba=False,
+        async_sba=True,
         enable_final_landmarks_export=True,
         enable_observations_export=True,
         debug_imu_mode=False,
@@ -299,7 +299,7 @@ def main() -> None:
     rig = get_rs_vio_rig(camera_params)
 
     # Initialize tracker
-    tracker = vslam.Tracker(rig, vslam.Tracker.Mode.OdometryOnlyOffline, odom_cfg)
+    tracker = vslam.Tracker(rig, vslam.Tracker.Mode.OdometryOnlyRealtime, odom_cfg)
 
     # Set up IR pipeline
     ir_pipe = rs.pipeline()

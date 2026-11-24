@@ -214,7 +214,7 @@ def main() -> None:
 
     # Initialize tracker
     odom_cfg = vslam.Odometry.Config(
-        async_sba=False,
+        async_sba=True,
         enable_final_landmarks_export=True,
         rectified_stereo_camera=True
     )
@@ -224,7 +224,7 @@ def main() -> None:
         odom_cfg.multisensor_settings = vslam.Odometry.MultisensorSettings(
             depth_camera_ids=[]
         )
-    tracker = vslam.Tracker(rig, vslam.Tracker.Mode.OdometryOnlyOffline, odom_cfg)
+    tracker = vslam.Tracker(rig, vslam.Tracker.Mode.OdometryOnlyRealtime, odom_cfg)
 
     # Configure all devices
     configure_all_devices(pipelines, configs)

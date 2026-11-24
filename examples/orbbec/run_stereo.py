@@ -159,14 +159,14 @@ def main() -> None:
 
     # Configure tracker
     odom_cfg = vslam.Odometry.Config(
-        async_sba=False,
+        async_sba=True,
         enable_final_landmarks_export=True,
         enable_observations_export=True,
         rectified_stereo_camera=True  # Orbbec IR images are typically rectified
     )
 
     # Initialize tracker and visualizer
-    tracker = vslam.Tracker(rig, vslam.Tracker.Mode.OdometryOnlyOffline, odom_cfg)
+    tracker = vslam.Tracker(rig, vslam.Tracker.Mode.OdometryOnlyRealtime, odom_cfg)
     visualizer = RerunVisualizer()
 
     frame_id = 0
