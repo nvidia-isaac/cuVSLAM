@@ -38,9 +38,10 @@ repos:
 
       - id: insert-license
         name: Add Header (Python/CMake)
-        # Matches .py, .cmake, and CMakeLists.txt files except __init__.py
+        # Matches .py, .cmake, and CMakeLists.txt files except package-marker __init__.py files;
+        # the cuvslam package __init__.py holds code and ships in the wheel
         files: (\.py|\.cmake|CMakeLists.txt)$
-        exclude: __init__\.py$
+        exclude: ^(?!python/src/).*__init__\.py$
         args:
           - --license-filepath
           - license_header.txt
@@ -55,6 +56,20 @@ repos:
 
   - repo: local
     hooks:
+      # insert-license only adds a missing header; it never flags a wrong or stale one.
+      - id: forbid-other-nvidia-license
+        name: Forbid NVIDIA license headers other than license_header.txt
+        entry: NVIDIA software released under the (?!NVIDIA Community License is intended )[^\s(]
+        language: pygrep
+        types: [text]
+
+      - id: forbid-duplicate-license-header
+        name: Forbid duplicate NVIDIA license headers
+        entry: Copyright (?:\(c\)|©)[^\n]*(?i:NVIDIA CORPORATION)[\s\S]*Copyright (?:\(c\)|©)[^\n]*(?i:NVIDIA CORPORATION)
+        language: pygrep
+        args: [--multiline]
+        types: [text]
+
       - id: check-workflow-security
         name: Verify CI workflow security guards
         entry: scripts/check-workflow-security.sh
