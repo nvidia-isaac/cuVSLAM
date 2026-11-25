@@ -59,6 +59,7 @@ public:
 
   // IN:  time_ns, frameState,
   //      observations - observations from all cameras
+  //      world_from_rig - predicted pose; solvers may use it as an initial guess
   // OUT: world_from_rig - if return code is true - estimated world_from_rig otherwise - previous pose.
   //                       Start pose is Identity.
   //      static_info_exp - information matrix for static frame in exponential mapping form
