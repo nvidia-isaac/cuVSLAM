@@ -25,8 +25,8 @@ The scripts read and write `anyloc.engine`, `vpr.vocabulary` and `map/` in this 
 
 1. Register at the [Texas Dataverse record](https://dataverse.tdl.org/dataset.xhtml?persistentId=doi:10.18738/T8/BBOQMV),
    accept the dataset license, and download `0.zip` and `5.zip` (87 GB) into `~/datasets/coda/raw`
-2. From the repository root, convert them into rectified stereo images in `~/datasets/coda/0` and
-   `~/datasets/coda/5` (61 GB); the converter needs only Python 3.10 or later:
+2. From the repository root, convert them into rectified stereo images and ground truth poses in `~/datasets/coda/0`
+   and `~/datasets/coda/5` (61 GB); the converter needs only Python 3.10 or later:
    ```bash
    PYTHONPATH=tools/python_tools python3 -m cuvslam_tools.dataset_preparation.coda.prepare \
        --raw-dir ~/datasets/coda/raw --output-dir ~/datasets --sequences 0 5
@@ -67,6 +67,11 @@ both:
   the map, in meters, or why it failed. Each try runs in a new session that tracks nothing, so it starts like a robot
   switched on, or picked up and put down, somewhere in the mapped area.
 
+Ground truth (`gt_global.txt`) checks both. A recognized place is right when it was mapped within 10 m of where the
+frame was taken, as `cuvslam_vpr_reporter` counts it. A localization next to a right place shows how far it is from
+where ground truth puts the frame: the offset from that place comes from ground truth and the place's pose from the
+map, so the map's own drift doesn't count.
+
 ```bash
 python3 localize.py
 ```
@@ -74,15 +79,16 @@ python3 localize.py
 It runs for about 6 minutes and prints lines such as:
 
 ```
-   40.0 s: recognized the place mapped at 45.2 s (score 0.76); localized at -31.06, 1.59, -1.88
-   45.0 s: recognized the place mapped at 52.3 s (score 0.80); localized at -34.23, 1.99, -4.70
-   50.0 s: recognized the place mapped at 57.3 s (score 0.79); not localized: Can't localize in map using provided image and guess
-   55.0 s: recognized the place mapped at 61.0 s (score 0.76); localized at -37.76, 4.01, -13.14
-   60.0 s: recognized the place mapped at 67.4 s (score 0.82); localized at -39.10, 4.84, -17.68
+   40.0 s: recognized the place mapped at 45.2 s, 0.8 m away (score 0.76); localized at -30.19, 1.74, -2.31 (0.17 m off)
+   45.0 s: recognized the place mapped at 52.3 s, 1.7 m away (score 0.80); localized at -34.00, 2.29, -4.66 (0.15 m off)
+   50.0 s: recognized the place mapped at 57.3 s, 1.9 m away (score 0.79); not localized: Can't localize in map using provided image and guess
+   55.0 s: recognized the place mapped at 61.0 s, 0.1 m away (score 0.76); localized at -37.76, 4.01, -13.14 (0.17 m off)
+   60.0 s: recognized the place mapped at 67.4 s, 1.1 m away (score 0.82); localized at -39.09, 4.84, -17.68 (0.20 m off)
 ```
 
-At the end it counts the tries that succeeded; without ground truth, it can't tell a right place from a wrong one:
+It ends with how many tries succeeded and how they compare with ground truth:
 
 ```
-localized 38 of 145 tries, recognized 131 of 144
+Summary: recognized 131 of 144 tries (91.0 %), localized 38 of 145 (26.2 %)
+Ground truth: 129 of 131 recognized places within 10 m (98.5 %); 37 localizations checked: median 0.36 m, max 2.90 m off
 ```

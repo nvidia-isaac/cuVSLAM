@@ -19,10 +19,12 @@ import json
 import os
 
 import cv2
+import numpy as np
 
 import cuvslam as vslam
 
 CODA_DIR = os.path.expanduser('~/datasets/coda')  # the converted sequences 0 and 5
+FRAME_NS = 10**8  # CODa is recorded at 10 fps
 ENGINE_PATH = 'anyloc.engine'
 VOCABULARY_PATH = 'vpr.vocabulary'
 MAP_PATH = 'map'
@@ -44,10 +46,15 @@ def image_paths(sequence: int, camera: str) -> list:
     return paths
 
 
+def ground_truth(sequence: int) -> np.ndarray:
+    """Returns the left camera pose of every frame of a CODa sequence in CODa's shared frame, as 3x4 [R | t]."""
+    return np.loadtxt(os.path.join(CODA_DIR, str(sequence), 'gt_global.txt')).reshape(-1, 3, 4)
+
+
 def coda_frames(sequence: int, step: int = 1):
     """Returns the rig of a CODa sequence and a generator of (timestamp_ns, images) over every step-th frame."""
     with open(os.path.join(CODA_DIR, str(sequence), 'stereo.edex')) as file:
-        header, body = json.load(file)
+        header, _ = json.load(file)
     left, right = header['cameras']
     intrinsics = left['intrinsics']
     # The images are rectified: the right camera only moves along x
@@ -57,7 +64,6 @@ def coda_frames(sequence: int, step: int = 1):
         for translation in ([0, 0, 0], [right['transform'][0][3], 0, 0])
     ])
     pairs = list(zip(image_paths(sequence, '00'), image_paths(sequence, '01')))
-    period_ns = 10**9 // body['fps']
-    frames = ((index * period_ns, [cv2.imread(path, cv2.IMREAD_GRAYSCALE) for path in pairs[index]])
+    frames = ((index * FRAME_NS, [cv2.imread(path, cv2.IMREAD_GRAYSCALE) for path in pairs[index]])
               for index in range(0, len(pairs), step))
     return rig, frames

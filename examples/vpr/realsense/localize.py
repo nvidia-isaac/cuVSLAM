@@ -58,4 +58,6 @@ try:
 except KeyboardInterrupt:
     pass
 # Successes only: without ground truth the tutorial can't tell a right place from a wrong one
-print(f'localized {localized} of {tries} tries, recognized {recognized} of {recognition_tries}')
+print(f'Summary: recognized {recognized} of {recognition_tries} tries '
+      f'({100 * recognized / max(recognition_tries, 1):.1f} %), localized {localized} of {tries} '
+      f'({100 * localized / max(tries, 1):.1f} %)')

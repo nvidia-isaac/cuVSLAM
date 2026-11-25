@@ -65,4 +65,4 @@ python3 localize.py
 ```
 
 Each try prints one line: its time, the recognized place, then the position or why localization failed. Press Ctrl+C
-to stop; it then counts the tries that localized and those that were recognized.
+to stop; it then counts the tries that were recognized and those that localized.
