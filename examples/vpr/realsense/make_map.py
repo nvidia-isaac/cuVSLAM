@@ -12,33 +12,20 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
-"""Step 1 with a RealSense camera: records left infrared images of the area into images/ until Ctrl+C."""
+"""Step 2: maps the area with place recognition while the camera moves through it, then saves the map."""
 
-import os
-import time
+import cuvslam as vslam
+from vpr_utils import MAP_PATH, realsense_frames, slam_config
 
-import cv2
-
-from vpr_utils import IMAGES_DIR, realsense_frames
-
-SAVE_EVERY = 10  # frames, so 3 images per second at 30 fps
-
-
-def main() -> None:
-    """Saves every SAVE_EVERY-th left image, named by the time it is saved, so later recordings add to earlier ones."""
-    _, frames = realsense_frames()
-    os.makedirs(IMAGES_DIR, exist_ok=True)
-    print(f'Recording into {IMAGES_DIR}/: walk through the area, then press Ctrl+C')
-    saved = 0
-    try:
-        for index, (_, images) in enumerate(frames):
-            if index % SAVE_EVERY == 0:
-                cv2.imwrite(os.path.join(IMAGES_DIR, f'{time.time_ns()}.png'), images[0])
-                saved += 1
-    except KeyboardInterrupt:
-        pass
-    print(f'Saved {saved} images')
-
-
-if __name__ == '__main__':
-    main()
+rig, frames = realsense_frames()
+tracker = vslam.Tracker(rig, vslam.Tracker.Mode.OdometryWithSlamRealtime,
+                        vslam.Odometry.Config(rectified_stereo_camera=True), slam_config())
+print('Mapping: walk through the area, then press Ctrl+C')
+try:
+    for timestamp, images in frames:
+        tracker.track(timestamp, images)
+except KeyboardInterrupt:
+    pass
+if not tracker.slam.save_map(MAP_PATH).result():
+    raise RuntimeError(f'Could not save the map to {MAP_PATH}')
+print(f'Saved the map to {MAP_PATH}')

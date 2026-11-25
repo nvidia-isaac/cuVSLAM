@@ -93,8 +93,9 @@ Both APIs expose it the same way:
 
 [doc/place_recognition.md](doc/place_recognition.md) walks through a mapping run and a relocalizing run in Python and
 C++, explains how it closes loops, and how to evaluate it with `cuvslam_vpr_reporter`;
-[examples/kitti](examples/kitti/README.md#global-localization-without-a-guess-pose) runs it on KITTI, and
-[examples/vpr](examples/vpr/README.md) on a live RealSense camera or on CODa.
+[examples/kitti](examples/kitti/README.md#global-localization-without-a-guess-pose) runs it on KITTI,
+[examples/vpr/coda](examples/vpr/coda/README.md) on CODa, and
+[examples/vpr/realsense](examples/vpr/realsense/README.md) on a live RealSense camera.
 
 # Using cuVSLAM
 

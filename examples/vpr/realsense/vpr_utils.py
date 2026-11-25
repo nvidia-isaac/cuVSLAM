@@ -12,15 +12,10 @@
 # By using, reproducing, modifying, distributing, performing, or displaying any portion or element
 # of the software or derivative works thereof, you agree to be bound by this License.
 
-"""Files, place recognition settings and stereo frame sources shared by the tutorial's steps."""
+"""Files, place recognition settings and the RealSense frame source shared by the tutorial's steps."""
 
-import glob
-import json
-import os
-import time
-
-import cv2
 import numpy as np
+import pyrealsense2 as rs
 
 import cuvslam as vslam
 
@@ -34,26 +29,15 @@ REALSENSE_FPS = 30
 REALSENSE_WARMUP_FRAMES = 60
 
 
-def slam_config(**kwargs) -> vslam.Slam.Config:
+def slam_config() -> vslam.Slam.Config:
     """Returns the SLAM configuration of mapping and localizing: place recognition with the vocabulary of step 1."""
     vpr_settings = vslam.Slam.VprSettings(model_path=ENGINE_PATH, vocabulary_path=VOCABULARY_PATH)
     # max_map_size=0 keeps every keyframe: merging one away would also drop its place
-    return vslam.Slam.Config(use_vpr=True, vpr_settings=vpr_settings, max_map_size=0, **kwargs)
-
-
-def stereo_rig(size, principal, focal, right_translation) -> vslam.Rig:
-    """Returns a rig of two rectified pinhole cameras, the right one at right_translation from the left one."""
-    return vslam.Rig([
-        vslam.Camera(size=size, principal=principal, focal=focal,
-                     rig_from_camera=vslam.Pose(rotation=[0, 0, 0, 1], translation=translation))
-        for translation in ([0, 0, 0], right_translation)
-    ])
+    return vslam.Slam.Config(use_vpr=True, vpr_settings=vpr_settings, max_map_size=0)
 
 
 def realsense_frames():
-    """Returns the rig of a live RealSense camera's infrared pair and a generator of (timestamp_ns, images)."""
-    import pyrealsense2 as rs  # only the camera needs librealsense
-
+    """Returns the rig of the RealSense camera's infrared pair and a generator of (timestamp_ns, images)."""
     config = rs.config()
     for index in (1, 2):
         config.enable_stream(rs.stream.infrared, index, *REALSENSE_RESOLUTION, rs.format.y8, REALSENSE_FPS)
@@ -64,8 +48,13 @@ def realsense_frames():
         depth_sensor.set_option(rs.option.emitter_enabled, 0)  # its dots would be tracked as features
     left, right = (profile.get_stream(rs.stream.infrared, index).as_video_stream_profile() for index in (1, 2))
     intrinsics = left.get_intrinsics()
-    rig = stereo_rig((intrinsics.width, intrinsics.height), (intrinsics.ppx, intrinsics.ppy),
-                     (intrinsics.fx, intrinsics.fy), right.get_extrinsics_to(left).translation)
+    # The infrared pair is rectified: the right camera only moves along its baseline
+    rig = vslam.Rig([
+        vslam.Camera(size=(intrinsics.width, intrinsics.height), principal=(intrinsics.ppx, intrinsics.ppy),
+                     focal=(intrinsics.fx, intrinsics.fy),
+                     rig_from_camera=vslam.Pose(rotation=[0, 0, 0, 1], translation=translation))
+        for translation in ([0, 0, 0], right.get_extrinsics_to(left).translation)
+    ])
 
     def frames():
         try:
@@ -83,30 +72,3 @@ def realsense_frames():
             pipeline.stop()
 
     return rig, frames()
-
-
-def coda_frames(sequence):
-    """Returns the rig of a converted CODa sequence and a generator of (timestamp_ns, images) at its frame rate."""
-    with open(os.path.join(sequence, 'stereo.edex')) as file:
-        header, body = json.load(file)
-    left, right = header['cameras']
-    intrinsics = left['intrinsics']
-    # The images are rectified: the right camera only moves along x
-    rig = stereo_rig(intrinsics['size'], intrinsics['principal'], intrinsics['focal'],
-                     [right['transform'][0][3], 0, 0])
-    pairs = list(zip(*(sorted(glob.glob(os.path.join(sequence, folder, '*.png'))) for folder in ('00', '01'))))
-    period_ns = 10**9 // body['fps']
-
-    def frames():
-        start = time.monotonic()
-        for index, pair in enumerate(pairs):
-            timestamp = index * period_ns
-            time.sleep(max(0.0, start + timestamp / 1e9 - time.monotonic()))  # as fast as a camera delivers them
-            yield timestamp, [cv2.imread(path, cv2.IMREAD_GRAYSCALE) for path in pair]
-
-    return rig, frames()
-
-
-def stereo_frames(coda_sequence):
-    """Returns coda_frames(coda_sequence) when it is given, realsense_frames() otherwise."""
-    return coda_frames(coda_sequence) if coda_sequence else realsense_frames()
