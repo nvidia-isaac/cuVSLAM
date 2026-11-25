@@ -21,13 +21,16 @@
 
 namespace cuvslam::sof {
 
+struct Settings;
+
 class ISelector {
 public:
   virtual ~ISelector() = default;
 
   virtual void set_image_width(uint32_t width) = 0;
   virtual void reset_selector() = 0;
-  virtual bool select(const TracksVector& cur_frame_tracks) = 0;
+  // sof_settings: the current frame's settings (see Odometry::Track internals).
+  virtual bool select(const TracksVector& cur_frame_tracks, const Settings& sof_settings) = 0;
   virtual void set_tracks(const TracksVector& cur_frame_tracks) = 0;
 };
 
