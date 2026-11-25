@@ -7,7 +7,7 @@
 
 ## Overview
 
-cuVSLAM is the library by NVIDIA, providing various Visual Tracking Camera modes and Simultaneous Localization and Mapping (SLAM) capabilities, including [visual global localization](#visual-global-localization) in a saved map without an initial pose. Leveraging CUDA acceleration and a rich set of features, cuVSLAM delivers highly accurate, computationally efficient, real-time performance.
+cuVSLAM is the library by NVIDIA, providing various Visual Tracking Camera modes and Simultaneous Localization and Mapping (SLAM) capabilities, including [visual global localization](#visual-global-localization) in a saved map without a guess pose. Leveraging CUDA acceleration and a rich set of features, cuVSLAM delivers highly accurate, computationally efficient, real-time performance.
 
 **cuVSLAM works out of the box.** All internal algorithms use carefully engineered defaults or adapt automatically to the environment and motion profile — no parameter tuning is required or expected. To get started, provide two things: accurate camera calibration (intrinsics and extrinsics) and a sensor configuration (which tracking mode matches your rig). Everything else is handled internally.
 
@@ -22,7 +22,7 @@ cuVSLAM is the library by NVIDIA, providing various Visual Tracking Camera modes
 - [Install PyCuVSLAM](#install-pycuvslam)
 - [Build cuVSLAM](#build-cuvslam)
 - [FAQ](#faq)
-- [Development](#development)
+- [Development](DEVELOPMENT.md)
 - [Agent Skills](#agent-skills)
 - [Feedback](#feedback)
 - [License](#license)
@@ -62,10 +62,11 @@ RGB-D cameras must use the pinhole model; cameras without depth support every di
 
 # Visual global localization
 
-Global localization finds the robot in a saved map without an initial pose, using visual place recognition.
-Loop closure answers "have I drifted?" and, by default, needs a pose to search around. Visual place recognition
-answers "where am I?" from a single image and no pose at all. That is what a **kidnapped robot** needs: a robot switched on inside
-a map it has never localized in, or picked up mid-run and put down elsewhere, has no prior to search around.
+Global localization finds the robot in a saved map without a guess pose, using visual place recognition (VPR).
+Loop closure answers "have I drifted?" and, by default, needs a pose to search around. VPR answers "which mapped place
+does this look like?" from a single image and no pose at all. That is what a **kidnapped robot** needs: a robot
+switched on inside a map it has never localized in, or picked up mid-run and put down elsewhere, has no guess pose to
+search around.
 
 `Slam` keeps a place recognition map alongside the pose graph: one frame per pose graph node, written into the SLAM
 map when it is saved. A match names a node rather than a stored pose, so the pose it reports follows loop closures and
@@ -87,15 +88,20 @@ Both APIs expose it the same way:
 | Turn it on | `Config::use_vpr = true` and `VprSettings::model_path` | `Config(use_vpr=True, vpr_settings=VprSettings(model_path=...))` |
 | Ask where a frame was taken | `RecognizePlaceByFrame` | `recognize_place_by_frame` |
 | Save it with the SLAM map | `SaveMap` | `save_map` |
-| Relocalize without a guess pose | `LocalizeInMap` with no `guess_pose` | `localize_in_map(..., guess_pose=None)` |
+| Localize in a saved map without a guess pose | `LocalizeInMap` with no `guess_pose` | `localize_in_map(..., guess_pose=None)` |
 | Close loops from it | `Config::loop_closure_mode = LoopClosureMode::VPR` | `Config(loop_closure_mode=LoopClosureMode.VPR)` |
 | Share one vocabulary across sessions | `cuvslam::VprVocabularyBuilder`, `VprSettings::vocabulary_path` | `cuvslam.VprVocabularyBuilder`, `VprSettings(vocabulary_path=...)` |
 
-[doc/place_recognition.md](doc/place_recognition.md) walks through a mapping run and a relocalizing run in Python and
+[doc/place_recognition.md](doc/place_recognition.md) walks through a mapping run and a localizing run in Python and
 C++, explains how it closes loops, and how to evaluate it with `cuvslam_vpr_reporter`;
 [examples/kitti](examples/kitti/README.md#global-localization-without-a-guess-pose) runs it on KITTI,
 [examples/vpr/coda](examples/vpr/coda/README.md) on CODa, and
 [examples/vpr/realsense](examples/vpr/realsense/README.md) on a live RealSense camera.
+
+`cuvslam.build_anyloc_engine(path)` or `anyloc_engine_builder` builds the engine
+([models/anyloc](models/anyloc/README.md)). From the command line, `cuvslam_tracker --use_vpr true` maps with place
+recognition, `cuvslam_vpr_vocabulary` fits a vocabulary, and `cuvslam_vpr_reporter` measures recognition
+([tools/python_tools](tools/python_tools/README.md#visual-place-recognition)).
 
 # Using cuVSLAM
 
@@ -174,9 +180,10 @@ combinations require an [installation from source](#install-from-source).
   Toolkit from JetPack). When installed, they take precedence over a system CUDA Toolkit, unless another module has
   already loaded these libraries.
 
-Visual place recognition (`use_vpr`, AnyLoc) also needs TensorRT 10 (`libnvinfer10`), not included in the wheels. The
-rest of cuVSLAM runs without it. Install it separately, or with the `tensorrt` extra (x86_64 and Jetson Thor). Then
-build the AnyLoc engine for your GPU once with `cuvslam.build_anyloc_engine(path)`.
+Visual place recognition (`use_vpr`, AnyLoc) also needs TensorRT 10 (`libnvinfer10`, and `libnvonnxparsers10` to build
+the engine), not included in the wheels. The rest of cuVSLAM runs without it. Install it separately, or with the
+`tensorrt` extra (x86_64 and Jetson Thor). Then build the AnyLoc engine for your GPU once with
+`cuvslam.build_anyloc_engine(path)`.
 
 Official wheels include cuNLS support for `Multisensor` mode; no separate cuNLS installation is required.
 

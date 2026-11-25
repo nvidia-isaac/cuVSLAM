@@ -1,9 +1,9 @@
 # cuVSLAM: Global Localization and Place Recognition
 
-Visual place recognition answers "where am I?" from a single frame and no pose, so `LocalizeInMap` can find the rig in
-a saved map without a guess pose: global localization. The
+Visual place recognition (VPR) names the mapped places a single frame looks like, with no pose, so `LocalizeInMap` can
+verify them and find the rig in a saved map without a guess pose: global localization. The
 [root README](https://github.com/nvidia-isaac/cuVSLAM/blob/main/README.md#visual-global-localization) gives the overview; this page shows how to drive it, how it
-closes loops and how to evaluate it. Relocalizing in a saved map with `LocalizeInMap` is covered in
+closes loops and how to evaluate it. Localizing with a guess pose is covered in
 [load_map.md](load_map.md), and how the module is built, with the measurements behind it, in
 [libs/slam/vpr/README.md](https://github.com/nvidia-isaac/cuVSLAM/blob/main/libs/slam/vpr/README.md).
 
@@ -57,6 +57,13 @@ database by `flush_map` and when SLAM is destroyed. `localize_in_map` replaces t
 is written the same way when localized with `attach=True`. After `localize_in_map` the session keeps mapping into the
 loaded map, and its new frames are recognized too.
 
+Without a guess pose, `LocalizationSettings`' radii are unused: its steps refine the pose around each of the
+`vpr_candidates` (5) best places that clear `VprSettings::score_threshold` (0.68). `max_map_size` (default 300) drops
+the places of the keyframes it merges away, and `localize_in_map` refuses a map with more nodes than the session's
+`max_map_size`; 0 keeps every place. `recognize_place_by_frame` searches the session's map, in a new session the one
+`localize_in_map` loaded, and returns the matched node's pose, not the camera's. Nothing detects a kidnapping:
+localize again when recognition and the SLAM pose disagree.
+
 `save_map`, `localize_in_map` and `recognize_place_by_frame` are asynchronous: they queue the work for the SLAM
 thread and return a request, which is done when that thread finishes the work. `request.result(timeout=None)` waits
 for it, and `request.wait(timeout)` and `request.done()` tell whether it is done. `sync_mode=True` above, which
@@ -97,18 +104,20 @@ for (const cuvslam::Tracker::ImageSet& images : sequence) {
 
 ## One vocabulary per operating domain
 
-Each session fits AnyLoc's vocabulary to its own first keyframes, so maps of separate sessions encode places
-differently. To share one vocabulary across the sessions of an operating domain, fit it once to images spread over
-recordings of that domain, with `cuvslam_vpr_vocabulary` or `cuvslam.VprVocabularyBuilder`, and give every session the
-file:
+The vocabulary is VLAD's 32 cluster centers, which pool a frame's patch features into its descriptor. Each session
+fits its own to its first keyframes, so maps of separate sessions encode places differently. To share one vocabulary
+across the sessions of an operating domain, fit it once to images spread over recordings of that domain, with
+`cuvslam_vpr_vocabulary` or `cuvslam.VprVocabularyBuilder`, from `vocabulary_max_keyframes` images (100 by default,
+about 2.4 MB of RAM each while fitting), and give every session the file:
 
 ```python
 vpr_settings = vslam.Slam.VprSettings(model_path=engine, vocabulary_path='kitti.vocabulary')
 slam_cfg = vslam.Slam.Config(use_vpr=True, vpr_settings=vpr_settings)
 ```
 
-Such a session recognizes places from its first keyframe. Without the file, `vocabulary_min_keyframes` and
-`vocabulary_max_keyframes` set what a session fits its own vocabulary to.
+Such a session recognizes places from its first keyframe, and localizes only in maps saved with the same file.
+Without the file, `vocabulary_min_keyframes` and `vocabulary_max_keyframes` set what a session fits its own
+vocabulary to.
 
 ## Closing loops with it
 

@@ -1042,8 +1042,9 @@ NB_MODULE(_cuvslam, m) {
            nb::arg("vocabulary_min_keyframes") = Slam::VprSettings{}.vocabulary_min_keyframes,
            nb::arg("vocabulary_max_keyframes") = Slam::VprSettings{}.vocabulary_max_keyframes)
       .def_rw("model_path", &Slam::VprSettings::model_path,
-              "AnyLoc TensorRT engine, built by the `anyloc_engine` target. The engine runs only on the GPU and "
-              "TensorRT version that built it; otherwise constructing Slam or the builder raises.")
+              "AnyLoc TensorRT engine, built by `cuvslam.build_anyloc_engine` or the `anyloc_engine` target. The "
+              "engine runs only on the GPU and TensorRT version that built it; otherwise constructing Slam or the "
+              "builder raises.")
       .def_rw("score_threshold", &Slam::VprSettings::score_threshold,
               "Minimum similarity in [0, 1] for place recognition to report a match.")
       .def_rw("vocabulary_path", &Slam::VprSettings::vocabulary_path,

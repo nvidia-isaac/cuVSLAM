@@ -1,25 +1,12 @@
 # Tutorial: Visual Global Localization on the CODa Dataset
 
 This tutorial maps a route of the CODa dataset once, then finds the camera in that map from single frames of a later
-run, without an initial pose, using [visual place recognition](../../../README.md#visual-global-localization). It takes
+run, without a guess pose, using [visual place recognition](../../../README.md#visual-global-localization). It takes
 three steps:
 
 1. Fit a place recognition vocabulary to the images of sequence 0
 2. Map sequence 0 with that vocabulary and save the map
 3. Every 5 seconds of sequence 5, which retraces the route, localize its frame in the saved map without a guess pose
-
-## Set Up
-
-Install PyCuVSLAM and the example dependencies as the [examples README](../../README.md#prerequisites) describes;
-place recognition also needs TensorRT ([root README](../../../README.md#install-from-wheels)). Then build the AnyLoc
-engine for your GPU once:
-
-```bash
-cd examples/vpr/coda
-python3 -c "import cuvslam; cuvslam.build_anyloc_engine('anyloc.engine')"
-```
-
-The scripts read and write `anyloc.engine`, `vpr.vocabulary` and `map/` in this folder.
 
 ## Get the Data
 
@@ -34,6 +21,19 @@ The scripts read and write `anyloc.engine`, `vpr.vocabulary` and `map/` in this 
 
 The scripts read the sequences from `~/datasets/coda`; set `CODA_DIR` in `vpr_utils.py` if they are elsewhere.
 
+## Set Up
+
+Install PyCuVSLAM and the example dependencies as the [examples README](../../README.md#prerequisites) describes;
+place recognition also needs TensorRT ([root README](../../../README.md#install-from-wheels)), and step 1 needs 19 GiB
+of RAM. Then build the AnyLoc engine for your GPU once:
+
+```bash
+cd examples/vpr/coda
+python3 -c "import cuvslam; cuvslam.build_anyloc_engine('anyloc.engine')"
+```
+
+The scripts read and write `anyloc.engine`, `vpr.vocabulary` and `map/` in this folder.
+
 ## Step 1: Build a Vocabulary
 
 A vocabulary fitted to images of your operating domain makes every map of it, and every localization in it, describe
@@ -43,7 +43,7 @@ places the same way. Fit it to the left images of sequence 0:
 python3 build_vocabulary.py
 ```
 
-Fitting holds every image in memory: the 8213 images take 19 GiB, and 7.5 minutes on an RTX 4090 desktop.
+Fitting holds every image in memory and takes 7.5 minutes on an RTX 4090 desktop.
 
 ## Step 2: Map the Route
 
@@ -92,3 +92,6 @@ It ends with how many tries succeeded and how they compare with ground truth:
 Summary: recognized 131 of 144 tries (91.0 %), localized 38 of 145 (26.2 %)
 Ground truth: 129 of 131 recognized places within 10 m (98.5 %); 37 localizations checked: median 0.36 m, max 2.90 m off
 ```
+
+Localization verifies each recognized place against the map's landmarks and rejects it when too few match, with
+`Can't localize in map using provided image and guess` even without a guess; a robot tries again on a later frame.

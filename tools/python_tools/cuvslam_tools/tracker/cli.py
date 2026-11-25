@@ -258,8 +258,8 @@ def add_loop_closure_arguments(parser: argparse.ArgumentParser) -> None:
         "--vpr_model_path",
         type=str,
         default=os.environ.get("CUVSLAM_ANYLOC_ENGINE", ""),
-        help="AnyLoc TensorRT engine for --use_vpr, the one the anyloc_engine "
-             "CMake target builds from here (default: $CUVSLAM_ANYLOC_ENGINE).",
+        help="AnyLoc TensorRT engine for --use_vpr, the one cuvslam.build_anyloc_engine() or the "
+             "anyloc_engine CMake target builds (default: $CUVSLAM_ANYLOC_ENGINE).",
     )
     parser.add_argument(
         "--vpr_vocabulary_path",
@@ -286,8 +286,9 @@ def validate_loop_closure_arguments(parser: argparse.ArgumentParser, args: argpa
     if require_use_slam and not args.use_slam and (args.loop_closure_mode != "lsi" or args.use_vpr):
         parser.error("--loop_closure_mode and --use_vpr only affect SLAM; add --use_slam true")
     if args.use_vpr and not os.path.isfile(args.vpr_model_path):
-        parser.error("--use_vpr needs the AnyLoc TensorRT engine; set --vpr_model_path to the one the "
-                     "anyloc_engine CMake target builds, or set CUVSLAM_ANYLOC_ENGINE")
+        parser.error("--use_vpr needs the AnyLoc TensorRT engine; set --vpr_model_path to the one "
+                     "cuvslam.build_anyloc_engine() or the anyloc_engine CMake target builds, or set "
+                     "CUVSLAM_ANYLOC_ENGINE")
     if args.vpr_vocabulary_path and not os.path.isfile(args.vpr_vocabulary_path):
         parser.error(f"--vpr_vocabulary_path {args.vpr_vocabulary_path} is not a file; "
                      "cuvslam_vpr_vocabulary writes one")
