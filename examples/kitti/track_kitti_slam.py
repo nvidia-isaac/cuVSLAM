@@ -144,8 +144,6 @@ TRACKER_MODE = cuvslam.Tracker.Mode.OdometryWithSlamRealtime  # async slam threa
 SLAM_SYNC_MODE = TRACKER_MODE == cuvslam.Tracker.Mode.OdometryWithSlamOffline
 IDX = 700  # starting index of the sequence after localization
 max_wait_time = 10.0  # seconds
-# With an AnyLoc engine, localize without a guess pose (global localization)
-VPR_ENGINE = os.environ.get('CUVSLAM_ANYLOC_ENGINE')
 
 # Load KITTI dataset calibration and initilize cameras
 intrinsics = loadtxt(
@@ -169,9 +167,6 @@ odom_cfg = cuvslam.Odometry.Config(
     rectified_stereo_camera=True
 )
 slam_cfg = cuvslam.Slam.Config(sync_mode=SLAM_SYNC_MODE)
-if VPR_ENGINE:
-    slam_cfg.use_vpr = True
-    slam_cfg.vpr_settings = cuvslam.Slam.VprSettings(model_path=VPR_ENGINE)
 tracker = cuvslam.Tracker(cuvslam.Rig(cameras), TRACKER_MODE, odom_cfg, slam_cfg)
 
 # Get timestamps from times.txt file
@@ -183,7 +178,7 @@ timestamps = [
 # Check if map folder and trajectory file exist
 map_path = os.path.join(sequence_path, 'map')
 trajectory_file = os.path.join(sequence_path, 'trajectory_tum.txt')
-localize = os.path.exists(map_path) and (bool(VPR_ENGINE) or os.path.exists(trajectory_file))
+localize = os.path.exists(map_path) and os.path.exists(trajectory_file)
 
 if not os.path.exists(map_path):
     print(f"Map folder not found at {map_path}")
@@ -200,8 +195,8 @@ loc_settings = cuvslam.Slam.LocalizationSettings(
     angular_step_rads=0.03
     )
 
-# Define guess pose from trajectory file; place recognition needs none
-if localize and not VPR_ENGINE:
+# Define guess pose from trajectory file
+if localize:
     trajectory_data = loadtxt(trajectory_file)
     if IDX >= len(trajectory_data):
         raise IndexError(
