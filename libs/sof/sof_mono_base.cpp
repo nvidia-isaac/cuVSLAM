@@ -132,13 +132,13 @@ bool MonoSOFBase::SelectKeyframe(const MonoSOFFrameSettings& frame_settings) {
     if (const std::optional<bool> override_frame_selection = frame_settings.kf.override_frame_selection) {
       if (*override_frame_selection) {
         // Give the selector a chance to update its first-keyframe state before forcing this frame to key.
-        (void)feature_selector_->select(tracks_);
+        (void)feature_selector_->select(tracks_, frame_settings.sof);
       }
       return *override_frame_selection;
     }
   }
 
-  return feature_selector_->select(tracks_);
+  return feature_selector_->select(tracks_, frame_settings.sof);
 }
 
 }  // namespace cuvslam::sof
