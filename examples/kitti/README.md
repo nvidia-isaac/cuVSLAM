@@ -115,6 +115,16 @@ As a result, the initial pose displayed will reflect the localized position (no 
 - **If you experience trouble localizing or see pose jumps after localization, try synchronous SLAM mode** (`Mode.OdometryWithSlamOffline` with `async_sba=False` and `sync_mode=True`). In sync mode, localization completes within the `localize_in_map()` call. However, all SLAM operations also block the `track()` calls, resulting in a substantial slowdown.
 - A redesign of the asynchronous SLAM pipeline is underway to remove these workarounds.
 
+### Global Localization without a Guess Pose
+
+With [visual place recognition](../../README.md#visual-global-localization), localization needs no guess pose. Set `CUVSLAM_ANYLOC_ENGINE` to an [AnyLoc engine](../../doc/place_recognition.md#the-engine) for both runs: the mapping run then saves a place recognition map with the SLAM map, and the localization run passes `None` instead of the trajectory's pose, so place recognition proposes the places to verify. A map saved without the engine cannot be used this way; delete the `map` folder to map again.
+
+```bash
+export CUVSLAM_ANYLOC_ENGINE=$PWD/anyloc.engine
+python3 track_kitti_slam.py  # maps and saves
+python3 track_kitti_slam.py  # localizes at frame 700 without a guess pose
+```
+
 ## Running PyCuVSLAM with input masks
 
 PyCuVSLAM supports both static and dynamic masks for input images, which exclude features from specified image regions during visual tracking.
