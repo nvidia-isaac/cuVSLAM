@@ -47,6 +47,8 @@ public:
   std::optional<pipelines::SolverSfMInertial::ImuState> GetImuState() const;
 
 private:
+  bool can_track_visual_blackout() const override;
+
   imu::ImuCalibration calib_;
   pipelines::SolverSfMInertial solver_;
 };
