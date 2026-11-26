@@ -89,13 +89,14 @@ def _glibc_tag() -> str:
 
 def _python_tag() -> str:
     version = sys.version_info
-    if version[:2] == (3, 10):
-        return "cp310"
+    if version[:2] == (3, 11):
+        return "cp311"
     if version >= (3, 12):
         return "cp312-abi3"
     raise RuntimeError(
-        f"released wheels do not support Python {version.major}.{version.minor}; "
-        "use Python 3.10 on Ubuntu 22.04 or Python 3.12+ on Ubuntu 24.04"
+        f"cuvslam-tools needs Python 3.11 or newer, got {version.major}.{version.minor}; "
+        "on Ubuntu 22.04 or Jetson Orin, run this script with "
+        "`uv run --managed-python --python 3.12 --no-project bootstrap_runtime.py ...`"
     )
 
 
@@ -184,6 +185,8 @@ def _healthy(python: Path, expected_version: str) -> bool:
             str(python),
             "-c",
             (
+                "import sys; "
+                "assert sys.version_info >= (3, 11), sys.version; "
                 "import cuvslam, cuvslam_tools; "
                 "version = cuvslam.get_version(); "
                 f"assert version[0].split('+', 1)[0] == {expected_version!r}, version; "
@@ -197,6 +200,16 @@ def _healthy(python: Path, expected_version: str) -> bool:
         print(probe.stdout.strip())
         return True
     return False
+
+
+def _below_python_3_11(python: Path) -> bool:
+    if not python.is_file():
+        return False
+    probe = subprocess.run(
+        [str(python), "-c", "import sys; raise SystemExit(sys.version_info < (3, 11))"],
+        capture_output=True,
+    )
+    return probe.returncode == 1
 
 
 def main() -> int:
@@ -254,8 +267,12 @@ def main() -> int:
 
     try:
         # Re-running venv is safe and repairs missing launchers after an interrupted
-        # creation. Pip then repairs partial package installations in place.
-        _run([sys.executable, "-m", "venv", str(venv)])
+        # creation. Pip then repairs partial package installations in place. A venv
+        # of Python 3.10 cannot be upgraded in place, so it is recreated.
+        venv_command = [sys.executable, "-m", "venv", str(venv)]
+        if _below_python_3_11(python):
+            venv_command.append("--clear")
+        _run(venv_command)
         _run([str(python), "-m", "pip", "install", "--upgrade", "pip"])
         _run([str(python), "-m", "pip", "install", "-e", str(repo / "tools" / "python_tools")])
         _run([str(python), "-m", "pip", "install", "--force-reinstall", wheel_source])

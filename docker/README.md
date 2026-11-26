@@ -6,7 +6,7 @@ Multi-architecture (aarch64/x86_64) Docker setup for PyCuVSLAM with RealSense ca
 
 | File | Ubuntu | CUDA | Python | librealsense |
 |------|--------|------|--------|--------------|
-| `Dockerfile.realsense-cu12` | 22.04 | 12.6 | 3.10 | v2.57.6 |
+| `Dockerfile.realsense-cu12` | 22.04 | 12.6 | 3.12 (uv-managed venv in `/opt/venv`) | v2.57.6 |
 | `Dockerfile.realsense-cu13` | 24.04 | 13.0 | 3.12 | v2.57.6 |
 
 ## Quick Start

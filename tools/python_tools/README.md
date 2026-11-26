@@ -15,11 +15,13 @@ It provides command-line tools for:
 
 ## Install
 
-From the repository root:
+`cuvslam-tools` needs Python 3.11 or newer, which [uv](https://docs.astral.sh/uv/getting-started/installation/)
+provides even where the system Python is older, such as on Ubuntu 22.04 and Jetson Orin (JetPack 6). From the
+repository root:
 
 ```bash
 cd tools/python_tools
-python3 -m venv .env
+uv venv --managed-python --seed --python 3.12 .env
 source .env/bin/activate
 pip install --upgrade pip
 pip install -e .

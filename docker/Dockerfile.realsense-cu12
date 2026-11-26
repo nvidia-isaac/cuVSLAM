@@ -32,6 +32,14 @@ RUN apt-get update \
 # Upgrade pip
 RUN pip3 install --upgrade pip
 
+# The examples need Python 3.11 or newer; Ubuntu 22.04 ships 3.10. pyrealsense2, PyCuVSLAM and the
+# example dependencies all go into this venv.
+ENV UV_PYTHON_INSTALL_DIR=/opt/uv-python
+RUN pip3 install uv==0.13.7 \
+    && uv venv --managed-python --seed --python 3.12 /opt/venv
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
 # Clone and build librealsense (v2.57.6 tag for Ubuntu 22.04)
 RUN git clone --branch v2.57.6 --depth 1 https://github.com/realsenseai/librealsense.git /opt/librealsense \
     && cd /opt/librealsense \

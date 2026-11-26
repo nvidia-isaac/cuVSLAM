@@ -53,6 +53,9 @@ cmake -S . -B build && cmake --build build --parallel $(nproc)
 Pre-built wheels: https://github.com/nvidia-isaac/cuVSLAM/releases/latest
 
 - Python 3.10 (`cp310`), 3.11 (`cp311`) and 3.12+ (`cp312-abi3`) on every target below.
+- `examples/requirements.txt` and `cuvslam-tools` need Python 3.11+ (Pillow 13). On Ubuntu 22.04 / Jetson Orin, a
+  `pillow==13.0.0` "no matching distribution" error means the system Python 3.10; use
+  `uv venv --managed-python --seed --python 3.12` and the `cp312-abi3` wheel.
 - x86_64: Ubuntu 22.04 or newer, `cu12` and `cu13`.
 - Jetson Orin: Ubuntu 22.04 / `cu12` only.
 - Jetson Thor: Ubuntu 24.04 / `cu13` only.

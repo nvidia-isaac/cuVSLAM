@@ -5,8 +5,14 @@
 
 set -e  # Exit on error
 
+if ! command -v uv &> /dev/null; then
+    echo "uv not found. Install it from https://docs.astral.sh/uv/getting-started/installation/" >&2
+    exit 1
+fi
+
+# cuvslam-tools needs Python 3.11 or newer, which uv provides even where the system Python is older.
 echo "Creating virtual environment..."
-python3 -m venv .env
+uv venv --managed-python --seed --python 3.12 .env
 
 echo "Activating virtual environment..."
 source .env/bin/activate

@@ -74,6 +74,9 @@ python3 <skill-dir>/scripts/replay_dataset.py --help
 
    ```bash
    python3 <skill-dir>/scripts/bootstrap_runtime.py --repo <cuvslam-repo>
+   # Python 3.10 (Ubuntu 22.04, Jetson Orin): cuvslam-tools needs 3.11+, so let uv provide 3.12.
+   uv run --managed-python --python 3.12 --no-project \
+       <skill-dir>/scripts/bootstrap_runtime.py --repo <cuvslam-repo>
    # Default: TUM trajectory.txt in the dataset directory, or beside a dataset file.
    <cuvslam-repo>/.venv-trajectory/bin/python \
        <skill-dir>/scripts/replay_dataset.py <dataset> --repo <cuvslam-repo>

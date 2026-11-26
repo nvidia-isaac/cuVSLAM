@@ -195,6 +195,22 @@ pip install "./cuvslam_cu12-<version>-<tags>.whl[cuda]" # with CUDA Toolkit whee
 Install only one of `cuvslam-cu12` and `cuvslam-cu13` in an environment: both provide the `cuvslam` module, and
 `import cuvslam` warns if more than one cuVSLAM package is installed.
 
+The [examples](examples/README.md) and [`cuvslam-tools`](tools/python_tools/README.md) need Python 3.11 or newer,
+because the last Pillow release for Python 3.10 has unfixed vulnerabilities. Ubuntu 22.04, and so JetPack 6 on Jetson
+Orin, ships Python 3.10. There, install [uv](https://docs.astral.sh/uv/getting-started/installation/) and let it
+provide Python 3.12 for the `cp312-abi3` wheel:
+
+```bash
+uv venv --managed-python --seed --python 3.12 .venv
+source .venv/bin/activate
+pip install cuvslam_cu12-<version>-cp312-abi3-<platform>.whl
+git clone https://github.com/nvidia-isaac/cuVSLAM.git && cd cuVSLAM   # the examples live in the repository
+pip install -r examples/requirements.txt
+```
+
+The `cp310` wheel stays available for using the `cuvslam` module from the system Python 3.10, for example next to
+ROS 2 Humble.
+
 If a pre-built wheel is not available for your system, see [Install from Source](#install-from-source) below.
 
 ## Install from Source
@@ -243,7 +259,7 @@ For Python usage, [pre-built wheels](#install-from-wheels) are the recommended a
 * `apt update && apt install g++ cmake git git-lfs python3-dev python3-venv`
     * git + git-lfs to clone this repository
     * CMake 3.19+, gcc
-    * Python 3.10+ (for python bindings, examples and some tools)
+    * Python 3.10+ for the Python bindings; 3.11+ for the examples and tools
 
 ### Build on local x86
 
@@ -335,7 +351,7 @@ nvidia-smi --query-gpu=compute_cap --format=csv,noheader   # e.g. 8.7 -> use 87
 
 1. Create virtual environment and install rerun SDK:
    ```bash
-   python3 -m venv .venv
+   uv venv --managed-python --seed --python 3.12 .venv
    source .venv/bin/activate
    pip install rerun-sdk==0.33.1
    ```
@@ -358,7 +374,9 @@ RERUN=1 ctest --output-on-failure
 
 **A**: Pre-built wheels cover Python 3.10 (`cp310`), 3.11 (`cp311`) and 3.12 or later (`cp312-abi3`) on x86_64 with
 Ubuntu 22.04 or newer, on Jetson Orin (`cu12`) and on Jetson Thor (`cu13`); see the
-[wheel table](#install-from-wheels). When built from source, PyCuVSLAM supports Python 3.10 and later.
+[wheel table](#install-from-wheels). When built from source, PyCuVSLAM supports Python 3.10 and later. The examples
+and tools need Python 3.11 or newer; on Ubuntu 22.04 and Jetson Orin, see the uv setup under
+[Install from Wheels](#install-from-wheels).
 
 
 # Troubleshooting
