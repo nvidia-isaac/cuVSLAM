@@ -123,8 +123,12 @@ macro(setup_cuvslam_settings)
 
         # Architecture-specific flags
         if (${CMAKE_HOST_SYSTEM_PROCESSOR} MATCHES "arm64|aarch64")
-            # Compile for compatible ARM hardware (Nano, TX2, Xavier, etc.)
-            target_compile_options(cuvslam_settings INTERFACE -march=native)
+            # One aarch64 package runs on every supported CPU, so the default is the Jetson Orin
+            # (Cortex-A78AE) feature set rather than the build host's: Thor-only features such as SVE
+            # raise SIGILL on Orin. "native" is fine for binaries that never leave the build machine.
+            set(CUVSLAM_AARCH64_MARCH "armv8.2-a+fp16+dotprod+rcpc" CACHE STRING
+                "-march for aarch64 host code; must not exceed the oldest supported CPU (Jetson Orin)")
+            target_compile_options(cuvslam_settings INTERFACE -march=${CUVSLAM_AARCH64_MARCH})
         elseif (${CMAKE_HOST_SYSTEM_PROCESSOR} MATCHES "x86_64|amd64")
             # For x86_64 we avoid -march=haswell to maintain compatibility with AMD --
             # using default to be generic.

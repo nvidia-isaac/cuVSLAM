@@ -42,6 +42,7 @@ CI scripts (`scripts/`):
   KPI Markdown rendering. `collect` writes raw and report JSON; `render` and `aggregate` produce publication Markdown.
 - `kpi_baseline_ranges.json` - committed KPI config: defaults and per-dataset overrides for sequence failure checks, drift tolerances, and calibrated expected values.
 - `package_cpp_dist.sh` - creates and validates the curated, versioned C++ SDK archive used by Actions and Releases.
+- `verify_pycuvslam_wheel_in_docker.sh` - checks each built wheel: PyPI metadata, abi3, an SVE-free disassembly for aarch64 wheels (Orin's CPU has no SVE), install and import per Python tag, and the version provenance below.
 - `Dockerfile` / `build_cuvslam_in_docker.sh` - product build image and wrapper; preserve Git/LFS metadata used by
   `get_version()`.
 
