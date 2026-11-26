@@ -18,7 +18,7 @@ Unless configured with `-DCUVSLAM_BUILD_ANYLOC_ENGINE=OFF` (see Options), the de
 `--vpr_model_path`:
 
 ```bash
-source build/cuvslam_vars.sh
+export CUVSLAM_ANYLOC_ENGINE=/path/to/anyloc.engine
 cuvslam_tracker --edex <kitti>/00 --use_slam true --max_map_size 0 --loop_closure_mode vpr --use_vpr true ...
 ```
 

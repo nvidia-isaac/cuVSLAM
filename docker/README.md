@@ -76,7 +76,8 @@ The script:
 
 ### Automatic Build and Installation
 - Builds cuVSLAM from source during `docker build`
-- Installs PyCuVSLAM Python bindings into the image
+- Installs PyCuVSLAM Python bindings into the image, with the AnyLoc engine builder and model for
+  `cuvslam.build_anyloc_engine()`
 - Installs all Python dependencies from requirements.txt
 - Ready to run examples immediately after container startup
 

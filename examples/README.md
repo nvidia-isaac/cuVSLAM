@@ -30,7 +30,7 @@ See the [Docker README](../docker/README.md) for building and running PyCuVSLAM 
 pip install -r requirements.txt
 ```
 
-The shared example requirements pin `numpy==2.2.4`. If you install an additional camera SDK Python wrapper, make sure it
+The shared example requirements pin `numpy==2.2.6`. If you install an additional camera SDK Python wrapper, make sure it
 is compatible with NumPy 2.x and does not downgrade NumPy. For ZED examples, see
 [ZED SDK Installation](zed/README.md#zed-sdk-installation).
 
@@ -77,6 +77,8 @@ Explore various examples to quickly get started with cuVSLAM using [Python API (
 
 - [**Visual Mapping, Localization, and Map Saving/Loading**](kitti/README.md#slam-mapping-collecting-storing-loading-and-localization)
 - [**Global Localization without a Guess Pose**](kitti/README.md#global-localization-without-a-guess-pose)
+- [**Visual Global Localization on the CODa Dataset**](vpr/coda/README.md)
+- [**Visual Global Localization on a RealSense Camera**](vpr/realsense/README.md)
 
 ### Advanced Features and Guides
 

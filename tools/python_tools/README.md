@@ -460,7 +460,8 @@ maps each keyframe's frame for place recognition, and saves the map, then asks t
 sequence was taken, without tracking those frames, so they never enter the map, and scores every answer against
 KITTI-format ground truth. The place recognition map is part of the SLAM map, so the saved folder holds one LMDB
 database with the landmarks too; those folders are large and are deleted after each pair unless `--keep_vpr_maps` asks
-for them.
+for them. It scores place recognition (`recognize_place_by_frame`), not `localize_in_map`, and needs the AnyLoc engine
+in `--vpr_model_path` (default: `$CUVSLAM_ANYLOC_ENGINE`).
 
 Two sequences, straight from flags:
 
@@ -549,7 +550,7 @@ The query pass does not track its frames, so they never enter the map and every 
 
 ### Vocabulary
 
-`cuvslam_vpr_vocabulary` fits the place recognition vocabulary of an operating domain to images spread evenly over
+`cuvslam_vpr_vocabulary` fits the place recognition vocabulary of an operating domain to 100 images spread evenly over
 EDEX sequences of it. For KITTI, fit it to 11-21, which have no ground truth, so 00-10 stay unseen for evaluation:
 
 ```bash

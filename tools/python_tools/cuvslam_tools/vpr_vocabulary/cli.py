@@ -57,14 +57,15 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("sequences", nargs="+", help="EDEX sequence folders of the operating domain.")
     parser.add_argument("--output", type=str, required=True, help="Vocabulary file to write.")
     parser.add_argument("--vpr_model_path", type=str, default=os.environ.get("CUVSLAM_ANYLOC_ENGINE", ""),
-                        help="AnyLoc TensorRT engine, built by the anyloc_engine CMake target "
-                             "(default: $CUVSLAM_ANYLOC_ENGINE).")
+                        help="AnyLoc TensorRT engine, built by cuvslam.build_anyloc_engine() or the anyloc_engine "
+                             "CMake target (default: $CUVSLAM_ANYLOC_ENGINE).")
     parser.add_argument("--edex_filename", type=str, default="stereo.edex",
                         help="EDEX file of each sequence (default: stereo.edex).")
 
     args = parser.parse_args(argv)
     if not os.path.isfile(args.vpr_model_path):
-        parser.error("--vpr_model_path must name the AnyLoc TensorRT engine the anyloc_engine CMake target builds")
+        parser.error("--vpr_model_path must name the AnyLoc TensorRT engine that cuvslam.build_anyloc_engine() or "
+                     "the anyloc_engine CMake target builds")
     for sequence in args.sequences:
         if not os.path.isfile(os.path.join(sequence, args.edex_filename)):
             parser.error(f"{sequence} has no {args.edex_filename}")

@@ -802,7 +802,7 @@ public:
    * @brief Visual place recognition settings, for `Config::use_vpr` and `VprVocabularyBuilder`
    */
   struct VprSettings {
-    /// AnyLoc TensorRT engine, built by the `anyloc_engine` target.
+    /// AnyLoc TensorRT engine, built by the `anyloc_engine` target or `anyloc_engine_builder`.
     /// The engine runs only on the GPU and TensorRT version that built it; otherwise the constructor throws.
     std::string model_path;
     /// Minimum similarity in [0, 1] for place recognition to report a match.
