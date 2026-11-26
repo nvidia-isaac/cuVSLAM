@@ -128,8 +128,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--vpr_score_threshold", type=float, default=None,
                         help="Minimum similarity in [0, 1] for a match (default: Slam.Config's).")
     parser.add_argument("--vpr_model_path", type=str, default=os.environ.get("CUVSLAM_ANYLOC_ENGINE", ""),
-                        help="AnyLoc TensorRT engine, built by the anyloc_engine CMake target "
-                             "(default: $CUVSLAM_ANYLOC_ENGINE).")
+                        help="AnyLoc TensorRT engine, built by cuvslam.build_anyloc_engine() or the anyloc_engine "
+                             "CMake target (default: $CUVSLAM_ANYLOC_ENGINE).")
     parser.add_argument("--vpr_vocabulary_path", type=str, default="",
                         help="Vocabulary file, written by cuvslam_vpr_vocabulary (default: each map fits its own).")
     parser.add_argument("--frame_limit", type=int, default=0,

@@ -117,9 +117,10 @@ As a result, the initial pose displayed will reflect the localized position (no 
 
 ### Global Localization without a Guess Pose
 
-With [visual place recognition](../../README.md#visual-global-localization), localization needs no guess pose. Set `CUVSLAM_ANYLOC_ENGINE` to an [AnyLoc engine](../../doc/place_recognition.md#the-engine) for both runs: the mapping run then saves a place recognition map with the SLAM map, and the localization run passes `None` instead of the trajectory's pose, so place recognition proposes the places to verify. A map saved without the engine cannot be used this way; delete the `map` folder to map again.
+With [visual place recognition](../../README.md#visual-global-localization), localization needs no guess pose. Set `CUVSLAM_ANYLOC_ENGINE` to an [AnyLoc engine](../../doc/place_recognition.md#the-engine) for both runs: the mapping run then saves a place recognition map with the SLAM map, and the localization run passes `None` instead of the trajectory's pose, so place recognition proposes the places to verify. A map saved without the engine cannot be used this way; delete `dataset/sequences/06/map` to map again.
 
 ```bash
+python3 -c "import cuvslam; cuvslam.build_anyloc_engine('anyloc.engine')"  # once per GPU
 export CUVSLAM_ANYLOC_ENGINE=$PWD/anyloc.engine
 python3 track_kitti_slam.py  # maps and saves
 python3 track_kitti_slam.py  # localizes at frame 700 without a guess pose
