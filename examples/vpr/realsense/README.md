@@ -17,8 +17,8 @@ docker build -f docker/Dockerfile.realsense-cu12 -t pycuvslam:realsense-cu12 .
 ./docker/run_docker.sh
 ```
 
-On Ubuntu 24.04 with CUDA 13, such as Jetson Thor, build `docker/Dockerfile.realsense-cu13` and run
-`./docker/run_docker.sh 24` instead.
+On Ubuntu 24.04 with CUDA 13, such as Jetson Thor, build `docker/Dockerfile.realsense-cu13` tagged
+`pycuvslam:realsense-cu13` and run `./docker/run_docker.sh 24` instead.
 
 In the container, go to `examples/vpr/realsense` and build the AnyLoc engine for your GPU once:
 

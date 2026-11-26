@@ -99,9 +99,9 @@ C++, explains how it closes loops, and how to evaluate it with `cuvslam_vpr_repo
 [examples/vpr/realsense](examples/vpr/realsense/README.md) on a live RealSense camera.
 
 `cuvslam.build_anyloc_engine(path)` or `anyloc_engine_builder` builds the engine
-([models/anyloc](models/anyloc/README.md)). From the command line, `cuvslam_tracker --use_vpr true` maps with place
-recognition, `cuvslam_vpr_vocabulary` fits a vocabulary, and `cuvslam_vpr_reporter` measures recognition
-([tools/python_tools](tools/python_tools/README.md#visual-place-recognition)).
+([models/anyloc](models/anyloc/README.md)). From the command line, `cuvslam_tracker --use_slam true --use_vpr true`
+maps with place recognition, `cuvslam_vpr_vocabulary` fits a vocabulary, and `cuvslam_vpr_reporter` measures
+recognition ([tools/python_tools](tools/python_tools/README.md#visual-place-recognition)).
 
 # Using cuVSLAM
 
