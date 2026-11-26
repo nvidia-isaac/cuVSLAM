@@ -16,6 +16,8 @@ import multiprocessing
 import os
 import tempfile
 import shutil
+import subprocess
+import sys
 import unittest
 import numpy as np
 from numpy.testing import assert_array_almost_equal
@@ -269,6 +271,17 @@ class TestMap(unittest.TestCase):
         # The only implementation a build without CUDA has
         self.use_gpu = False
         self.check_creating_and_localizing_in_a_map()
+
+    @unittest.skipUnless(vslam.is_cuda_build(), "test_map_on_cpu already runs without a GPU")
+    def test_map_on_cpu_without_a_gpu(self):
+        # The CPU pipeline of a CUDA build must not touch the GPU, which may be absent or have a driver too old
+        # for the build. With no visible device, any CUDA call fails.
+        result = subprocess.run(
+            [sys.executable, "-m", "unittest", f"{__name__}.TestMap.test_map_on_cpu"],
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            env=dict(os.environ, CUDA_VISIBLE_DEVICES=""),
+            capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def check_creating_and_localizing_in_a_map(self):
         img = data.ImageGenerator(self.rig.cameras, 30)
