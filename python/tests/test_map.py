@@ -276,8 +276,9 @@ class TestMap(unittest.TestCase):
     def test_map_on_cpu_without_a_gpu(self):
         # The CPU pipeline of a CUDA build must not touch the GPU, which may be absent or have a driver too old
         # for the build. With no visible device, any CUDA call fails.
+        module = os.path.splitext(os.path.basename(__file__))[0]  # __name__ is "__main__" when run directly
         result = subprocess.run(
-            [sys.executable, "-m", "unittest", f"{__name__}.TestMap.test_map_on_cpu"],
+            [sys.executable, "-m", "unittest", f"{module}.TestMap.test_map_on_cpu"],
             cwd=os.path.dirname(os.path.abspath(__file__)),
             env=dict(os.environ, CUDA_VISIBLE_DEVICES=""),
             capture_output=True, text=True, check=False)
