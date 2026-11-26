@@ -1,7 +1,7 @@
 # cuVSLAM: Global Localization and Place Recognition
 
-Visual place recognition (VPR) names the mapped places a single frame looks like, with no pose, so `LocalizeInMap` can
-verify them and find the rig in a saved map without a guess pose: global localization. The
+Visual place recognition answers "where am I?" from a single frame and no pose, so `LocalizeInMap` can find the rig in
+a saved map without a guess pose: global localization. The
 [root README](https://github.com/nvidia-isaac/cuVSLAM/blob/main/README.md#visual-global-localization) gives the overview; this page shows how to drive it, how it
 closes loops and how to evaluate it. Localizing with a guess pose is covered in
 [load_map.md](load_map.md), and how the module is built, with the measurements behind it, in
