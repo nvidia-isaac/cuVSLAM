@@ -60,8 +60,10 @@ docker run --runtime=nvidia --gpus all --rm --label "cuvslam.runner=${RUNNER_NAM
         extracted="/tmp/extracted-${name%.whl}"
         python3 -m zipfile -e "$wheel" "$extracted"
         while IFS= read -r -d "" lib; do
-          sve=$(objdump -d --no-show-raw-insn "$lib" \
-            | grep -cE "\bz[0-9]+\.[bhsdq]\b|\bp[0-9]+/[mz]\b|\b(ptrue|whilelo)\b" || true)
+          objdump -d --no-show-raw-insn "$lib" > /tmp/disassembly.txt
+          # SVE vector and predicate operands, and the SVE-only mnemonics that have neither
+          sve=$(grep -cE "\bz[0-9]+\.[bhsdq]\b|\bp[0-9]+(/[mz]|\.[bhsd])\b|\b(ptrues?|pfalse|while(lo|ls|lt|le|hi|hs|gt|ge)|((sq|uq)?(inc|dec)|cnt)[bhwd]|addvl|addpl|rdvl)\b" \
+            /tmp/disassembly.txt) || [ $? -eq 1 ]
           if [ "$sve" -ne 0 ]; then
             echo "$name: ${lib#"$extracted"/} has $sve SVE instructions, which Jetson Orin cannot run" >&2
             exit 1
