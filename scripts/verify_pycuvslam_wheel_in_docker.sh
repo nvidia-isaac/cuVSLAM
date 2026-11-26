@@ -8,7 +8,8 @@ if [ "$#" -ne 1 ] && [ "$#" -ne 3 ]; then
   echo "  Python 3.14) and imports cuvslam, verifying the wheel filename is valid"
   echo "  (pip-installable) and the auditwheel-repaired extension loads with the"
   echo "  excluded CUDA libraries resolved from the system. Before installing, runs the"
-  echo "  PyPI metadata check (twine check --strict) and, for abi3 wheels, abi3audit."
+  echo "  PyPI metadata check (twine check --strict), for abi3 wheels abi3audit, and for"
+  echo "  aarch64 wheels a disassembly check that their libraries use no SVE (Orin lacks it)."
   echo "  The abi3 wheel also builds and loads an AnyLoc engine, with the TensorRT of"
   echo "  its tensorrt extra in place of the image's (Orin's wheel: JetPack's)."
   echo "  When expected_version and expected_git_sha are provided, also verifies that"
@@ -54,6 +55,20 @@ docker run --runtime=nvidia --gpus all --rm --label "cuvslam.runner=${RUNNER_NAM
     for wheel in /output/wheel/*.whl; do
       name=$(basename "$wheel")
       twine check --strict "$wheel"
+      # The aarch64 wheels also run on Jetson Orin (Cortex-A78AE), which has no SVE
+      if [[ "$name" == *_aarch64.whl ]]; then
+        extracted="/tmp/extracted-${name%.whl}"
+        python3 -m zipfile -e "$wheel" "$extracted"
+        while IFS= read -r -d "" lib; do
+          sve=$(objdump -d --no-show-raw-insn "$lib" \
+            | grep -cE "\bz[0-9]+\.[bhsdq]\b|\bp[0-9]+/[mz]\b|\b(ptrue|whilelo)\b" || true)
+          if [ "$sve" -ne 0 ]; then
+            echo "$name: ${lib#"$extracted"/} has $sve SVE instructions, which Jetson Orin cannot run" >&2
+            exit 1
+          fi
+        done < <(find "$extracted" -type f -name "*.so*" -print0)
+        echo "$name: no SVE instructions"
+      fi
       pythons=$(echo "$name" | sed -E "s/^[^-]+-[^-]+-cp3([0-9]+)-.*/3.\1/")
       case "$name" in
         *-abi3-*) abi3audit "$wheel"; pythons="$pythons 3.14" ;;
