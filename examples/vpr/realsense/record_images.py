@@ -31,7 +31,9 @@ try:
     for index, (_, images) in enumerate(frames):
         if index % SAVE_EVERY == 0:
             # Named by the time it is saved, so a later recording adds to an earlier one
-            cv2.imwrite(os.path.join(IMAGES_DIR, f'{time.time_ns()}.png'), images[0])
+            path = os.path.join(IMAGES_DIR, f'{time.time_ns()}.png')
+            if not cv2.imwrite(path, images[0]):
+                raise RuntimeError(f'Could not write {path}')
             saved += 1
 except KeyboardInterrupt:
     pass
