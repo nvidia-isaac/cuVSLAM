@@ -77,6 +77,8 @@ Explore various examples to quickly get started with cuVSLAM using [Python API (
 
 - [**Visual Mapping, Localization, and Map Saving/Loading**](kitti/README.md#slam-mapping-collecting-storing-loading-and-localization)
 - [**Global Localization without a Guess Pose**](kitti/README.md#global-localization-without-a-guess-pose)
+- [**Visual Global Localization on the CODa Dataset**](vpr/coda/README.md)
+- [**Visual Global Localization on a RealSense Camera**](vpr/realsense/README.md)
 
 ### Advanced Features and Guides
 
