@@ -157,12 +157,12 @@ def main() -> None:
 
     # Create rig and tracker
     odom_cfg = vslam.Odometry.Config(
-        async_sba=False,
+        async_sba=True,
         enable_final_landmarks_export=True,
         enable_observations_export=True,
         rectified_stereo_camera=False
     )
-    tracker = vslam.Tracker(vslam.Rig(cameras), vslam.Tracker.Mode.OdometryOnlyOffline, odom_cfg)
+    tracker = vslam.Tracker(vslam.Rig(cameras), vslam.Tracker.Mode.OdometryOnlyRealtime, odom_cfg)
 
     # Create pipeline with the device
     pipeline = dai.Pipeline(device)
