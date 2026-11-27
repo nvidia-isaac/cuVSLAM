@@ -1191,7 +1191,7 @@ public:
       : primary_cameras_(primary_cameras) {
     THROW_INVALID_ARG_IF(config.use_gpu && !IsCudaBuild(), "use_gpu requires a build with CUDA support (USE_CUDA=ON)");
     std::string message;
-    TracePrintIf(!CheckCudaCompatibility(message), "[WARNING] %s\n", message.c_str());
+    TracePrintIf(config.use_gpu && !CheckCudaCompatibility(message), "[WARNING] %s\n", message.c_str());
 
     // Slam can be constructed on its own, so it cannot rely on Odometry having vetted the rig
     CheckCameras(rig);
@@ -1437,7 +1437,11 @@ void Slam::LocalizeInMap(std::string_view folder_name, int64_t timestamp_ns, con
   image_manager->init(shape, primary_cameras.size() * cache_size, use_gpu, 0);
 
 #ifdef USE_CUDA
-  cuda::Stream s{true};
+  // Without use_gpu, the GPU may be absent or have a driver too old for this build
+  std::optional<cuda::Stream> s;
+  if (use_gpu) {
+    s.emplace(true);
+  }
 #endif
   for (const auto& image : images) {
     auto cam_id = image.camera_index;
@@ -1459,8 +1463,8 @@ void Slam::LocalizeInMap(std::string_view folder_name, int64_t timestamp_ns, con
     ptr->set_image_meta(meta);
     if (use_gpu) {
 #ifdef USE_CUDA
-      ptr->build_gpu_image_pyramid(source, false, s.get_stream());
-      ptr->build_gpu_gradient_pyramid(false, s.get_stream());
+      ptr->build_gpu_image_pyramid(source, false, s->get_stream());
+      ptr->build_gpu_gradient_pyramid(false, s->get_stream());
 #endif
     } else {
       ptr->build_cpu_image_pyramid(source, false);
@@ -1470,7 +1474,7 @@ void Slam::LocalizeInMap(std::string_view folder_name, int64_t timestamp_ns, con
   }
 #ifdef USE_CUDA
   if (use_gpu) {
-    CUDA_CHECK(cudaStreamSynchronize(s.get_stream()));  // Synchronize once after all pyramids are built
+    CUDA_CHECK(cudaStreamSynchronize(s->get_stream()));  // Synchronize once after all pyramids are built
   }
 #endif
 
